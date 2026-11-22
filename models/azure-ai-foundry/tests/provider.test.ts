@@ -371,8 +371,8 @@ test("sends bounded inline PDFs and images, rejecting mismatches and unsupported
   expect(calls).toBe(3)
 })
 
-// Regression proof: remove checkScope in request.ts. Reusing opaque history on another
-// deployment then sends a second inference request instead of rejecting the mismatched binding.
+// Regression proof: return `messages` unchanged from ownReplayState in request.ts. Another
+// deployment and another resource then receive this deployment's encrypted reasoning and phase.
 test("runs tools and replays encrypted reasoning/phase after durable history serialization", async () => {
   const bodies: JsonObject[] = []
   const reasoning = {
@@ -457,19 +457,35 @@ test("runs tools and replays encrypted reasoning/phase after durable history ser
   ])
   await collect((await model.stream(request({ messages: history }))).events)
   expect(bodies[2]?.input).toContainEqual(reasoning)
+  // Another deployment or resource gets the conversation without this one's replay state.
   provider("other", { definition })
   await provider.catalog.refresh()
-  await expect(
-    provider("other", { definition }).stream(request({ messages: history }))
-  ).rejects.toThrow("different endpoint, deployment, or protocol")
-  const otherResource = createAzureAIFoundry({
-    endpoint: "https://other.openai.azure.com/api/projects/test",
-    apiKey: "key",
-  })("deployment", { definition })
-  await expect(otherResource.stream(request({ messages: history }))).rejects.toThrow(
-    "different endpoint"
+  await collect(
+    (await provider("other", { definition }).stream(request({ messages: history }))).events
   )
-  expect(bodies).toHaveLength(3)
+  const elsewhere: JsonObject[] = []
+  await collect(
+    (
+      await createAzureAIFoundry({
+        endpoint: "https://other.services.ai.azure.com/api/projects/test",
+        apiKey: "key",
+        fetch: async (_url, init) => {
+          elsewhere.push(JSON.parse(String(init?.body)))
+          return completed()
+        },
+      })("deployment", { definition }).stream(request({ messages: history }))
+    ).events
+  )
+  for (const body of [bodies[3], elsewhere[0]]) {
+    expect(JSON.stringify(body?.input)).not.toContain("opaque")
+    expect(JSON.stringify(body?.input)).not.toContain("commentary")
+    expect(body?.input).toContainEqual({
+      type: "function_call",
+      call_id: "tool-call",
+      name: "check",
+      arguments: "{}",
+    })
+  }
 })
 
 test("preserves unknown usage, non-OpenAI reasoning counters, explicit prices and custom estimates", async () => {

@@ -1,11 +1,14 @@
 import {
   isJsonObject,
   type JsonObject,
+  type JsonValue,
   type LanguageModelDefinition,
   type LanguageModelRequest,
+  type ModelAssistantPart,
   type ModelMessage,
   type ModelToolSpecification,
   modelReasoningSupportIssue,
+  type ProviderData,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { requiredNullableSchema, responsesInput } from "@sixb/model-protocols/responses"
@@ -71,8 +74,8 @@ export function responsesRequest(
   scope: string,
   deployment?: AzureAIFoundryDeployment
 ): JsonObject {
-  const max = prepareRequest(request, definition, options, scope)
-  const replayed = responsesInput(request.messages, definition.providerId, definition.modelId)
+  const { max, messages } = prepareRequest(request, definition, options, scope)
+  const replayed = responsesInput(messages, definition.providerId, definition.modelId)
   const input = replayed.map((item) => {
     if (!isJsonObject(item)) return item
     const content = Array.isArray(item.content)
@@ -174,19 +177,19 @@ export function responsesRequest(
   }
 }
 
+/** The output ceiling, and the messages to send: validated, with only this scope's replay state. */
 export function prepareRequest(
   request: LanguageModelRequest,
   definition: LanguageModelDefinition,
   options: { readonly maxOutputTokens?: number; readonly maxInputFileBytes?: number },
   scope: string,
   remotePdf = false
-): number | undefined {
+): { readonly max: number | undefined; readonly messages: readonly ModelMessage[] } {
   positiveInteger(request.maxOutputTokens, "maxOutputTokens")
   validateMessages(
     request.messages,
     definition,
     options.maxInputFileBytes ?? 20 * 1024 * 1024,
-    scope,
     remotePdf
   )
   const limits = [
@@ -194,28 +197,56 @@ export function prepareRequest(
     options.maxOutputTokens,
     request.maxOutputTokens,
   ].filter((n): n is number => n !== undefined)
-  return limits.length ? Math.min(...limits) : undefined
+  return {
+    max: limits.length ? Math.min(...limits) : undefined,
+    messages: ownReplayState(request.messages, definition.providerId, scope),
+  }
+}
+
+/**
+ * Replay state goes back only where it was recorded: the address, deployment and protocol that
+ * `scope` names. State recorded anywhere else, such as another deployment's encrypted reasoning
+ * after a conversation switches models, is left out; its visible text and tool calls still replay.
+ */
+function ownReplayState(
+  messages: readonly ModelMessage[],
+  providerId: string,
+  scope: string
+): ModelMessage[] {
+  const foreign = (data: JsonValue | undefined) =>
+    data !== undefined && object(data)?.scope !== scope
+  const own = <T extends { readonly providerData?: ProviderData }>(part: T): T => {
+    if (!part.providerData || !foreign(part.providerData[providerId])) return part
+    const { [providerId]: _foreign, ...others } = part.providerData
+    return { ...part, providerData: others }
+  }
+  return messages.map((message): ModelMessage => {
+    if (message.role === "system") return own(message)
+    if (message.role === "user") return { ...message, content: message.content.map(own) }
+    if (message.role === "tool") return { ...message, content: message.content.map(own) }
+    return {
+      ...message,
+      content: message.content.flatMap((part): ModelAssistantPart[] =>
+        part.type !== "provider-state"
+          ? [own(part)]
+          : part.providerId === providerId && foreign(part.data)
+            ? []
+            : [part]
+      ),
+    }
+  })
 }
 
 export function validateMessages(
   messages: readonly ModelMessage[],
   definition: LanguageModelDefinition,
   budget: number,
-  scope: string,
   remotePdf = false
 ): void {
   let bytes = 0
   for (const message of messages) {
-    if (message.role === "system") {
-      checkScope(message.providerData?.[definition.providerId], scope)
-      continue
-    }
+    if (message.role === "system") continue
     for (const part of message.content) {
-      if (part.type === "provider-state") {
-        if (part.providerId === definition.providerId) checkScope(part.data, scope)
-        continue
-      }
-      checkScope(part.providerData?.[definition.providerId], scope)
       if (part.type !== "file") continue
       const allowed = definition.capabilities.inputMediaTypes
       const media = part.mediaType
@@ -258,14 +289,6 @@ export function validateMessages(
       if (Buffer.from(data, "base64").toString("base64") !== data)
         throw new TypeError(`${PREFIX} File data must use canonical base64.`)
     }
-  }
-}
-
-function checkScope(data: unknown, scope: string): void {
-  if (data !== undefined && object(data)?.scope !== scope) {
-    throw new UnsupportedModelFeatureError(
-      `${PREFIX} Replay state belongs to a different endpoint, deployment, or protocol.`
-    )
   }
 }
 

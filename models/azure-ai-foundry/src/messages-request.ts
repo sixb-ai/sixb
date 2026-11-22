@@ -84,9 +84,9 @@ export function foundryMessagesRequest(
   scope: string,
   unconstrained = false
 ): FoundryMessagesRequest {
-  const max = prepareRequest(request, definition, options, scope, true)
+  const { max, messages } = prepareRequest(request, definition, options, scope, true)
   let conversation = false
-  for (const message of request.messages) {
+  for (const message of messages) {
     if (message.role === "system" && conversation)
       throw new UnsupportedModelFeatureError(
         `${PREFIX} Messages system instructions must precede the conversation.`
@@ -116,7 +116,7 @@ export function foundryMessagesRequest(
     throw new UnsupportedModelFeatureError(
       `${PREFIX} Explicit sampling controls cannot be combined with Messages thinking.`
     )
-  const mapped = messagesInput(request.messages, definition.providerId, PREFIX)
+  const mapped = messagesInput(messages, definition.providerId, PREFIX)
   const output: JsonObject = {
     ...(thinking.effort === undefined ? {} : { effort: thinking.effort }),
     ...(schema ? { format: { type: "json_schema", schema } } : {}),
