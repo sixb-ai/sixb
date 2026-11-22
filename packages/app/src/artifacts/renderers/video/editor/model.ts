@@ -224,9 +224,10 @@ export function onRows(placed: readonly Omit<LaidClip, "row">[]): LaidClip[] {
 }
 
 /**
- * How far each block's edges lie under the block beside it on its row, in pixels: a narrow block
- * drawn wider than its time, at its least width, covers the start of the next. A trim handle starts
- * past what covers it, so it never reaches over another clip's block.
+ * How far each block's edges lie under the blocks beside it on its row, in pixels: a narrow block
+ * drawn wider than its time, at its least width, covers the start of the next, and of any after it
+ * that it reaches. A trim handle starts past what covers it, so it never reaches over another
+ * clip's block.
  */
 export function coveredEdges(
   blocks: readonly {
@@ -240,19 +241,27 @@ export function coveredEdges(
   const rows = new Map<number, (typeof blocks)[number][]>()
   for (const block of blocks) {
     covered.set(block.key, { start: 0, end: 0 })
-    rows.set(block.row, [...(rows.get(block.row) ?? []), block])
+    const row = rows.get(block.row) ?? []
+    rows.set(block.row, row)
+    row.push(block)
   }
 
   for (const row of rows.values()) {
     const sorted = [...row].sort((a, b) => a.left - b.left)
     sorted.forEach((block, index) => {
-      const next = sorted[index + 1]
-      if (!next) return
-      const overlap = block.left + block.width - next.left
-      if (overlap <= 0) return
-      const [mine, theirs] = [covered.get(block.key), covered.get(next.key)]
-      if (mine) mine.end = Math.max(mine.end, Math.min(overlap, block.width))
-      if (theirs) theirs.start = Math.max(theirs.start, Math.min(overlap, next.width))
+      const right = block.left + block.width
+      const mine = covered.get(block.key)
+
+      // Every block that starts under this one, not only the next: one between them may end
+      // sooner than this one does.
+      for (let at = index + 1; at < sorted.length; at += 1) {
+        const next = sorted[at]
+        const overlap = next ? right - next.left : 0
+        if (!next || overlap <= 0) break
+        const theirs = covered.get(next.key)
+        if (mine) mine.end = Math.max(mine.end, Math.min(overlap, block.width))
+        if (theirs) theirs.start = Math.max(theirs.start, Math.min(overlap, next.width))
+      }
     })
   }
   return covered
