@@ -4,8 +4,10 @@ import {
   cutRange,
   duplicateScene,
   moveClip,
+  moveClips,
   moveScene,
   removeClip,
+  removeClips,
   removeMediaRanges,
   removeScene,
   setClipSound,
@@ -14,9 +16,11 @@ import {
   setSceneLength,
   setVideoText,
   splitClip,
+  splitClips,
   trimClip,
   VIDEO_ENTRY,
   type VideoClip,
+  type VideoClipTarget,
   type VideoEditResult,
   type VideoScene,
   type VideoSources,
@@ -69,7 +73,7 @@ import { liveVideoOf } from "../../../live/video"
 import { useArtifactMessages } from "../../../messages"
 import { formatClock } from "../../../playback"
 import type { ArtifactVersion } from "../../../queries"
-import { typesItself } from "../keys"
+import { appleKeyboard, commandKey, typesItself } from "../keys"
 import { useSize } from "../player"
 import { useMediaImport } from "./import"
 import { InPlaceEditor, type InPlaceText } from "./in-place"
@@ -80,13 +84,16 @@ import { editPoints, type LaidClip, nextEditPoint, openingSeek, sceneAt } from "
 import { readEveryScene, readMagnetic, writeEveryScene, writeMagnetic } from "./preferences"
 import { PlayMark, PreviewScreen, usePreview } from "./preview"
 import {
+  choose,
+  chosenIn,
   type EditorSelection,
   everySceneClips,
   heardRecordings,
   laidClips,
   openEnd,
-  selectedClip,
+  selectedClips,
   selectedScene,
+  selectionOf,
   typedText,
 } from "./selection"
 import { Timeline, type ZoomControls } from "./timeline"
@@ -174,7 +181,9 @@ export default function VideoEditor({
     () => (composition && everyScene ? everySceneClips(state, composition) : clips),
     [state, composition, everyScene, clips]
   )
-  const clip = selectedClip(state, selection)
+  // The clips selected, each in its file, and the one when it is alone.
+  const picked = selectedClips(state, selection)
+  const clip = picked.length === 1 ? picked[0] : undefined
   const playing = sceneAt(scenes, timeMs)
 
   // What the others see this reader working on: the scene open on the timeline.
@@ -278,6 +287,40 @@ export default function VideoEditor({
     if (made && second) setSelection({ type: "clip", file, target: second })
   }
 
+  /** Splits the clips selected together at the playhead; their second parts are selected. */
+  const splitGroup = (group: readonly LaidClip[]) => {
+    let seconds: readonly VideoClipTarget[] = []
+    const made = edit((sources) => {
+      const result = splitClips(
+        sources,
+        group.map((laid) => ({
+          file: laid.file,
+          clip: videoTarget(laid.clip),
+          atMs: timeMs - offsetOf(laid.file),
+          ...(endOf(laid.file) === undefined ? {} : { endMs: endOf(laid.file) }),
+        }))
+      )
+      seconds = "edit" in result ? (result.clips ?? []) : []
+      return result
+    })
+    if (made) setSelection(selectionOf(seconds.map(({ file, clip }) => ({ file, target: clip }))))
+  }
+
+  const removeGroup = (group: readonly { readonly file: string; readonly clip: VideoClip }[]) => {
+    const removed = edit((sources) =>
+      removeClips(
+        sources,
+        group.map((laid) => ({
+          file: laid.file,
+          clip: videoTarget(laid.clip),
+          ...(endOf(laid.file) === undefined ? {} : { endMs: endOf(laid.file) }),
+        })),
+        { ripple: magnetic }
+      )
+    )
+    if (removed) setSelection(null)
+  }
+
   const removeSelected = (laid: { readonly file: string; readonly clip: VideoClip }) => {
     const endMs = endOf(laid.file)
     if (
@@ -308,21 +351,42 @@ export default function VideoEditor({
     },
     removeClip: (file, target) => removeSelected({ file, clip: target }),
     splitClip: (file, target) => splitAt(file, target),
+    splitClips: () => splitNow(),
+    removeClips: () => removeGroup(picked),
   }
 
   /** The clip the playhead splits: the one selected when it is under it, else the picture on top. */
   const splitTarget = (): LaidClip | undefined => {
     const under = shown.filter((laid) => laid.startMs + 100 <= timeMs && timeMs <= laid.endMs - 100)
-    const chosen =
-      clip && selection?.type === "clip"
-        ? under.find((laid) => laid.file === selection.file && laid.clip.ref === clip.ref)
-        : undefined
+    const chosen = clip
+      ? under.find((laid) => laid.file === clip.file && laid.clip.ref === clip.clip.ref)
+      : undefined
     return (
       chosen ??
       under.filter((laid) => laid.track === "picture" && laid.file !== VIDEO_ENTRY).at(-1) ??
       under.find((laid) => laid.file !== VIDEO_ENTRY)
     )
   }
+
+  /** The clips selected together that the playhead is inside, which S splits. */
+  const groupUnder = (): LaidClip[] =>
+    picked.length > 1
+      ? chosenIn(shown, selection).filter(
+          (laid) => laid.startMs + 100 <= timeMs && timeMs <= laid.endMs - 100
+        )
+      : []
+
+  /** What S does: splits the clips selected together under the playhead, or the one it splits. */
+  const splitNow = () => {
+    if (picked.length > 1) {
+      const under = groupUnder()
+      if (under.length > 0) splitGroup(under)
+      return
+    }
+    const laid = splitTarget()
+    if (laid) splitAt(laid.file, laid.clip)
+  }
+  const canSplit = () => (picked.length > 1 ? groupUnder().length > 0 : !!splitTarget())
 
   /** Cuts the marked range out of the video, from every scene it spans. */
   const cutMarks = () => {
@@ -337,8 +401,12 @@ export default function VideoEditor({
       cutMarks()
       return
     }
-    if (clip && selection?.type === "clip") {
-      removeSelected({ file: selection.file, clip })
+    if (picked.length > 1) {
+      removeGroup(picked)
+      return
+    }
+    if (clip) {
+      removeSelected(clip)
       return
     }
     if (selection?.type === "scene") {
@@ -405,7 +473,7 @@ export default function VideoEditor({
     if (active && active !== document.body && !root.current?.contains(active)) return
     if (active?.closest("[role=menu], [role=dialog], [data-transcript]")) return
 
-    const command = event.metaKey || event.ctrlKey
+    const command = commandKey(event)
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key
     const frameMs = 1000 / (composition?.fps ?? 30)
     const handled = (): void => event.preventDefault()
@@ -421,10 +489,14 @@ export default function VideoEditor({
       } else if (key === "d" && open) {
         handled()
         sceneActions.duplicate(open)
+      } else if (key === "a") {
+        handled()
+        setSelection(choose(shown))
       }
       return
     }
-    if (event.altKey) return
+    // The other modifier, Ctrl on a Mac and ⌘ elsewhere, leaves the keys to the system.
+    if (event.altKey || event.metaKey || event.ctrlKey) return
 
     switch (key) {
       case " ":
@@ -476,12 +548,10 @@ export default function VideoEditor({
         handled()
         setMarks((current) => ordered({ ...current, out: timeMs }))
         return
-      case "s": {
+      case "s":
         handled()
-        const laid = splitTarget()
-        if (laid) splitAt(laid.file, laid.clip)
+        splitNow()
         return
-      }
       case "Delete":
       case "Backspace":
         handled()
@@ -615,21 +685,17 @@ export default function VideoEditor({
   // What the Transcript tab reads: the recordings heard in the open scene, and the selected clip's.
   const heard = heardRecordings(clips, open, timeMs)
   const selectedRecording =
-    clip &&
-    selection?.type === "clip" &&
-    (clip.kind === "video" || clip.kind === "audio") &&
-    clip.src
+    clip && (clip.clip.kind === "video" || clip.clip.kind === "audio") && clip.clip.src
       ? {
-          src: clip.src,
-          file: selection.file,
-          clips: clips.filter((laid) => laid.file === selection.file && laid.clip.src === clip.src),
+          src: clip.clip.src,
+          file: clip.file,
+          clips: clips.filter((laid) => laid.file === clip.file && laid.clip.src === clip.clip.src),
         }
       : undefined
   const splittable =
-    !!clip &&
-    selection?.type === "clip" &&
-    splitTarget()?.clip.ref === clip.ref &&
-    splitTarget()?.file === selection.file
+    picked.length > 1
+      ? groupUnder().length > 0
+      : !!clip && splitTarget()?.clip.ref === clip.clip.ref && splitTarget()?.file === clip.file
 
   return (
     <div
@@ -699,9 +765,8 @@ export default function VideoEditor({
                 scene={
                   selection?.type === "scene" ? selectedScene(composition, selection) : undefined
                 }
-                clip={
-                  clip && selection?.type === "clip" ? { file: selection.file, clip } : undefined
-                }
+                clip={clip}
+                clips={picked.length > 1 ? picked : undefined}
                 splittable={splittable}
                 target={target}
                 actions={inspectorActions}
@@ -756,6 +821,14 @@ export default function VideoEditor({
               edit((sources) =>
                 moveClip(sources, laid.file, videoTarget(laid.clip), startMs - offsetOf(laid.file))
               ),
+            moveClips: (group, deltaMs) =>
+              edit((sources) =>
+                moveClips(
+                  sources,
+                  group.map((laid) => ({ file: laid.file, clip: videoTarget(laid.clip) })),
+                  deltaMs
+                )
+              ),
             trimClip: (laid, side, atMs) => {
               const endMs = endOf(laid.file)
               edit((sources) =>
@@ -781,13 +854,10 @@ export default function VideoEditor({
               onToggle={playback.toggle}
               timeMs={timeMs}
               durationMs={composition.durationMs}
-              canSplit={!!splitTarget()}
-              onSplit={() => {
-                const laid = splitTarget()
-                if (laid) splitAt(laid.file, laid.clip)
-              }}
+              canSplit={canSplit()}
+              onSplit={splitNow}
               canDelete={
-                !!clip ||
+                picked.length > 0 ||
                 selection?.type === "scene" ||
                 (marks.in !== undefined && marks.out !== undefined)
               }
@@ -1103,7 +1173,7 @@ function Toolbar({
           <PopoverContent align="end" className="w-80">
             <h3 className="m-0 mb-2 text-sm font-semibold">{editor.shortcuts}</h3>
             <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
-              {shortcuts(editor).map(([keys, what]) => (
+              {shortcuts(editor, appleKeyboard()).map(([keys, what]) => (
                 <div key={keys} className="contents">
                   <dt className="font-mono text-xs text-foreground">{keys}</dt>
                   <dd className="m-0 text-muted-foreground">{what}</dd>
@@ -1152,11 +1222,13 @@ function ToolButton({
   )
 }
 
-/** The editor's keys, each with what it does. */
+/** The editor's keys, each with what it does, with ⌘ on a Mac and Ctrl elsewhere. */
 function shortcuts(
-  messages: ReturnType<typeof useArtifactMessages>["videoEditor"]
+  messages: ReturnType<typeof useArtifactMessages>["videoEditor"],
+  apple: boolean
 ): readonly (readonly [string, string])[] {
   const help = messages.shortcutHelp
+  const command = apple ? "⌘" : "Ctrl+"
   return [
     [`${messages.space}, K`, help.play],
     ["J, L", help.skip],
@@ -1165,8 +1237,11 @@ function shortcuts(
     ["I, O", help.marks],
     ["S", help.split],
     ["⌫", help.delete],
-    ["⌘Z, ⇧⌘Z", help.undo],
-    ["⌘D", help.duplicate],
+    [apple ? "⌘Z, ⇧⌘Z" : "Ctrl+Z, Ctrl+Y", help.undo],
+    [`${command}D`, help.duplicate],
+    [messages.commandClicking(apple ? "⌘" : "Ctrl"), help.select],
+    [`${command}A`, help.selectAll],
+    [messages.escape, help.deselect],
     [messages.shiftDragging, help.free],
   ]
 }

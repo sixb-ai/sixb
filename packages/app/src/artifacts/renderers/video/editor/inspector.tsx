@@ -15,6 +15,7 @@ import {
   AudioLines,
   Copy,
   Image as ImageIcon,
+  Layers,
   Scissors,
   Trash2,
   TriangleAlert,
@@ -29,7 +30,7 @@ import { clipName, sceneName, typedText } from "./selection"
 import { TRACK_TONE } from "./timeline"
 
 // What the selection is, and its settings: a scene's name, length and words on screen; a clip's
-// timing, sound and words. Each field changes the video once the reader commits it, with Enter or
+// timing, sound and words; for several clips, how many, to split or delete together. Each field changes the video once the reader commits it, with Enter or
 // by leaving it: a step of its own for undo. The arrows nudge a time by a tenth of a second, and a
 // whole one with Shift.
 
@@ -56,6 +57,9 @@ export interface InspectorActions {
   readonly clipText: (file: string, clip: VideoClip, text: string) => void
   readonly removeClip: (file: string, clip: VideoClip) => void
   readonly splitClip: (file: string, clip: VideoClip) => void
+  /** Splits the clips selected together at the playhead, and deletes them. */
+  readonly splitClips: () => void
+  readonly removeClips: () => void
 }
 
 export function Inspector({
@@ -63,6 +67,7 @@ export function Inspector({
   timelines,
   scene,
   clip,
+  clips,
   splittable,
   target,
   actions,
@@ -73,13 +78,55 @@ export function Inspector({
   readonly scene: VideoScene | undefined
   /** The clip selected, in its file. */
   readonly clip: { readonly file: string; readonly clip: VideoClip } | undefined
-  /** Whether the playhead is inside the selected clip, where it splits. */
+  /** The clips selected together, when there are several. */
+  readonly clips?: readonly { readonly file: string; readonly clip: VideoClip }[] | undefined
+  /** Whether the playhead is inside the selected clip, or one of those, where it splits. */
   readonly splittable: boolean
   /** Where its recordings' parts are read from. */
   readonly target: MediaTarget
   readonly actions: InspectorActions
 }) {
   const messages = useArtifactMessages().videoEditor
+
+  if (clips && clips.length > 1) {
+    return (
+      <div className="flex flex-col gap-5 p-4">
+        <header className="flex items-center gap-2">
+          <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted [&_svg]:size-3.5">
+            <Layers aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="m-0 truncate text-sm font-semibold">
+              {messages.clipsSelected(clips.length)}
+            </h3>
+            <p className="m-0 text-[11px] text-muted-foreground">{messages.clipsHint}</p>
+          </div>
+        </header>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!splittable}
+            title={messages.splitHint}
+            onClick={actions.splitClips}
+          >
+            <Scissors />
+            {messages.split}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={actions.removeClips}
+            className="text-destructive hover:text-destructive"
+          >
+            <Trash2 />
+            {messages.delete}
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   if (clip) {
     return (

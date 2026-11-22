@@ -81,3 +81,18 @@ export function typesItself(target: EventTarget | null, key: string): boolean {
     target.closest('button, [role="button"], [role="menuitem"], a[href]') !== null
   )
 }
+
+/**
+ * Whether the reader's keyboard is a Mac's, or an iPad's: its command key is ⌘, and Ctrl with a
+ * click opens the context menu there.
+ */
+export function appleKeyboard(): boolean {
+  if (typeof navigator === "undefined") return false
+  const hinted = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData
+  return /mac|iphone|ipad|ipod/i.test(hinted?.platform || navigator.platform || "")
+}
+
+/** Whether an event holds the command key: ⌘ on a Mac, Ctrl elsewhere. */
+export function commandKey(event: Pick<KeyboardEvent, "metaKey" | "ctrlKey">): boolean {
+  return appleKeyboard() ? event.metaKey : event.ctrlKey
+}

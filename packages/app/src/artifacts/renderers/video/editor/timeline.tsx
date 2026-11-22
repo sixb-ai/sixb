@@ -1,6 +1,5 @@
 import {
   type ArtifactLiveUser,
-  findVideoTarget,
   VIDEO_ENTRY,
   type VideoComposition,
   type VideoFileTimeline,
@@ -25,9 +24,13 @@ import {
 import { useArtifactMessages } from "../../../messages"
 import { formatClock } from "../../../playback"
 import { Waveform } from "../../../waveform"
+import { commandKey } from "../keys"
 import { type MediaTarget, useMediaParts } from "./media"
 import {
+  type ClipBox,
   fitZoom,
+  groupDelta,
+  inRectangle,
   type LaidClip,
   rulerSteps,
   SNAP_PX,
@@ -39,7 +42,7 @@ import {
 } from "./model"
 import { useReorder } from "./reorder"
 import { FilmstripFrame, type SceneActions, SceneBlock, SceneDropMark } from "./scenes"
-import { clipName, type EditorSelection } from "./selection"
+import { choose, chosenIn, clipName, type EditorSelection, toggled } from "./selection"
 
 // The timeline: one axis for the whole video, its scenes along the top, each with its picture, the
 // open scene's clips under them on the picture, text and sound tracks (every scene's, when the
@@ -48,6 +51,9 @@ import { clipName, type EditorSelection } from "./selection"
 // Clips are dragged to move and trimmed by their edges, snapping to the playhead, the marks, every
 // edge and the cuts of their footage; Shift lets them go free. Ctrl or ⌘ with the wheel, or a
 // pinch, zooms around the pointer.
+// The command key, ⌘ on a Mac and Ctrl elsewhere, adds a clip clicked to the selection or takes it
+// out, and dragged, draws a rectangle that selects every clip it touches. A selected clip dragged
+// moves every selected clip with it.
 
 /** The column of track names, which stays on the left as the timeline scrolls. */
 const LABELS_PX = 112
@@ -80,6 +86,8 @@ type Drag =
   | {
       readonly type: "move"
       readonly clip: LaidClip
+      /** The clips selected with it, itself included, which move as much. */
+      readonly group?: readonly LaidClip[]
       readonly x: number
       readonly startMs: number
       readonly moved: boolean
@@ -101,11 +109,32 @@ type Drag =
       readonly target?: number
     }
   | { readonly type: "scrub" }
+  | {
+      readonly type: "marquee"
+      /** Where it was pressed and where the pointer is: an instant, and how far down the tracks. */
+      readonly from: TrackPoint
+      readonly to: TrackPoint
+      /** The clip pressed, which a press let go without a drag adds or takes out. */
+      readonly over?: LaidClip
+      /** The selection before it, which the clips it touches join. */
+      readonly before: EditorSelection
+      readonly moved: boolean
+      /** The clips it touches now, by file and ref. */
+      readonly touched: string
+    }
+
+/** A point over the tracks: the instant under it, and its pixels from the first track's top. */
+interface TrackPoint {
+  readonly ms: number
+  readonly y: number
+}
 
 export interface TimelineEdits {
   readonly seek: (ms: number, mode: "drag" | "commit") => void
   readonly select: (selection: EditorSelection) => void
   readonly moveClip: (clip: LaidClip, startMs: number) => void
+  /** Moves clips together by `deltaMs`, as one edit. */
+  readonly moveClips: (clips: readonly LaidClip[], deltaMs: number) => void
   readonly trimClip: (clip: LaidClip, edge: "start" | "end", atMs: number) => void
   readonly sceneLength: (scene: VideoScene, ms: number) => void
   /** Reorders, duplicates, deletes or renames a scene. */
@@ -163,6 +192,7 @@ export function Timeline({
   const messages = useArtifactMessages().videoEditor
   const scroller = useRef<HTMLDivElement | null>(null)
   const scenesRow = useRef<HTMLDivElement | null>(null)
+  const tracksArea = useRef<HTMLDivElement | null>(null)
 
   // A scene dragged along its track lands before the scene whose middle it passes.
   const { drag: reorder, start: startReorder } = useReorder({
@@ -263,11 +293,13 @@ export function Timeline({
 
   // What edges snap to: the playhead, the marks, every edge, and the cuts of the dragged footage.
   const parts = useMediaParts(
-    drag && drag.type !== "scrub" && drag.type !== "scene" ? target : null,
+    drag && (drag.type === "move" || drag.type === "trim") ? target : null,
     drag && (drag.type === "move" || drag.type === "trim") ? drag.clip.clip.src : undefined
   )
   const targets = useMemo(() => {
     const dragged = drag && (drag.type === "move" || drag.type === "trim") ? drag.clip : null
+    // Clips dragged together snap to what stays, never to each other.
+    const group = drag?.type === "move" ? (drag.group ?? []) : []
     // The clip dragged, as the timeline lays it out now: a change that lands mid-drag lays it anew.
     const points = new Set<number>([0, timeMs])
     if (marks.in !== undefined) points.add(marks.in)
@@ -278,6 +310,7 @@ export function Timeline({
     }
     for (const clip of clips) {
       if (dragged && sameClip(clip, dragged)) continue
+      if (group.some((each) => sameClip(each, clip))) continue
       points.add(clip.startMs)
       if (!clip.open) points.add(clip.endMs)
     }
@@ -293,6 +326,12 @@ export function Timeline({
   const snapMs = (ms: number, free: boolean) =>
     snapping && !free ? snapTo(ms, targets, threshold) : { ms }
 
+  /** Where a clip's composition starts in the video, before which it never goes. */
+  const floorOf = (file: string) =>
+    file === VIDEO_ENTRY
+      ? 0
+      : (composition.scenes.find((scene) => scene.src === file)?.startMs ?? 0)
+
   // ── Dragging ───────────────────────────────────────────────────────
 
   const startDrag = (event: ReactPointerEvent, next: Drag) => {
@@ -303,7 +342,7 @@ export function Timeline({
 
   const onDragMove = (event: ReactPointerEvent) => {
     const current = dragRef.current
-    if (!current) return
+    if (!current || current.type === "marquee") return
     const free = event.shiftKey
 
     if (current.type === "scrub") {
@@ -313,16 +352,27 @@ export function Timeline({
 
     const delta = ((event.clientX - current.x) / zoom) * 1000
     if (current.type === "move") {
-      const length = current.clip.endMs - current.clip.startMs
-      const raw = Math.max(0, current.clip.startMs + delta)
+      const { clip, group } = current
+      const length = clip.endMs - clip.startMs
+      const raw = group ? clip.startMs + delta : Math.max(0, clip.startMs + delta)
       const snapped =
         snapping && !free ? snapMove(raw, length, targets, threshold) : { startMs: raw }
+
+      // Together, the clips go as far as the first to reach its composition's start.
+      const startMs = group
+        ? clip.startMs +
+          groupDelta(
+            group.map((each) => ({ startMs: each.startMs, floorMs: floorOf(each.file) })),
+            snapped.startMs - clip.startMs
+          )
+        : snapped.startMs
+      const target = startMs === snapped.startMs ? snapped.target : undefined
       setDrag({
         ...current,
-        startMs: snapped.startMs,
+        startMs,
         moved: current.moved || Math.abs(event.clientX - current.x) > 3,
-        ...(snapped.target === undefined ? { target: undefined } : { target: snapped.target }),
-      } as Drag)
+        target,
+      })
       return
     }
 
@@ -340,6 +390,7 @@ export function Timeline({
 
   const onDragEnd = (event: ReactPointerEvent) => {
     const current = dragRef.current
+    if (current?.type === "marquee") return
     setDrag(null)
     if (!current) return
 
@@ -356,7 +407,8 @@ export function Timeline({
           })
           return
         }
-        edits.moveClip(current.clip, current.startMs)
+        if (current.group) edits.moveClips(current.group, current.startMs - current.clip.startMs)
+        else edits.moveClip(current.clip, current.startMs)
         return
       case "trim":
         edits.trimClip(current.clip, current.edge, current.atMs)
@@ -375,14 +427,9 @@ export function Timeline({
 
   // ── Layout ─────────────────────────────────────────────────────────
 
-  // The clip selected, as its file is now.
-  const chosen =
-    selection?.type === "clip"
-      ? findVideoTarget(
-          clips.filter((laid) => laid.file === selection.file).map((laid) => laid.clip),
-          selection.target
-        )
-      : undefined
+  // The clips selected, as their files are now.
+  const chosen = chosenIn(clips, selection)
+  const isChosen = (laid: LaidClip) => chosen.some((each) => sameClip(each, laid))
 
   const rows = trackRows(clips)
   const sceneClips = clips.filter((clip) => clip.file !== VIDEO_ENTRY)
@@ -424,6 +471,78 @@ export function Timeline({
       clips: ownClips,
       rows: Math.max(1, ...ownClips.map((clip) => clip.row + 1)),
     })
+  }
+
+  // Where each clip is drawn down the tracks, which a selection rectangle touches.
+  const boxes: ClipBox<LaidClip>[] = []
+  let tracksHeight = 0
+  for (const track of tracks) {
+    const height = ROW_PX[track.track]
+    for (const laid of track.clips) {
+      boxes.push({
+        clip: laid,
+        startMs: laid.startMs,
+        endMs: laid.endMs,
+        top: tracksHeight + laid.row * height + 2,
+        height: height - 4,
+      })
+    }
+    tracksHeight += height * track.rows
+  }
+
+  // ── Selecting ──────────────────────────────────────────────────────
+
+  const trackPoint = (event: ReactPointerEvent): TrackPoint => ({
+    ms: msAt(event.clientX),
+    y: event.clientY - (tracksArea.current?.getBoundingClientRect().top ?? 0),
+  })
+
+  /** A press with the command key, on a clip or between them: a click, or a rectangle dragged. */
+  const startSelecting = (event: ReactPointerEvent, over?: LaidClip) => {
+    event.stopPropagation()
+    // Nothing of the page is selected as the rectangle grows.
+    event.preventDefault()
+    tracksArea.current?.setPointerCapture(event.pointerId)
+    const at = trackPoint(event)
+    setDrag({
+      type: "marquee",
+      from: at,
+      to: at,
+      over,
+      before: selection,
+      moved: false,
+      touched: "",
+    })
+  }
+
+  const onSelectingMove = (event: ReactPointerEvent) => {
+    const current = dragRef.current
+    if (current?.type !== "marquee") return
+    const to = trackPoint(event)
+    const moved =
+      current.moved ||
+      Math.abs(px(to.ms - current.from.ms)) > 3 ||
+      Math.abs(to.y - current.from.y) > 3
+    if (!moved) return
+
+    const touched = inRectangle(boxes, current.from, to)
+    const key = touched.map((laid) => `${laid.file}#${laid.clip.ref}`).join("\n")
+    setDrag({ ...current, to, moved, touched: key })
+    if (key === current.touched && current.moved) return
+
+    // What it touches joins what was selected, as the pointer goes.
+    const before = chosenIn(clips, current.before)
+    edits.select(
+      choose([...before, ...touched.filter((laid) => !before.some((each) => sameClip(each, laid)))])
+    )
+  }
+
+  const onSelectingEnd = () => {
+    const current = dragRef.current
+    if (current?.type !== "marquee") return
+    dragRef.current = null
+    setDrag(null)
+    if (!current.moved && current.over) edits.select(toggled(clips, current.before, current.over))
   }
 
   // Each scene where it shows, its end as dragged, and what it plays with the next.
@@ -571,104 +690,146 @@ export function Timeline({
             {reorder ? <SceneDropMark left={dropAt(reorder.slot)} /> : null}
           </Row>
 
-          {tracks.map((track) => (
-            <Row
-              key={track.id}
-              label={track.label}
-              icon={trackIcon(track.track)}
-              height={ROW_PX[track.track] * track.rows}
-              onBackground={(event) => {
-                edits.select(null)
-                edits.seek(msAt(event.clientX), "commit")
-              }}
-              muted={track.id !== "soundtrack" && !open}
-            >
-              {track.id !== "soundtrack" && open ? (
-                <span
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-y-0 bg-foreground/[0.025] dark:bg-foreground/[0.04]"
-                  style={{ left: px(open.startMs), width: px(open.durationMs) }}
-                />
-              ) : null}
-              {track.clips.map((laid) => {
-                const selected = chosen === laid.clip
-                const moving =
-                  drag?.type === "move" && sameClip(drag.clip, laid) && drag.moved ? drag : null
-                const trimming = drag?.type === "trim" && sameClip(drag.clip, laid) ? drag : null
-                const start = moving
-                  ? moving.startMs
-                  : trimming?.edge === "start"
-                    ? trimming.atMs
-                    : laid.startMs
-                const end = moving
-                  ? moving.startMs + laid.endMs - laid.startMs
-                  : trimming?.edge === "end"
-                    ? trimming.atMs
-                    : laid.endMs
-                return (
-                  <ClipBlock
-                    key={`${laid.file}#${laid.clip.ref}`}
-                    laid={laid}
-                    selected={selected}
-                    dragging={!!moving || !!trimming}
-                    left={px(start)}
-                    width={Math.max(6, px(end - start))}
-                    top={laid.row * ROW_PX[track.track]}
-                    height={ROW_PX[track.track]}
-                    target={target}
-                    zoom={zoom}
-                    viewStartMs={start}
-                    onPointerDown={(event) => {
-                      if (event.button !== 0) return
-                      startDrag(event, {
-                        type: "move",
-                        clip: laid,
-                        x: event.clientX,
-                        startMs: laid.startMs,
-                        moved: false,
-                      })
-                    }}
-                    onTrim={(event, edge) =>
-                      startDrag(event, {
-                        type: "trim",
-                        clip: laid,
-                        edge,
-                        x: event.clientX,
-                        atMs: edge === "start" ? laid.startMs : laid.endMs,
-                      })
-                    }
-                    onSelect={() =>
-                      edits.select({
-                        type: "clip",
-                        file: laid.file,
-                        target: videoTarget(laid.clip),
-                      })
-                    }
-                    dragHandlers={dragHandlers}
+          {/* The tracks, where the command key draws a selection rectangle over the clips. */}
+          <div
+            ref={tracksArea}
+            data-video-tracks=""
+            className="relative select-none"
+            onPointerMove={onSelectingMove}
+            onPointerUp={onSelectingEnd}
+            onPointerCancel={() => {
+              if (dragRef.current?.type === "marquee") setDrag(null)
+            }}
+          >
+            {tracks.map((track) => (
+              <Row
+                key={track.id}
+                label={track.label}
+                icon={trackIcon(track.track)}
+                height={ROW_PX[track.track] * track.rows}
+                onBackground={(event) => {
+                  if (commandKey(event)) {
+                    startSelecting(event)
+                    return
+                  }
+                  edits.select(null)
+                  edits.seek(msAt(event.clientX), "commit")
+                }}
+                muted={track.id !== "soundtrack" && !open}
+              >
+                {track.id !== "soundtrack" && open ? (
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-y-0 bg-foreground/[0.025] dark:bg-foreground/[0.04]"
+                    style={{ left: px(open.startMs), width: px(open.durationMs) }}
                   />
-                )
-              })}
-              {uploads
-                .filter((upload) => upload.track === track.track && track.id !== "soundtrack")
-                .map((upload) => (
-                  <div
-                    key={upload.id}
-                    className="absolute inset-y-1 overflow-hidden rounded-md border border-dashed border-primary/60 bg-primary/10"
-                    style={{ left: px(upload.startMs), width: Math.max(24, px(upload.durationMs)) }}
-                  >
-                    <span
-                      className="absolute inset-y-0 left-0 bg-primary/20 transition-[width] duration-300"
-                      style={{ width: `${Math.round(upload.progress * 100)}%` }}
+                ) : null}
+                {track.clips.map((laid) => {
+                  const selected = isChosen(laid)
+                  const moving =
+                    drag?.type === "move" &&
+                    drag.moved &&
+                    (sameClip(drag.clip, laid) || drag.group?.some((each) => sameClip(each, laid)))
+                      ? drag
+                      : null
+                  const trimming = drag?.type === "trim" && sameClip(drag.clip, laid) ? drag : null
+                  // The clip dragged where it is dragged; the others selected with it as far.
+                  const movedTo = moving
+                    ? sameClip(moving.clip, laid)
+                      ? moving.startMs
+                      : laid.startMs + moving.startMs - moving.clip.startMs
+                    : undefined
+                  const start =
+                    movedTo ?? (trimming?.edge === "start" ? trimming.atMs : laid.startMs)
+                  const end =
+                    movedTo !== undefined
+                      ? movedTo + laid.endMs - laid.startMs
+                      : trimming?.edge === "end"
+                        ? trimming.atMs
+                        : laid.endMs
+                  return (
+                    <ClipBlock
+                      key={`${laid.file}#${laid.clip.ref}`}
+                      laid={laid}
+                      selected={selected}
+                      dragging={!!moving || !!trimming}
+                      left={px(start)}
+                      width={Math.max(6, px(end - start))}
+                      top={laid.row * ROW_PX[track.track]}
+                      height={ROW_PX[track.track]}
+                      target={target}
+                      zoom={zoom}
+                      viewStartMs={start}
+                      onPointerDown={(event) => {
+                        if (event.button !== 0) return
+                        if (commandKey(event)) {
+                          startSelecting(event, laid)
+                          return
+                        }
+                        startDrag(event, {
+                          type: "move",
+                          clip: laid,
+                          ...(chosen.length > 1 && selected ? { group: chosen } : {}),
+                          x: event.clientX,
+                          startMs: laid.startMs,
+                          moved: false,
+                        })
+                      }}
+                      onTrim={(event, edge) =>
+                        startDrag(event, {
+                          type: "trim",
+                          clip: laid,
+                          edge,
+                          x: event.clientX,
+                          atMs: edge === "start" ? laid.startMs : laid.endMs,
+                        })
+                      }
+                      onSelect={() =>
+                        edits.select({
+                          type: "clip",
+                          file: laid.file,
+                          target: videoTarget(laid.clip),
+                        })
+                      }
+                      dragHandlers={dragHandlers}
                     />
-                    <span className="relative flex h-full items-center px-2 text-[11px] font-medium text-foreground">
-                      <span className="truncate">
-                        {messages.uploading(upload.name, Math.round(upload.progress * 100))}
+                  )
+                })}
+                {uploads
+                  .filter((upload) => upload.track === track.track && track.id !== "soundtrack")
+                  .map((upload) => (
+                    <div
+                      key={upload.id}
+                      className="absolute inset-y-1 overflow-hidden rounded-md border border-dashed border-primary/60 bg-primary/10"
+                      style={{
+                        left: px(upload.startMs),
+                        width: Math.max(24, px(upload.durationMs)),
+                      }}
+                    >
+                      <span
+                        className="absolute inset-y-0 left-0 bg-primary/20 transition-[width] duration-300"
+                        style={{ width: `${Math.round(upload.progress * 100)}%` }}
+                      />
+                      <span className="relative flex h-full items-center px-2 text-[11px] font-medium text-foreground">
+                        <span className="truncate">
+                          {messages.uploading(upload.name, Math.round(upload.progress * 100))}
+                        </span>
                       </span>
-                    </span>
-                  </div>
-                ))}
-            </Row>
-          ))}
+                    </div>
+                  ))}
+              </Row>
+            ))}
+            {drag?.type === "marquee" && drag.moved ? (
+              <Marquee
+                left={LABELS_PX + px(Math.min(drag.from.ms, drag.to.ms))}
+                right={LABELS_PX + px(Math.max(drag.from.ms, drag.to.ms))}
+                top={Math.max(0, Math.min(drag.from.y, drag.to.y))}
+                bottom={Math.min(tracksHeight, Math.max(drag.from.y, drag.to.y))}
+                // Never over the track names, which stay on the left as the timeline scrolls.
+                minLeft={LABELS_PX + (scroller.current?.scrollLeft ?? 0)}
+              />
+            ) : null}
+          </div>
 
           {/* Marks in and out, over every track. */}
           {marks.in !== undefined || marks.out !== undefined ? (
@@ -704,6 +865,36 @@ export function Timeline({
         </div>
       </div>
     </section>
+  )
+}
+
+/** The rectangle the command key draws over the tracks, in pixels of the timeline's content. */
+function Marquee({
+  left,
+  right,
+  top,
+  bottom,
+  minLeft,
+}: {
+  readonly left: number
+  readonly right: number
+  readonly top: number
+  readonly bottom: number
+  readonly minLeft: number
+}) {
+  const from = Math.max(left, minLeft)
+  return (
+    <span
+      aria-hidden="true"
+      data-marquee=""
+      className="pointer-events-none absolute z-[15] rounded-[3px] border border-primary/80 bg-primary/10"
+      style={{
+        left: from,
+        width: Math.max(0, right - from),
+        top,
+        height: Math.max(0, bottom - top),
+      }}
+    />
   )
 }
 
