@@ -2061,10 +2061,10 @@ function clipHtml(
 /**
  * Puts clips' elements in a composition, on lines of their own, as children of the composition
  * itself: never inside one of its elements, a phone's frame or a lower third, whose look would be
- * theirs. A clip goes after the last element holding one of its track. When there is none, a
- * picture goes under the words, before the first element holding any, and words or a sound over
- * the pictures, after the last element holding one; else they go last, before the composition's
- * closing styles and scripts.
+ * theirs. A picture goes under the words: before the first element holding any, when that one
+ * comes no later than the last holding a picture, as a card holding both; else after the last
+ * holding a picture. Words and sounds go after the last element holding one of their track, else
+ * over the pictures, after the last holding one; else last, before the closing styles and scripts.
  */
 function insertInComposition(
   work: Working,
@@ -2086,13 +2086,19 @@ function insertInComposition(
   const lastHolding = (tracks: readonly VideoTrack[]) =>
     children.filter((child) => holds(child, tracks)).at(-1)
 
-  const after = lastHolding([track]) ?? (track === "picture" ? undefined : lastHolding(["picture"]))
-  const before =
-    after === undefined
-      ? track === "picture"
-        ? children.find((child) => holds(child, ["text"]))
-        : undefined
-      : undefined
+  // A picture never goes over words: before the first element holding any, when that one comes
+  // no later than the last holding a picture, as a card holding both.
+  const firstWords = children.findIndex((child) => holds(child, ["text"]))
+  const lastPicture = children.reduce(
+    (last, child, index) => (holds(child, ["picture"]) ? index : last),
+    -1
+  )
+  const underWords =
+    track === "picture" && firstWords >= 0 && (lastPicture < 0 || firstWords <= lastPicture)
+  const after = underWords
+    ? undefined
+    : (lastHolding([track]) ?? (track === "picture" ? undefined : lastHolding(["picture"])))
+  const before = underWords ? children[firstWords] : undefined
   // Last, before the styles and scripts that close the composition.
   let closing = children.length
   while (closing > 0 && ["style", "script"].includes(children[closing - 1]?.tag ?? "")) closing -= 1
