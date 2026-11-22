@@ -719,6 +719,36 @@ export function Timeline({
     }
   }
 
+  /**
+   * Where two parts of one clip on a track lie on different rows, the part after painting over
+   * what the one before did not: a quiet line at the chapter's edge between them, from the middle
+   * of one to the middle of the other, so they read as one clip.
+   */
+  const chainLinks = (track: {
+    readonly track: VideoTrack
+    readonly rows: number
+    readonly clips: readonly LaidClip[]
+  }) =>
+    [...chains.values()].flatMap((parts) => {
+      const here = parts.filter((part) => track.clips.includes(part))
+      return here.slice(1).flatMap((part, index) => {
+        const before = here[index]
+        if (!before || before.row === part.row) return []
+        const middle = (row: number) =>
+          rowTop(track.track, row, track.rows) + ROW_PX[track.track] / 2
+        const [a, b] = [middle(before.row), middle(part.row)]
+        return [
+          {
+            key: `${clipKey(before)}>${clipKey(part)}`,
+            left: px(part.startMs),
+            top: Math.min(a, b),
+            height: Math.abs(a - b),
+            selected: chosenKeys.has(chainKey(part)),
+          },
+        ]
+      })
+    })
+
   // The chapter selected, the one under the playhead, and where files dragged in would land.
   const chosenScene = selection?.type === "scene" ? selection.scene : undefined
   const playingScene = sceneAt(composition.scenes, timeMs)?.id
@@ -956,6 +986,18 @@ export function Timeline({
                     )
                   })
                 })()}
+                {chainLinks(track).map((link) => (
+                  <span
+                    key={link.key}
+                    aria-hidden="true"
+                    data-chain-link=""
+                    className={cn(
+                      "pointer-events-none absolute z-[12] w-[1.5px] -translate-x-1/2 rounded-full",
+                      link.selected ? "bg-foreground/60" : "bg-foreground/25 dark:bg-foreground/35"
+                    )}
+                    style={{ left: link.left, top: link.top, height: link.height }}
+                  />
+                ))}
                 {uploads
                   .filter((upload) => upload.track === track.track && track.id !== "soundtrack")
                   .map((upload) => (
@@ -1372,6 +1414,12 @@ const ClipBlock = memo(function ClipBlock({
         width,
         top: top + 2,
         height: height - 4,
+        // Chosen, the parts against each other are one shape: no ring where they meet.
+        ...(selected && (laid.chain?.joinsBefore || laid.chain?.joinsAfter)
+          ? {
+              clipPath: `inset(-4px ${laid.chain?.joinsAfter ? 0 : -4}px -4px ${laid.chain?.joinsBefore ? 0 : -4}px)`,
+            }
+          : {}),
         ...(failed
           ? {
               backgroundImage:
