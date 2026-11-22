@@ -29,8 +29,10 @@ export const VIDEO_ENGINE = `hyperframes@${HYPERFRAMES_VERSION}`
  * How every segment is encoded, so segments join without being encoded again: H.264 at one
  * quality, a keyframe on its first frame and every two seconds after, captured by two browsers at
  * once, which keeps a segment rendered again the same. Changing them renders every segment anew.
+ * CRF 20 makes a 1080×1920 video about 11 Mb/s, what social networks take in; CRF 18 made it 19,
+ * twice the file for no difference a viewer sees (SSIM 0.986 against 0.989).
  */
-export const VIDEO_SEGMENT_SETTINGS = { crf: 18, keyframeSeconds: 2, workers: 2 } as const
+export const VIDEO_SEGMENT_SETTINGS = { crf: 20, keyframeSeconds: 2, workers: 2 } as const
 
 /**
  * How the render worker assembles an export: each attempt within `timeoutMs`, which holds fetching
