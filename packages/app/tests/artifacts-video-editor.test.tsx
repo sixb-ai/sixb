@@ -1403,6 +1403,31 @@ describe("the timeline", () => {
     })
   })
 
+  // Guard proof: leave `dragRef.current` set in onDragEnd in timeline.tsx; the handle's release
+  // bubbles to its clip, and the trim is made twice, a start trim with ripple twice as deep.
+  test("a trim is made once when its handle is let go", () => {
+    const trims: number[] = []
+    const edits = {
+      seek: () => {},
+      select: () => {},
+      moveClip: () => {},
+      moveClips: () => {},
+      trimClip: (_laid: unknown, _edge: unknown, atMs: number) => trims.push(atMs),
+      sceneLength: () => {},
+      scene: { select: () => {}, move: () => {}, duplicate: () => {}, remove: () => {} },
+    }
+    const view = render(timeline({ timeMs: 0, edits: edits as never }))
+    const handle = view.container.querySelector<HTMLElement>(
+      '[data-timeline-clip="clip"] > .cursor-ew-resize'
+    )
+    if (!handle) throw new Error("No trim handle on the footage.")
+
+    fireEvent.pointerDown(handle, { button: 0, clientX: 412, pointerId: 1, shiftKey: true })
+    fireEvent.pointerMove(handle, { clientX: 462, pointerId: 1, shiftKey: true })
+    fireEvent.pointerUp(handle, { clientX: 462, pointerId: 1, shiftKey: true })
+    expect(trims).toHaveLength(1)
+  })
+
   // Reproduce by finding the dragged clip by identity, as the timeline did: a change that lands
   // mid-drag lays every clip out anew, and the block snaps back to where it was.
   test("keeps a clip where it is dragged when a change lands mid-drag", () => {
