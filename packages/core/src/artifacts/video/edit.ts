@@ -26,6 +26,7 @@ import {
   readRootLayers,
   readRootTimeline,
   readSceneTimeline,
+  sceneAfter,
   type VideoChain,
   type VideoClip,
   type VideoElementSource,
@@ -197,8 +198,9 @@ export function moveScene(sources: VideoSources, scene: string, to: number): Vid
 
 /**
  * Copies a scene: its file under a new id, its host after its own, and the scenes that followed it
- * now following the copy. The copy's recordings get ids of their own, as HyperFrames plays each by
- * its id. Returns the copy's id with the edit.
+ * now following the copy. Every element of the copy gets an id of its own, as HyperFrames plays
+ * each recording by its id and a clip is one clip by its id, and none of it goes on from a clip of
+ * the original's. Returns the copy's id with the edit.
  */
 export function duplicateScene(
   sources: VideoSources,
@@ -1448,17 +1450,34 @@ function copySceneFile(text: string, from: string, to: string, taken: Set<string
       (_, open, quote, close) => `${open}${quote}${to}${quote}${close}`
     )
 
-  const timeline = readSceneTimeline(copy)
-  for (const clip of timeline?.clips ?? []) {
-    if (!clip.id || (clip.kind !== "video" && clip.kind !== "audio")) continue
-    const renamed = uniqueName(clip.id, taken)
+  // A copy goes on from nothing: the clip a part of it went on from is the original's.
+  copy = copy.replace(/\s+data-continues\s*=\s*(["'])[^"']*\1/g, "")
+
+  // Every element takes an id of its own, and whatever names it in the file follows: a `#id`, a
+  // script's `getElementById`, a start chained to it, the look carried for it.
+  const ids = new Set(
+    [...copy.matchAll(/\sid\s*=\s*(["'])([^"']+)\1/g)].flatMap((match) =>
+      match[2] ? [match[2]] : []
+    )
+  )
+  for (const id of ids) {
+    const renamed = uniqueName(id, taken)
     taken.add(renamed)
+    const name = quoted(id)
     copy = copy
       .replace(
-        new RegExp(`(\\sid\\s*=\\s*)(["'])${quoted(clip.id)}\\2`, "g"),
-        (_, name, quote) => `${name}${quote}${renamed}${quote}`
+        new RegExp(`(\\s(?:id|data-carried)\\s*=\\s*)(["'])${name}\\2`, "g"),
+        (_, attribute, quote) => `${attribute}${quote}${renamed}${quote}`
       )
-      .replace(new RegExp(`#${quoted(clip.id)}(?![\\w-])`, "g"), `#${renamed}`)
+      .replace(new RegExp(`#${name}(?![\\w-])`, "g"), `#${renamed}`)
+      .replace(
+        new RegExp(`(getElementById\\(\\s*)(["'\`])${name}\\2`, "g"),
+        (_, call, quote) => `${call}${quote}${renamed}${quote}`
+      )
+      .replace(
+        new RegExp(`(\\sdata-start\\s*=\\s*(["'])\\s*)${name}(?=\\s*(?:[+-]|\\2))`, "g"),
+        (_, start) => `${start}${renamed}`
+      )
   }
   return copy
 }
@@ -2600,7 +2619,7 @@ function partsOf(
   const from = (ms: number, except?: Scene) =>
     scenes.find((scene) => scene !== except && scene.startMs >= ms)
   const last = scenes.reduce((latest, scene) => (end(scene) >= end(latest) ? scene : latest), own)
-  const next = (scene: Scene) => onTop(end(scene), scene) ?? from(end(scene), scene)
+  const next = (scene: Scene) => sceneAfter(scenes, scene)
 
   let scene = (holds(own, startMs) ? own : undefined) ?? onTop(startMs) ?? from(startMs) ?? last
   const first = Math.max(startMs, scene.startMs)

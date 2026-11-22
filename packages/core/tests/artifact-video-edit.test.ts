@@ -36,7 +36,7 @@ import {
   type VideoSources,
   videoTarget,
 } from "../src/artifacts/video/edit"
-import { readRootTimeline, readSceneTimeline } from "../src/artifacts/video/timeline"
+import { readRootTimeline, readSceneTimeline, videoChains } from "../src/artifacts/video/timeline"
 
 // Editing a video changes the text of its files as little as it can, and leaves a video: each
 // operation is checked by reading the files it leaves as publishing reads them.
@@ -1530,6 +1530,102 @@ describe("a clip that goes on in later scenes", () => {
     expect(
       readSceneTimeline(files.get("scenes/demo.html") as string)?.clips.map((clip) => clip.text)
     ).toEqual(["x", "Welcome"])
+  })
+
+  /** The chains the video holds, each as its parts' files and refs. */
+  const chains = (files: ReadonlyMap<string, string | null>) =>
+    videoChains(
+      composition(files).scenes,
+      (file) => readSceneTimeline(files.get(file) as string) ?? undefined
+    ).map((chain) => chain.parts.map((part) => `${part.file}#${part.clip.ref}`))
+  const titled = new Map(opening)
+  titled.set(
+    "scenes/hook.html",
+    scene("hook", '<h1 class="title" data-start="0" data-duration="3">Title</h1>')
+  )
+
+  // Guard proof: drop the check that the part before ends with its scene from goesOn
+  // (timeline.ts), as the gap rule let it; the outro's part then goes on from the hook's across
+  // the demo, and moving the head writes a whole title into the demo again.
+  test("a part goes on only from the scene just before it, ended with it", () => {
+    const long = applied(trimClip(titled, "scenes/hook.html", "#0", "end", 13_000), titled)
+    expect(chains(long)).toEqual([
+      ["scenes/hook.html#text", "scenes/demo.html#text-2", "scenes/outro.html#text-3"],
+    ])
+
+    // Its middle part taken out by hand, the outro's is a clip of its own.
+    const gapped = new Map(long)
+    gapped.set(
+      "scenes/demo.html",
+      (long.get("scenes/demo.html") as string).replace(/\n\s*<h1[^\n]*<\/h1>/, "")
+    )
+    expect(chains(gapped)).toEqual([])
+    const moved = applied(moveClip(gapped, "scenes/hook.html", "text", 200), gapped)
+    const titles = (file: string) =>
+      (readSceneTimeline(moved.get(file) as string)?.clips ?? [])
+        .filter((clip) => clip.tag === "h1")
+        .map((clip) => [clip.ref, clip.startMs, clip.durationMs])
+    expect(titles("scenes/demo.html")).toEqual([["text-2", 0, 200]])
+    expect(titles("scenes/outro.html")).toEqual([["text-3", 0, 2000]])
+  })
+
+  // Guard proof: rename only recordings in copySceneFile (edit.ts), as it did, and keep its
+  // `data-continues`; the copied demo's title joins the chain, stretches when the head moves, and
+  // goes when the head goes. Let an id written twice head a chain in videoChains (timeline.ts),
+  // and the part goes on from whichever title the Agent gave that id.
+  test("a copied scene's clips are its own: none goes on from the original's", () => {
+    const continued = applied(trimClip(titled, "scenes/hook.html", "#0", "end", 5000), titled)
+    const copied = applied(duplicateScene(continued, "demo"), continued)
+    expect(copied.get("scenes/demo-2.html")).not.toContain("data-continues")
+    expect(copied.get("scenes/demo-2.html")).toContain('id="text-3"')
+    expect(chains(copied)).toEqual([["scenes/hook.html#text", "scenes/demo.html#text-2"]])
+
+    const moved = applied(moveClip(copied, "scenes/hook.html", "text", 500), copied)
+    expect(moved.get("scenes/demo-2.html")).toBe(copied.get("scenes/demo-2.html"))
+    const gone = applied(removeClip(copied, "scenes/hook.html", "text"), copied)
+    expect(gone.get("scenes/demo-2.html")).toBe(copied.get("scenes/demo-2.html"))
+
+    // Two titles the Agent gave one id, each ending with the hook: neither heads the part that
+    // names it, as either could be the one it went on from.
+    const twice = new Map(continued)
+    twice.set(
+      "scenes/hook.html",
+      (continued.get("scenes/hook.html") as string).replace(
+        "</h1>",
+        '</h1>\n    <h1 class="title" id="text" data-start="2" data-duration="1">Title</h1>'
+      )
+    )
+    expect(chains(twice)).toEqual([])
+
+    // The head's own scene copied: its title takes an id of its own, and the copy, now between
+    // the hook and the demo, ends the chain: the demo's part plays on its own.
+    const hooks = applied(duplicateScene(continued, "hook"), continued)
+    expect(hooks.get("scenes/hook-2.html")).toContain('id="text-3"')
+    expect(chains(hooks)).toEqual([])
+  })
+
+  // Guard proof: rename no carried look nor chained start in copySceneFile (edit.ts); the copy's
+  // look then names an element it no longer holds, and its caption follows nothing.
+  test("a copied scene's looks and chained starts follow its new ids", () => {
+    const sources = new Map(opening)
+    sources.set(
+      "scenes/outro.html",
+      scene(
+        "outro",
+        `<p id="cap" class="caption" data-start="0" data-duration="1">Hi</p>
+    <p id="after" data-start="cap + 0.5" data-duration="1">there</p>
+    <style data-carried="cap" data-from="demo">
+      [data-composition-id="outro"] #cap { color: yellow; }
+    </style>
+    <script>document.getElementById("cap")</script>`
+      )
+    )
+    const copy = applied(duplicateScene(sources, "outro"), sources).get("scenes/outro-2.html") ?? ""
+    expect(copy).toContain('<p id="cap-2" class="caption"')
+    expect(copy).toContain('data-start="cap-2 + 0.5"')
+    expect(copy).toContain('<style data-carried="cap-2" data-from="demo">')
+    expect(copy).toContain('[data-composition-id="outro-2"] #cap-2 { color: yellow; }')
+    expect(copy).toContain('getElementById("cap-2")')
   })
 
   // Guard proof: drop the check that a part goes on from the one before in goesOn (timeline.ts);
