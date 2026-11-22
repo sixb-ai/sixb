@@ -70,6 +70,7 @@ import {
 | --- | --- |
 | `messagesInput(messages, providerId, errorPrefix)` | Return system/content blocks; serialize images/PDFs and tools; merge adjacent roles. |
 | `messagesEvents(body, signal, options)` | Assemble text, tools, thinking/signatures, citations, and opaque native blocks. |
+| `messagesPromptCaching(body, caching, localTools)` | Mark the last tool, the last system block and the conversation tail for caching, from the request's caching intent; one-shot requests and `"off"` stay unmarked. |
 
 ```text
 message_start

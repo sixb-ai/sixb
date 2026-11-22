@@ -1,4 +1,4 @@
-import { defineModelRateCard, type ModelRateCard } from "@sixb/core/models"
+import { defineModelRateCard, type ModelRateCard, type ModelTokenPrice } from "@sixb/core/models"
 import { object } from "./json"
 
 export const MODELS_DEV_URL = "https://models.dev/api.json"
@@ -154,4 +154,30 @@ function abortable<T>(operation: () => T | Promise<T>, signal: AbortSignal): Pro
       .then(resolve, reject)
       .finally(() => signal.removeEventListener("abort", abort))
   })
+}
+
+/** A per-million-token price times `numerator / denominator`, context tiers included. */
+export function scaleTokenPrice(
+  price: ModelTokenPrice,
+  [numerator, denominator]: readonly [bigint, bigint]
+): ModelTokenPrice {
+  if (typeof price === "string") return scale(price, numerator, denominator)
+  return {
+    default: scale(price.default, numerator, denominator),
+    tiers: price.tiers.map((tier) => ({
+      ...tier,
+      price: scale(tier.price, numerator, denominator),
+    })),
+  }
+}
+
+function scale(value: string, numerator: bigint, denominator: bigint): string {
+  const [whole = "0", fraction = ""] = value.split(".")
+  const precision = 9
+  const factor = 10n ** BigInt(fraction.length)
+  const outputFactor = 10n ** BigInt(precision)
+  const scaled = (BigInt(`${whole}${fraction}`) * numerator * outputFactor) / factor / denominator
+  const scaledWhole = scaled / outputFactor
+  const remainder = (scaled % outputFactor).toString().padStart(precision, "0").replace(/0+$/, "")
+  return remainder ? `${scaledWhole}.${remainder}` : scaledWhole.toString()
 }

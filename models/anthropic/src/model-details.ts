@@ -1,4 +1,5 @@
 import type { JsonObject, ModelRateCard, ModelTokenPrice } from "@sixb/core/models"
+import { scaleTokenPrice } from "@sixb/model-protocols/models-dev"
 
 interface OutputLimitRule {
   readonly match: RegExp
@@ -91,8 +92,8 @@ export function anthropicRateCard(
   if (residency && PRE_US_INFERENCE.test(modelId)) return undefined
 
   const adjusted = (price: ModelTokenPrice) => {
-    const withSpeed = fast ? scalePrice(price, FAST_MODE) : price
-    return residency ? scalePrice(withSpeed, US_INFERENCE) : withSpeed
+    const withSpeed = fast ? scaleTokenPrice(price, FAST_MODE) : price
+    return residency ? scaleTokenPrice(withSpeed, US_INFERENCE) : withSpeed
   }
   return {
     currency: "USD",
@@ -102,31 +103,6 @@ export function anthropicRateCard(
     ...(base.cacheWriteInput === undefined
       ? {}
       : { cacheWriteInput5m: adjusted(base.cacheWriteInput) }),
-    cacheWriteInput1h: adjusted(scalePrice(base.input, ONE_HOUR_CACHE_WRITE)),
+    cacheWriteInput1h: adjusted(scaleTokenPrice(base.input, ONE_HOUR_CACHE_WRITE)),
   }
-}
-
-function scalePrice(
-  price: ModelTokenPrice,
-  [numerator, denominator]: readonly [bigint, bigint]
-): ModelTokenPrice {
-  if (typeof price === "string") return scale(price, numerator, denominator)
-  return {
-    default: scale(price.default, numerator, denominator),
-    tiers: price.tiers.map((tier) => ({
-      ...tier,
-      price: scale(tier.price, numerator, denominator),
-    })),
-  }
-}
-
-function scale(value: string, numerator: bigint, denominator: bigint): string {
-  const [whole = "0", fraction = ""] = value.split(".")
-  const precision = 9
-  const factor = 10n ** BigInt(fraction.length)
-  const outputFactor = 10n ** BigInt(precision)
-  const scaled = (BigInt(`${whole}${fraction}`) * numerator * outputFactor) / factor / denominator
-  const scaledWhole = scaled / outputFactor
-  const remainder = (scaled % outputFactor).toString().padStart(precision, "0").replace(/0+$/, "")
-  return remainder ? `${scaledWhole}.${remainder}` : scaledWhole.toString()
 }
