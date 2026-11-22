@@ -953,7 +953,8 @@ describe("placing clips in the video", () => {
   })
 
   // Guard proof: drop `src` from the attributes placeFound writes (edit.ts); the copy in the
-  // end card, a file at the video's root, then plays `../media/new.mp4`, outside the video.
+  // end card, a file at the video's root, then plays `../media/new.mp4`, outside the video. Write
+  // `data-media-start` whatever it is, and the clip gains a `data-media-start="0"` it never had.
   test("a recording that lands in a file of another folder plays the same file", () => {
     const sources = with_({
       "index.html": INDEX.replace("scenes/outro.html", "outro.html"),
@@ -966,7 +967,7 @@ describe("placing clips in the video", () => {
     sources.delete("scenes/outro.html")
     const files = applied(moveClip(sources, "scenes/hook.html", "intro", 11_000), sources)
     expect(files.get("outro.html")).toContain(
-      '<video id="intro" src="media/new.mp4" data-start="0.5"'
+      '<video id="intro" src="media/new.mp4" data-start="0.5" data-duration="3" muted></video>'
     )
     expect(composition(files).scenes[2]?.media.map((each) => each.value)).toContain("media/new.mp4")
   })
