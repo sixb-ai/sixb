@@ -34,10 +34,12 @@ export interface SceneActions {
 }
 
 /**
- * The narrowest a chapter shows its name at, in pixels, its menu's room taken: a few letters of it.
- * Narrower, it shows its number.
+ * The narrowest a chapter shows its name with room for its menu, in pixels; narrower, its name
+ * alone, cut short, its menu on a right click and the whole name in a tooltip; narrower than a few
+ * letters, its number.
  */
 const NAME_FROM_PX = 72
+const NUMBER_BELOW_PX = 36
 
 export function SceneBlock({
   scene,
@@ -79,7 +81,8 @@ export function SceneBlock({
   const box = useRef<HTMLDivElement | null>(null)
   const { width } = useSize(box)
   // Until it is measured, it is laid out as a chapter with room for its name.
-  const narrow = width > 0 && width < NAME_FROM_PX
+  const narrow = width > 0 && width < NUMBER_BELOW_PX
+  const compact = width > 0 && width < NAME_FROM_PX
 
   const block = (
     <button
@@ -87,10 +90,10 @@ export function SceneBlock({
       aria-pressed={open}
       aria-current={playing ? "true" : undefined}
       aria-label={messages.sceneLabel(index + 1, name, length)}
-      title={narrow ? undefined : agent ? messages.agentEditing : messages.sceneHint}
+      title={compact ? undefined : agent ? messages.agentEditing : messages.sceneHint}
       className={cn(
         "absolute inset-0 flex touch-none items-center gap-1.5 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-        narrow ? "justify-center p-0" : "pr-8 pl-2"
+        narrow ? "justify-center p-0" : compact ? "px-1.5" : "pr-8 pl-2"
       )}
       onPointerDown={(event) => {
         if (event.button !== 0 || renaming) return
@@ -122,7 +125,9 @@ export function SceneBlock({
         </span>
       ) : renaming ? null : (
         <>
-          {agent ? <Sparkles className="size-3 shrink-0 text-primary" aria-hidden="true" /> : null}
+          {agent && !compact ? (
+            <Sparkles className="size-3 shrink-0 text-primary" aria-hidden="true" />
+          ) : null}
           <span
             className={cn(
               "min-w-0 truncate text-[11px] leading-none font-medium",
@@ -131,9 +136,11 @@ export function SceneBlock({
           >
             {name}
           </span>
-          <span className="shrink-0 text-[10px] leading-none text-muted-foreground/75 tabular-nums @max-[8rem]/chapter:hidden">
-            {length}
-          </span>
+          {compact ? null : (
+            <span className="shrink-0 text-[10px] leading-none text-muted-foreground/75 tabular-nums @max-[8rem]/chapter:hidden">
+              {length}
+            </span>
+          )}
         </>
       )}
     </button>
@@ -151,7 +158,7 @@ export function SceneBlock({
         dragging && "opacity-40"
       )}
     >
-      {narrow ? (
+      {compact ? (
         <Tooltip>
           <TooltipTrigger asChild>{block}</TooltipTrigger>
           <TooltipContent>
@@ -188,7 +195,7 @@ export function SceneBlock({
         </div>
       ) : null}
 
-      {people.length > 0 && !narrow ? (
+      {people.length > 0 && !compact ? (
         <span className="pointer-events-none absolute top-1/2 right-7 flex -translate-y-1/2 -space-x-1">
           {people.slice(0, 3).map((person) => (
             <span
@@ -203,13 +210,13 @@ export function SceneBlock({
         </span>
       ) : null}
 
-      {/* Too narrow for its name, a chapter keeps its menu for a right click: it would cover it. */}
+      {/* Too narrow for its name and its menu, a chapter keeps the menu for a right click. */}
       <div
         className={cn(
           "absolute top-1/2 right-2 z-10 -translate-y-1/2 transition-opacity",
-          menu || (open && !narrow)
+          menu || (open && !compact)
             ? "opacity-100"
-            : narrow
+            : compact
               ? "pointer-events-none opacity-0"
               : "opacity-0 group-focus-within/sceneblock:opacity-100 group-hover/sceneblock:opacity-100"
         )}

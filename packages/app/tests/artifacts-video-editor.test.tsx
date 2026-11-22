@@ -672,6 +672,52 @@ describe("the editor's pieces", () => {
     }
   })
 
+  // Guard proof: show the number below NAME_FROM_PX in SceneBlock (scenes.tsx), `narrow` as wide
+  // as `compact`, as it did; at 58 px the chapter reads "2", where its name's first letters fit.
+  test("a chapter with room for a few letters of its name shows them, and the rest in a tooltip", async () => {
+    const talk = composition().scenes[1]
+    if (!talk) throw new Error("No interview scene.")
+    const measured = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth")
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get: () => 58,
+    })
+
+    try {
+      const view = render(
+        wrap(
+          <SceneBlock
+            scene={talk}
+            index={1}
+            count={2}
+            open={false}
+            playing={false}
+            agent={false}
+            people={[]}
+            dragging={false}
+            length="7 s"
+            onPress={() => {}}
+            actions={{
+              select: () => {},
+              move: () => {},
+              duplicate: () => {},
+              remove: () => {},
+              rename: () => {},
+            }}
+          />
+        )
+      )
+      const block = view.getByRole("button", { name: "Chapter 2, Interview, 7 s" })
+      expect(block.textContent).toBe("Interview")
+      expect(block.getAttribute("title")).toBeNull()
+      fireEvent.focus(block)
+      await waitFor(() => expect(view.getAllByText("2. Interview").length).toBeGreaterThan(0))
+    } finally {
+      if (measured) Object.defineProperty(HTMLElement.prototype, "clientWidth", measured)
+      else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth
+    }
+  })
+
   // Guard proof: compare the field's words with the current `value` on leaving, as before, in
   // TextField (inspector.tsx), or with the current `name` in RenameField (scenes.tsx). Left
   // untouched, each then writes the words it opened on over the other's change.
