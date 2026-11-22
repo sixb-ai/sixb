@@ -93,7 +93,7 @@ for. It is joined from segments kept under their own keys, shared by every expor
   fetched by the sandbox.
 - A scene's project keeps the scenes on screen during its segment, moved earlier when it can so
   its first frame is frame 0. HyperFrames renders it, `--no-low-memory-mode` when the sandbox has
-  3 GiB or more, two browsers at once, H.264 at CRF 18 with a keyframe every two seconds; the sound
+  3 GiB or more, two browsers at once, H.264 at CRF 20 with a keyframe every two seconds; the sound
   is dropped. A scene that fades in over the one before, or a root that moves, renders a range of
   the project instead, which HyperFrames captures in short chunks one after the other: about twice
   slower, with a keyframe every half second.
