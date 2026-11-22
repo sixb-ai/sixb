@@ -234,8 +234,25 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
   import; a range cut from the video, each scene it spans losing its share; stretches of a
   recording cut wherever it plays. Several clips, from any files, move, split or go in one edit
   (`moveClips`, `splitClips`, `removeClips`): each is found before any changes, a move goes no
-  further than the first clip to reach its composition's start, and a ripple closes a file's gaps
-  as one cut.
+  further than the first clip to reach the video's start, and a ripple closes a file's gaps as
+  one cut.
+- **Placing** (`placeFound`): every edit that puts a scene's clip at a time of the video, a move,
+  an end trim without ripple, an import, goes through it. The clip lives in the scene that plays
+  where it starts: its own while that holds it, else the one on top there (the later in play
+  order, as hosts stack in a crossfade); in a gap, the next scene, from its start. Past that
+  scene's end, it goes on in the next one as a copy starting where the first part ends, so a
+  crossfade shows nothing twice, its `data-media-start` advanced by what the parts before played;
+  the last scene grows, in frame steps, to hold the rest. No other scene changes length. A clip
+  without a written length moves but is never split. A move keeps the length its scene shows: an
+  overhang never seen stays behind. The video's own clips stay in `index.html`.
+- A clip that leaves its file takes an id no other element of the video has (copies always take
+  new ones), its recording's path rebased for the new folder, and its look: the rules naming its
+  id or a class, from its scene's `<style>` (all of them, as an export renders the new scene
+  without the old one's file) and from the linked sheets (those scoped to its old scene alone),
+  rewritten for the new scene and id, with the keyframes they use, each written once. What
+  followed it there keeps its time. Its old scene's script cannot follow: the result's
+  `animationsLeft` names each clip that left a script naming its `#id` or a class. A clip that
+  holds others, or a file two scenes play, stays put: the edit is refused whole.
 
 How an operation works:
 
@@ -295,4 +312,5 @@ What moves with what:
   one the writer's copy no longer did: someone else may have just added a clip of it.
 
 Not covered: motion a scene's script writes (`gsap.timeline` positions) keeps its own times, and a
-recording a script plays without an element is not seen.
+recording a script plays without an element is not seen. A clip that leaves its scene leaves its
+wrappers too, and the rules that style it through them (`.frame video`), and `@media` rules.
