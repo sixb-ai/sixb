@@ -37,6 +37,7 @@ import { clipName, type SpokenRecording } from "./selection"
 import {
   fillers,
   findWords,
+  keptSpans,
   rangesLength,
   silences,
   type TranscriptTiming,
@@ -367,6 +368,9 @@ function Words({
     [clips]
   )
   const playedAt = (ms: number) => kept.find(({ range }) => range.startMs <= ms && ms < range.endMs)
+  // What is played on without a skip, from one part of a clip that goes on to the next.
+  const spans = useMemo(() => keptSpans(kept.map(({ range }) => range)), [kept])
+  const spanAt = (ms: number) => spans.find((span) => span.startMs <= ms && ms < span.endMs)
 
   // The word being said: where the playhead is in the file, through the clip playing it.
   const playing = clips.find((laid) => laid.startMs <= timeMs && timeMs < laid.endMs)
@@ -401,17 +405,21 @@ function Words({
 
   const cutSelection = () => {
     if (!selection) return
+    // From what plays the first word on to what plays the last, across a chapter's edge.
     const first = words[from]
-    const within = first ? (playedAt(first.startMs) ?? playedAt(first.endMs - 1)) : undefined
-    if (!within) return
-    const range = wordsCut(words, from, to, within.range, cuts)
+    const last = words[to]
+    const start = first ? (spanAt(first.startMs) ?? spanAt(first.endMs - 1)) : undefined
+    const end = last ? (spanAt(last.endMs - 1) ?? spanAt(last.startMs)) : undefined
+    if (!start || !end) return
+    const bounds = { startMs: start.startMs, endMs: Math.max(start.endMs, end.endMs) }
+    const range = wordsCut(words, from, to, bounds, cuts)
     setSelection(null)
     if (range) onRemove([range])
   }
 
   const propose = (kind: Proposal["kind"]) => {
-    const ranges = kept.flatMap(({ range }) =>
-      kind === "silences" ? silences(words, range) : fillers(words, range, cuts)
+    const ranges = spans.flatMap((span) =>
+      kind === "silences" ? silences(words, span) : fillers(words, span, cuts)
     )
     setProposal({ kind, ranges })
   }

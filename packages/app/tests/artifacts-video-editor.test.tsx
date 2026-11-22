@@ -6,6 +6,7 @@ import {
   readVideoFileTimeline,
   setSceneLength,
   splitClip,
+  type VideoCut,
 } from "@sixb/core/artifacts/live"
 import { TooltipProvider } from "@sixb/ui/components"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
@@ -1114,8 +1115,8 @@ describe("the Transcript tab", () => {
     "media/broll.mp4": [],
   }
 
-  /** The API, answering each recording's parts and its transcript's file. */
-  function serve() {
+  /** The API, answering each recording's parts and its transcript's file, timed as `timed` says. */
+  function serve(timed: Record<string, readonly TranscriptWord[]> = {}) {
     const unavailable = { status: "unavailable", reason: "It has no picture." }
     const parts = (path: string) => ({
       probe: { status: "ready", durationMs: 7000, container: "mp4" },
@@ -1147,11 +1148,13 @@ describe("the Transcript tab", () => {
       async (input: RequestInfo | URL) => {
         const { pathname } = new URL(String(input))
         const path = decodeURIComponent(pathname.replace(/^\/transcripts\//, ""))
-        const words = (said[path] ?? []).map((text, index) => ({
-          text,
-          startMs: index * 400,
-          endMs: index * 400 + 300,
-        }))
+        const words =
+          timed[path] ??
+          (said[path] ?? []).map((text, index) => ({
+            text,
+            startMs: index * 400,
+            endMs: index * 400 + 300,
+          }))
         return Response.json({ text: words.map((word) => word.text).join(" "), words })
       },
       { preconnect: original.preconnect }
@@ -1166,7 +1169,8 @@ describe("the Transcript tab", () => {
     timeMs: number,
     onSeek: (ms: number) => void = () => {},
     title = TITLE,
-    talk = SPOKEN_TALK
+    talk = SPOKEN_TALK,
+    onRemove: (ranges: readonly VideoCut[]) => void = () => {}
   ) {
     const files: LiveFiles = new Map([
       ["index.html", { text: SPOKEN_INDEX }],
@@ -1187,7 +1191,7 @@ describe("the Transcript tab", () => {
         selected={undefined}
         timeMs={timeMs}
         onSeek={onSeek}
-        onRemove={() => {}}
+        onRemove={(_, ranges) => onRemove(ranges)}
       />
     )
   }
@@ -1278,6 +1282,63 @@ describe("the Transcript tab", () => {
       fireEvent.pointerDown(view.getByText("lunch."), { button: 0, pointerId: 1 })
       fireEvent.pointerUp(view.getByText("lunch."), { button: 0, pointerId: 1 })
       expect(seeks).toEqual([3600])
+    } finally {
+      restore()
+    }
+  })
+
+  // Guard proof: bound a cut by the stretch of the part holding its first word in cutSelection
+  // (transcript-panel.tsx), `within.range`, as it did; the words across the edge are then cut only
+  // up to it. Propose cleanups part by part, over `kept`, and the pause across the edge is two.
+  test("a recording that goes on cuts its words, and its pauses, across a chapter's edge", async () => {
+    // The answer from 2 s in the title, on into the interview from 1 s into its file.
+    const title = TITLE.replace(
+      "<h1>",
+      '<audio id="answer" src="media/answer.m4a" data-start="2" data-duration="1"></audio>\n    <h1>'
+    )
+    const talk = SPOKEN_TALK.replace(
+      '<audio id="answer" src="media/answer.m4a" data-start="0.5" data-duration="6"></audio>',
+      '<audio id="answer-2" src="media/answer.m4a" data-start="0" data-duration="2" data-media-start="1" data-continues="answer"></audio>'
+    )
+    // A pause from 0.6 s to 1.6 s into the file, across the edge.
+    const restore = serve({
+      "media/answer.m4a": [
+        { text: "We", startMs: 0, endMs: 300 },
+        { text: "fixed", startMs: 300, endMs: 600 },
+        { text: "it", startMs: 1600, endMs: 1900 },
+        { text: "before", startMs: 1900, endMs: 2300 },
+        { text: "lunch.", startMs: 2300, endMs: 2700 },
+      ],
+    })
+    try {
+      const removed: VideoCut[][] = []
+      const view = render(
+        tab(
+          "title",
+          2500,
+          () => {},
+          title,
+          talk,
+          (ranges) => removed.push([...ranges])
+        )
+      )
+      await waitFor(() => view.getByText("lunch."))
+
+      // "fixed" to "it": one cut, from before the edge to after it.
+      fireEvent.pointerDown(view.getByText("fixed"), { button: 0, pointerId: 1, shiftKey: true })
+      fireEvent.pointerUp(view.getByText("fixed"), { button: 0, pointerId: 1 })
+      fireEvent.pointerDown(view.getByText("it"), { button: 0, pointerId: 1, shiftKey: true })
+      fireEvent.pointerUp(view.getByText("it"), { button: 0, pointerId: 1 })
+      fireEvent.click(view.getByRole("button", { name: "Cut 2 words" }))
+      expect(removed).toHaveLength(1)
+      expect(removed[0]?.[0]?.startMs).toBeLessThanOrEqual(300)
+      expect(removed[0]?.[0]?.endMs).toBeGreaterThanOrEqual(1900)
+
+      // The pause across the edge is one silence, whole.
+      fireEvent.click(view.getByRole("button", { name: /Remove silences/ }))
+      fireEvent.click(view.getByRole("button", { name: "Remove" }))
+      expect(removed[1]).toHaveLength(1)
+      expect(removed[1]?.[0]?.room).toEqual({ startMs: 600, endMs: 1600 })
     } finally {
       restore()
     }
