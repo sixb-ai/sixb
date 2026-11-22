@@ -2,6 +2,17 @@ import type { ArtifactKind } from "@sixb/core/artifacts"
 import { defineMessages, type MessageTree, type Translation } from "@sixb/ui/lib/i18n"
 
 const number = (value: number) => value.toLocaleString("en")
+
+/** What a drop changed for one clip, as its notice says it. */
+interface MovedClip {
+  /** The chapter whose animation it left behind, and the one whose animation it now takes. */
+  readonly from?: string
+  readonly to?: string
+  readonly kind: "video" | "image" | "text" | "audio"
+  readonly differs?: boolean
+  /** The chapter it may look a little different in. */
+  readonly chapter?: string
+}
 const numberFr = (value: number) => value.toLocaleString("fr")
 
 // What a reader does about a value a live sheet locks: it is a permission they lack, which an admin
@@ -934,25 +945,36 @@ export const en = {
     refused: "That change would break the video",
     chapterTooLarge:
       "This chapter would be too large to publish. Move fewer clips at once, or ask the agent to simplify it.",
-    /** A clip moved out of the chapter whose script animated it. */
-    keepsLook: (name: string) => `“${name}” keeps its look`,
-    animationStays: (chapter: string) =>
-      `Its animation stays with “${chapter}”. Ask the agent to animate it here.`,
-    animationSwaps: (from: string, to: string) =>
-      `Its animation stays with “${from}”, and the one of “${to}” plays on it now.`,
-    /** A clip moved into a chapter whose script animates clips like it. */
-    takesMotion: (name: string, chapter: string) => `“${name}” now moves with “${chapter}”`,
-    motionApplies: (chapter: string) =>
-      `“${chapter}” animates clips like it, so its animation plays on this one too.`,
-    keepLooks: (count: number) => `${number(count)} clips keep their look`,
-    /** A clip moved where some of its styles, given by what held it, could not follow. */
-    lookMayDiffer: (name: string) => `“${name}” may look a little different here`,
-    looksMayDiffer: (count: number) => `${number(count)} clips may look a little different here`,
-    lookDiffers: "Some of its styles came from what held it before. Check it in the preview.",
-    looksDiffer: "Some of their styles came from what held them before. Check them in the preview.",
-    lookAlsoDiffers: "Some styles from what held it before stayed behind too.",
-    animationsChange:
-      "Their animations follow the chapters they are in now. Ask the agent to adjust them.",
+    /**
+     * What a drop changed for one clip, in one sentence: the animation it left, the one of the
+     * chapter it joined, which animates `kind` clips, and whether it may look a little different.
+     */
+    movedClip: ({ from, to, kind, differs, chapter }: MovedClip) => {
+      const noun = { video: "footage", image: "pictures", text: "text", audio: "sounds" }[kind]
+      if (from && to) {
+        return differs
+          ? `This clip’s animation stays in “${from}”, and “${to}” now animates it like the rest; it may also look a little different.`
+          : `This clip’s animation stays in “${from}”, and “${to}” now animates it like the rest.`
+      }
+      if (to) {
+        return differs
+          ? `“${to}” animates its ${noun}, so this clip now moves like the rest and may look a little different.`
+          : `“${to}” animates its ${noun}, so this clip now moves like the rest.`
+      }
+      if (from) {
+        return differs
+          ? `This clip’s animation stays in “${from}”, and it may look a little different here: ask the agent to adjust it.`
+          : `This clip’s animation stays in “${from}”: ask the agent to animate it here.`
+      }
+      return `This clip may look a little different in “${chapter}”.`
+    },
+    /** What a drop changed for several clips, in one sentence. */
+    movedClips: (count: number, moves: boolean, differs: boolean) =>
+      moves
+        ? differs
+          ? `These ${number(count)} clips now move as their new chapters animate them, and some may look a little different.`
+          : `These ${number(count)} clips now move as their new chapters animate them. Ask the agent to adjust them.`
+        : `${number(count)} clips may look a little different in their new chapters.`,
     dismiss: "Dismiss",
     inPlaceHint: "Enter to keep · Esc to leave as it was",
     broken: "The video’s files don’t read as a video right now",
@@ -1936,23 +1958,31 @@ export const fr: Translation<ArtifactMessages> = {
     refused: "Cette modification casserait la vidéo",
     chapterTooLarge:
       "Ce chapitre serait trop lourd pour être publié. Déplacez moins de plans à la fois, ou demandez à l’agent de le simplifier.",
-    keepsLook: (name) => `« ${name} » garde son style`,
-    animationStays: (chapter) =>
-      `Son animation reste dans « ${chapter} ». Demandez à l’agent de l’animer ici.`,
-    animationSwaps: (from, to) =>
-      `Son animation reste dans « ${from} », et celle de « ${to} » s’y applique désormais.`,
-    takesMotion: (name, chapter) => `« ${name} » s’anime désormais avec « ${chapter} »`,
-    motionApplies: (chapter) =>
-      `« ${chapter} » anime les plans comme lui : son animation s’applique aussi à celui-ci.`,
-    keepLooks: (count) => `${numberFr(count)} plans gardent leur style`,
-    lookMayDiffer: (name) => `« ${name} » peut paraître un peu différent ici`,
-    looksMayDiffer: (count) => `${numberFr(count)} plans peuvent paraître un peu différents ici`,
-    lookDiffers: "Une partie de son style venait de ce qui l’entourait. Vérifiez-le dans l’aperçu.",
-    looksDiffer:
-      "Une partie de leur style venait de ce qui les entourait. Vérifiez-les dans l’aperçu.",
-    lookAlsoDiffers: "Une partie du style venu de ce qui l’entourait est aussi restée en place.",
-    animationsChange:
-      "Leurs animations suivent les chapitres où ils se trouvent. Demandez à l’agent de les ajuster.",
+    movedClip: ({ from, to, kind, differs, chapter }) => {
+      const noun = { video: "vidéos", image: "images", text: "textes", audio: "sons" }[kind]
+      if (from && to) {
+        return differs
+          ? `L’animation de ce plan reste dans « ${from} », et « ${to} » l’anime désormais comme les autres ; il peut aussi paraître un peu différent.`
+          : `L’animation de ce plan reste dans « ${from} », et « ${to} » l’anime désormais comme les autres.`
+      }
+      if (to) {
+        return differs
+          ? `« ${to} » anime ses ${noun} : ce plan s’anime donc comme les autres, et peut paraître un peu différent.`
+          : `« ${to} » anime ses ${noun} : ce plan s’anime donc comme les autres.`
+      }
+      if (from) {
+        return differs
+          ? `L’animation de ce plan reste dans « ${from} », et il peut paraître un peu différent ici : demandez à l’agent de l’ajuster.`
+          : `L’animation de ce plan reste dans « ${from} » : demandez à l’agent de l’animer ici.`
+      }
+      return `Ce plan peut paraître un peu différent dans « ${chapter} ».`
+    },
+    movedClips: (count, moves, differs) =>
+      moves
+        ? differs
+          ? `Ces ${numberFr(count)} plans s’animent désormais comme leurs nouveaux chapitres, et certains peuvent paraître un peu différents.`
+          : `Ces ${numberFr(count)} plans s’animent désormais comme leurs nouveaux chapitres. Demandez à l’agent de les ajuster.`
+        : `${numberFr(count)} plans peuvent paraître un peu différents dans leurs nouveaux chapitres.`,
     dismiss: "Fermer",
     inPlaceHint: "Entrée pour garder · Échap pour laisser tel quel",
     broken: "Les fichiers de la vidéo ne se lisent pas comme une vidéo pour l’instant",

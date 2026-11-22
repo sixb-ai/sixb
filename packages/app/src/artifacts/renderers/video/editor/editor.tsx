@@ -134,9 +134,6 @@ interface EditorNotice {
   readonly tone?: "warning" | "info"
 }
 
-/** The longest a clip's name is said in a notice, its words cut after. */
-const NOTICE_NAME_LENGTH = 40
-
 export default function VideoEditor({
   version,
   outline,
@@ -301,76 +298,59 @@ export default function VideoEditor({
       const found = now.composition?.scenes.find((each) => each.id === id)
       return found ? sceneName(found) : id
     }
-    const named = (target: VideoClipTarget) => {
-      const found = findVideoTarget(now.timelines.get(target.file)?.clips ?? [], target.clip)
-      return Array.isArray(found) ? undefined : clipName(found as VideoClip)
-    }
 
     // Each clip once, with what it left and joined, and whether its look may differ, each said
-    // once while the editor is open.
-    const clips = new Map<string, { name: string; from?: string; to?: string; differs?: true }>()
+    // once while the editor is open, in one sentence for the drop.
+    const clips = new Map<
+      string,
+      { kind: VideoClip["kind"]; from?: string; to?: string; differs?: true; chapter?: string }
+    >()
     const note = (
       target: VideoClipTarget,
       key: string,
-      what: { from?: string; to?: string; differs?: true }
+      what: { from?: string; to?: string; differs?: true; chapter?: string }
     ) => {
-      const name = named(target)
-      if (name === undefined || told.current.has(`${key}\n${name}`)) return
+      const found = findVideoTarget(now.timelines.get(target.file)?.clips ?? [], target.clip)
+      if (Array.isArray(found)) return
+      const clip = found as VideoClip
+      const name = clipName(clip)
+      if (told.current.has(`${key}\n${name}`)) return
       told.current.add(`${key}\n${name}`)
       const at = `${target.file}\n${JSON.stringify(target.clip)}`
-      clips.set(at, { name, ...clips.get(at), ...what })
+      clips.set(at, { kind: clip.kind, ...clips.get(at), ...what })
+    }
+    const inChapter = (file: string) => {
+      const found = now.composition?.scenes.find((each) => each.src === file)
+      return found ? sceneName(found) : undefined
     }
     for (const { clip, scene } of left) note(clip, `from\n${scene}`, { from: chapter(scene) })
     for (const { clip, scene } of joined) note(clip, `to\n${scene}`, { to: chapter(scene) })
-    for (const clip of differs) note(clip, "look", { differs: true })
+    for (const clip of differs) {
+      note(clip, "look", {
+        differs: true,
+        ...(inChapter(clip.file) ? { chapter: inChapter(clip.file) } : {}),
+      })
+    }
 
     const said = [...clips.values()]
     const [first] = said
     if (!first) return
-    const moves = said.some((each) => each.from || each.to)
-    const differ = said.some((each) => each.differs)
     if (said.length > 1) {
-      setNotice(
-        moves
-          ? {
-              title: messages.keepLooks(said.length),
-              detail: differ
-                ? `${messages.animationsChange} ${messages.lookAlsoDiffers}`
-                : messages.animationsChange,
-              tone: "info",
-            }
-          : {
-              title: messages.looksMayDiffer(said.length),
-              detail: messages.looksDiffer,
-              tone: "info",
-            }
-      )
+      const moves = said.some((each) => each.from || each.to)
+      const differ = said.some((each) => each.differs)
+      setNotice({ title: messages.movedClips(said.length, moves, differ), tone: "info" })
       return
     }
-
-    const name = shortName(first.name)
-    const also = first.differs ? ` ${messages.lookAlsoDiffers}` : ""
-    setNotice(
-      first.from && first.to
-        ? {
-            title: messages.keepsLook(name),
-            detail: `${messages.animationSwaps(first.from, first.to)}${also}`,
-            tone: "info",
-          }
-        : first.from
-          ? {
-              title: messages.keepsLook(name),
-              detail: `${messages.animationStays(first.from)}${also}`,
-              tone: "info",
-            }
-          : first.to
-            ? {
-                title: messages.takesMotion(name, first.to),
-                detail: `${messages.motionApplies(first.to)}${also}`,
-                tone: "info",
-              }
-            : { title: messages.lookMayDiffer(name), detail: messages.lookDiffers, tone: "info" }
-    )
+    setNotice({
+      title: messages.movedClip({
+        ...first,
+        kind:
+          first.kind === "video" || first.kind === "image" || first.kind === "audio"
+            ? first.kind
+            : "text",
+      }),
+      tone: "info",
+    })
   }
 
   const offsetOf = (file: string) =>
@@ -855,13 +835,17 @@ export default function VideoEditor({
 
   // What the Transcript tab reads: the recordings heard in the open scene, and the selected clip's.
   const heard = heardRecordings(clips, open, timeMs)
+  // A clip that goes on, its recording's words as one, read in every chapter it plays in.
   const selectedRecording =
     clip && (clip.clip.kind === "video" || clip.clip.kind === "audio") && clip.clip.src
-      ? {
+      ? (heard.find(
+          (recording) =>
+            recording.chain && recording.clips.some((laid) => clipKey(laid) === clipKey(clip))
+        ) ?? {
           src: clip.clip.src,
           file: clip.file,
           clips: clips.filter((laid) => laid.file === clip.file && laid.clip.src === clip.clip.src),
-        }
+        })
       : undefined
   const splittable =
     picked.length > 1
@@ -1119,13 +1103,6 @@ function ordered(marks: { readonly in?: number; readonly out?: number }) {
 
 function formatTenths(ms: number): string {
   return String(Math.round(ms / 100) / 10)
-}
-
-/** A clip's name as a notice says it: its first words, when it is a long caption. */
-function shortName(name: string): string {
-  return name.length > NOTICE_NAME_LENGTH
-    ? `${name.slice(0, NOTICE_NAME_LENGTH - 1).trimEnd()}…`
-    : name
 }
 
 function Banner({

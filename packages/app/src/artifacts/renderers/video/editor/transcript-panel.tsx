@@ -191,7 +191,7 @@ export function TranscriptTab({
 }
 
 function keyOf(recording: SpokenRecording): string {
-  return `${recording.file}\n${recording.src}`
+  return `${recording.chain ?? recording.file}\n${recording.src}`
 }
 
 function recordingName(recording: SpokenRecording): string {
