@@ -34,6 +34,7 @@ import {
   useMediaParts,
 } from "../src/artifacts/renderers/video/editor/media"
 import {
+  coveredEdges,
   editPoints,
   groupDelta,
   inRectangle,
@@ -1908,6 +1909,56 @@ describe("the timeline", () => {
       const tracks = view.container.querySelector<HTMLElement>("[data-video-tracks]") as HTMLElement
       fireEvent.pointerUp(tracks, { clientX: xAt(3000), pointerId: 2, ...command })
       expect(selected.at(-1)).toEqual({ type: "clip", file: "scenes/talk.html", target: "clip" })
+    })
+
+    // Guard proof: drop `narrow` from ClipBlock's classes (timeline.tsx), and start each handle at
+    // its block's edge, `inset` 0; the next caption's start handle then lies over the narrow one,
+    // whose press it takes. In coveredEdges (model.ts), count no overlap, and the same.
+    test("a narrow clip at a chapter's edge lies over its neighbour's handle, which starts past it", () => {
+      expect(
+        coveredEdges([
+          { key: "a", row: 0, left: 298, width: 6 },
+          { key: "b", row: 0, left: 300, width: 200 },
+          { key: "c", row: 1, left: 300, width: 20 },
+        ])
+      ).toEqual(
+        new Map([
+          ["a", { start: 0, end: 4 }],
+          ["b", { start: 4, end: 0 }],
+          ["c", { start: 0, end: 0 }],
+        ])
+      )
+
+      const files = new Map(FILES)
+      files.set("scenes/title.html", {
+        text: TITLE.replace(
+          "<h1>",
+          '<p class="caption" data-start="2.98" data-duration="0.02">So</p>\n    <h1>'
+        ),
+      })
+      files.set("scenes/talk.html", {
+        text: TALK.replace(
+          'data-start="0.5" data-duration="2"',
+          'data-start="0" data-duration="2"'
+        ),
+      })
+      const state = new LiveVideo(createArtifactDocument("video", files)).getState()
+      const shown = state.composition
+      if (!shown) throw new Error("No video.")
+      const view = render(
+        timeline({ timeMs: 0, composition: shown, clips: everySceneClips(state, shown) })
+      )
+      const word = (words: string) => {
+        const found = view.container.querySelector<HTMLElement>(`[aria-label$=", ${words}"]`)
+        if (!found) throw new Error(`No caption "${words}".`)
+        return found
+      }
+      // 2.98 s to 3 s, drawn 6 px wide from 298 px: over the next caption's first 4 px.
+      expect(word("So").style.left).toBe("298px")
+      expect(word("So").className).toContain("z-[11]")
+      const [start] =
+        word("Thanks for having me.").querySelectorAll<HTMLElement>(".cursor-ew-resize")
+      expect(start?.style.left).toBe("4px")
     })
 
     /** The title opening on footage that goes on into the interview, as an edit continues it. */
