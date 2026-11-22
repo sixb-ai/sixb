@@ -2323,8 +2323,9 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
     changes.set(file, plan)
     plan.set(ref, what)
   }
-  // Each element whose carried look goes with it, by its file.
+  // Each element whose carried look goes with it, by its file, and the sheets every scene reads.
   const lookless: { readonly file: string; readonly id: string }[] = []
+  const linked = linkedBlocks(work)
 
   for (const [file, each] of byFile(plans)) {
     const text = work.text(file)
@@ -2352,7 +2353,7 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
       // How it looks where it is, for each part that lands elsewhere: its scene is its home,
       // unless it came with a look carried from another.
       const styled = parts.some((part) => part.scene.id !== own.id)
-        ? lookSheets(work, file, was.id)
+        ? lookSheets(work, file, was.id, linked)
         : undefined
       const look = styled ? lookOf(facts, own.id, styled.sheets) : undefined
       const home = styled?.home ?? own.id
@@ -2485,15 +2486,26 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
     // Each look that came with a clip, in a style of its own that reaches that clip alone, and
     // each animation of this scene that reaches what landed.
     const scripts = scriptsOf(work.text(file))
+    const seen = sceneKeyframes(work, file, linked)
+    const carriedIn = new Map(seen.carried)
+    const looks: { readonly id: string; readonly home: string; readonly rules: string[] }[] = []
     for (const one of each) {
       if (one.look && one.id && one.home) {
-        const rules = writtenLook(one.look, one.scene, one.id, sceneKeyframes(work, file))
-        if (rules.length > 0) writeCarriedLook(work, file, one.id, one.home, rules)
+        const rules = writtenLook(one.look, one.scene, one.id, {
+          own: seen.own,
+          carried: carriedIn,
+        })
+        if (rules.length > 0) looks.push({ id: one.id, home: one.home, rules })
+        // What it wrote, the next look reads.
+        for (const [name, body] of keyframesOf(cssBlocks(rules.join("\n")))) {
+          carriedIn.set(name, [...(carriedIn.get(name) ?? []), body])
+        }
       }
       if (scriptReaches(scripts, one.element) && !joined.some((each) => each.index === one.index)) {
         joined.push({ index: one.index, scene: one.scene })
       }
     }
+    writeCarriedLooks(work, file, looks)
   }
 
   // The last scene grows to hold what lands past its end.
@@ -2657,7 +2669,8 @@ function linkedBlocks(work: Working): CssBlock[][] {
 function lookSheets(
   work: Working,
   file: string,
-  id: string | undefined
+  id: string | undefined,
+  linked: readonly (readonly CssBlock[])[]
 ): { readonly sheets: LookSheet[]; readonly home?: string } {
   const styles = stylesIn(work.text(file))
   const own = id ? styles.find((style) => style.carried === id) : undefined
@@ -2667,19 +2680,23 @@ function lookSheets(
     ...styles
       .filter((style) => style.carried === undefined)
       .map((style) => ({ blocks: cssBlocks(style.css), scopedOnly: false, byId })),
-    ...linkedBlocks(work).map((blocks) => ({ blocks, scopedOnly: true, byId })),
+    ...linked.map((blocks) => ({ blocks, scopedOnly: true, byId })),
   ]
   return { sheets, ...(own?.from ? { home: own.from } : {}) }
 }
 
 /** The keyframes a scene's file reads by name: its own, its linked sheets', and its looks'. */
-function sceneKeyframes(work: Working, file: string): SceneKeyframes {
+function sceneKeyframes(
+  work: Working,
+  file: string,
+  linked: readonly (readonly CssBlock[])[]
+): SceneKeyframes {
   const own = new Map<string, string>()
   const carried = new Map<string, string[]>()
   const styles = stylesIn(work.text(file))
   for (const blocks of [
     ...styles.filter((style) => !style.carried).map((style) => cssBlocks(style.css)),
-    ...linkedBlocks(work),
+    ...linked,
   ]) {
     for (const [name, body] of keyframesOf(blocks)) if (!own.has(name)) own.set(name, body)
   }
@@ -2707,18 +2724,21 @@ function removeCarriedLook(work: Working, file: string, id: string): void {
 }
 
 /**
- * Writes the look carried for the element `id` from the scene `home` in a style of its own,
+ * Writes the look carried for each element `id` from the scene `home` in a style of its own,
  * `<style data-carried="<id>" data-from="<home>">`, a child of the composition before the scripts
- * that close it, which a later move finds and takes along.
+ * that close it, which a later move finds and takes along. All at once, the file read once.
  */
-function writeCarriedLook(
+function writeCarriedLooks(
   work: Working,
   file: string,
-  id: string,
-  home: string,
-  rules: readonly string[]
+  looks: readonly {
+    readonly id: string
+    readonly home: string
+    readonly rules: readonly string[]
+  }[]
 ): void {
-  removeCarriedLook(work, file, id)
+  if (looks.length === 0) return
+  for (const { id } of looks) removeCarriedLook(work, file, id)
 
   const text = work.text(file)
   const timeline = timelineOf(work, file)
@@ -2733,19 +2753,23 @@ function writeCarriedLook(
       ? lineIndent(text, previous.source.element.start)
       : `${lineIndent(text, timeline.composition.element.start)}  `
 
-  const body = rules.map((rule) => `${indent}  ${rule.replace(/\n/g, `\n${indent}  `)}`).join("\n")
-  const style = `<style data-carried="${escapeAttribute(id)}" data-from="${escapeAttribute(home)}">\n${body}\n${indent}</style>`
+  const styles = looks
+    .map(({ id, home, rules }) => {
+      const body = rules.map((rule) => `${indent}  ${rule.replace(/\n/g, `\n${indent}  `)}`)
+      return `<style data-carried="${escapeAttribute(id)}" data-from="${escapeAttribute(home)}">\n${body.join("\n")}\n${indent}</style>`
+    })
+    .join(`\n${indent}`)
 
   if (next && aloneOnLine(text, next.source.element.start)) {
     const lineStart = text.lastIndexOf("\n", next.source.element.start - 1) + 1
-    work.replace(file, lineStart, lineStart, `${indent}${style}\n`)
+    work.replace(file, lineStart, lineStart, `${indent}${styles}\n`)
   } else if (previous) {
     const block = lineBlock(text, previous.source.element)
-    work.replace(file, block.end, block.end, `${indent}${style}${lineEnd(text, block)}`)
+    work.replace(file, block.end, block.end, `${indent}${styles}${lineEnd(text, block)}`)
   } else {
     const content = timeline.composition.content
     if (!content) throw new EditError(`${file}: its composition holds nothing a style can join.`)
-    work.replace(file, content.start, content.start, `\n${indent}${style}`)
+    work.replace(file, content.start, content.start, `\n${indent}${styles}`)
   }
 }
 
