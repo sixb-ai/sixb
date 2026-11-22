@@ -16,6 +16,7 @@ import {
   type Look,
   type LookElement,
   type LookSheet,
+  lookKey,
   lookOf,
   type SceneKeyframes,
   scriptNames,
@@ -555,7 +556,7 @@ export function removeClip(
     const removed = clipOf(work, file, clip)
     const block = lineBlock(work.text(file), removed.source.element)
     work.replace(file, block.start, block.end, "")
-    if (found.id) removeCarriedLook(work, file, found.id)
+    pruneLooks(work, file)
     if (options.ripple) rippleRemove(work, file, [{ startMs: found.startMs, endMs: end }])
   })
 }
@@ -674,7 +675,7 @@ function removeFound(
     freezeFollowers(work, file, (clip) => clip.id !== undefined && ids.has(clip.id))
 
     rewriteClips(work, file, new Map(each.map(({ clip }) => [clip.ref, "remove" as const])))
-    for (const id of ids) removeCarriedLook(work, file, id)
+    pruneLooks(work, file)
     if (ripple) rippleRemove(work, file, stretches)
   }
 }
@@ -936,6 +937,11 @@ class Working {
    * writes room for any length, so each step reads, and the last writes the length it ends with.
    */
   opened: VideoRoot | undefined
+  /** Each file's timeline as last read, kept while its text is the one it was read from. */
+  readonly timelines = new Map<
+    string,
+    { readonly text: string; readonly timeline: VideoFileTimeline }
+  >()
 
   constructor(readonly sources: VideoSources) {
     this.files = new Map(sources)
@@ -1103,6 +1109,19 @@ function run(sources: VideoSources, operation: (work: Working) => void): VideoEd
   for (const scene of read.composition.scenes) {
     if (!readSceneTimeline(files.get(scene.src) as string)) {
       return { error: `${scene.src}: a scene file is one <template> holding its composition.` }
+    }
+  }
+
+  // No HTML file grows past what publishing reads, as a look carried in for many clips might.
+  const limit = ARTIFACT_LIMITS.maxSceneBytes
+  for (const change of edit) {
+    if (!/\.html?$/i.test(change.path) || "remove" in change) continue
+    const after = new TextEncoder().encode(files.get(change.path) ?? "").length
+    const before = new TextEncoder().encode(sources.get(change.path) ?? "").length
+    if (after > limit && after > before) {
+      return {
+        error: `'${change.path}' would be ${after} bytes: each of a video's HTML files holds at most ${limit}.`,
+      }
     }
   }
   return { edit }
@@ -1387,6 +1406,7 @@ function fitRoot(work: Working, before: VideoRoot): void {
     if (Object.keys(change).length > 0) plan.set(clip.ref, change)
   }
   rewriteClips(work, VIDEO_ENTRY, plan)
+  pruneLooks(work, VIDEO_ENTRY)
 
   // Its length and its poster at once: either alone may not read as a video.
   const poster = posterAfter(before, now, duration)
@@ -1476,7 +1496,7 @@ function copySceneFile(text: string, from: string, to: string, taken: Set<string
 
   return copy
     .replace(
-      /(\s(?:id|data-carried)\s*=\s*)(["'])([^"']+)\2/g,
+      /(\sid\s*=\s*)(["'])([^"']+)\2/g,
       (_, attribute, quote, id) => `${attribute}${quote}${name(id)}${quote}`
     )
     .replace(
@@ -1612,8 +1632,13 @@ function slug(name: string): string {
 // Clips, inside -----------------------------------------------------------------------------------
 
 function timelineOf(work: Working, file: string): VideoFileTimeline {
-  const timeline = readVideoFileTimeline(file, work.text(file))
+  const text = work.text(file)
+  const read = work.timelines.get(file)
+  if (read?.text === text) return read.timeline
+
+  const timeline = readVideoFileTimeline(file, text)
   if (!timeline) throw new EditError(`${file} holds no composition.`)
+  work.timelines.set(file, { text, timeline })
   return timeline
 }
 
@@ -1893,6 +1918,7 @@ function rippleRemove(work: Working, file: string, cut: readonly VideoCut[]): vo
     })
   }
   rewriteClips(work, file, plan)
+  pruneLooks(work, file)
   for (const [from, to] of repointed) repointContinues(work, from, to)
 
   const scene = sceneOf(work, file)
@@ -2449,14 +2475,25 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
     changes.set(file, plan)
     plan.set(ref, what)
   }
-  // Each element whose carried look goes with it, by its file, and the sheets every scene reads.
-  const lookless: { readonly file: string; readonly id: string }[] = []
+  // The files whose looks may have lost their last clip, the sheets every scene reads, and each
+  // look worked out once: by its file's styles, and by what the clip is as a selector reads it.
+  const touched = new Set<string>()
   const linked = linkedBlocks(work)
+  const blocksOf = new Map<string, readonly CssBlock[]>()
+  const parsed = (css: string) => {
+    const known = blocksOf.get(css)
+    if (known) return known
+    const blocks = cssBlocks(css)
+    blocksOf.set(css, blocks)
+    return blocks
+  }
+  const looksOf = new Map<string, { look: Look; home: string }>()
 
   for (const [file, each] of byFile(plans)) {
     const text = work.text(file)
     const clips = timelineOf(work, file).clips
     const scripts = file === VIDEO_ENTRY ? "" : scriptsOf(text)
+    const read = attributesRead([...linked, ...stylesIn(text).map((style) => parsed(style.css))])
 
     for (const plan of each) {
       const { clip: was, own, parts, startMs, durationMs, index } = plan
@@ -2477,12 +2514,25 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
       const stays = parts[0]?.scene.id === own.id
       const mediaStartMs = plan.mediaStartMs ?? was.mediaStartMs
       // How it looks where it is, for each part that lands elsewhere: its scene is its home,
-      // unless it came with a look carried from another.
-      const styled = parts.some((part) => part.scene.id !== own.id)
-        ? lookSheets(work, file, was.id, linked)
+      // unless it came with a look carried from another, which it keeps by its key.
+      const carriedKey = facts.attributes.get("data-look")
+      const known = parts.some((part) => part.scene.id !== own.id)
+        ? (() => {
+            const signature = `${file}\n${carriedKey ?? ""}\n${lookSignature(facts, read)}`
+            const cached = looksOf.get(signature)
+            if (cached) return cached
+            const styled = lookSheets(stylesIn(text), carriedKey, linked, parsed)
+            const found = {
+              look: lookOf(facts, own.id, styled.sheets),
+              home: styled.home ?? own.id,
+            }
+            looksOf.set(signature, found)
+            return found
+          })()
         : undefined
-      const look = styled ? lookOf(facts, own.id, styled.sheets) : undefined
-      const home = styled?.home ?? own.id
+      const look = known?.look
+      const home = known?.home ?? own.id
+      const key = look && look.rules.length > 0 ? lookKey(home, look) : undefined
       if (look?.uncertain && parts.some((part) => part.scene.id !== home)) uncertain.add(index)
       const base = was.id ?? slug(was.src?.replace(/^.*\//, "").replace(/\.[^.]*$/, "") ?? "")
       const fresh = () => {
@@ -2499,15 +2549,9 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
       }
 
       // The head: in place, or written for the file it lands in. It has an id once parts go on
-      // from it, or a look is to reach it, and its own id unless another element has it.
-      const first = parts[0]
-      const landsStyled = (look?.rules.length ?? 0) > 0 && first?.scene.id !== home
+      // from it, and its own id unless another element has it.
       const keepsId = was.id !== undefined && (stays || (counts.get(was.id) ?? 0) <= 1)
-      const headId = keepsId
-        ? was.id
-        : was.id || parts.length > 1 || (!stays && landsStyled)
-          ? fresh()
-          : undefined
+      const headId = keepsId ? was.id : was.id || parts.length > 1 ? fresh() : undefined
       if (headId && headId === was.id) taken.add(headId)
 
       // As one clip, it fades in on its first part and out on its last: the fade out it ended on.
@@ -2568,7 +2612,8 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
         }
 
         const id = n === 0 ? headId : fresh()
-        const styles = (look?.rules.length ?? 0) > 0 && part.scene.id !== home
+        // Its look, by its key, where it is not at home; at home, its scene's own rules.
+        const styled = key !== undefined && part.scene.id !== home
         const src = attributeOf(text, clip, "src")
         const moved = src === undefined ? undefined : rebased(work, file, part.scene.src, src)
         const html = withAttributes(element, {
@@ -2581,6 +2626,7 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
             : { "data-media-start": timing.media }),
           ...(moved === undefined ? {} : { src: moved }),
           "data-continues": n === 0 ? null : (headId ?? null),
+          "data-look": styled ? key : null,
           ...fades(n, was),
           ...(n === 0 ? {} : { [PLACING]: null }),
         })
@@ -2591,26 +2637,25 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
           html,
           index,
           element: { ...facts, ...(id ? { id } : {}) },
-          ...(look && id && styles ? { look, id, home } : {}),
+          ...(look && key && styled ? { look, key, home } : {}),
         })
       })
 
       if (!stays) {
         change(file, clip.ref, "remove")
-        if (was.id) lookless.push({ file, id: was.id })
+        touched.add(file)
         if (scriptNames(scripts, facts)) left.push({ index, scene: own.id })
       }
 
       // The parts no new one lands beside go, with the looks they carried.
       for (const other of others) {
         change(other.file, other.clip.ref, "remove")
-        if (other.clip.id) lookless.push({ file: other.file, id: other.clip.id })
+        touched.add(other.file)
       }
     }
   }
 
   for (const [file, plan] of changes) rewriteClips(work, file, plan)
-  for (const { file, id } of lookless) removeCarriedLook(work, file, id)
 
   // What lands in a file goes after the last clip of its track there, in the order placed.
   for (const [file, each] of groupBy(carried, (one) => one.file)) {
@@ -2632,14 +2677,16 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
     const scripts = scriptsOf(work.text(file))
     const seen = sceneKeyframes(work, file, linked)
     const carriedIn = new Map(seen.carried)
-    const looks: { readonly id: string; readonly home: string; readonly rules: string[] }[] = []
+    const written = new Set(looksIn(work.text(file)))
+    const looks: { readonly key: string; readonly home: string; readonly rules: string[] }[] = []
     for (const one of each) {
-      if (one.look && one.id && one.home) {
-        const rules = writtenLook(one.look, one.scene, one.id, {
+      if (one.look && one.key && one.home && !written.has(one.key)) {
+        written.add(one.key)
+        const rules = writtenLook(one.look, one.scene, one.key, {
           own: seen.own,
           carried: carriedIn,
         })
-        if (rules.length > 0) looks.push({ id: one.id, home: one.home, rules })
+        if (rules.length > 0) looks.push({ key: one.key, home: one.home, rules })
         // What it wrote, the next look reads.
         for (const [name, body] of keyframesOf(cssBlocks(rules.join("\n")))) {
           carriedIn.set(name, [...(carriedIn.get(name) ?? []), body])
@@ -2649,8 +2696,9 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
         joined.push({ index: one.index, scene: one.scene })
       }
     }
-    writeCarriedLooks(work, file, looks)
+    writeLooks(work, file, looks)
   }
+  for (const file of touched) pruneLooks(work, file)
 
   // The last scene grows to hold what lands past its end.
   const needed = new Map<string, number>()
@@ -2766,9 +2814,9 @@ interface Carried {
   /** The clip it is a part of, by its place among those placed. */
   readonly index: number
   readonly element: LookElement
-  /** Its look, the id it reaches it by, and the scene it is from, when it lands elsewhere. */
+  /** Its look, the key it carries it by, and the scene it is from, when it lands elsewhere. */
   readonly look?: Look
-  readonly id?: string
+  readonly key?: string
   readonly home?: string
 }
 
@@ -2787,15 +2835,37 @@ function lookElement(html: string, id: string | undefined): LookElement {
   }
 }
 
-/** A file's `<style>` elements: each one's CSS, and the clip whose look it carries, if it does. */
+/**
+ * An element as the selectors of its file may read it, by its tag, id, classes and the attributes
+ * they name: elements alike so have one look there, which a placement works out once for them all.
+ */
+function lookSignature(element: LookElement, read: ReadonlySet<string>): string {
+  const attributes = [...element.attributes].filter(([name]) => read.has(name.toLowerCase()))
+  return JSON.stringify([element.tag, element.id, element.classes, attributes])
+}
+
+/** The attributes some selector of these sheets names, `[name…]`, at any depth. */
+function attributesRead(sheets: readonly (readonly CssBlock[])[]): Set<string> {
+  const read = new Set<string>()
+  for (const blocks of sheets) {
+    for (const { prelude, body } of blocks) {
+      for (const match of `${prelude}{${body}`.matchAll(/\[\s*([\w-]+)/g)) {
+        read.add((match[1] ?? "").toLowerCase())
+      }
+    }
+  }
+  return read
+}
+
+/** A file's `<style>` elements: each one's CSS, and the look it is, by its key, if it is one. */
 function stylesIn(
   text: string
-): { readonly css: string; readonly carried?: string; readonly from?: string }[] {
+): { readonly css: string; readonly look?: string; readonly from?: string }[] {
   return [...text.matchAll(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi)].map((match) => {
     const attributes = match[1] ?? ""
-    const carried = /\sdata-carried\s*=\s*"([^"]*)"/.exec(attributes)?.[1]
+    const look = /\sdata-look\s*=\s*"([^"]*)"/.exec(attributes)?.[1]
     const from = /\sdata-from\s*=\s*"([^"]*)"/.exec(attributes)?.[1]
-    return { css: match[2] ?? "", ...(carried ? { carried } : {}), ...(from ? { from } : {}) }
+    return { css: match[2] ?? "", ...(look ? { look } : {}), ...(from ? { from } : {}) }
   })
 }
 
@@ -2811,26 +2881,25 @@ function linkedBlocks(work: Working): CssBlock[][] {
 
 /**
  * The sheets that give a clip of a scene's file its look, in the order the page reads them, and the
- * scene it is from when it came with a look of its own: then that look, and the rules naming it by
- * its id; else every rule that styles it there.
+ * scene it is from when it came with a look of its own, by `key`: then that look, and the rules
+ * naming it by its id; else every rule that styles it there.
  */
 function lookSheets(
-  work: Working,
-  file: string,
-  id: string | undefined,
-  linked: readonly (readonly CssBlock[])[]
+  styles: readonly { readonly css: string; readonly look?: string; readonly from?: string }[],
+  key: string | undefined,
+  linked: readonly (readonly CssBlock[])[],
+  parsed: (css: string) => readonly CssBlock[]
 ): { readonly sheets: LookSheet[]; readonly home?: string } {
-  const styles = stylesIn(work.text(file))
-  const own = id ? styles.find((style) => style.carried === id) : undefined
+  const own = key ? styles.find((style) => style.look === key) : undefined
   const byId = own !== undefined
   // In the order the page reads them: the linked sheets in its head, the scene's own styles,
-  // then the look carried for it, written after them.
+  // then the look carried in, written after them.
   const sheets: LookSheet[] = [
     ...linked.map((blocks) => ({ blocks, byId })),
     ...styles
-      .filter((style) => style.carried === undefined)
-      .map((style) => ({ blocks: cssBlocks(style.css), byId })),
-    ...(own ? [{ blocks: cssBlocks(own.css), carried: true }] : []),
+      .filter((style) => style.look === undefined)
+      .map((style) => ({ blocks: parsed(style.css), byId })),
+    ...(own ? [{ blocks: parsed(own.css), carried: true }] : []),
   ]
   return { sheets, ...(own?.from ? { home: own.from } : {}) }
 }
@@ -2845,12 +2914,12 @@ function sceneKeyframes(
   const carried = new Map<string, string[]>()
   const styles = stylesIn(work.text(file))
   for (const blocks of [
-    ...styles.filter((style) => !style.carried).map((style) => cssBlocks(style.css)),
+    ...styles.filter((style) => !style.look).map((style) => cssBlocks(style.css)),
     ...linked,
   ]) {
     for (const [name, body] of keyframesOf(blocks)) if (!own.has(name)) own.set(name, body)
   }
-  for (const style of styles.filter((each) => each.carried)) {
+  for (const style of styles.filter((each) => each.look)) {
     for (const [name, body] of keyframesOf(cssBlocks(style.css))) {
       carried.set(name, [...(carried.get(name) ?? []), body])
     }
@@ -2858,37 +2927,45 @@ function sceneKeyframes(
   return { own, carried }
 }
 
-/** The `<style>` holding the look carried for the element `id` in a file, if there is one. */
-function carriedStyle(work: Working, file: string, id: string): VideoSourceSpan | undefined {
-  const text = work.text(file)
-  for (const match of text.matchAll(/<style\b([^>]*)>[\s\S]*?<\/style>/gi)) {
-    if (/\sdata-carried\s*=\s*"([^"]*)"/.exec(match[1] ?? "")?.[1] !== id) continue
-    return { start: match.index, end: match.index + match[0].length }
-  }
-  return undefined
+/** The keys of the looks a file writes, `<style data-look="<key>">`. */
+function looksIn(text: string): string[] {
+  return stylesIn(text).flatMap((style) => (style.look ? [style.look] : []))
 }
 
-function removeCarriedLook(work: Working, file: string, id: string): void {
-  const style = carriedStyle(work, file, id)
-  if (style) work.replace(file, ...spanOf(lineBlock(work.text(file), style)), "")
+/** Removes each look of a file no element of it carries any more. */
+function pruneLooks(work: Working, file: string): void {
+  if (!work.textOf(file)?.includes("data-look")) return
+  for (const key of looksIn(work.text(file))) {
+    const text = work.text(file)
+    const name = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    // The style names its key once itself; each element carrying it, once more.
+    const carriers = text.match(new RegExp(`\\sdata-look\\s*=\\s*"${name}"`, "g"))?.length ?? 0
+    if (carriers > 1) continue
+    for (const match of text.matchAll(/<style\b([^>]*)>[\s\S]*?<\/style>/gi)) {
+      if (/\sdata-look\s*=\s*"([^"]*)"/.exec(match[1] ?? "")?.[1] !== key) continue
+      const span = { start: match.index, end: match.index + match[0].length }
+      work.replace(file, ...spanOf(lineBlock(text, span)), "")
+      break
+    }
+  }
 }
 
 /**
- * Writes the look carried for each element `id` from the scene `home` in a style of its own,
- * `<style data-carried="<id>" data-from="<home>">`, a child of the composition before the scripts
- * that close it, which a later move finds and takes along. All at once, the file read once.
+ * Writes each look carried into a file from the scene `home` in a style of its own, once for all
+ * the clips that carry it, `<style data-look="<key>" data-from="<home>">`, a child of the
+ * composition before the scripts that close it, which a later move finds and takes along. All at
+ * once, the file read once.
  */
-function writeCarriedLooks(
+function writeLooks(
   work: Working,
   file: string,
   looks: readonly {
-    readonly id: string
+    readonly key: string
     readonly home: string
     readonly rules: readonly string[]
   }[]
 ): void {
   if (looks.length === 0) return
-  for (const { id } of looks) removeCarriedLook(work, file, id)
 
   const text = work.text(file)
   const timeline = timelineOf(work, file)
@@ -2904,9 +2981,9 @@ function writeCarriedLooks(
       : `${lineIndent(text, timeline.composition.element.start)}  `
 
   const styles = looks
-    .map(({ id, home, rules }) => {
+    .map(({ key, home, rules }) => {
       const body = rules.map((rule) => `${indent}  ${rule.replace(/\n/g, `\n${indent}  `)}`)
-      return `<style data-carried="${escapeAttribute(id)}" data-from="${escapeAttribute(home)}">\n${body.join("\n")}\n${indent}</style>`
+      return `<style data-look="${escapeAttribute(key)}" data-from="${escapeAttribute(home)}">\n${body.join("\n")}\n${indent}</style>`
     })
     .join(`\n${indent}`)
 

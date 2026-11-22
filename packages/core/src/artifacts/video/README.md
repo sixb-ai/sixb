@@ -267,39 +267,33 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
   a clip cut into pieces goes on from its last. A head is the one clip of the video with its id. A
   part edited apart, whose first part is gone, or whose scene a copy now follows, is a clip of its
   own, and loses the attribute once it is placed again.
-- A clip that leaves its file takes an id no other element of the video has (copies always take
-  new ones), and its recording's path rebased for the new folder. What followed it there keeps its
-  time. A clip that holds others, or a file two scenes play, stays put: the edit is refused whole.
+- A clip that leaves its file keeps its id, unless another element of the video has it, and takes
+  one of its own when parts go on from it (copies always take new ones); its recording's path is
+  rebased for the new folder. What followed it there keeps its time. A clip that holds others, or a
+  file two scenes play, stays put: the edit is refused whole.
 - **Its look** (`looks.ts`) goes with it, to reach it alone, as the page computes it: every rule
   that styles the element itself (its tag, id, classes, attributes and states, `:is()`, `:where()`
   and `:not()` read for it), from the linked sheets, then its scene's `<style>`, in that order, each
-  inside the `@media`, `@supports`, `@container` or `@layer` it was in. Each is written in the scene
-  it lands in naming the element by its id once more than it did,
-  `[data-composition-id="<scene>"] p#<id>.caption.big`, so the rules keep their cascade among
-  themselves and outrank that scene's own, in a `<style data-carried="<id>" data-from="<scene it
-  is from>">` of its own. Keyframes it animates by keep their name when the new scene reads none
-  other by it, and take `<name>-2` otherwise. The scene's own rules never change, so its clips keep
-  their look. Moved again, the carried style goes with the clip, and is dropped when it goes home.
-  A rule that styles what the clip holds through it, `.caption .hot` or `.caption > span`, goes
-  with it, its tail as written; escaped class names and attribute operators are read. A rule that
-  may style it through a wrapper, by its place among its siblings, or styles its siblings, is not
-  carried, and neither is one it cannot read: `looksMayDiffer` names the clip.
+  inside the `@media`, `@supports`, `@container` or `@layer` it was in. The look is written once
+  in the scene it lands in, in a `<style data-look="<key>" data-from="<scene it is from>">`, for
+  every clip that carries it by `data-look="<key>"`: the key hashes the look and its scene, so
+  clips that look alike, moved together or one after the other, share one style. Each rule reaches
+  them by their key as specific as one id more than it was,
+  `[data-composition-id="<scene>"] p:is([data-look="<key>"], #sixb-look).caption.big`, so the rules
+  keep their cascade among themselves and outrank that scene's own. Keyframes it animates by keep
+  their name when the new scene reads none other by it, and take `<name>-2` otherwise; the key
+  reads them by their place, so a renamed look keeps it. The scene's own rules never change, so its
+  clips keep their look. Moved again, a clip takes its look along by the same key, and drops it
+  when it goes home; a style goes once no element carries its key, whatever removed the last. A
+  rule that styles what the clip holds through it, `.caption .hot` or `.caption > span`, goes with
+  it, its tail as written; escaped class names and attribute operators are read. A rule that may
+  style it through a wrapper, by its place among its siblings, or styles its siblings, is not
+  carried, and neither is one it cannot read: `looksMayDiffer` names the clip. A placement works
+  each look out once for the elements alike, and an edit that would grow an HTML file past what
+  publishing reads is refused.
 - Its old scene's script cannot follow: `animationsLeft` names each clip that left a script naming
   its `#id` or a class, and `animationsJoined` each that landed where the script reaches one of its
   classes or its tag (`${scene} video`).
-- A clip that lands in a file, moved or imported, is a child of its composition itself, never of
-  a wrapper whose look would become its own. A picture goes under the words, before the first
-  element holding any when that one comes no later than the last holding a picture (a card holding
-  both), else after that one; words and sounds after the last element holding their track, else
-  over the pictures, else last before the closing `<style>` and `<script>`.
-- A clip that leaves its file takes an id no other element of the video has (copies always take
-  new ones), its recording's path rebased for the new folder, and its look: the rules naming its
-  id or a class, from its scene's `<style>` (all of them, as an export renders the new scene
-  without the old one's file) and from the linked sheets (those scoped to its old scene alone),
-  rewritten for the new scene and id, with the keyframes they use, each written once. What
-  followed it there keeps its time. Its old scene's script cannot follow: the result's
-  `animationsLeft` names each clip that left a script naming its `#id` or a class. A clip that
-  holds others, or a file two scenes play, stays put: the edit is refused whole.
 
 How an operation works:
 

@@ -153,13 +153,20 @@ export function lookOf(element: LookElement, scene: string, sheets: readonly Loo
 }
 
 /**
- * A look written for an element landing in `scene` by its id: each rule as it was, naming the
- * element by its id once more, `[data-composition-id="<scene>"] p#<id>.caption`, so the rules keep
- * their cascade among themselves and outrank the scene's own; in the `@media` it was in; and the
- * keyframes it animates by. A name the scene reads already, with the same frames, is used as it
- * is; with others, the look's keyframes take a name of their own, so neither changes the other.
+ * A look written for `scene`, once, for every clip that carries it by `data-look="<key>"`: each
+ * rule as it was, reaching those clips by their key, as specific as it was and one id more,
+ * `[data-composition-id="<scene>"] p:is([data-look="<key>"], #sixb-look).caption`, `:is()` taking
+ * its most specific argument's weight, an id none has; so the rules keep their cascade among
+ * themselves and outrank the scene's own. In the `@media` each was in, with the keyframes they
+ * animate by: a name the scene reads already, with the same frames, is used as it is; with others,
+ * the look's take a name of their own, so neither changes the other.
  */
-export function writtenLook(look: Look, scene: string, id: string, seen: SceneKeyframes): string[] {
+export function writtenLook(
+  look: Look,
+  scene: string,
+  key: string,
+  seen: SceneKeyframes
+): string[] {
   const renamed = new Map<string, string>()
   const frames: string[] = []
   for (const [name, body] of look.keyframes) {
@@ -181,7 +188,8 @@ export function writtenLook(look: Look, scene: string, id: string, seen: SceneKe
     let body = rule.body
     for (const [from, to] of renamed) body = renameAnimation(body, from, to)
     const scope = rule.scoped ? `[data-composition-id="${scene}"] ` : ""
-    const selector = `${scope}${rule.tag}${`#${id}`.repeat(rule.ids)}${rule.rest}${rule.tail}`
+    const reach = `:is([data-look="${key}"], #${LOOK_ID})`.repeat(rule.ids)
+    const selector = `${scope}${rule.tag}${reach}${rule.rest}${rule.tail}`
     return rule.within.reduceRight(
       (inner, prelude) => wrapped(prelude, inner),
       cssRule(selector, body)
@@ -230,6 +238,39 @@ const KEYFRAMES = /^@(?:-webkit-)?keyframes\s+([\w-]+)/i
 
 /** Each composition a selector names by `[data-composition-id=…]`. */
 const SCOPE = /^\[\s*data-composition-id\s*=\s*(["']?)([^"'\]\s]+)\1\s*\]$/
+
+/** An id no element has, which gives a look's rules the weight of one. */
+const LOOK_ID = "sixb-look"
+
+/** How a carried look's rule reaches its clips, as {@link writtenLook} writes it. */
+const REACH = new RegExp(`^:is\\(\\[data-look="[^"]*"\\], #${LOOK_ID}\\)$`)
+
+/**
+ * A look's key, from the scene it is from and what it is: the same look, the same key, whichever
+ * clip carries it and wherever it was carried: its keyframes by their place, whatever a scene
+ * renamed them, and its rules as {@link cssKey} reads them. Two FNV-1a hashes of it, and its
+ * length.
+ */
+export function lookKey(home: string, look: Look): string {
+  const names = [...look.keyframes.keys()]
+  const rules = look.rules.map((rule) => ({
+    ...rule,
+    within: rule.within.map(cssKey),
+    body: cssKey(
+      names.reduce((body, name, at) => renameAnimation(body, name, `\0${at}`), rule.body)
+    ),
+  }))
+  const frames = [...look.keyframes.values()].map(cssKey)
+  const text = `${home}\n${JSON.stringify(rules)}\n${JSON.stringify(frames)}`
+  let low = 0x811c9dc5
+  let high = 0x01000193
+  for (let at = 0; at < text.length; at += 1) {
+    const code = text.charCodeAt(at)
+    low = Math.imul(low ^ code, 0x01000193)
+    high = Math.imul(high ^ code, 0x811c9dc5) ^ (low >>> 15)
+  }
+  return [high >>> 0, low >>> 0, text.length].map((each) => each.toString(36)).join("")
+}
 
 /** The at-rules whose rules apply under a condition, which a carried rule stays inside. */
 const GROUPING = /^@(?:media|supports|container|layer)\b/i
@@ -291,7 +332,12 @@ function stylesItself(
   let tag = ""
   let rest = ""
   for (const part of parts) {
-    if (part.startsWith("#")) {
+    // A carried look reaches its clips by their key, as an id would: read so, it is the look it
+    // was, and takes the same key.
+    if (sheet.carried && REACH.test(part)) {
+      ids += 1
+      names = true
+    } else if (part.startsWith("#")) {
       ids += 1
       names = true
     } else if (part.startsWith(".")) {
