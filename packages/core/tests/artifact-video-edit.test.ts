@@ -2392,7 +2392,10 @@ describe("a clip that goes on in later scenes", () => {
 
   // Guard proof: cut placed parts only where a skip leaves a clip's least length either side in
   // atJumps (edit.ts), moving the others to the edge as it did; a move of 50 ms then brings back
-  // 50 ms of the cut words, and loses as much of those kept.
+  // 50 ms of the cut words, and loses as much of those kept. Keep every piece, however short, and
+  // a move of 1 ms writes one a millisecond long. Link a recording's pieces in a scene only as
+  // close as an instant in goesOn (timeline.ts), and the two either side of the one left out are
+  // two clips.
   test("a skip near a chapter's edge keeps what is heard, however little the move", () => {
     const index = `<div data-composition-id="main" data-width="1920" data-height="1080" data-fps="30" data-duration="15">
     <div id="hook" data-composition-id="hook" data-composition-src="scenes/hook.html" data-start="0" data-duration="3"></div>
@@ -2446,9 +2449,64 @@ describe("a clip that goes on in later scenes", () => {
       [2200, 3000],
       [3300, 8000],
     ])
+    // Moved, it never plays what was cut, and keeps all it did, but less than a frame at a skip
+    // that falls within a frame of a chapter's edge: the cut 70 ms before the hook's end took it
+    // to the end, in whole steps, so the skip lies at that edge.
+    const frame = 1000 / 30
     for (const by of [10, 50, 99, 120, -10, -50, -99, -120]) {
+      const now = heard(applied(moveClip(files, "scenes/hook.html", "v", 1000 + by), files))
+      const near = Math.abs(by) < frame
+      if (!near) expect([by, now]).toEqual([by, before])
+      expect(now).toHaveLength(before.length)
+      now.forEach(([from, to], at) => {
+        const [wasFrom, wasTo] = before[at] as [number, number]
+        expect([by, from >= wasFrom, to <= wasTo]).toEqual([by, true, true])
+        expect([by, wasFrom - from + to - wasTo < frame]).toEqual([by, true])
+      })
+    }
+
+    // Two skips 20 ms apart in the demo, as an Agent may write them: moved, the piece between is
+    // left out, and the pieces either side, less than a frame apart, go on one from the other.
+    const close = new Map(files)
+    close.set(
+      "scenes/demo.html",
+      scene(
+        "demo",
+        [
+          '<video id="w-2" src="media/a.mp4" data-start="0.5" data-duration="1" data-has-audio="true" data-media-start="2" data-continues="w"></video>',
+          '<video id="w-3" src="media/a.mp4" data-start="1.5" data-duration="0.02" data-has-audio="true" data-media-start="3.3" data-continues="w"></video>',
+          '<video id="w-4" src="media/a.mp4" data-start="1.52" data-duration="2" data-has-audio="true" data-media-start="3.5" data-continues="w"></video>',
+        ].join("\n    ")
+      )
+    )
+    close.set(
+      "scenes/hook.html",
+      scene(
+        "hook",
+        '<video id="w" src="media/a.mp4" data-start="1" data-duration="2" data-has-audio="true"></video>'
+      )
+    )
+    close.set("scenes/outro.html", scene("outro"))
+    const spaced = applied(moveClip(close, "scenes/hook.html", "w", 1300), close)
+    expect(heardOnce(spaced).map((part) => [part[2], part[3], part[4]])).toEqual([
+      [1300, 2900, 0],
+      [2900, 4200, 1600],
+      [4220, 5900, 3500],
+      [5900, 6200, 5180],
+    ])
+
+    // However little the move, no part it writes is shorter than a frame, and it is one clip.
+    for (let by = -40; by <= 40; by += 1) {
+      if (by === 0) continue
       const moved = applied(moveClip(files, "scenes/hook.html", "v", 1000 + by), files)
-      expect([by, heard(moved)]).toEqual([by, before])
+      heardOnce(moved)
+      for (const file of ["scenes/hook.html", "scenes/demo.html", "scenes/outro.html"]) {
+        for (const clip of readSceneTimeline(moved.get(file) as string)?.clips ?? []) {
+          if (clip.src === "media/a.mp4") {
+            expect([by, clip.ref, (clip.durationMs ?? 0) >= frame]).toEqual([by, clip.ref, true])
+          }
+        }
+      }
     }
   })
 
