@@ -36,9 +36,9 @@ import { cn } from "@sixb/ui/lib/utils"
 import {
   ArrowRightFromLine,
   ArrowRightToLine,
+  FoldHorizontal,
   GalleryHorizontalEnd,
   Keyboard,
-  Magnet,
   Maximize2,
   Pause,
   Play,
@@ -77,7 +77,7 @@ import { Inspector, type InspectorActions } from "./inspector"
 import type { MediaTarget } from "./media"
 import { MobileScenes } from "./mobile"
 import { editPoints, type LaidClip, nextEditPoint, openingSeek, sceneAt } from "./model"
-import { readEveryScene, writeEveryScene } from "./preferences"
+import { readEveryScene, readMagnetic, writeEveryScene, writeMagnetic } from "./preferences"
 import { PlayMark, PreviewScreen, usePreview } from "./preview"
 import {
   type EditorSelection,
@@ -136,7 +136,7 @@ export default function VideoEditor({
   const [selection, setSelection] = useState<EditorSelection>(null)
   const [openId, setOpenId] = useState<string | undefined>(undefined)
   const [marks, setMarks] = useState<{ readonly in?: number; readonly out?: number }>({})
-  const [magnetic, setMagnetic] = useState(true)
+  const [magnetic, setMagnetic] = useState(readMagnetic)
   const [snapping, setSnapping] = useState(true)
   const [everyScene, setEveryScene] = useState(readEveryScene)
   const [panel, setPanel] = useState<"inspector" | "transcript">("inspector")
@@ -798,7 +798,10 @@ export default function VideoEditor({
               onClearMarks={() => setMarks({})}
               onCutMarks={cutMarks}
               magnetic={magnetic}
-              onMagnetic={setMagnetic}
+              onMagnetic={(on) => {
+                setMagnetic(on)
+                writeMagnetic(on)
+              }}
               snapping={snapping}
               onSnapping={setSnapping}
               everyScene={everyScene}
@@ -1040,7 +1043,7 @@ function Toolbar({
               aria-label={editor.magnetic}
               className="h-8 gap-1.5 px-2 text-[13px]"
             >
-              <Magnet />
+              <FoldHorizontal />
               <span className="@max-4xl/toolbar:sr-only">{editor.magnetic}</span>
             </Toggle>
           </TooltipTrigger>
