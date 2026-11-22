@@ -1165,6 +1165,59 @@ describe("placing clips in the video", () => {
     })
   })
 
+  // Guard proof: carry only rules whose last compound is the clip in stylesItself (looks.ts), as
+  // it did; the highlighted word then loses its colour, the escaped class its size, both silently.
+  test("a clip takes along what styles the words it holds, and reads escaped classes", () => {
+    const demo = `<template>
+  <div data-composition-id="demo" data-width="1920" data-height="1080">
+    <p id="cap" class="caption md:big" data-start="1" data-duration="2">Office <span class="hot">parties</span></p>
+    <style>
+      [data-composition-id="demo"] .caption .hot { color: #ffd166 }
+      [data-composition-id="demo"] .caption > span { font-weight: 800 }
+      [data-composition-id="demo"] .md\\:big { font-size: 90px }
+      [data-composition-id="demo"] p[class~="caption"] { letter-spacing: 2px }
+      [data-composition-id="demo"] .caption { color: white }
+    </style>
+  </div>
+</template>
+`
+    const sources = with_({ "scenes/demo.html": demo })
+    const result = moveClip(sources, "scenes/demo.html", "cap", 8500)
+    const files = applied(result, sources)
+    expect("edit" in result && result.looksMayDiffer).toEqual([])
+
+    const computed = (html: string) => {
+      const browser = new Window()
+      browser.document.body.innerHTML = /<template>([\s\S]*)<\/template>/.exec(html)?.[1] ?? ""
+      const word = browser.document.querySelector(".hot")
+      const line = browser.document.getElementById("cap")
+      if (!word || !line) throw new Error("No caption.")
+      const values = [
+        browser.getComputedStyle(word).color,
+        browser.getComputedStyle(word).fontWeight,
+        browser.getComputedStyle(line).fontSize,
+        browser.getComputedStyle(line).letterSpacing,
+        browser.getComputedStyle(line).color,
+      ]
+      browser.close()
+      return values
+    }
+    expect(computed(demo)).toEqual(["#ffd166", "800", "90px", "2px", "white"])
+    expect(computed(files.get("scenes/outro.html") ?? "")).toEqual(computed(demo))
+
+    // What styles its siblings stays with the scene, and says so.
+    const beside = with_({
+      "scenes/demo.html": demo.replace(
+        "</style>",
+        '  [data-composition-id="demo"] .caption + .note { color: red }\n    </style>'
+      ),
+    })
+    const moved = moveClip(beside, "scenes/demo.html", "cap", 8500)
+    expect("edit" in moved && moved.looksMayDiffer).toEqual([
+      { file: "scenes/outro.html", clip: "cap" },
+    ])
+  })
+
   // Guard proof: carry the rules a wrapper or a place among siblings gives in lookOf (looks.ts),
   // rather than say so; or say nothing of them, and the caption leaves its frame's look with no
   // word.
