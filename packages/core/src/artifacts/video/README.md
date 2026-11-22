@@ -346,8 +346,10 @@ What moves with what:
 - A clip whose `data-start` names another clip follows it, and a ripple does not move it. Once
   that clip is split, it follows the last part; once it is removed or cut, it starts at the time
   it did, which the ripple then moves as any other's.
-- A copied scene's elements take new ids, and every `#id`, `getElementById`, chained start and
-  carried look naming them in the file follows; a part in it goes on from nothing.
+- A copied scene's elements take new ids, and what names them in the file follows, each by its
+  whole name: a chained start, the look carried for it, `getElementById`, and `#id` or `[id=…]`
+  where they are selectors (a style's preludes, a script's selector strings), never a value such as
+  a colour `#fade`. A part in it goes on from nothing.
 - What `index.html` plays during one scene, a line of voice-over at a number of seconds, belongs
   to the scene it plays most during, when it lasts no longer than that scene: it keeps its time
   into the scene as the scene moves, and goes with it. A soundtrack under every scene belongs to

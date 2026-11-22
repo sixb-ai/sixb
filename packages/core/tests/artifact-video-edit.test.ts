@@ -1887,6 +1887,35 @@ describe("a clip that goes on in later scenes", () => {
     expect(chains(hooks)).toEqual([])
   })
 
+  // Guard proof: read a chained start's name lazily, up to a `-`, in copySceneFile (edit.ts), as
+  // its lookahead let it; the follower of `talk-2` then follows `talk-3-2`. Rename in a style's
+  // declarations too, and the colour `#fade` becomes `#fade-2`; in a script's property values, and
+  // so does GSAP's; leave `[id=…]` as it is, and it still names the original.
+  test("a copied scene renames ids by their whole name, where they are selectors alone", () => {
+    const sources = new Map(opening)
+    sources.set(
+      "scenes/demo.html",
+      scene(
+        "demo",
+        `<video id="talk" src="media/a.mp4" data-start="0" data-duration="2"></video>
+    <video id="talk-2" src="media/a.mp4" data-start="2" data-duration="4" data-media-start="2"></video>
+    <p id="fade" class="c" data-start="talk-2 + 0.5" data-duration="1" style="color: #fade">hi</p>
+    <style>[data-composition-id="demo"] .c { color: #fade; background: #FADE; } [id="talk"], #fade { opacity: 1 } @media (min-width: 1px) { #talk-2 { margin: 0 } }</style>
+    <script>gsap.to(\`[data-composition-id="demo"] #talk\`, { color: "#fade" }); document.querySelector('#fade'); document.getElementById("talk")</script>`
+      )
+    )
+    const copy = applied(duplicateScene(sources, "demo"), sources).get("scenes/demo-2.html") ?? ""
+    expect(copy).toContain(
+      '<p id="fade-2" class="c" data-start="talk-4 + 0.5" data-duration="1" style="color: #fade">'
+    )
+    expect(copy).toContain(
+      '<style>[data-composition-id="demo-2"] .c { color: #fade; background: #FADE; } [id="talk-3"], #fade-2 { opacity: 1 } @media (min-width: 1px) { #talk-4 { margin: 0 } }</style>'
+    )
+    expect(copy).toContain(
+      '<script>gsap.to(`[data-composition-id="demo-2"] #talk-3`, { color: "#fade" }); document.querySelector(\'#fade-2\'); document.getElementById("talk-3")</script>'
+    )
+  })
+
   // Guard proof: rename no carried look nor chained start in copySceneFile (edit.ts); the copy's
   // look then names an element it no longer holds, and its caption follows nothing.
   test("a copied scene's looks and chained starts follow its new ids", () => {
