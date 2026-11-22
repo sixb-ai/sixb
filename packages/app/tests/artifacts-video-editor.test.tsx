@@ -1962,7 +1962,10 @@ describe("the timeline", () => {
     })
 
     /** The title opening on footage that goes on into the interview, as an edit continues it. */
-    function continued(selection: Parameters<typeof Timeline>[0]["selection"] = null) {
+    function continued(
+      selection: Parameters<typeof Timeline>[0]["selection"] = null,
+      over = false
+    ) {
       const files = new Map(FILES)
       files.set("scenes/title.html", {
         text: TITLE.replace(
@@ -1970,11 +1973,12 @@ describe("the timeline", () => {
           '<video id="intro" src="media/talk.mp4" data-start="0" data-duration="3"></video>\n    <h1>'
         ),
       })
+      const part =
+        '<video id="intro-2" src="media/talk.mp4" data-start="0" data-duration="2" data-media-start="3" data-continues="intro"></video>'
       files.set("scenes/talk.html", {
-        text: TALK.replace(
-          '    <video id="clip"',
-          '    <video id="intro-2" src="media/talk.mp4" data-start="0" data-duration="2" data-media-start="3" data-continues="intro"></video>\n    <video id="clip"'
-        ),
+        text: over
+          ? TALK.replace("    <p class", `    ${part}\n    <p class`)
+          : TALK.replace('    <video id="clip"', `    ${part}\n    <video id="clip"`),
       })
       const state = new LiveVideo(createArtifactDocument("video", files)).getState()
       const shown = state.composition
@@ -2015,6 +2019,24 @@ describe("the timeline", () => {
       }
       return { view, selected, grouped, trimmed, block }
     }
+
+    // Guard proof: draw no chainLinks in the timeline (timeline.tsx); the part painted over the
+    // interview's footage lies a row above the title's, and nothing ties them. Leave the ring
+    // whole on parts against each other, and a line of it cuts the chosen clip at its seam.
+    test("parts of one clip read as one: linked across rows, ringed as one shape", () => {
+      const apart = continued(null, true)
+      const link = apart.view.container.querySelector<HTMLElement>("[data-chain-link]")
+      expect(link?.style.left).toBe("300px")
+      expect(link?.className).toContain("pointer-events-none")
+      // From the middle of the lower row to the middle of the upper one.
+      expect(link?.style.height).toBe("44px")
+      cleanup()
+
+      const joined = continued({ type: "clip", file: "scenes/title.html", target: "intro" })
+      expect(joined.view.container.querySelector("[data-chain-link]")).toBeNull()
+      expect(joined.block("intro").style.clipPath).toBe("inset(-4px 0px -4px -4px)")
+      expect(joined.block("intro-2").style.clipPath).toBe("inset(-4px -4px -4px 0px)")
+    })
 
     // Guard proof: bound the end handle by the part it is on, `clip.startMs + 100`, in onDragMove
     // (timeline.tsx), as it did; the clip then cannot be trimmed back into the title. Trim the
