@@ -9,7 +9,7 @@ import {
   type VideoText,
 } from "@sixb/core/artifacts/live"
 import type { LiveVideoState } from "../../../live/video"
-import { type LaidClip, layClips } from "./model"
+import { type LaidClip, layClips, onRows } from "./model"
 
 // What the reader has selected in the editor, and what follows from it: the scene whose clips the
 // timeline opens, and every clip laid out in the video's time.
@@ -61,6 +61,24 @@ export function laidClips(
       : []),
     ...(own ? layClips(own, VIDEO_ENTRY, 0, composition.durationMs) : []),
   ]
+}
+
+/**
+ * Every scene's clips, laid in the video, and the video's own: the timeline when it shows all the
+ * scenes. Scenes that play together, as in a crossfade, share the rows, so their clips lie apart.
+ */
+export function everySceneClips(state: LiveVideoState, composition: VideoComposition): LaidClip[] {
+  const own = state.timelines.get(VIDEO_ENTRY)
+  const scenes = [...composition.scenes]
+    .sort((a, b) => a.startMs - b.startMs)
+    .flatMap((scene) => {
+      const timeline = state.timelines.get(scene.src)
+      return timeline
+        ? layClips(timeline, scene.src, scene.startMs, scene.startMs + scene.durationMs)
+        : []
+    })
+
+  return [...onRows(scenes), ...(own ? layClips(own, VIDEO_ENTRY, 0, composition.durationMs) : [])]
 }
 
 /** Where a clip that writes no length ends, from its composition's start, for an edit to it. */

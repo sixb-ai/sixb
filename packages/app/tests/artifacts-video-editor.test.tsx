@@ -43,7 +43,11 @@ import {
   zoomAround,
 } from "../src/artifacts/renderers/video/editor/model"
 import { RenameField, SceneBlock } from "../src/artifacts/renderers/video/editor/scenes"
-import { heardRecordings, laidClips } from "../src/artifacts/renderers/video/editor/selection"
+import {
+  everySceneClips,
+  heardRecordings,
+  laidClips,
+} from "../src/artifacts/renderers/video/editor/selection"
 import { Timeline } from "../src/artifacts/renderers/video/editor/timeline"
 import {
   fillers,
@@ -393,6 +397,44 @@ describe("the live video", () => {
       "#1",
     ])
     expect(state.sources.get("media/talk.mp4")).toBeNull()
+  })
+
+  // Guard proof: return the scenes' clips as `layClips` rows them, file by file, without `onRows`
+  // over them all: the second scene's line, shown while the first's still is, lands on its row.
+  test("all the scenes lay every scene's clips in the video, apart where they play together", () => {
+    const index = `<div data-composition-id="main" data-width="1280" data-height="720" data-duration="5">
+  <audio id="score" src="media/score.m4a" data-start="0" data-duration="5"></audio>
+  <div id="a" data-composition-id="a" data-composition-src="scenes/a.html" data-start="0" data-duration="3"></div>
+  <div id="b" data-composition-id="b" data-composition-src="scenes/b.html" data-start="a - 1" data-duration="3"></div>
+</div>`
+    const scene = (id: string, words: string) =>
+      `<template><div data-composition-id="${id}" data-width="1280" data-height="720"><p data-start="0" data-duration="3">${words}</p></div></template>`
+    const state = new LiveVideo(
+      createArtifactDocument(
+        "video",
+        new Map([
+          ["index.html", { text: index }],
+          ["scenes/a.html", { text: scene("a", "Fresh every morning") }],
+          ["scenes/b.html", { text: scene("b", "Order by noon") }],
+          ["media/score.m4a", { file: ref("media/score.m4a") }],
+        ])
+      )
+    ).getState()
+    const composition = state.composition
+    if (!composition) throw new Error("No video.")
+
+    const laid = (
+      clips: readonly { file: string; startMs: number; endMs: number; row: number }[]
+    ) => clips.map((each) => [each.file, each.startMs, each.endMs, each.row])
+    expect(laid(everySceneClips(state, composition))).toEqual([
+      ["scenes/a.html", 0, 3000, 0],
+      ["scenes/b.html", 2000, 5000, 1],
+      ["index.html", 0, 5000, 0],
+    ])
+    expect(laid(laidClips(state, composition, composition.scenes[1]))).toEqual([
+      ["scenes/b.html", 2000, 5000, 0],
+      ["index.html", 0, 5000, 0],
+    ])
   })
 
   test("an edit is one step of the reader's undo, and a file nobody changed keeps its timeline", () => {

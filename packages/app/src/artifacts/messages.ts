@@ -839,6 +839,8 @@ export const en = {
     magneticHint: "Trims and deletes close the gap",
     snapping: "Snapping",
     snappingHint: "Edges stick to the playhead, cuts and other clips",
+    everyScene: "All scenes",
+    everySceneHint: "Show every scene’s clips on the tracks, not only the open scene’s",
     zoomIn: "Zoom in",
     zoomOut: "Zoom out",
     zoomFit: "Fit to window",
@@ -1814,6 +1816,9 @@ export const fr: Translation<ArtifactMessages> = {
     magneticHint: "Raccourcir ou supprimer referme le vide",
     snapping: "Magnétisme",
     snappingHint: "Les bords s’aimantent à la tête de lecture, aux coupes et aux autres plans",
+    everyScene: "Toutes les scènes",
+    everySceneHint:
+      "Montrer les plans de toutes les scènes sur les pistes, pas seulement de la scène ouverte",
     zoomIn: "Zoom avant",
     zoomOut: "Zoom arrière",
     zoomFit: "Ajuster à la fenêtre",

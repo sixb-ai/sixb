@@ -125,6 +125,14 @@ export function layClips(
     }
   })
 
+  return onRows(placed)
+}
+
+/**
+ * Clips on rows of their own track, in the order given: each on the first row free where it
+ * starts, so clips that overlap lie apart.
+ */
+export function onRows(placed: readonly Omit<LaidClip, "row">[]): LaidClip[] {
   const rows = new Map<VideoTrack, number[]>()
   return placed.map((each) => {
     const ends = rows.get(each.track) ?? []

@@ -221,7 +221,7 @@ The picture plays the latest save; the timeline under it changes as you edit.
 | In a video | |
 | --- | --- |
 | Scenes | The timeline's first track, each scene with its picture: drag to reorder, or ⌥← ⌥→; double-click to rename; its menu, or a right click, duplicates, moves or deletes. Chained scenes follow, with the voice-over and the poster in them; two that overlap show their crossfade between them |
-| Timeline | The open scene's clips on picture, text and sound tracks, over the video's soundtrack. Drag to move, drag an edge to trim; edges snap to the playhead, the marks, every edge and the footage's cuts (Shift: free). A clip longer than its recording is hatched from where the file ends |
+| Timeline | The open scene's clips on picture, text and sound tracks, over the video's soundtrack; **All scenes** shows every scene's. Drag to move, drag an edge to trim; edges snap to the playhead, the marks, every edge and the footage's cuts (Shift: free). A clip longer than its recording is hatched from where the file ends |
 | Magnetic | On by default: trimming or deleting a clip closes the gap, and the scene's end follows |
 | Keys | Space or K, J and L (1 s), ← → (a frame, a second with Shift), ↑ ↓ (edit points), I and O (marks), S (split at the playhead), ⌫ (delete, or cut between the marks), ⌘D (duplicate the scene), ⌘Z ⇧⌘Z |
 | Words | Click words in the paused picture to retype them where they show |

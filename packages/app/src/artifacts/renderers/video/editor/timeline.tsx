@@ -42,8 +42,9 @@ import { FilmstripFrame, type SceneActions, SceneBlock, SceneDropMark } from "./
 import { clipName, type EditorSelection } from "./selection"
 
 // The timeline: one axis for the whole video, its scenes along the top, each with its picture, the
-// open scene's clips under them on the picture, text and sound tracks, and the video's own
-// soundtrack at the foot. A scene is dragged along its track to reorder it.
+// open scene's clips under them on the picture, text and sound tracks (every scene's, when the
+// reader asks for all of them), and the video's own soundtrack at the foot. A scene is dragged
+// along its track to reorder it.
 // Clips are dragged to move and trimmed by their edges, snapping to the playhead, the marks, every
 // edge and the cuts of their footage; Shift lets them go free. Ctrl or ⌘ with the wheel, or a
 // pinch, zooms around the pointer.
