@@ -314,6 +314,7 @@ export function trimClip(
     if (edge === "end") {
       const length = Math.round(toMs) - found.startMs
       if (length < MIN_CLIP_MS) throw new EditError(`A clip lasts at least ${MIN_CLIP_MS} ms.`)
+      if (length === found.durationMs) return undefined
 
       if (options.ripple || file === VIDEO_ENTRY) {
         setAttributes(work, file, found.source, { "data-duration": seconds(length) })
@@ -1957,6 +1958,14 @@ function moveFound(
 ): Placement {
   const starts = found.map(({ file, clip }) => videoStartOf(work, file, clip))
   const delta = Math.max(Math.round(deltaMs), ...starts.map((start) => -start))
+
+  // A move that goes nowhere, as a group held at the video's start, changes nothing.
+  if (delta === 0) {
+    return {
+      clips: found.map(({ file, clip }) => ({ file, clip: videoTarget(clip) })),
+      animationsLeft: [],
+    }
+  }
 
   return placeFound(
     work,

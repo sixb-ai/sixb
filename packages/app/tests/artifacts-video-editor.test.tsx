@@ -1531,6 +1531,38 @@ describe("the timeline", () => {
     })
   })
 
+  // Guard proof: edit on every drag let go in onDragEnd (timeline.tsx), as it did; a clip dragged
+  // away and back, and a trim handle let go where it was, each ask for an edit that changes nothing.
+  test("a drag let go where it started asks for no edit", () => {
+    const asked: string[] = []
+    const edits = {
+      seek: () => {},
+      select: () => {},
+      moveClip: () => asked.push("move"),
+      moveClips: () => asked.push("moves"),
+      trimClip: () => asked.push("trim"),
+      sceneLength: () => {},
+      scene: { select: () => {}, move: () => {}, duplicate: () => {}, remove: () => {} },
+    }
+    const view = render(timeline({ timeMs: 0, edits: edits as never }))
+    const block = () => {
+      const found = view.container.querySelector<HTMLElement>('[data-timeline-clip="clip"]')
+      if (!found) throw new Error("No footage on the timeline.")
+      return found
+    }
+
+    fireEvent.pointerDown(block(), { button: 0, clientX: 412, pointerId: 1 })
+    fireEvent.pointerMove(block(), { clientX: 480, pointerId: 1, shiftKey: true })
+    fireEvent.pointerMove(block(), { clientX: 412, pointerId: 1, shiftKey: true })
+    fireEvent.pointerUp(block(), { clientX: 412, pointerId: 1, shiftKey: true })
+
+    const handle = block().querySelector<HTMLElement>(".cursor-ew-resize")
+    if (!handle) throw new Error("No trim handle on the footage.")
+    fireEvent.pointerDown(handle, { button: 0, clientX: 412, pointerId: 1, shiftKey: true })
+    fireEvent.pointerUp(handle, { clientX: 412, pointerId: 1, shiftKey: true })
+    expect(asked).toEqual([])
+  })
+
   // Guard proof: leave `dragRef.current` set in onDragEnd in timeline.tsx; the handle's release
   // bubbles to its clip, and the trim is made twice, a start trim with ripple twice as deep.
   test("a trim is made once when its handle is let go", () => {

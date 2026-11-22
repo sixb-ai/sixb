@@ -1136,6 +1136,48 @@ describe("placing clips in the video", () => {
     expect("error" in result && result.error).toContain("'frame' holds other clips")
   })
 
+  // Guard proof: drop the early return for a delta of 0 from moveFound (edit.ts); the footage
+  // longer than its scene is written shorter, and the held group's too, each an undo step. Drop
+  // the one for an unchanged length from trimClip, and the screen past its scene's end moves.
+  test("a move or a trim that changes nothing writes nothing", () => {
+    const sources = with_({
+      "scenes/demo.html": DEMO.replace(
+        'data-duration="5" data-media-start="2"',
+        'data-duration="12" data-media-start="2"'
+      ),
+    })
+    const unchanged = (result: VideoEditResult) => ("edit" in result ? result.edit : result.error)
+
+    expect(unchanged(moveClip(sources, "scenes/demo.html", "talk", 0))).toEqual([])
+    // The talk at the video's 2.5 s and the title held at 0: the group cannot go sooner.
+    const held = with_({
+      "scenes/demo.html": sources.get("scenes/demo.html") ?? "",
+      "scenes/hook.html": HOOK.replace("<h1", '<h1 data-start="0" data-duration="3"'),
+    })
+    const group = moveClips(
+      held,
+      [
+        { file: "scenes/demo.html", clip: "talk" },
+        { file: "scenes/hook.html", clip: "#0" },
+      ],
+      -500
+    )
+    expect(unchanged(group)).toEqual([])
+    expect(placed(group)).toEqual([
+      { file: "scenes/demo.html", clip: "talk" },
+      { file: "scenes/hook.html", clip: { ref: "#0", tag: "h1", words: "Every job, one screen" } },
+    ])
+
+    // A screen the Agent left past its scene's end stays there when its end is let go in place.
+    const past = with_({
+      "scenes/demo.html": DEMO.replace(
+        'data-start="5" data-duration="3"',
+        'data-start="9" data-duration="3"'
+      ),
+    })
+    expect(unchanged(trimClip(past, "scenes/demo.html", "screen", "end", 12_000))).toEqual([])
+  })
+
   // Guard proof: drop the placeFound call from insertClip (edit.ts); the footage then plays on
   // past the hook's end, unseen, and the demo shows none of it.
   test("an import past its scene's end goes on in the next one", () => {
