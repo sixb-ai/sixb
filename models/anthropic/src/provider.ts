@@ -15,7 +15,6 @@ import {
   type LanguageModelRequest,
   MODEL_REASONING_EFFORTS,
   MODEL_REASONING_LEVELS,
-  type ModelCaching,
   type ModelCapabilities,
   ModelCatalogUnavailableError,
   type ModelCostEstimator,
