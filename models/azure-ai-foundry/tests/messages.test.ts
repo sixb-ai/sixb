@@ -781,3 +781,17 @@ test("keeps explicit cache control when automatic caching is off", async () => {
     status: "rated",
   })
 })
+
+// Claude on Azure reports its speed and inference location on every call (measured November
+// 2026). Regression proof: drop the speed or inference_geo case in messages-accounting.ts
+// tokenMeters; every Claude call is then unpriceable.
+test("prices Claude at standard speed and global inference, and nothing else", () => {
+  const estimator = foundryMessagesEstimator(rateCard, undefined, metadata.modelName, "1")
+  const raw = { ...rawUsage, service_tier: "standard", speed: "standard", inference_geo: "global" }
+  expect(estimator.estimate({ usage: foundryMessagesUsage(raw) }).status).toBe("rated")
+  // Fast mode doubles every meter; US-only inference costs 1.1 times as much.
+  for (const other of [{ speed: "fast" }, { inference_geo: "us" }])
+    expect(estimator.estimate({ usage: foundryMessagesUsage({ ...raw, ...other }) }).status).toBe(
+      "unpriceable"
+    )
+})

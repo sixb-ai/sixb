@@ -187,3 +187,36 @@ test("cache writes are priced at the write rate; absent or invalid counts stay u
     }
   }
 })
+
+// GPT-5.6 and later may report writes by cache lifetime. Regression proof: drop the
+// cache_write_tokens_details case in accounting.ts onlyTokenMeters (or chat-accounting.ts
+// tokenMeters); default-lifetime writes are then unpriceable.
+test("default-lifetime writes are priced; a 12-hour write, which costs twice as much, is not", () => {
+  const card = {
+    currency: "USD",
+    input: "1",
+    output: "2",
+    cacheReadInput: "0.1",
+    cacheWriteInput: "3",
+  } as const
+  for (const [twelveHours, status] of [
+    [0, "rated"],
+    [1, "unpriceable"],
+  ] as const) {
+    const details = {
+      cached_tokens: 0,
+      cache_write_tokens: 4,
+      cache_write_tokens_details: { ttl_30m_tokens: 4 - twelveHours, ttl_12h_tokens: twelveHours },
+    }
+    const responses = foundryUsage(
+      { input_tokens: 10, output_tokens: 1, input_tokens_details: details },
+      false
+    )
+    const chat = foundryChatUsage(
+      { prompt_tokens: 10, completion_tokens: 1, prompt_tokens_details: details },
+      false
+    )
+    expect(foundryEstimator(card, undefined).estimate({ usage: responses }).status).toBe(status)
+    expect(foundryChatEstimator(card, undefined).estimate({ usage: chat }).status).toBe(status)
+  }
+})

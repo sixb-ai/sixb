@@ -115,9 +115,28 @@ function onlyTokenMeters(raw: JsonObject | undefined): boolean {
   )
     return false
   return (
-    Object.keys(object(raw.input_tokens_details) ?? {}).every(
-      (key) => key === "cached_tokens" || key === "cache_write_tokens"
+    Object.entries(object(raw.input_tokens_details) ?? {}).every(
+      ([key, value]) =>
+        key === "cached_tokens" ||
+        key === "cache_write_tokens" ||
+        (key === "cache_write_tokens_details" && defaultLifetimeWrites(value))
     ) &&
     Object.keys(object(raw.output_tokens_details) ?? {}).every((key) => key === "reasoning_tokens")
+  )
+}
+
+/**
+ * Writes by cache lifetime, as GPT-5.6 and later report them. The catalog's write rate is the
+ * default 30 minutes'; a 12-hour write costs twice that, so any makes the call unpriceable.
+ */
+export function defaultLifetimeWrites(details: unknown): boolean {
+  const lifetimes = object(details)
+  return (
+    lifetimes !== undefined &&
+    Object.entries(lifetimes).every(
+      ([key, value]) =>
+        (key === "ttl_30m_tokens" && counter(value) !== undefined) ||
+        (key === "ttl_12h_tokens" && value === 0)
+    )
   )
 }

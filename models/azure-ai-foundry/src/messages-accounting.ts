@@ -93,7 +93,12 @@ function tokenMeters(raw: JsonObject | undefined): boolean {
         )
       )
         return false
-    } else if (key === "service_tier" && value === "standard") {
+    } else if (
+      (key === "service_tier" && value === "standard") ||
+      (key === "speed" && value === "standard") ||
+      // Claude on Azure reports "global"; US-only inference costs 1.1 times as much.
+      (key === "inference_geo" && value === "global")
+    ) {
     } else return false
   }
   return true
