@@ -846,8 +846,8 @@ describe("the editor's pieces", () => {
     const timeline = readVideoFileTimeline(
       "scenes/captions.html",
       '<template><div data-composition-id="captions">' +
-        '<p data-start="0" data-duration="1">Fresh bagels</p>' +
-        '<p data-start="1" data-duration="1"><span class="hot">Office</span> parties</p>' +
+        '<p data-start="0" data-duration="1">Assign the job</p>' +
+        '<p data-start="1" data-duration="1"><span class="hot">Nearest</span> tech</p>' +
         "</div></template>"
     )
     const [plain, styled] = timeline?.clips ?? []

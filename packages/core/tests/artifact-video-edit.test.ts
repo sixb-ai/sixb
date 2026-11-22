@@ -196,13 +196,13 @@ describe("reading a composition's clips", () => {
   test("a caption that styles its words reads on the text track, and is not typed over", () => {
     const timeline = readSceneTimeline(
       '<template><div data-composition-id="a">' +
-        '<p class="caption" data-start="0" data-duration="1"><span class="hot">Office</span> parties<br><b>all</b> week</p>' +
-        '<div class="card" data-start="1" data-duration="1"><img src="logo.png"> Bagels</div>' +
+        '<p class="caption" data-start="0" data-duration="1"><span class="hot">Dispatch</span> crews<br><b>in</b> seconds</p>' +
+        '<div class="card" data-start="1" data-duration="1"><img src="logo.png"> Fieldwise</div>' +
         "</div></template>"
     )
 
     expect(timeline?.clips.map((clip) => [clip.kind, clip.track, clip.text])).toEqual([
-      ["text", "text", "Office parties all week"],
+      ["text", "text", "Dispatch crews in seconds"],
       ["element", "picture", undefined],
     ])
     // Only the styled word itself, which holds text alone, is typed over.
@@ -1367,7 +1367,7 @@ describe("placing clips in the video", () => {
   test("a clip takes along what styles the words it holds, and reads escaped classes", () => {
     const demo = `<template>
   <div data-composition-id="demo" data-width="1920" data-height="1080">
-    <p id="cap" class="caption md:big" data-start="1" data-duration="2">Office <span class="hot">parties</span></p>
+    <p id="cap" class="caption md:big" data-start="1" data-duration="2">Nearest <span class="hot">tech</span></p>
     <style>
       [data-composition-id="demo"] .caption .hot { color: #ffd166 }
       [data-composition-id="demo"] .caption > span { font-weight: 800 }
