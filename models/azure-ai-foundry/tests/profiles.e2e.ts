@@ -41,6 +41,7 @@ const fixtures = [
     model: "gpt-4.1-mini",
     provider: "azure",
     id: "gpt-4.1-mini",
+    protocol: "responses",
     tools: true,
     reasoning: false,
     images: true,
@@ -50,6 +51,7 @@ const fixtures = [
     model: "gpt-5-mini",
     provider: "azure",
     id: "gpt-5-mini",
+    protocol: "responses",
     tools: true,
     reasoning: true,
     images: true,
@@ -127,7 +129,8 @@ test.skipIf(
           deployment: { name },
           catalog: { provider: fixture.provider, modelId: fixture.id, pricing: "reference" },
         })
-        expect(model.protocol).toBe("chat")
+        // Azure reports these OpenAI deployments' publisher; every other one runs on Chat.
+        expect(model.protocol).toBe("protocol" in fixture ? "responses" : "chat")
         expect(model.definition.contextWindow).toBeGreaterThan(0)
         expect(model.definition.maxOutputTokens).toBeGreaterThan(0)
         expect(model.definition.capabilities.localTools).toBe(fixture.tools)
