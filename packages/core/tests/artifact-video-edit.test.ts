@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { Window } from "happy-dom"
 import * as Y from "yjs"
 import { applyBoardEditToText } from "../src/artifacts/live/board"
 import {
@@ -1029,9 +1030,9 @@ describe("placing clips in the video", () => {
     <p class="caption" data-start="1.5" data-duration="2" id="text">in two taps</p>
     ${outroStyle}
     <style data-carried="text" data-from="demo">
-      [data-composition-id="outro"] #text { color: #ffd166; animation: rise-2 0.4s; }
-      [data-composition-id="outro"] #text { font-weight: 700; }
-      [data-composition-id="outro"] #text { letter-spacing: -0.01em; }
+      [data-composition-id="outro"] #text.caption { letter-spacing: -0.01em; }
+      [data-composition-id="outro"] #text.caption { color: #ffd166; animation: rise-2 0.4s; }
+      #text.caption { font-weight: 700; }
       @keyframes rise-2 { from { opacity: 0 } to { opacity: 1 } }
     </style>
   </div>
@@ -1059,7 +1060,130 @@ describe("placing clips in the video", () => {
     const onward = applied(moveClip(again, "scenes/outro.html", "text", 1000 - 10_500), again)
     expect(onward.get("scenes/outro.html")).toBe(sources.get("scenes/outro.html"))
     expect(onward.get("scenes/hook.html")).toContain(`<style data-carried="text" data-from="demo">
-      [data-composition-id="hook"] #text { color: #ffd166; animation: rise-2 0.4s; }`)
+      [data-composition-id="hook"] #text.caption { letter-spacing: -0.01em; }
+      [data-composition-id="hook"] #text.caption { color: #ffd166; animation: rise-2 0.4s; }
+      #text.caption { font-weight: 700; }`)
+  })
+
+  // Guard proof: write every carried rule as `[scene] #id`, its compound dropped, in writtenLook
+  // (looks.ts), and read the linked sheets last in lookSheets (edit.ts), as they did; the caption
+  // then lands 40 px and white, where it was 60 px and yellow. Leave out `within`, and a rule of a
+  // `@media` that does not hold pads it anyway.
+  test("a clip looks the same where it lands, as the page computes its style", () => {
+    const template = (id: string, inner: string) =>
+      `<template>\n  <div data-composition-id="${id}" data-width="1920" data-height="1080">\n    ${inner}\n  </div>\n</template>\n`
+    const linked =
+      '[data-composition-id="demo"] .caption { color: white; padding-left: 4px }\n.caption { text-transform: uppercase }'
+    const demo = template(
+      "demo",
+      `<p class="caption big" data-role="sub" data-start="1" data-duration="2">Hi</p>
+    <style>
+      [data-composition-id="demo"] .caption.big { font-size: 60px }
+      [data-composition-id="demo"] .caption { font-size: 40px; color: yellow }
+      .caption { font-weight: 300 !important }
+      [data-composition-id="demo"] :is(.caption, .other) { margin-top: 7px }
+      @media (min-width: 1px) { [data-composition-id="demo"] .caption[data-role="sub"] { letter-spacing: 3px } }
+      @media (max-width: 1px) { [data-composition-id="demo"] .caption { padding-right: 9px } }
+      [data-composition-id="demo"] .caption:hover { opacity: 0.5 }
+    </style>`
+    )
+    const outro = template(
+      "outro",
+      `<p class="caption" data-start="0" data-duration="1">Own</p>
+    <style>
+      .caption { color: green; font-size: 10px; font-weight: 900 }
+    </style>`
+    )
+    const sources = new Map<string, string | null>([
+      ["index.html", INDEX],
+      ["scenes/hook.html", template("hook", "")],
+      ["scenes/demo.html", demo],
+      ["scenes/outro.html", outro],
+      ["styles.css", linked],
+    ])
+    const result = moveClip(sources, "scenes/demo.html", "#0", 8500)
+    const files = applied(result, sources)
+    expect("edit" in result && result.looksMayDiffer).toEqual([])
+
+    // Each scene as the page holds it: the linked sheet, then the scene.
+    const styleOf = (file: string, words: string) => {
+      const browser = new Window()
+      const inner =
+        /<template>([\s\S]*)<\/template>/.exec(files.get(file) ?? sources.get(file) ?? "")?.[1] ??
+        ""
+      browser.document.body.innerHTML = `<style>${linked}</style>${inner}`
+      const element = [...browser.document.querySelectorAll("p")].find(
+        (each) => each.textContent === words
+      )
+      if (!element) throw new Error(`No "${words}" in ${file}.`)
+      const style = browser.getComputedStyle(element)
+      const read = [
+        "fontSize",
+        "color",
+        "fontWeight",
+        "marginTop",
+        "letterSpacing",
+        "paddingLeft",
+        "paddingRight",
+        "textTransform",
+      ] as const
+      const values = Object.fromEntries(read.map((name) => [name, style[name]]))
+      browser.close()
+      return values
+    }
+    const before = (() => {
+      const browser = new Window()
+      browser.document.body.innerHTML = `<style>${linked}</style>${/<template>([\s\S]*)<\/template>/.exec(demo)?.[1] ?? ""}`
+      const element = browser.document.querySelector("p")
+      if (!element) throw new Error("No caption.")
+      const style = browser.getComputedStyle(element)
+      const values = {
+        fontSize: style.fontSize,
+        color: style.color,
+        fontWeight: style.fontWeight,
+        marginTop: style.marginTop,
+        letterSpacing: style.letterSpacing,
+        paddingLeft: style.paddingLeft,
+        paddingRight: style.paddingRight,
+        textTransform: style.textTransform,
+      }
+      browser.close()
+      return values
+    })()
+    expect(before).toMatchObject({
+      fontSize: "60px",
+      color: "yellow",
+      fontWeight: "300",
+      letterSpacing: "3px",
+    })
+    expect(styleOf("scenes/outro.html", "Hi")).toEqual(before)
+    // The outro's own caption keeps its look.
+    expect(styleOf("scenes/outro.html", "Own")).toMatchObject({
+      fontSize: "10px",
+      color: "green",
+      fontWeight: "900",
+    })
+  })
+
+  // Guard proof: carry the rules a wrapper or a place among siblings gives in lookOf (looks.ts),
+  // rather than say so; or say nothing of them, and the caption leaves its frame's look with no
+  // word.
+  test("says when a look depends on what the clip leaves behind", () => {
+    const style = `<style>
+      [data-composition-id="demo"] .frame .caption { border-radius: 24px; }
+      [data-composition-id="demo"] .caption:first-child { margin: 0; }
+    </style>
+    <script>`
+    const sources = with_({ "scenes/demo.html": DEMO.replace("<script>", style) })
+    const result = moveClips(
+      sources,
+      [{ file: "scenes/demo.html", clip: caption("in two taps") }],
+      7000
+    )
+    expect("edit" in result && result.looksMayDiffer).toEqual([
+      { file: "scenes/outro.html", clip: { ref: "#0", tag: "p", words: "in two taps" } },
+    ])
+    expect(applied(result, sources).get("scenes/outro.html")).not.toContain("border-radius")
   })
 
   // Guard proof: return false from scriptNames (looks.ts); the talk then leaves the demo, whose

@@ -265,14 +265,18 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
 - A clip that leaves its file takes an id no other element of the video has (copies always take
   new ones), and its recording's path rebased for the new folder. What followed it there keeps its
   time. A clip that holds others, or a file two scenes play, stays put: the edit is refused whole.
-- **Its look** (`looks.ts`) goes with it, to reach it alone: every rule of its scene's `<style>`,
-  and of the linked sheets scoped to that scene, whose selector styles the element itself (its
-  tag, id, classes, attributes; no wrapper, `:first-child` or `:hover`), written in the scene it
-  lands in as `[data-composition-id="<scene>"] #<id>`, which outranks that scene's own class rules,
-  in a `<style data-carried="<id>" data-from="<scene it is from>">` of its own. Keyframes it
-  animates by keep their name when the new scene reads none other by it, and take `<name>-2`
-  otherwise. The scene's own rules never change, so its clips keep their look. Moved again, the
-  carried style goes with the clip, and is dropped when it goes home.
+- **Its look** (`looks.ts`) goes with it, to reach it alone, as the page computes it: every rule
+  that styles the element itself (its tag, id, classes, attributes and states, `:is()`, `:where()`
+  and `:not()` read for it), from the linked sheets, then its scene's `<style>`, in that order, each
+  inside the `@media`, `@supports`, `@container` or `@layer` it was in. Each is written in the scene
+  it lands in naming the element by its id once more than it did,
+  `[data-composition-id="<scene>"] p#<id>.caption.big`, so the rules keep their cascade among
+  themselves and outrank that scene's own, in a `<style data-carried="<id>" data-from="<scene it
+  is from>">` of its own. Keyframes it animates by keep their name when the new scene reads none
+  other by it, and take `<name>-2` otherwise. The scene's own rules never change, so its clips keep
+  their look. Moved again, the carried style goes with the clip, and is dropped when it goes home.
+  A rule that may style it through a wrapper, or by its place among its siblings, is not carried:
+  `looksMayDiffer` names the clip.
 - Its old scene's script cannot follow: `animationsLeft` names each clip that left a script naming
   its `#id` or a class, and `animationsJoined` each that landed where the script reaches one of its
   classes or its tag (`${scene} video`).
