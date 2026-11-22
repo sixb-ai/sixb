@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -26,6 +27,7 @@ import {
   type BackgroundCommandOutput,
   type BackgroundCommandState,
   BackgroundCommands,
+  stopLeftRunning,
 } from "../src/background-commands"
 import { BackgroundNotices, backgroundCommandsLeftRunning } from "../src/background-notices"
 import { ComputerRunner, emptyDirectory } from "../src/computer-runner"
@@ -56,9 +58,57 @@ beforeEach(async () => {
 afterEach(async () => {
   jest.useRealTimers()
   await commands.stopAll()
+  // Each command runs in a process group of its own, which outlives this process: one a test left
+  // running, passing or not, runs on after the suite. Stop every one, and fail the test that left it.
+  const leaked = groupsLeftRunning(root)
+  if (leaked.length > 0)
+    await stopLeftRunning(
+      sandbox,
+      leaked.map(({ file }) => file),
+      signal
+    )
   await sandbox.destroy()
   rmSync(root, { recursive: true, force: true })
+  if (leaked.length > 0) {
+    throw new Error(
+      `[test] It left ${leaked.length} command(s) running: ${leaked.map(({ file, group }) => `group ${group} of ${file}`).join(", ")}`
+    )
+  }
 })
+
+/** The process group a command's pid file names. */
+function groupOf(state: BackgroundCommandState): number {
+  return Number(readFileSync(state.outputPath.replace(/\.log$/, ".pid"), "utf8").split(" ")[1])
+}
+
+/** Whether any process of a group still runs. */
+function groupRunning(group: number): boolean {
+  try {
+    process.kill(-group, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** The pid files under a directory whose group still runs. */
+function groupsLeftRunning(directory: string): { file: string; group: number }[] {
+  const names = readdirSync(directory, { recursive: true }) as string[]
+  return names
+    .filter((name) => name.endsWith(".pid"))
+    .flatMap((name) => {
+      const file = join(directory, name)
+      let group = Number.NaN
+      try {
+        group = Number(readFileSync(file, "utf8").split(" ")[1])
+      } catch {
+        return []
+      }
+      return Number.isSafeInteger(group) && group > 1 && groupRunning(group)
+        ? [{ file, group }]
+        : []
+    })
+}
 
 /** One turn of the real event loop, which fake timers leave alone: I/O completes on it. */
 function loopTurn(): Promise<void> {
@@ -179,24 +229,25 @@ describe("background commands", () => {
 
   // Removal proof: drop the SIGKILL and the abort after the grace period in BackgroundCommands'
   // stop; the stop then waits for a command that ignores SIGTERM forever.
+  //
+  // Real time, under a short grace period. Fake time would run out the timeouts of the calls that
+  // signal its group too: neither signal then reaches it, the held call's abort ends the wrapper
+  // with 137 all the same, and the command runs on, its stop reading as done.
   test("kill a command that ignores SIGTERM once its grace period elapsed", async () => {
-    const started = await commands.start({
+    const graced = new BackgroundCommands({ stopGraceMs: 200 })
+    const started = await graced.start({
       handle,
       command: "trap '' TERM; echo ready; while true; do sleep 0.05; done",
     })
     await waitFor(() => readFileSync(started.outputPath, "utf8").includes("ready"))
+    const group = groupOf(started)
 
-    jest.useFakeTimers()
-    let stopped: BackgroundCommandState | undefined
-    const stopping = commands.stop(started.id).then((state) => {
-      stopped = state
-      return state
-    })
-    // Its signals go through the sandbox, on the real event loop: turn it, the grace period
-    // elapsing in fake time, until the stop returned.
-    await until(() => stopped !== undefined, 500)
-
-    expect(await stopping).toMatchObject({ status: "stopped", exitCode: 137 })
+    try {
+      expect(await graced.stop(started.id)).toMatchObject({ status: "stopped", exitCode: 137 })
+      await waitFor(() => !groupRunning(group), { label: "the command's group exits" })
+    } finally {
+      await graced.stopAll()
+    }
   })
 
   // Removal proof: drop `await entry.started` from BackgroundCommands' #stop. The stop then finds
@@ -291,6 +342,12 @@ describe("background commands", () => {
 
     expect(commands.get(id)).toMatchObject({ status: "stopped", timedOut: true })
     expect(notices.take()).toContain("(`sleep 30`) was stopped at the sandbox's time limit after")
+
+    // Past its bound the held call's abort ended the wrapper alone; the SIGKILL that follows ends
+    // its group, through the sandbox, on the real loop. A test that ended here would outrun it.
+    jest.useRealTimers()
+    const group = groupOf(started as BackgroundCommandState)
+    await waitFor(() => !groupRunning(group), { label: "the command's group exits" })
   })
 
   test("run in the directory named, relative to the workspace", async () => {
