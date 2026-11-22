@@ -4,6 +4,7 @@ import { measureAgentContextHistory } from "../src/agents/context-compaction"
 import { apportionAgentContextTokens } from "../src/agents/context-parts"
 import type { AgentMessage } from "../src/agents/message"
 import { projectAgentThreadModelContext } from "../src/agents/thread-context-projection"
+import { stableJsonStringify } from "../src/json"
 import type { ModelMessage } from "../src/models"
 import type { AgentContextCheckpointRecord, AgentMessageRecord } from "../src/storage/agents"
 
@@ -121,6 +122,35 @@ describe("measureAgentStepRequest", () => {
       toolResults: bytes("- Prefers euros") + bytes("notes"),
     })
     expect(request.images).toBe(1)
+  })
+})
+
+describe("measureAgentStepRequest, with replayed provider state", () => {
+  // Reproduce: weigh provider state as its JSON in context-parts.ts, not by providerStateBytes; a
+  // step then records 27,000 bytes of encrypted reasoning its estimate does not count.
+  test("weighs it as the estimate does: a reasoning item as nothing, a tool's result as JSON", () => {
+    const result = { block: { type: "web_search_tool_result", content: [{ title: "Bun" }] } }
+    const request = measureAgentStepRequest({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Done." },
+            {
+              type: "provider-state",
+              providerId: "openai",
+              data: { item: { type: "reasoning", encrypted_content: "g".repeat(27_000) } },
+            },
+            { type: "provider-state", providerId: "anthropic", data: result },
+          ],
+        },
+      ],
+      tools: [],
+    })
+
+    expect(request.history).toEqual({
+      messages: bytes("Done.") + bytes(stableJsonStringify(result)),
+    })
   })
 })
 

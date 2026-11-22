@@ -33,8 +33,7 @@ const CALIBRATION_MIN_TEXT_TOKENS = 1_000
 /**
  * How far a thread's measured rate may move from the rate its run started from. Down is the safe
  * side and goes to half. Up only a quarter: stored bytes the provider bills for less (replayed
- * reasoning, provider state) raise the measured rate, and an estimate too low crosses the window
- * unseen.
+ * reasoning) raise the measured rate, and an estimate too low crosses the window unseen.
  */
 const CALIBRATION_MIN_FACTOR = 0.5
 const CALIBRATION_MAX_FACTOR = 1.25

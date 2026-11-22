@@ -1,4 +1,4 @@
-import { stableJsonStringify } from "../json"
+import { isJsonObject, type JsonValue, stableJsonStringify } from "../json"
 import type { ModelMessage, ModelResponseFormat, ModelToolSpecification } from "../models"
 import type { AgentMessageRecord } from "../storage/agents/types"
 import { AGENT_CONTINUATION_INSTRUCTION, agentMessageSteps } from "./adapters"
@@ -18,8 +18,9 @@ import { isAgentToolResult } from "./tool-result"
 /**
  * 2: text counts in UTF-8 bytes at the model's own bytes per token; retained attachments, the
  * images tools returned and stored model-facing tool output count as the model reads them.
+ * 3: a replayed reasoning item weighs nothing (see providerStateBytes).
  */
-export const AGENT_CONTEXT_ESTIMATOR_VERSION = 2 as const
+export const AGENT_CONTEXT_ESTIMATOR_VERSION = 3 as const
 
 const REQUEST_OVERHEAD_TOKENS = 8
 const MESSAGE_OVERHEAD_TOKENS = 8
@@ -212,6 +213,19 @@ export function measureAgentModelRequest(request: {
 }
 
 /**
+ * What replayed provider state weighs as text. A model's reasoning item weighs nothing: its text is
+ * the reasoning part beside it, counted already, and the rest is replay data a provider bills far
+ * below its bytes. OpenAI's and Gemini's encrypted reasoning runs about 27 KB an item for a few
+ * dozen tokens: counted, a GPT request measured 10.65 bytes per token, out of the band a rate is
+ * stored in, and threads that replayed such items compacted at two to four times what their calls
+ * cost. Any other state, such as a provider tool's call or result, is content the model reads.
+ */
+export function providerStateBytes(data: JsonValue): number {
+  const item = isJsonObject(data) ? data.item : undefined
+  return isJsonObject(item) && item.type === "reasoning" ? 0 : utf8Bytes(stableJsonStringify(data))
+}
+
+/**
  * Weigh one outgoing model request the same way as a stored conversation: the same parts, the
  * same overheads. A file part counts by its name and media type only; what an attached file costs
  * is the caller's call.
@@ -249,7 +263,7 @@ export function measureModelRequest(request: {
           size.bytes += utf8Bytes(`${part.filename ?? ""} ${part.mediaType}`)
           break
         case "provider-state":
-          size.bytes += utf8Bytes(stableJsonStringify(part.data))
+          size.bytes += providerStateBytes(part.data)
           break
         case "tool-call":
           size.tokens += TOOL_OVERHEAD_TOKENS
@@ -353,7 +367,7 @@ function measureMessage(
         addBytes(size, "messages", utf8Bytes(stableJsonStringify(part.context)))
         break
       case "provider-state":
-        addBytes(size, "messages", utf8Bytes(stableJsonStringify(part.data)))
+        addBytes(size, "messages", providerStateBytes(part.data))
         break
       case "tool-call":
         size.tokens += TOOL_OVERHEAD_TOKENS

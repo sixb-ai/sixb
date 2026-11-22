@@ -1,6 +1,7 @@
 import type { JsonValue } from "../json"
 import { stableJsonStringify } from "../json"
 import type { ModelMessage, ModelToolSpecification } from "../models"
+import { providerStateBytes } from "./context-compaction"
 import { agentContextFileKind } from "./context-files"
 import { AGENT_IMAGE_INPUT_TOKENS } from "./inline-images"
 import type {
@@ -103,7 +104,7 @@ export function measureAgentStepRequest(input: {
               add(history, "messages", utf8Bytes(part.text))
               break
             case "provider-state":
-              add(history, "messages", utf8Bytes(stableJsonStringify(part.data)))
+              add(history, "messages", providerStateBytes(part.data))
               break
             case "tool-call":
               add(

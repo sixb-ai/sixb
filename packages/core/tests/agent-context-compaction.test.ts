@@ -8,6 +8,7 @@ import {
   selectAgentContextCompactionBoundary,
   shouldCompactAgentContext,
 } from "../src/agents"
+import { stableJsonStringify } from "../src/json"
 import type { AgentContextCheckpointRecord, AgentMessageRecord } from "../src/storage/agents"
 
 const bytesPerToken = 4
@@ -26,19 +27,57 @@ function message(seq: number, role: AgentMessageRecord["role"], text: string): A
   }
 }
 
+/** An OpenAI encrypted reasoning item of `bytes`, as a provider stores it to replay it. */
+function encryptedReasoning(bytes: number) {
+  return {
+    type: "provider-state" as const,
+    providerId: "openai",
+    data: { item: { type: "reasoning", summary: [], encrypted_content: "g".repeat(bytes) } },
+  }
+}
+
+/** An Anthropic web fetch tool's result: the page it fetched, which the model reads. */
+const fetchedPage = {
+  type: "provider-state" as const,
+  providerId: "anthropic",
+  data: {
+    block: {
+      type: "web_fetch_tool_result",
+      tool_use_id: "srvtoolu_1",
+      content: {
+        type: "web_fetch_result",
+        url: "https://example.com",
+        content: "page ".repeat(2_000),
+      },
+    },
+  },
+}
+
 describe("agent context token estimation", () => {
-  test("counts opaque provider state", () => {
-    // Regression proof: remove provider-state from the switch in context-compaction.ts.
+  // Reproduce: return the item's JSON bytes from providerStateBytes; the encrypted reasoning,
+  // which the provider bills a few dozen tokens for, then counts as 27,000 bytes.
+  test("weighs a replayed reasoning item as nothing", () => {
     const base = message(2, "assistant", "answer")
     const withState: AgentMessageRecord = {
       ...base,
-      parts: [
-        ...base.parts,
-        { type: "provider-state", providerId: "anthropic", data: { opaque: "secret".repeat(100) } },
-      ],
+      parts: [...base.parts, encryptedReasoning(27_000)],
     }
-    expect(estimateAgentContextMessagesTokens([withState], bytesPerToken).tokens).toBeGreaterThan(
+    expect(estimateAgentContextMessagesTokens([withState], bytesPerToken).tokens).toBe(
       estimateAgentContextMessagesTokens([base], bytesPerToken).tokens
+    )
+  })
+
+  // Reproduce: weigh all provider state as nothing in providerStateBytes; the page a provider tool
+  // fetched, which the model reads and the provider bills, then counts for nothing.
+  test("counts other provider state, as a provider tool's result, as the model reads it", () => {
+    const base = message(2, "assistant", "answer")
+    const withPage: AgentMessageRecord = { ...base, parts: [...base.parts, fetchedPage] }
+    const asText: AgentMessageRecord = {
+      ...base,
+      parts: [...base.parts, { type: "text", text: stableJsonStringify(fetchedPage.data) }],
+    }
+    expect(estimateAgentContextMessagesTokens([withPage], bytesPerToken).tokens).toBe(
+      estimateAgentContextMessagesTokens([asText], bytesPerToken).tokens
     )
   })
   test("counts how a held call ended as the model reads it", () => {

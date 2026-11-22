@@ -7,7 +7,10 @@ import {
   measureModelRequest,
   readAgentContextTokenRates,
 } from "../src/agents"
-import { measureAgentContextRequest } from "../src/agents/context-compaction"
+import {
+  measureAgentContextRequest,
+  measureAgentModelRequest,
+} from "../src/agents/context-compaction"
 import {
   AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
   type AgentContextTokenRateSample,
@@ -191,6 +194,50 @@ describe("a model's learned rate", () => {
 
   const samples = (...rates: number[]): AgentContextTokenRateSample[] =>
     rates.map((rate) => ({ bytes: Math.round(rate * 10_000), tokens: 10_000 }))
+
+  // Reproduce: weigh provider state as its JSON in measureModelRequest, not by providerStateBytes.
+  // This request, the last call of a GPT-6.2 Sol run in production, then measures 10.65 bytes per
+  // token, which storage refuses: the model learns only from runs that replayed less.
+  test("is measured on a request's text, not on the reasoning it replays", async () => {
+    // 59,117 input tokens billed; at the 4.54 bytes per token GPT-6.1 Sol measures, their text.
+    const inputTokens = 59_117
+    const replayed = [26_514, 27_378, 27_572, 28_397, 28_972, 29_334, 30_194, 30_636, 31_076]
+    replayed.push(31_702, 32_333, 36_092)
+    const request = {
+      messages: [
+        { role: "system", content: text(Math.round(inputTokens * 4.54)) },
+        ...replayed.map(
+          (bytes): ModelMessage => ({
+            role: "assistant",
+            content: [
+              {
+                type: "provider-state",
+                providerId: "openai",
+                data: { item: { type: "reasoning", encrypted_content: "g".repeat(bytes) } },
+              },
+            ],
+          })
+        ),
+      ] satisfies ModelMessage[],
+      tools: [],
+    }
+    const sample = measureAgentContextTokenRate({
+      size: measureAgentModelRequest(request),
+      inputTokens,
+    })
+    if (!sample) throw new Error("Expected a measurement.")
+    expect(sample.bytes / sample.tokens).toBeCloseTo(4.55, 2)
+
+    const tokenRates = project()
+    await recordAgentContextTokenRate({
+      tokenRates,
+      projectId: "project",
+      runId: "run_sol",
+      sample: { ...model, ...sample },
+      measuredAt: new Date(t0),
+    })
+    expect(await learned(tokenRates)).toBeCloseTo(4.55, 2)
+  })
 
   test("starts a model no run measured at a rate denser than any tokenizer's", async () => {
     // Removal proof: return the median from learnedAgentContextBytesPerToken for an empty window;
