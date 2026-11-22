@@ -28,6 +28,13 @@ Sixb packages are versioned independently. Each release entry names the packages
   priced instead of leaving the call unpriceable. Earlier OpenAI models keep a conversation's cache
   for 24 hours at no extra price, and every OpenAI-style request names the conversation's
   `prompt_cache_key`. See [prompt caching](models/azure-ai-foundry/README.md#prompt-caching).
+- `sixb deploy` only checks the server and ships releases. A release starts in its own slot beside
+  the live one, takes traffic once it is healthy, and moves the routes and singletons back if it
+  fails after the switch; a release with storage migrations still stops the live one while they
+  run, and starts it again if the release fails. The server runs the deploy, so a
+  dropped connection doesn't stop it, and a deploy loads the project once to migrate and check it.
+  `sixb deploy check` checks a short list of [host requirements](docs/deployment/host-requirements.md),
+  Chromium's libraries for projects that use Playwright among them.
 
 ### Upgrade notes
 
@@ -46,6 +53,23 @@ Sixb packages are versioned independently. Each release entry names the packages
   every protocol. Reasoning recorded before the upgrade is not replayed to the next turn of a
   conversation, since it was recorded for the project's path. A Claude call's cost reservation
   holds the one-hour cache write rate, twice the input price.
+- `sixb deploy setup`, `sixb deploy access` and `sixb deploy ci` are gone: a server comes from your
+  own provisioning and meets the [host requirements](docs/deployment/host-requirements.md), and
+  [CI deploys](docs/deployment/github-actions.md) with a key or Tailscale you give it. A server set
+  up before, running one deployment, keeps working as it is.
+- `SshTarget` keeps `host` and `user` (still `"sixb"` by default): one deployment per server, on
+  fixed ports. Remove `ports` and `standbyPorts` from `sixb.deploy.ts`.
+- The first deploy after upgrading adopts the running deployment as its live slot, with no downtime.
+  `@sixb/cli` and `@sixb/deploy-ssh` upgrade together: a commit whose `@sixb/deploy-ssh` is older
+  can't be deployed with `--ref` by the new CLI.
+- An env source no longer creates server tokens (`createServerToken` left the `EnvSource`
+  contract). Put the token on the server when you provision it. A server reads with
+  `read(env, { server: true, token })`, and a source that reads with the server's own identity sets
+  `serverNeedsToken: false`, so the server needs no token file: Azure Key Vault does with
+  `server: { identity: "managed" }`.
+- `DeployTarget` loses `setup`, `access` and `ci`, a check's status is `ok`, `fail` or `warning`,
+  and `DeployCheckContext` gains `chromium` and `envToken`. A check can carry `commands` that fix
+  it, which `sixb deploy check` prints for someone with root to run on the server.
 
 ## 2026-11-19 — Sixb 0.2.6
 

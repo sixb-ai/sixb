@@ -134,89 +134,34 @@ export interface DeployTarget {
   ): Promise<void>
   /** What stands between the target and a working deploy of the release, changing nothing. */
   check(release: DeployRelease, context: DeployCheckContext): Promise<readonly DeployCheck[]>
-  /** Prepares the target for the release, fixing what `check` reports as fixable. */
-  setup?(release: DeployRelease, context: DeploySetupContext): Promise<void>
   /**
    * Runs a script against the deployed project, as `sixb run` would there, with the environment the
    * deployment's services start from and the script's output on this terminal. Resolves with its
    * exit code; rejects only when the target cannot run it.
    */
   run?(script: DeployScript, context: DeployOperationContext): Promise<number>
-  /** Who may deploy and operate the deployment, for a target reached with keys. */
-  readonly access?: DeployAccess
-  /** Credentials for a CI job that deploys, for a target reached with keys. */
-  readonly ci?: DeployCi
 }
 
 export interface DeployCheck {
   readonly id: string
   /** What was checked, such as `"SSH"` or `"api DNS"`. */
   readonly label: string
-  /**
-   * `fixable`: `sixb deploy setup` fixes it. `manual`: only you can, as `remedy` says. Both stop
-   * a deploy; a `warning` does not.
-   */
-  readonly status: "ok" | "fixable" | "manual" | "warning"
+  /** `fail` stops a deploy until `remedy` is done; a `warning` does not. */
+  readonly status: "ok" | "fail" | "warning"
   readonly detail: string
   /** What to do about it, when the status is not `ok`. */
   readonly remedy?: string
+  /** Shell commands that fix it, for someone with administrator rights on the target to run once. */
+  readonly commands?: readonly string[]
 }
 
 export interface DeployCheckContext extends DeployOperationContext {
   /** The project's directory inside its repository: `.` at the root. */
   readonly projectPath: string
-}
-
-export interface DeploySetupContext extends DeployCheckContext {
-  /** The account with sudo that prepares a server, for a target that needs one. */
-  readonly admin?: string
-  /** A public key file to authorize for deploys, instead of the one the target would pick. */
-  readonly key?: string
-  /** Creates the token `steps.env` reads with, for a target that doesn't have one yet. */
-  readonly createEnvToken?: () => Promise<string>
-  /** A line of progress for the person running setup. */
-  write(line: string): void
-}
-
-export interface DeployAccess {
-  list(context: DeployOperationContext): Promise<readonly DeployAccessKey[]>
-  /** Authorizes a public key, given as its text (`ssh-ed25519 AAAA… comment`). */
-  add(key: string, context: DeployOperationContext): Promise<DeployAccessKey>
-  /** Revokes the keys whose fingerprint or comment matches, and returns them. */
-  remove(match: string, context: DeployOperationContext): Promise<readonly DeployAccessKey[]>
-}
-
-export interface DeployAccessKey {
-  readonly type: string
-  readonly fingerprint: string
-  readonly comment: string
-  /** Whether the key is limited to running commands: no forwarding, no terminal. */
-  readonly restricted: boolean
-}
-
-/**
- * Lets a CI job deploy. `sixb deploy ci` stores what `create` returns as the CI system's secrets and
- * writes the workflow around it.
- */
-export interface DeployCi {
-  /**
-   * Creates a credential for one CI job, such as `"github:acme/shop"`, and authorizes it on the
-   * target next to the job's earlier ones. Running it again for the same job rotates the credential.
-   */
-  create(job: string, context: DeployOperationContext): Promise<DeployCiCredential>
-}
-
-export interface DeployCiCredential {
-  /** Describes the credential, such as its key's fingerprint. */
-  readonly description: string
-  /** What the CI job needs, by environment variable name. CI stores them as secrets. */
-  readonly secrets: Readonly<Record<string, string>>
-  /** Shell lines that install the credential on the CI runner, with `secrets` in the environment. */
-  readonly install: readonly string[]
-  /** Revokes the job's earlier credentials once CI holds this one, and returns them. */
-  retireOthers(): Promise<readonly DeployAccessKey[]>
-  /** Revokes this credential, when CI could not store it. */
-  revoke(): Promise<void>
+  /** The project prints with Chromium through Playwright, so the target needs its libraries. */
+  readonly chromium: boolean
+  /** The project's env source reads on the server with a token file, not an identity of its own. */
+  readonly envToken: boolean
 }
 
 export interface DeployListenAddress {

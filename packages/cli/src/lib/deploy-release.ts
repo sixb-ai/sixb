@@ -101,10 +101,9 @@ export function buildDeployRelease(
     steps: {
       ...(options.envFromSource ? { env: sixb("env", "pull", "--env", "prod") } : {}),
       build: [sixb("build")],
-      // The order `docs/deployment` gives. `check` probes every provider, so a broker or queue
-      // the services cannot reach fails the deploy instead of passing for healthy; it needs the
-      // schema migrated first.
-      beforeStart: [sixb("db", "migrate"), sixb("check"), sixb("lake", "check")],
+      // One project load: migrate, then probe every provider, so a broker or queue the services
+      // cannot reach fails the deploy instead of passing for healthy, then the lake's datasets.
+      beforeStart: [sixb("check", "--migrate", "--lake")],
     },
     services: [
       ...enabled.map((service) => sixbService(config, service, env, http)),

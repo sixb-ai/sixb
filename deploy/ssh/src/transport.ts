@@ -199,16 +199,32 @@ export function sshError(destination: string, error: unknown): Error {
   }
   const output = error.message
   const host = destination.split("@").at(-1) ?? destination
-  const reason = /REMOTE HOST IDENTIFICATION HAS CHANGED/.test(output)
-    ? `${host} answered with a host key other than the one on record. If the server was rebuilt, remove the old key with \`ssh-keygen -R ${host}\` and connect once to accept the new one; for CI, run \`sixb deploy ci\` again. Otherwise, something else is answering at that address: do not deploy to it.`
-    : /Host key verification failed/.test(output)
-      ? `The host key for ${host} is not trusted yet. Connect once with \`ssh ${destination}\`, check the fingerprint, and accept it.`
-      : /Permission denied/.test(output)
-        ? `The server refused your SSH key for ${destination}. Load it into your SSH agent, or ask someone with access to authorize it.`
-        : /Could not resolve hostname/.test(output)
-          ? `${host} does not resolve. Check the target's host.`
-          : /Connection refused|timed out|No route to host/.test(output)
-            ? `Could not reach ${host} over SSH.`
-            : `SSH to ${destination} failed.`
-  return new RemoteScriptError(`[SshTarget] ${reason}\n${output}`, error.exitCode)
+  return new RemoteScriptError(
+    `[SshTarget] ${sshFailureReason(output, destination, host)}\n${output}`,
+    error.exitCode
+  )
+}
+
+function sshFailureReason(output: string, destination: string, host: string): string {
+  if (/Tailscale SSH requires an additional check/.test(output)) {
+    return `Tailscale SSH wants you to sign in again before reaching ${destination}: open the link below, then try again.`
+  }
+  if (/tailnet policy does not permit/.test(output)) {
+    return `The tailnet's SSH rules don't let you reach ${destination}. Ask a tailnet admin to allow it.`
+  }
+  if (/REMOTE HOST IDENTIFICATION HAS CHANGED/.test(output)) {
+    return `${host} answered with a host key other than the one on record. If the server was rebuilt, remove the old key with \`ssh-keygen -R ${host}\` and connect once to accept the new one. Otherwise, something else is answering at that address: do not deploy to it.`
+  }
+  if (/Host key verification failed/.test(output)) {
+    return `The host key for ${host} is not trusted yet. Connect once with \`ssh ${destination}\`, check the fingerprint, and accept it.`
+  }
+  if (/Permission denied/.test(output)) {
+    return `The server refused your SSH key for ${destination}. Load it into your SSH agent, or ask someone with access to the server to allow it.`
+  }
+  if (/Could not resolve hostname/.test(output))
+    return `${host} does not resolve. Check the target's host.`
+  if (/Connection refused|timed out|No route to host/.test(output)) {
+    return `Could not reach ${host} over SSH.`
+  }
+  return `SSH to ${destination} failed.`
 }

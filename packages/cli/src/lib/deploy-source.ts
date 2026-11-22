@@ -48,6 +48,21 @@ export async function packSource(projectDir: string, ref = "HEAD"): Promise<Pack
   }
 }
 
+/** The packages a project prints with Chromium through. */
+const CHROMIUM_PACKAGES = ["playwright", "playwright-core"]
+
+/** Whether the project depends on Playwright, so its server needs Chromium's libraries. */
+export async function usesChromium(projectDir: string): Promise<boolean> {
+  const manifest = (await Bun.file(join(projectDir, "package.json"))
+    .json()
+    .catch(() => null)) as {
+    readonly dependencies?: Readonly<Record<string, string>>
+    readonly optionalDependencies?: Readonly<Record<string, string>>
+  } | null
+  const dependencies = { ...manifest?.dependencies, ...manifest?.optionalDependencies }
+  return CHROMIUM_PACKAGES.some((name) => name in dependencies)
+}
+
 /**
  * The Bun version the project pins with `packageManager` (`"bun@1.4.2"`) in its `package.json` or
  * the nearest one above it, up to the repository root; else the Bun running this CLI. Read from the

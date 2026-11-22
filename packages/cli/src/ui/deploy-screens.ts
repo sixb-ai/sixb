@@ -1,10 +1,4 @@
-import type {
-  DeployAccessKey,
-  DeployCheck,
-  DeployCommand,
-  DeployRelease,
-  DeployStatus,
-} from "@sixb/core/deploy"
+import type { DeployCheck, DeployCommand, DeployRelease, DeployStatus } from "@sixb/core/deploy"
 import {
   commands,
   header,
@@ -196,8 +190,7 @@ export function deployStatusView({
 
 const CHECK_STATUS = {
   ok: "ok",
-  fixable: "warn",
-  manual: "idle",
+  fail: "idle",
   warning: "warn",
 } as const satisfies Record<DeployCheck["status"], Status>
 
@@ -210,13 +203,15 @@ export function deployChecksView({
   location: string
   checks: readonly DeployCheck[]
 }): string {
-  const blocking = checks.filter((check) => check.status === "fixable" || check.status === "manual")
+  const blocking = checks.filter((check) => check.status === "fail")
   const warnings = checks.filter((check) => check.status === "warning")
-  const next = blocking.some((check) => check.status === "fixable")
-    ? "sixb deploy setup"
-    : blocking.length > 0
-      ? "the steps above, then sixb deploy check"
-      : "sixb deploy"
+  const next = blocking.length > 0 ? "the steps above, then sixb deploy check" : "sixb deploy"
+  // Unwrapped and together, so they paste into a root shell on the server as they are.
+  const fixes = [
+    ...new Set(
+      checks.filter((check) => check.status !== "ok").flatMap((check) => check.commands ?? [])
+    ),
+  ]
 
   return screen(
     header("deploy check", location),
@@ -237,105 +232,9 @@ export function deployChecksView({
           `${name} is ready to deploy`,
           warnings.length > 0 ? `${warnings.length} to look at` : undefined
         ),
+    fixes.length > 0 ? section("Run once on the server, as root", commands(fixes)) : undefined,
     nextStep(next)
   )
-}
-
-export function deployCiView({
-  name,
-  repo,
-  environment,
-  branch,
-  credential,
-  secrets,
-  retired,
-  workflow,
-  token,
-}: {
-  name: string
-  repo: string
-  environment: string
-  branch: string
-  credential: string
-  secrets: readonly string[]
-  retired: readonly DeployAccessKey[]
-  workflow: { readonly path: string; readonly state: "written" | "unchanged" | "kept" }
-  token: {
-    readonly name: string
-    readonly submodules: readonly {
-      readonly path: string
-      readonly url: string
-      readonly repo: string | null
-    }[]
-  } | null
-}): string {
-  const items: Row[] = [
-    { label: "Key", status: "ok", value: credential },
-    { label: "Secrets", status: "ok", value: secrets.join(", ") },
-    {
-      label: "Older keys",
-      status: "ok",
-      value:
-        retired.length === 0
-          ? "none to revoke"
-          : `revoked ${retired.map((key) => key.fingerprint).join(", ")}`,
-    },
-    {
-      label: "Workflow",
-      status: "ok",
-      value: {
-        written: workflow.path,
-        unchanged: `${workflow.path} (unchanged)`,
-        kept: `${workflow.path} (yours, kept: it differs from what this command writes; delete it and run again to start over)`,
-      }[workflow.state],
-    },
-    ...(token
-      ? [
-          {
-            label: "Token",
-            status: "idle" as const,
-            value: `${token.submodules.map((submodule) => submodule.path).join(", ")} ${token.submodules.length === 1 ? "is" : "are"} private, and CI cannot read ${token.submodules.length === 1 ? "it" : "them"} with its own token.`,
-            remedy: `Create a fine-grained token with Contents: read on ${token.submodules.map((submodule) => submodule.repo ?? submodule.url).join(", ")}, then run \`gh secret set ${token.name} --env ${environment} --repo ${repo}\`.`,
-          },
-        ]
-      : []),
-  ]
-  const next =
-    workflow.state === "written"
-      ? `commit ${workflow.path} and push to ${branch}.`
-      : `push to ${branch} to deploy.`
-
-  return screen(
-    stack(header("deploy ci", repo), tone.muted(`environment ${environment}`)),
-    rows(items),
-    headline(
-      token ? "warn" : "ok",
-      `${name} deploys from GitHub Actions on every push to ${branch}`
-    ),
-    nextStep(next)
-  )
-}
-
-export function deployAccessView({
-  title,
-  keys,
-}: {
-  title: string
-  keys: readonly DeployAccessKey[]
-}): string {
-  // Two lines a key: a fingerprint and a long comment do not fit side by side in 80 columns.
-  const list =
-    keys.length === 0
-      ? tone.muted("No keys.")
-      : keys
-          .map((key) =>
-            stack(
-              `${key.comment || "(no comment)"}${key.restricted ? tone.warn("  restricted") : ""}`,
-              tone.muted(`${key.type} ${key.fingerprint}`)
-            )
-          )
-          .join("\n")
-  return screen(header(), list, headline("ok", title))
 }
 
 /** The one thing to do next: a command to run, or what to do in words. */

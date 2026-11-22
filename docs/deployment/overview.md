@@ -4,7 +4,7 @@ A deployed Sixb project runs as several services, such as the API, your app, and
 
 There are two ways to run them:
 
-- **[Deploy to a server](servers.md)** with `sixb deploy`. Describe the deployment in `sixb.deploy.ts`, and the CLI sets up a Linux server you reach over SSH, sends each commit, and runs and routes every service for you. It can also [deploy from GitHub Actions](github-actions.md) on every push.
+- **[Deploy to a server](servers.md)** with `sixb deploy`. Describe the deployment in `sixb.deploy.ts`, and the CLI sends each commit to a Linux server you reach over SSH, then runs and routes every service for you, without downtime. It can also [deploy from GitHub Actions](github-actions.md) on every push.
 - **Run the services yourself** on the platform of your choice, as the rest of this page describes.
 
 Either way, start by preparing your configuration.

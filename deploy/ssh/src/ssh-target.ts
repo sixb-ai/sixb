@@ -1,11 +1,7 @@
 import { isIPv6 } from "node:net"
 import type {
-  DeployAccess,
-  DeployAccessKey,
   DeployCheck,
   DeployCheckContext,
-  DeployCi,
-  DeployCiCredential,
   DeployContext,
   DeployControlAction,
   DeployHttpServiceName,
@@ -14,15 +10,12 @@ import type {
   DeployOperationContext,
   DeployRelease,
   DeployScript,
-  DeploySetupContext,
   DeploySource,
   DeployStatus,
   DeployTarget,
 } from "@sixb/core/deploy"
-import { addKey, listKeys, removeKeys, removeKeysWhere } from "./access"
-import { checkDns, ENV_TOKEN_CHECK, runChecks } from "./check"
-import { generateCiKey, knownHostsLines, readHostKeys, renderCiInstall } from "./ci"
-import { ENV_TOKEN_FILE } from "./layout"
+import { checkDns, checkHost } from "./check"
+import { SLOT_PORTS } from "./layout"
 import {
   controlServices,
   deployRelease,
@@ -30,55 +23,37 @@ import {
   runDeployScript,
   streamLogs,
 } from "./operations"
-import { ensureEnvToken, pickPublicKey, renderAdminScript } from "./setup"
-import { shellQuote } from "./shell"
 import { resolveSshConfig } from "./ssh-config"
-import { RemoteScriptError, type RemoteShell, SshShell } from "./transport"
+import { type RemoteShell, SshShell } from "./transport"
 
 export interface SshTargetOptions {
   /** The server: a hostname, an IP address, or a `Host` alias from your SSH config. */
   readonly host: string
-  /**
-   * The Linux user the deployment runs as. Projects under one user can read each other's files,
-   * so give a project its own user to wall it off from the others on the server. Defaults to
-   * `"sixb"`.
-   */
+  /** The account the deployment logs in and runs as, never `root`. Defaults to `"sixb"`. */
   readonly user?: string
-  /**
-   * Local ports for the HTTP services, which Caddy on the server forwards to. Set them when
-   * projects share a server, so that each has its own. Defaults: app 3001, api 3002.
-   */
-  readonly ports?: Readonly<Partial<Record<DeployHttpServiceName, number>>>
-  /**
-   * Second local port pair for blue-green cutovers while the active slot keeps serving. Defaults
-   * to `ports` plus 10 (app 3011, api 3012).
-   */
-  readonly standbyPorts?: Readonly<Partial<Record<DeployHttpServiceName, number>>>
 }
-
-const OPTIONS = ["host", "user", "ports", "standbyPorts"] as const
 
 const DEFAULT_USER = "sixb"
 
-const DEFAULT_PORTS = {
-  app: 3001,
-  api: 3002,
-} as const satisfies Record<DeployHttpServiceName, number>
-
-/** Services listen on loopback only: Caddy on the same server is their one way in. */
-const LISTEN_HOST = "127.0.0.1"
+/** Options earlier versions took, and why they went. */
+const REMOVED_OPTIONS: Readonly<Record<string, string>> = {
+  ports: "a server runs one deployment, on fixed ports",
+  standbyPorts: "a server runs one deployment, on fixed ports",
+}
 
 /** A Linux account name `useradd` accepts. */
 const USER_PATTERN = /^[a-z_][a-z0-9_-]{0,31}$/
+
+/** Services listen on loopback only: Caddy on the same server is their one way in. */
+const LISTEN_HOST = "127.0.0.1"
 
 /** A server reached over SSH, where Caddy routes each domain to its service. */
 export class SshTarget implements DeployTarget {
   readonly kind = "ssh"
   readonly host: string
+  /** The account the deployment logs in and runs as. */
   readonly user: string
   readonly location: string
-  readonly #ports: Readonly<Record<DeployHttpServiceName, number>>
-  readonly #standbyPorts: Readonly<Record<DeployHttpServiceName, number>>
 
   constructor(options: SshTargetOptions) {
     if (typeof options !== "object" || options === null) {
@@ -87,40 +62,24 @@ export class SshTarget implements DeployTarget {
       )
     }
     for (const key of Object.keys(options)) {
-      if (!(OPTIONS as readonly string[]).includes(key)) {
-        throw new Error(`[SshTarget] Unknown option '${key}'. Available: ${OPTIONS.join(", ")}.`)
+      const removed = REMOVED_OPTIONS[key]
+      if (removed) throw new Error(`[SshTarget] Remove \`${key}\`: ${removed}.`)
+      if (key !== "host" && key !== "user") {
+        throw new Error(`[SshTarget] Unknown option '${key}'. Available: host, user.`)
       }
     }
 
     this.host = validateHost(options.host)
     this.user = validateUser(options.user ?? DEFAULT_USER)
     this.location = `${this.user}@${this.host}`
-    const primary = { ...DEFAULT_PORTS, ...validatePorts(options.ports, "ports") }
-    const standbyDefaults: Record<DeployHttpServiceName, number> = {
-      app: defaultStandbyPort(primary.app),
-      api: defaultStandbyPort(primary.api),
-    }
-    const standby = { ...standbyDefaults, ...validatePorts(options.standbyPorts, "standbyPorts") }
-    assertDistinctPorts(primary, standby)
-    this.#ports = primary
-    this.#standbyPorts = standby
   }
 
   listenAddress(service: DeployHttpServiceName): DeployListenAddress {
-    return { host: LISTEN_HOST, port: this.#ports[service] }
-  }
-
-  standbyListenAddress(service: DeployHttpServiceName): DeployListenAddress {
-    return { host: LISTEN_HOST, port: this.#standbyPorts[service] }
+    return { host: LISTEN_HOST, port: SLOT_PORTS.blue[service] }
   }
 
   deploy(release: DeployRelease, source: DeploySource, context: DeployContext): Promise<void> {
-    return this.#connected((shell) =>
-      deployRelease(shell, this.user, release, source, context, {
-        blue: this.#ports,
-        green: this.#standbyPorts,
-      })
-    )
+    return this.#connected((shell) => deployRelease(shell, release, source, context))
   }
 
   status(context: DeployOperationContext): Promise<DeployStatus> {
@@ -152,135 +111,23 @@ export class SshTarget implements DeployTarget {
     try {
       server = await this.#connected(async (shell) => [
         { id: "ssh", label: "SSH", status: "ok" as const, detail: this.location },
-        ...(await runChecks(shell, {
+        ...(await checkHost(shell, {
           name: context.name,
           projectPath: context.projectPath,
-          ports: release.services.flatMap((service) => {
-            if (!service.http || (service.name !== "api" && service.name !== "app")) return []
-            return [
-              { service: service.name, port: this.#ports[service.name] },
-              { service: `${service.name}-standby`, port: this.#standbyPorts[service.name] },
-            ]
-          }),
-          envFromSource: release.steps.env !== undefined,
-          location: this.location,
+          ports: [...Object.values(SLOT_PORTS.blue), ...Object.values(SLOT_PORTS.green)],
+          settings:
+            release.steps.env === undefined
+              ? "env-file"
+              : context.envToken
+                ? "env-token"
+                : "identity",
+          chromium: context.chromium,
         })),
       ])
     } catch (error) {
       server = [sshCheck(this.location, error)]
     }
     return [...server, ...(await dns)]
-  }
-
-  /**
-   * Prepares the server as the admin login when the deploy user or the server is not set up
-   * yet, then the project as the deploy user. Running it again changes nothing that is right.
-   */
-  async setup(release: DeployRelease, context: DeploySetupContext): Promise<void> {
-    const before = await this.check(release, context)
-    const serverFixes = before.filter(
-      (check) =>
-        (check.status === "fixable" &&
-          check.id !== "project.env" &&
-          check.id !== ENV_TOKEN_CHECK) ||
-        (check.id === "ssh" && check.status !== "ok")
-    )
-    const unreachable = before.find((check) => check.id === "ssh" && check.status === "manual")
-    if (unreachable) {
-      throw new Error(`[SshTarget] ${unreachable.detail}`)
-    }
-
-    if (serverFixes.length > 0) {
-      const admin = context.admin ?? "root"
-      const { identityFiles } = await resolveSshConfig(this.location)
-      const key = await pickPublicKey({ key: context.key, identityFiles })
-      context.write(
-        `Setting up ${this.host} as ${admin}, authorizing ${key.source} for ${this.user}.`
-      )
-      await runAsAdmin(
-        `${admin}@${this.host}`,
-        admin === "root",
-        renderAdminScript({ user: this.user, publicKey: key.text, admin })
-      )
-    }
-
-    context.write(`Preparing ${context.name} as ${this.user}.`)
-    await this.#connected((shell) =>
-      shell.run(
-        [
-          `root="$HOME"/${shellQuote(context.name)}`,
-          `project="$HOME"/${shellQuote(`${context.name}/code/${context.projectPath}`)}`,
-          'mkdir -p "$root/shared"',
-          'if [ ! -L "$root/code" ]; then mkdir -p "$project"; fi',
-          'if [ -f "$root/shared/.env" ]; then chmod 600 "$root/shared/.env"; fi',
-          'if [ -f "$project/.env" ]; then chmod 600 "$project/.env"; fi',
-          `token="$HOME"/${shellQuote(`${context.name}/${ENV_TOKEN_FILE}`)}`,
-          'if [ -f "$token" ]; then chmod 600 "$token"; fi',
-        ].join("\n")
-      )
-    )
-
-    const { createEnvToken } = context
-    if (release.steps.env && createEnvToken) {
-      const installed = await this.#connected((shell) =>
-        ensureEnvToken(shell, context.name, createEnvToken)
-      )
-      if (installed) context.write(`Installed a read-only token for ${context.name}.`)
-    }
-  }
-
-  readonly access: DeployAccess = {
-    list: () => this.#connected(async (shell) => (await listKeys(shell)).map(withoutLine)),
-    add: (key) => this.#connected((shell) => addKey(shell, key)).then(withoutLine),
-    remove: (match) =>
-      this.#connected(async (shell) => (await removeKeys(shell, match)).map(withoutLine)),
-  }
-
-  readonly ci: DeployCi = {
-    create: (job, context) => this.#createCiKey(job, context.name),
-  }
-
-  /**
-   * A key for one CI job, allowed to run commands and nothing else (no forwarding, no terminal),
-   * with the server's host keys pinned so CI never trusts an address on first sight.
-   */
-  async #createCiKey(job: string, name: string): Promise<DeployCiCredential> {
-    const ssh = await resolveSshConfig(this.location)
-    if (ssh.proxyJump) {
-      throw new Error(
-        `[SshTarget] Your SSH config reaches ${this.host} through ${ssh.proxyJump}, and CI connects ` +
-          "directly. Set `host` to an address CI can reach."
-      )
-    }
-    // One comment per job and deployment: it is how a later run finds the keys it replaces.
-    const comment = `sixb-ci:${name}@${job}`
-    const pair = await generateCiKey(comment)
-    const { key, hostKeys } = await this.#connected(async (shell) => ({
-      hostKeys: await readHostKeys(shell),
-      key: await addKey(shell, pair.publicKey, "restrict"),
-    }))
-
-    return {
-      description: `${key.fingerprint} for ${this.location}, restricted to running commands`,
-      secrets: {
-        SIXB_DEPLOY_SSH_KEY: pair.privateKey,
-        SIXB_DEPLOY_KNOWN_HOSTS: knownHostsLines(hostKeys, ssh.hostname, ssh.port).join("\n"),
-      },
-      install: renderCiInstall({ host: this.host, hostname: ssh.hostname, port: ssh.port }),
-      retireOthers: () =>
-        this.#connected(async (shell) =>
-          (
-            await removeKeysWhere(
-              shell,
-              (other) => other.comment === comment && other.fingerprint !== key.fingerprint
-            )
-          ).map(withoutLine)
-        ),
-      revoke: () =>
-        this.#connected(async (shell) => {
-          await removeKeysWhere(shell, (other) => other.fingerprint === key.fingerprint)
-        }),
-    }
   }
 
   async #connected<T>(work: (shell: RemoteShell) => Promise<T>): Promise<T> {
@@ -293,30 +140,17 @@ export class SshTarget implements DeployTarget {
   }
 }
 
-function defaultStandbyPort(port: number): number {
-  return port + 10 <= 65_535 ? port + 10 : port - 10
-}
-
-function assertDistinctPorts(
-  primary: Readonly<Record<DeployHttpServiceName, number>>,
-  standby: Readonly<Record<DeployHttpServiceName, number>>
-): void {
-  const entries: readonly [string, number][] = [
-    ["ports.app", primary.app],
-    ["ports.api", primary.api],
-    ["standbyPorts.app", standby.app],
-    ["standbyPorts.api", standby.api],
-  ]
-  const seen = new Map<number, string>()
-  for (const [label, port] of entries) {
-    const previous = seen.get(port)
-    if (previous) {
-      throw new Error(
-        `[SshTarget] ${label} (${port}) conflicts with ${previous}. Give each HTTP service and slot its own port.`
-      )
-    }
-    seen.set(port, label)
+function validateUser(value: unknown): string {
+  if (value === "root") {
+    throw new Error("[SshTarget] Deployments never run as root. Use an account without sudo.")
   }
+  if (typeof value !== "string" || !USER_PATTERN.test(value)) {
+    throw new Error(
+      `[SshTarget] user ${JSON.stringify(value)} is not a Linux account name. Use lowercase ` +
+        "letters, digits, underscores and hyphens, starting with a letter or underscore."
+    )
+  }
+  return value
 }
 
 function validateHost(value: unknown): string {
@@ -326,7 +160,7 @@ function validateHost(value: unknown): string {
   const host = value.trim()
   if (host.includes("@")) {
     throw new Error(
-      `[SshTarget] host '${host}' includes a user. Set the host alone, and the user with \`user\`.`
+      `[SshTarget] host '${host}' includes a user. Set the host alone, and the account with \`user\`.`
     )
   }
   // `ssh` reads an argument that starts with `-` as an option, not a host.
@@ -342,89 +176,13 @@ function validateHost(value: unknown): string {
   return host
 }
 
-function validateUser(value: unknown): string {
-  if (value === "root") {
-    throw new Error(
-      "[SshTarget] Deployments never run as root. Use a deploy user without sudo, such as the " +
-        'default "sixb".'
-    )
-  }
-  if (typeof value !== "string" || !USER_PATTERN.test(value)) {
-    throw new Error(
-      `[SshTarget] user ${JSON.stringify(value)} is not a Linux user name. Use lowercase ` +
-        "letters, digits, underscores, and hyphens, starting with a letter or underscore."
-    )
-  }
-  return value
-}
-
-function validatePorts(
-  value: unknown,
-  field: "ports" | "standbyPorts"
-): Partial<Record<DeployHttpServiceName, number>> {
-  if (value === undefined) return {}
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`[SshTarget] ${field} must be an object, such as \`{ api: 3012 }\`.`)
-  }
-
-  const ports: Partial<Record<DeployHttpServiceName, number>> = {}
-  for (const [service, port] of Object.entries(value)) {
-    if (!Object.hasOwn(DEFAULT_PORTS, service)) {
-      throw new Error(
-        `[SshTarget] ${field}.${service} is not an HTTP service. Available: api, app.`
-      )
-    }
-    // A deploy user has no privileges, and ports below 1024 need them.
-    if (!Number.isInteger(port) || port < 1024 || port > 65_535) {
-      throw new Error(`[SshTarget] ${field}.${service} must be a port from 1024 to 65535.`)
-    }
-    ports[service as DeployHttpServiceName] = port
-  }
-  return ports
-}
-
-/** What a failed connection means for a deploy, and whether setup can fix it. */
+/** A failed connection, as the check that stops a deploy. */
 function sshCheck(location: string, error: unknown): DeployCheck {
-  const message =
-    (error instanceof Error ? error.message : String(error))
-      .split("\n")[0]
-      ?.replace(/^\[SshTarget\] /, "") ?? ""
-  if (error instanceof RemoteScriptError && /refused your SSH key/.test(message)) {
-    return {
-      id: "ssh",
-      label: "SSH",
-      status: "fixable",
-      detail: message,
-      remedy: `Run \`sixb deploy setup --admin <login>\` with a login that has sudo: it creates the deploy user and authorizes your key. Or have someone with access run \`sixb deploy access add\` with your key.`,
-    }
-  }
+  const [message = ""] = (error instanceof Error ? error.message : String(error)).split("\n")
   return {
     id: "ssh",
     label: "SSH",
-    status: "manual",
-    detail: message || `Cannot reach ${location}.`,
-  }
-}
-
-function withoutLine({ type, fingerprint, comment, restricted }: DeployAccessKey): DeployAccessKey {
-  return { type, fingerprint, comment, restricted }
-}
-
-/**
- * Runs the setup script as the admin login with the terminal attached, so sudo can ask for its
- * password and the person running setup sees each step.
- */
-async function runAsAdmin(destination: string, root: boolean, script: string): Promise<void> {
-  const command = `${root ? "" : "sudo "}bash -c ${shellQuote(script)}`
-  // LogLevel=ERROR drops the "Connection closed" line a terminal session ends with, not errors.
-  const ssh = ["ssh", "-tt", "-o", "ConnectTimeout=15", "-o", "LogLevel=ERROR"]
-  const child = Bun.spawn([...ssh, destination, command], {
-    stdio: ["inherit", "inherit", "inherit"],
-  })
-  const exitCode = await child.exited
-  if (exitCode !== 0) {
-    throw new Error(
-      `[SshTarget] Setting up the server as ${destination} failed (exit code ${exitCode}).`
-    )
+    status: "fail",
+    detail: message.replace(/^\[SshTarget\] /, "") || `Cannot reach ${location}.`,
   }
 }

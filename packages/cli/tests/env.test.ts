@@ -35,9 +35,11 @@ interface SourceState {
   /** Environments this person can't read. */
   noAccess?: string[]
   lastToken?: string
+  lastServer?: boolean
 }
 
-const FAKE_SOURCE = `
+/** `identity`: the source reads on a server with the server's own identity, not a token file. */
+const fakeSource = (identity: boolean) => `
   import { EnvSourceUnreachableError } from "@sixb/core/env"
 
   const file = new URL("./source.json", import.meta.url).pathname
@@ -58,24 +60,27 @@ const FAKE_SOURCE = `
     async read(env, options) {
       const state = await load()
       assertReadable(state, env)
-      await save({ ...state, lastToken: options?.token })
+      await save({ ...state, lastToken: options?.token, lastServer: options?.server })
       return state[env] ?? {}
-    },
+    },${identity ? "\n    serverNeedsToken: false," : ""}
     async write(env, values) {
       const state = await load()
       await save({ ...state, [env]: { ...state[env], ...values } })
     },
-    createServerToken: async () => "unused",
   }
 `
 
-async function project(state: SourceState, vars: Record<string, string>): Promise<string> {
+async function project(
+  state: SourceState,
+  vars: Record<string, string>,
+  options: { readonly identity?: boolean } = {}
+): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "sixb-env-"))
   projects.push(dir)
   await mkdir(join(dir, "node_modules/@sixb"), { recursive: true })
   await symlink(CORE_PACKAGE, join(dir, "node_modules/@sixb/core"))
   await writeFile(join(dir, "source.json"), JSON.stringify(state))
-  await writeFile(join(dir, "fake-source.ts"), FAKE_SOURCE)
+  await writeFile(join(dir, "fake-source.ts"), fakeSource(options.identity === true))
   await writeFile(
     join(dir, "sixb.env.ts"),
     `import { source } from "./fake-source"\nexport default { source, vars: ${JSON.stringify(vars)} }\n`
@@ -180,7 +185,22 @@ describe("sixb env pull", () => {
 
     await runInProcess(() => runEnvPull({ cwd: dir, env: "prod", tokenFile }))
 
-    expect((await sourceState(dir)).lastToken).toBe("server-token")
+    expect(await sourceState(dir)).toMatchObject({ lastToken: "server-token", lastServer: true })
+    expect(await dotEnv(dir)).toContain("A='prod-value'")
+  })
+
+  // Reproduce: read the token file whatever the source says; a server that reads with its managed
+  // identity then fails for a file it never uses.
+  test("a server whose source reads with its own identity needs no token file", async () => {
+    const dir = await project({ prod: { A: "prod-value" } }, {}, { identity: true })
+
+    await runInProcess(() =>
+      runEnvPull({ cwd: dir, env: "prod", tokenFile: join(dir, "no-such-file") })
+    )
+
+    const state = await sourceState(dir)
+    expect(state.lastServer).toBe(true)
+    expect(state.lastToken).toBeUndefined()
     expect(await dotEnv(dir)).toContain("A='prod-value'")
   })
 
@@ -487,8 +507,7 @@ describe("sixb env init", () => {
         const state = await load()
         await Bun.write(file, JSON.stringify({ ...state, project, [env]: { ...state[env], ...values } }))
       },
-      createServerToken: async () => "unused",
-    })
+      })
   `
 
   test("uploads both files and writes sixb.env.ts with a first guess at each rule", async () => {

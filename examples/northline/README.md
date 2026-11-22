@@ -172,20 +172,20 @@ it runs on PostgreSQL and Redis (`lib/runtime/production.ts`) and stays open to 
 development. `sixb.deploy.ts` reads the server and domain from the environment, so neither is
 committed.
 
-1. Point `*.<your domain>` at the server, and have PostgreSQL and Redis running where it can reach
-   them.
-2. Set up the server, naming an account on it with `sudo`:
+1. Start from a server that meets the [host requirements](../../docs/deployment/host-requirements.md),
+   point `*.<your domain>` at it, and have PostgreSQL and Redis running where it can reach them.
+2. Put `DATABASE_URL` and `REDIS_URL` in `~/northline/shared/.env` on the server, mode 600.
+3. Check the server, then deploy the committed code. `NORTHLINE_DEPLOY_USER` names the account to
+   deploy as, when it isn't `sixb`:
 
    ```bash
    cd examples/northline
    export NORTHLINE_DEPLOY_HOST=203.0.113.10 NORTHLINE_DEPLOY_DOMAIN=example.com
-   bun run deploy setup --admin <login>
+   bun run deploy check
+   bun run deploy
    ```
 
-3. Put `DATABASE_URL` and `REDIS_URL` in the project's `.env` on the server;
-   `bun run deploy check` prints where it goes.
-4. Deploy the committed code with `bun run deploy`. It serves `northline-app` and
-   `northline-api` under your domain.
+   It serves `northline-app` and `northline-api` under your domain.
 
 ## Source ownership
 

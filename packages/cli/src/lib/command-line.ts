@@ -140,6 +140,16 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Branch, tag, or commit to deploy (default: HEAD)",
     kind: "string",
   },
+  migrate: {
+    syntax: "--migrate",
+    summary: "Bring the storage schema up to date first, as a deploy does",
+    kind: "boolean",
+  },
+  lake: {
+    syntax: "--lake",
+    summary: "Check the lake's dataset definitions too",
+    kind: "boolean",
+  },
   follow: { syntax: "--follow", summary: "Keep printing new log lines", kind: "boolean" },
   env: {
     syntax: "--env <dev|prod>",
@@ -165,21 +175,6 @@ export const CLI_OPTION_DEFINITIONS = {
     syntax: "--force",
     summary: "Replace a hand-written .env, losing what the source doesn't have",
     kind: "boolean",
-  },
-  admin: {
-    syntax: "--admin <login>",
-    summary: "Login with sudo that prepares the server (default: root)",
-    kind: "string",
-  },
-  key: {
-    syntax: "--key <path>",
-    summary: "Public key to authorize for deploys (default: the one SSH uses)",
-    kind: "string",
-  },
-  branch: {
-    syntax: "--branch <name>",
-    summary: "Branch whose pushes deploy (default: the repository's default branch)",
-    kind: "string",
   },
   tail: {
     syntax: "--tail <lines>",
@@ -257,12 +252,7 @@ export type LocalCommandId =
   | "deploy:restart"
   | "deploy:start"
   | "deploy:stop"
-  | "deploy:setup"
   | "deploy:check"
-  | "deploy:ci"
-  | "deploy:access:list"
-  | "deploy:access:add"
-  | "deploy:access:remove"
   | "env:init"
   | "env:pull"
   | "env:set"
@@ -547,7 +537,9 @@ const commandTree: readonly CommandNode[] = [
     maximumPositionals: Number.POSITIVE_INFINITY,
     rootHelpLabel: "worker-group [types...]",
   }),
-  command("check", "Validate project configuration and health", { options: ["entry"] }),
+  command("check", "Validate project configuration and health", {
+    options: ["entry", "migrate", "lake"],
+  }),
   command("run", "Run a script against the project, here or in production", {
     usage: "sixb run [--deployed] [--yes] [--entry <path>] <script> [args...]",
     options: ["entry", "deployed", "yes"],
@@ -622,17 +614,9 @@ const commandTree: readonly CommandNode[] = [
       rootHelpLabel: "deploy ...",
     }),
     children: [
-      command("deploy:setup", "Prepare the server and project for deploys", {
-        path: ["deploy", "setup"],
-        options: ["admin", "key"],
-      }),
       command("deploy:check", "Check what stands between you and a working deploy", {
         path: ["deploy", "check"],
         options: ["json"],
-      }),
-      command("deploy:ci", "Deploy from GitHub Actions on every push", {
-        path: ["deploy", "ci"],
-        options: ["branch"],
       }),
       command("deploy:status", "Show what the deployment runs, and which commit", {
         path: ["deploy", "status"],
@@ -651,29 +635,6 @@ const commandTree: readonly CommandNode[] = [
           maximumPositionals: 1,
         })
       ),
-      {
-        name: "access",
-        summary: "Manage the keys that may deploy and operate the deployment",
-        usage: "sixb deploy access <list|add|remove>",
-        children: [
-          command("deploy:access:list", "List the authorized keys", {
-            path: ["deploy", "access", "list"],
-            options: ["json"],
-          }),
-          command("deploy:access:add", "Authorize a key: a .pub file, its text, or github:<user>", {
-            path: ["deploy", "access", "add"],
-            usage: "sixb deploy access add <key>",
-            minimumPositionals: 1,
-            maximumPositionals: 1,
-          }),
-          command("deploy:access:remove", "Revoke the keys with this fingerprint or comment", {
-            path: ["deploy", "access", "remove"],
-            usage: "sixb deploy access remove <fingerprint|comment>",
-            minimumPositionals: 1,
-            maximumPositionals: 1,
-          }),
-        ],
-      },
     ],
   },
   {

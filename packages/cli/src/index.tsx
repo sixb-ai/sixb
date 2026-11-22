@@ -333,7 +333,11 @@ async function main(): Promise<void> {
 
     case "check": {
       const { runCheck } = await import("./commands/check")
-      await runCheck({ entry: getFlag("entry") })
+      await runCheck({
+        entry: getFlag("entry"),
+        migrate: hasFlag("migrate"),
+        lake: hasFlag("lake"),
+      })
       break
     }
 
@@ -445,7 +449,11 @@ async function main(): Promise<void> {
 
     case "deploy": {
       const { runDeploy } = await import("./commands/deploy")
-      await runDeploy({ dryRun: hasFlag("dry-run"), json: hasFlag("json"), ref: getFlag("ref") })
+      await runDeploy({
+        dryRun: hasFlag("dry-run"),
+        json: hasFlag("json"),
+        ref: getFlag("ref"),
+      })
       break
     }
 
@@ -465,33 +473,9 @@ async function main(): Promise<void> {
       break
     }
 
-    case "deploy:setup": {
-      const { runDeploySetup } = await import("./commands/deploy")
-      await runDeploySetup({ admin: getFlag("admin"), key: getFlag("key") })
-      break
-    }
-
     case "deploy:check": {
       const { runDeployCheck } = await import("./commands/deploy")
       await runDeployCheck({ json: hasFlag("json") })
-      break
-    }
-
-    case "deploy:ci": {
-      const { runDeployCi } = await import("./commands/deploy")
-      await runDeployCi({ branch: getFlag("branch") })
-      break
-    }
-
-    case "deploy:access:list":
-    case "deploy:access:add":
-    case "deploy:access:remove": {
-      const { runDeployAccess } = await import("./commands/deploy")
-      await runDeployAccess({
-        action: parsed.id.slice("deploy:access:".length) as "list" | "add" | "remove",
-        value: positionals[0],
-        json: hasFlag("json"),
-      })
       break
     }
 

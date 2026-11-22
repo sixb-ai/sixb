@@ -60,7 +60,7 @@ describe("deploy config validation", () => {
     rejects(config({ host: "203.0.113.10" }), "Unknown deploy setting 'host'")
     rejects(
       config({ services: { api: { port: 3012 } } }),
-      "Ports belong to the target, such as `new SshTarget({ ports: { api: 3012 } })`."
+      "The target picks the ports; remove the setting."
     )
     rejects(config({ services: { sentinel: true } }), "Unknown deploy setting 'services.sentinel'")
     rejects(

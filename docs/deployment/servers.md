@@ -1,12 +1,12 @@
 # Deploy to a server
 
-`sixb deploy` runs your project on a Linux server you reach over SSH. You describe the deployment in `sixb.deploy.ts`. The CLI prepares the server once, then on each deploy sends the commit, builds it on the server, runs every service under an account without root access, and serves each one on its own domain over HTTPS.
+`sixb deploy` runs your project on a Linux server you reach over SSH. You describe the deployment in `sixb.deploy.ts`. Each deploy sends the commit, builds it on the server, starts it beside the live release, and moves traffic to it once it is healthy, so a deploy never takes the project down.
 
 ## Before you start
 
 You need:
 
-- **A server** running Ubuntu or Debian with systemd, such as a new virtual machine from a cloud provider, with an account that can use `sudo`, or `root`. You use that account once, to set the server up.
+- **A server** that meets the [host requirements](host-requirements.md): Ubuntu or Debian with systemd, Caddy, and an account you can reach over SSH. The page has a cloud-init script that sets a new server up.
 - **A domain** whose DNS you control. Each service gets its own name under it, so one wildcard record such as `*.example.com` pointing at the server covers them all. Ports 80 and 443 must be open; the server gets an HTTPS certificate for each name automatically.
 - **Production providers.** The services run as separate processes, so they need storage, a broker, and queues they can share, such as PostgreSQL and Redis, and [authentication](../auth/authentication.md) configured for production. See [Prepare your configuration](overview.md#prepare-your-configuration). The databases can run on the server or anywhere it can reach.
 
@@ -49,7 +49,7 @@ It lists every process with its command, address, and environment.
 | `name` | Names the deployment on the server and in default domains. Lowercase letters, numbers, and hyphens. |
 | `domain` | Parent domain for services without their own: `<name>-<service>.<domain>`. |
 | `target` | Where the deployment runs. |
-| `env` | Environment variables for every service. This file is committed, so keep secrets in the server's [`.env`](#add-the-projects-settings). |
+| `env` | Environment variables for every service. This file is committed, so keep secrets in the [project's settings](#add-the-projects-settings). |
 | `services` | Turn services off or adjust them. |
 | `processes` | Long-running scripts of your own, supervised alongside the services. |
 
@@ -57,12 +57,12 @@ Every service gets `NODE_ENV=production` and the [public origins](overview.md#co
 
 ### The SSH target
 
-| Option | Default | Purpose |
-| --- | --- | --- |
-| `host` | | The server's hostname or IP address, or a `Host` alias from your SSH config. Use an alias to reach SSH on a port other than 22. |
-| `user` | `"sixb"` | The account the services run as. Never `root`. See [Several projects on one server](server-access.md#several-projects-on-one-server). |
-| `ports` | app 3001, API 3002 | The primary local ports each domain is forwarded to. A project also uses its `standbyPorts`, so give the next project on a server ports 20 higher. |
-| `standbyPorts` | `ports` + 10 (app 3011, API 3012) | Second local port pair used to boot and verify a new release before Caddy switches traffic. |
+| Option | Purpose |
+| --- | --- |
+| `host` | The server's hostname or IP address, or a `Host` alias from your SSH config. Use an alias to reach SSH on a port other than 22. |
+| `user` | The account the deployment logs in and runs as, never `root`. Defaults to `"sixb"`. |
+
+A server runs one deployment.
 
 ### Services
 
@@ -106,45 +106,26 @@ processes: {
 
 It runs with Bun from the project directory and gets the same environment as the services.
 
-## Set up the server
-
-Run this once per server, naming an account with `sudo` (default: `root`):
-
-```bash
-bun sixb deploy setup --admin ademattos
-```
-
-Setup logs in as that account only when the server needs something, and:
-
-- installs [Caddy](https://caddyserver.com), the web server that routes each domain to its service and handles HTTPS;
-- creates the deploy account, `sixb` by default, which accepts your SSH key and no password, and lets its services start at boot;
-- lets the deploy account reload Caddy, and nothing else that needs root;
-- adds your admin account to the deploy account's group, so it can read the projects without `sudo`.
-
-`--key <file>` authorizes a different public key than the one SSH uses for the server. A Caddy already on the server must be 2.7 or later, and `sixb deploy check` stops on an older one. On a server where Caddy already serves other sites, setup keeps its configuration, adds one import line, and saves the previous file as `/etc/caddy/Caddyfile.before-sixb-deploy`. Setup reports an SSH server that accepts passwords, or a firewall that blocks ports 80 and 443, but changes neither.
-
-Setup is safe to run again. More projects under the same deploy account need no admin login.
-
-Check the server at any time without changing anything:
+## Check the server
 
 ```bash
 bun sixb deploy check
 ```
 
-It checks the server's tools, the deploy account, the routes, the project's `.env`, its ports, the free disk space, and where each domain points, and says what to do about each problem. `sixb deploy` runs the same checks first, and stops before uploading anything when one would make the deploy fail.
+It checks every [host requirement](host-requirements.md) and where each domain points, changes nothing, and says what to do about each problem. `sixb deploy` runs the same checks first, and stops before uploading anything when one would make the deploy fail.
 
 ## Add the project's settings
 
 To keep them in one place across your team and servers, use [environment variables from Doppler](environment-variables.md#deploy). A deploy then writes the server's `.env` for you, and you can skip the rest of this section.
 
-Otherwise, secrets and connection strings, such as `DATABASE_URL`, API keys, and anything else you keep out of the repository, go in a `.env` file in the project's directory on the server. Create it readable only by the deploy account, then edit it:
+Otherwise, secrets and connection strings, such as `DATABASE_URL`, API keys, and anything else you keep out of the repository, go in `~/<name>/shared/.env` on the server. Create it readable only by the deploy account, then edit it:
 
 ```bash
-ssh sixb@203.0.113.10 'install -m 600 /dev/null ~/shop/code/.env'
-ssh -t sixb@203.0.113.10 'nano ~/shop/code/.env'
+ssh sixb@203.0.113.10 'mkdir -p ~/shop/shared && install -m 600 /dev/null ~/shop/shared/.env'
+ssh -t sixb@203.0.113.10 'nano ~/shop/shared/.env'
 ```
 
-For a project inside a monorepo, the directory is `~/<name>/code/<path>`; `sixb deploy check` prints the exact path. Every release reads this one file, so `sixb deploy restart` applies an edit. Without a [source](environment-variables.md), a deploy never replaces the server's `.env`, even when the repository has one.
+Every release reads this one file, so `sixb deploy restart` applies an edit. Without a [source](environment-variables.md), a deploy never replaces it, even when the repository has a `.env`.
 
 ## Deploy
 
@@ -159,13 +140,16 @@ Only committed files are sent, with submodules at their recorded commits. Uncomm
 A deploy:
 
 1. Checks the server.
-2. Unpacks the commit into its own `releases/<id>` directory and links it to the server's `.env`.
-3. Installs the pinned Bun and the dependencies, [writes `.env`](environment-variables.md#deploy) if the project has a source, and runs `sixb build` (carrying one generation of hashed browser chunks forward so open tabs never `404`).
-4. Runs `sixb db migrate`, `sixb check`, and `sixb lake check` from the new release while the previous release keeps serving. When the new release brings storage migrations, the services stop first, since the previous release cannot run against the new schema: that deploy has a short downtime.
-5. Starts the new `app`, `api`, and `workers` on the standby ports, waits for the API's `/ready`, and fails if a process exits in its first seconds.
-6. Validates and reloads the Caddy routes onto the new slot, swaps `orchestrator` and `rules`, and drains the retiring `api` and `workers` in the background so in-flight requests and agent turns finish cleanly.
+2. Unpacks the commit into its own `releases/<id>` folder, then installs the pinned Bun and the dependencies.
+3. [Writes `.env`](environment-variables.md#deploy) into the release if the project has a source, and runs `sixb build` (carrying one generation of hashed browser chunks forward, so open tabs never `404`).
+4. Runs `sixb check --migrate --lake` from the new release: it brings the storage schema up to date, checks every provider, and checks the lake's datasets.
+5. Starts the new release beside the live one, on its own ports, without its singletons (`orchestrator`, `rules` and your processes). It waits for the API's `/ready`, and fails if a process exits in its first seconds.
+6. Moves Caddy's routes to the new release, then moves the singletons, and checks again.
+7. Lets the previous release finish its requests and agent turns for up to five minutes, then stops it. A deploy within those minutes gives it ten more seconds.
 
-A deploy that fails before the new release takes over discards it, and the live release keeps serving, unless a migration stopped it in step 4. A check that fails after that leaves the new release serving: the deploy says so, and `sixb deploy status` names its commit. Two deploys of the same project never overlap; the second waits for the first.
+Any failure before the routes move leaves the live release serving; a failure after it moves the routes and singletons back. Either way, the deploy says what failed. The server runs the deploy, so closing your laptop or losing the connection doesn't stop it: `sixb deploy status` shows the release once it ends. Two deploys of the same project never overlap; the second waits for the first.
+
+A release with storage migrations is the exception: the live release was built for the schema before them, so it stops while they run, and the new release starts cold once they're done. The cutover takes as long as the migrations and the new release's start, usually seconds. A failure after the services stopped starts the previous release again.
 
 ## Operate the deployment
 
@@ -183,5 +167,5 @@ To return to an earlier release, deploy its commit with `--ref`. Storage migrati
 ## Next steps
 
 - [Deploy from GitHub Actions](github-actions.md) on every push.
-- [Server accounts and access](server-access.md): give teammates access, and run several projects on one server.
+- [Host requirements](host-requirements.md): what a server provides, with a cloud-init script.
 - The [Northline example](https://github.com/sixb-ai/sixb/tree/main/examples/northline#deploy) deploys this way, with PostgreSQL and Redis.
