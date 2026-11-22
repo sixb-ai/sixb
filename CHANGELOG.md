@@ -13,6 +13,15 @@ Sixb packages are versioned independently. Each release entry names the packages
   "Go ahead" after a plan for a large change stays on the plan's tier instead of reading like a
   thank-you. Each tier's model description now steers the choice too, so a project can say what it
   uses each tier for, such as code changes across a repository on `heavy`.
+- `@sixb/azure-ai-foundry` connects with the project endpoint and its key, or with Entra ID, and
+  calls every model on the resource that owns the project. `createAzureAIFoundry()` reads
+  `AZURE_AI_FOUNDRY_ENDPOINT` and `AZURE_AI_FOUNDRY_API_KEY`;
+  `createAzureAIFoundry({ credential: new DefaultAzureCredential() })` signs in with a managed
+  identity or `az login`. `foundry(name)` picks the protocol from the publisher Azure reports:
+  Responses for OpenAI, Messages for Anthropic, Chat for the rest. GPT-6.2 Sol now reasons with
+  tools; the project's own inference path refused both. A conversation that switches between
+  Foundry deployments keeps working: the next model gets its text and tool calls, without the
+  previous model's reasoning.
 
 ### Upgrade notes
 
@@ -23,6 +32,13 @@ Sixb packages are versioned independently. Each release entry names the packages
   `SIXB.md`, as a new project's [does](packages/create-sixb/template/SIXB.md). It now always says
   what it checked and what it could not, and in a repository conversation it commits and pushes
   when the project's `SIXB.md` asks it to, not only when the user does.
+- `@sixb/azure-ai-foundry`: remove the `embeddings` option; embedding deployments use the project's
+  resource and key. Responses and Chat calls go to
+  `https://<resource>.services.ai.azure.com/openai/v1` instead of the project's path, so allow it
+  if a firewall lists URLs. `foundry(name)` runs OpenAI deployments on Responses; use
+  `foundry.chat(name)` to keep one on Chat. A deployment from a project connection is rejected for
+  every protocol. Reasoning recorded before the upgrade is not replayed to the next turn of a
+  conversation, since it was recorded for the project's path.
 
 ## 2026-11-19 — Sixb 0.2.6
 
