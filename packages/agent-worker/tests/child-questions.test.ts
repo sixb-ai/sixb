@@ -537,27 +537,30 @@ describe("a child's question", () => {
     }
   })
 
-  // Removal proof: drop the `#asking` check from SubagentInbox.ask; both questions go out, the
-  // parent answers the one it lists, and the other waits until the test gives up.
-  test("is one at a time: a second one asked with it is refused", async () => {
+  // Removal proof: run a step's calls at once in runModelLoop; the second question is then
+  // refused while the first waits, instead of asked once the first is answered.
+  test("is one at a time: a second one asked with it goes once the first is answered", async () => {
+    const CURRENCY = "Which currency?"
     const harness = setup({
       parent: (request, call) => {
+        const westId = () => westRunId(harness.parentRequests[1])
         if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
         if (call === 2) return toolCalls(["wait", "wait", { ids: [westRunId(request)] }])
         if (call === 3) {
           return toolCalls(["answer", "message_agent", { key: WEST.key, text: ANSWER }])
         }
-        if (call === 4) {
-          const westId = westRunId(harness.parentRequests[1])
-          return toolCalls(["wait-again", "wait", { ids: [westId] }])
+        if (call === 4) return toolCalls(["wait-again", "wait", { ids: [westId()] }])
+        if (call === 5) {
+          return toolCalls(["answer-too", "message_agent", { key: WEST.key, text: "Euros." }])
         }
+        if (call === 6) return toolCalls(["wait-last", "wait", { ids: [westId()] }])
         return answer(RESULT)
       },
       west: (_request, call) =>
         call === 1
           ? toolCalls(
               ["ask", "ask", { questions: [{ question: QUESTION }] }],
-              ["ask-too", "ask", { questions: [{ question: "Which currency?" }] }]
+              ["ask-too", "ask", { questions: [{ question: CURRENCY }] }]
             )
           : answer(RESULT),
     })
@@ -565,20 +568,16 @@ describe("a child's question", () => {
     await harness.worker.start()
     try {
       const { finished } = await requestTurn(harness, "How did the west do this year?")
-      const replies = [
-        toolOutput(harness.westRequests[1], "ask"),
-        toolOutput(harness.westRequests[1], "ask-too"),
-      ]
 
       expect(finished).toMatchObject({ status: "succeeded" })
-      expect(replies).toContainEqual({ answer: ANSWER })
-      expect(replies).toContainEqual(
-        "[SixbAgent] Ask one question at a time: your parent has not answered the last one yet."
-      )
-      const waited = toolOutput(harness.parentRequests[2], "wait") as {
-        readonly questions: readonly unknown[]
-      }
-      expect(waited.questions).toHaveLength(1)
+      expect(toolOutput(harness.parentRequests[2], "wait")).toMatchObject({
+        questions: [{ key: WEST.key, text: QUESTION }],
+      })
+      expect(toolOutput(harness.parentRequests[4], "wait-again")).toMatchObject({
+        questions: [{ key: WEST.key, text: CURRENCY }],
+      })
+      expect(toolOutput(harness.westRequests[1], "ask")).toEqual({ answer: ANSWER })
+      expect(toolOutput(harness.westRequests[1], "ask-too")).toEqual({ answer: "Euros." })
     } finally {
       await settle(harness.worker.stop(), "worker stop")
     }
@@ -697,6 +696,43 @@ describe("a question its parent's turn ends on", () => {
       // What its parent's turn told the paused child is a reply, never a message to read again.
       expect(modelText(resumed)).not.toContain("<sixb_parent_message id=")
       expect(harness.westRequests).toHaveLength(3)
+    } finally {
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+
+  // Removal proof: drop the deferred check from SubagentInbox.ask; the second question then goes
+  // out after the first was deferred, nothing answers it, and the turn never ends.
+  test("refuses a second question of the same step once the first is deferred", async () => {
+    const harness = setup({
+      parent: (request, call) => asksTheUser(request, call),
+      west: (_request, call) =>
+        call === 1
+          ? toolCalls(
+              ["ask", "ask", { questions: [{ question: QUESTION }] }],
+              ["ask-too", "ask", { questions: [{ question: "Which currency?" }] }]
+            )
+          : answer(RESULT),
+    })
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      const first = await requestTurn(harness, "How did the west do this year?")
+      const paused = await child(harness.agents, createSubagentRunId(first.run.id, WEST.key))
+      const calls = (await transcriptOf(harness, paused.id)).flatMap((message) =>
+        message.parts.filter((part) => part.type === "tool-call")
+      )
+
+      expect(first.finished).toMatchObject({ status: "succeeded", finishReason: "stop" })
+      expect(paused).toMatchObject({ status: "succeeded", finishReason: "awaiting_answer" })
+      expect(calls).toMatchObject([
+        { toolCallId: "ask", output: { status: "deferred" } },
+        {
+          toolCallId: "ask-too",
+          errorText:
+            "[SixbAgent] Your parent's turn ended before it could answer your last question. Ask this one once you continue with its answer.",
+        },
+      ])
     } finally {
       await settle(harness.worker.stop(), "worker stop")
     }
@@ -858,9 +894,9 @@ describe("a turn that ends while a child waits on its question", () => {
     }
   })
 
-  // Removal proof: publish the answer before claiming the question in message_agent; both
-  // messages are told they answered it.
-  test("is answered once when two answers are sent at once", async () => {
+  // Removal proof: drop both the claim in message_agent and the child's withdrawal of its answered
+  // question in FamilyMailbox; the second message is then told it answered it too.
+  test("is answered once when two answers are sent in one step", async () => {
     const harness = setup({
       parent: (request, call) => {
         if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
@@ -1040,9 +1076,9 @@ describe("a child paused on its question, in a later turn", () => {
     }
   })
 
-  // Removal proof: drop the check for this turn's continuation in `answerPaused`; the second
-  // answer fails as a key used with other inputs.
-  test("takes one answer: a second sent with it is refused, and says why", async () => {
+  // Removal proof: run a step's calls at once in runModelLoop; the second message then reaches
+  // the paused child too, and is refused as a second answer.
+  test("takes one answer: a second message sent after it reaches the continued child", async () => {
     const harness = setup({
       parent: (request, call) => {
         if (call <= 3) return asksTheUser(request, call)
@@ -1070,10 +1106,11 @@ describe("a child paused on its question, in a later turn", () => {
         toolOutput(harness.parentRequests[4], id)
       )
 
-      expect(replies).toContainEqual(expect.objectContaining({ delivery: "answer" }))
-      expect(replies).toContainEqual(
-        "[SixbAgent] 'west' already continues with the answer you sent it this turn. Message it again once it is at work, or wait for it with wait."
-      )
+      // Read before the continuation's first step or its next, as it is claimed.
+      expect(replies).toEqual([
+        expect.objectContaining({ delivery: "answer" }),
+        expect.objectContaining({ delivery: expect.stringMatching(/^(first|next)-step$/) }),
+      ])
     } finally {
       await settle(harness.worker.stop(), "worker stop")
     }

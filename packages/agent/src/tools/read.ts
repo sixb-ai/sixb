@@ -73,6 +73,7 @@ export function createReadTool(
 ): ModelTool<ReadToolInput> {
   return {
     ...READ_TOOL_SPEC,
+    readOnly: true,
     parseInput: parseReadToolInput,
     async execute(input, { signal, toolCallId }): Promise<JsonValue> {
       const path = normalizePath(input.path)

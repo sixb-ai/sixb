@@ -72,6 +72,7 @@ export function createGrepTool(
 ): ModelTool<GrepToolInput> {
   return {
     ...GREP_TOOL_SPEC,
+    readOnly: true,
     parseInput: parseGrepInput,
     async execute(input, { signal }): Promise<JsonValue> {
       const handle = await resolveSandbox()

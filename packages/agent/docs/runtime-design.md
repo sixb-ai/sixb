@@ -224,6 +224,14 @@ For a blank sandbox:
    fails the command with bash's message, which the model reads and corrects.
 4. On run teardown the worker releases it, which calls `destroy()`.
 
+A step's calls run in the order the model gave them
+([model-loop.ts](../../core/src/agents/model-loop.ts)). `read`, `glob`, `grep`, `web_search` and
+`web_fetch` change nothing (`readOnly`), so they run together with the read-only calls next to
+them; every other call runs alone, once the calls before it have finished. An edit and the test
+run after it in the same step see each other, and a call not yet started when the run stops never
+starts. A call that blocks, such as `wait`, a child's `ask` or a foreground `bash`, holds the calls
+after it: one `wait` with several ids waits for them together.
+
 `bash` with `run_in_background` starts a command that outlives its call
 ([background-commands.ts](../src/background-commands.ts)), under an id no other run gives
 (`bg_<hex>`). It runs in a `runCommand` held open until it ends, so a provider that kills what a
@@ -513,7 +521,9 @@ messages do (`src/ask-tool.ts`, `src/subagent-inbox.ts`, `src/family-mailbox.ts`
 
 - **Asking.** The child puts its question, id `<childRunId>:<modelCallId>:<toolCallId>`, in the
   turn's mailbox and waits for the reply to it (`inReplyTo` the question), bounded by its signal:
-  its cancel, or its parent's. One call at a time: a second `ask` while one waits is refused. Replies never reach the step-boundary reads as messages, and the first reply counts.
+  its cancel, or its parent's. A step's calls run in order, so a second `ask` goes once the first
+  has its reply; once its parent's turn ended on one, it asks no other before it pauses. Replies
+  never reach the step-boundary reads as messages, and the first reply counts.
 - **The parent's wait wakes.** A question wakes the parent's waits at once (see
   [the parent's waits](#the-parents-waits)). `wait` returns as soon as a question comes, from any child
   of the turn, not only those it waits for, since a child blocked on its question never finishes.
@@ -521,9 +531,10 @@ messages do (`src/ask-tool.ts`, `src/subagent-inbox.ts`, `src/family-mailbox.ts`
   own. `questions` (`key`, `runId`, `id`, `text`) lists the questions it returns first and those
   of the children it waits for, and each is on its child's result.
 - **Answering.** While the child waits on a question the model has read, the parent's next
-  `message_agent` to its key is the answer: an `answer` mail, which `ask` returns as `{ answer }`. The question is claimed before the mail is written, so of two answers sent at once
-  the second is a message. A message sent before the model read the question stays a message. The
-  answer's id is the call's, so a replay is the same answer, sent once.
+  `message_agent` to its key is the answer: an `answer` mail, which `ask` returns as `{ answer }`.
+  The question is claimed before the mail is written, so a message sent after the answer is a
+  message. A message sent before the model read the question stays a message. The answer's id is
+  the call's, so a replay is the same answer, sent once.
 - **A question the model has not read.** When the model answers without tools, a question it has
   not read comes as one more step, a `<sixb_child_questions>` block: the turn does not end on an
   answer that ignores it.
@@ -546,10 +557,10 @@ messages do (`src/ask-tool.ts`, `src/subagent-inbox.ts`, `src/family-mailbox.ts`
   of its thread, past the continuations that failed or were cancelled. One `awaiting_answer` is
   continued as the next run of its thread under this turn and the same key, as
   [paused children](#paused-children) are, with the answer's `mail` part in its trigger instead of
-  outcomes; the failed attempts' messages leave the thread first, and a second answer in the same
-  turn is refused. The continuation reads it, as a `<sixb_parent_answer>` block, after the thread's
-  messages, so its request starts with the bytes the paused run's last one had. `wait` by
-  the old id returns its answer.
+  outcomes; the failed attempts' messages leave the thread first, and a second message in the same
+  turn reaches the continuation. The continuation reads it, as a `<sixb_parent_answer>` block,
+  after the thread's messages, so its request starts with the bytes the paused run's last one had.
+  `wait` by the old id returns its answer.
 
 ## The parent's waits
 

@@ -406,8 +406,10 @@ export async function runModelLoop(
       return { status: "completed", output, steps, finishReason: response.finishReason }
     }
 
-    const toolResults = await Promise.all(
-      localCalls.map((call) => executeToolCall(call, tools, callId, input.signal, input.onEvent))
+    const toolResults = await executeToolCalls(
+      localCalls,
+      (call) => tools.get(call.part.toolName)?.readOnly === true,
+      (call) => executeToolCall(call, tools, callId, input.signal, input.onEvent)
     )
     const step = modelStep(response, responseId, [...response.content, ...toolResults], cost)
     steps.push(step)
@@ -640,6 +642,31 @@ function modelStep(
   }
 }
 
+/**
+ * Run a step's calls in the order the model gave them. Read-only calls run together with the
+ * read-only calls next to them; every other call runs alone, once the calls before it have
+ * finished. An edit and the test the model runs after it in the same step then see each other.
+ */
+async function executeToolCalls(
+  calls: readonly ParsedToolCall[],
+  readOnly: (call: ParsedToolCall) => boolean,
+  execute: (call: ParsedToolCall) => Promise<ModelToolResultPart>
+): Promise<ModelToolResultPart[]> {
+  const results: ModelToolResultPart[] = []
+  let reads: ParsedToolCall[] = []
+  for (const call of calls) {
+    if (readOnly(call)) {
+      reads.push(call)
+      continue
+    }
+    results.push(...(await Promise.all(reads.map(execute))))
+    reads = []
+    results.push(await execute(call))
+  }
+  results.push(...(await Promise.all(reads.map(execute))))
+  return results
+}
+
 async function executeToolCall(
   call: ParsedToolCall,
   tools: ReadonlyMap<string, ModelTool>,
@@ -648,6 +675,17 @@ async function executeToolCall(
   onEvent: RunModelLoopInput["onEvent"]
 ): Promise<ModelToolResultPart> {
   const { part } = call
+  // A step's calls can run one after another: none starts once the run has stopped.
+  if (signal.aborted) {
+    const errorText = "The run stopped before this call started."
+    await onEvent?.({
+      type: "tool-output-error",
+      toolCallId: part.toolCallId,
+      toolName: part.toolName,
+      errorText,
+    })
+    return toolErrorResult(part, errorText)
+  }
   if (call.inputError) {
     const errorText = `Tool input is not valid JSON: ${call.inputError.message}`
     await onEvent?.({

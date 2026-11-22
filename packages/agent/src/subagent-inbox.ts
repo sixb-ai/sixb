@@ -22,8 +22,6 @@ export type ParentReply =
  */
 export class SubagentInbox {
   readonly #deliveries: SubagentDelivery[] = []
-  /** The question waiting for its reply: one at a time. */
-  #asking: string | undefined
   #deferred: QuestionRef | undefined
 
   constructor(
@@ -46,21 +44,18 @@ export class SubagentInbox {
    * parent's. Its id names the child's model call and tool call, so the parent lists it once.
    */
   async ask(question: string, callId: string, signal: AbortSignal): Promise<ParentReply> {
-    if (this.#asking !== undefined) {
+    // The child pauses after this step on the question its parent's turn ended on: nothing would
+    // answer another one before then, and its parent waits for it to pause.
+    if (this.#deferred !== undefined) {
       throw new AgentToolPublicError(
-        "[SixbAgent] Ask one question at a time: your parent has not answered the last one yet."
+        "[SixbAgent] Your parent's turn ended before it could answer your last question. Ask this one once you continue with its answer."
       )
     }
     const id = `${this.run.id}:${callId}`
-    this.#asking = id
-    try {
-      const reply = await this.mailbox.ask({ id, text: question }, signal)
-      if (reply.kind === "answer") return { kind: "answer", text: reply.text }
-      this.#deferred = { id, text: question }
-      return { kind: "deferred", questionId: id }
-    } finally {
-      this.#asking = undefined
-    }
+    const reply = await this.mailbox.ask({ id, text: question }, signal)
+    if (reply.kind === "answer") return { kind: "answer", text: reply.text }
+    this.#deferred = { id, text: question }
+    return { kind: "deferred", questionId: id }
   }
 
   /**
