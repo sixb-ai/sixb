@@ -14,7 +14,10 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 import { type ReactNode, useLayoutEffect } from "react"
 import * as Y from "yjs"
 import { createArtifactDocument } from "../../core/src/artifacts/live/document"
+import { frameLinkKey } from "../src/artifacts/frame"
+import { LiveArtifact } from "../src/artifacts/live/session"
 import { LiveVideo } from "../src/artifacts/live/video"
+import VideoEditor from "../src/artifacts/renderers/video/editor/editor"
 import { importKind } from "../src/artifacts/renderers/video/editor/import"
 import {
   formatSeconds,
@@ -67,15 +70,18 @@ import {
   TranscriptTab,
 } from "../src/artifacts/renderers/video/editor/transcript-panel"
 import { appleKeyboard } from "../src/artifacts/renderers/video/keys"
+import { artifactVersion } from "./helpers/artifacts"
 import { installDom } from "./helpers/dom"
 
 installDom([
   "document",
   "navigator",
+  "location",
   "localStorage",
   "Node",
   "Element",
   "HTMLElement",
+  "HTMLIFrameElement",
   "HTMLInputElement",
   "HTMLFormElement",
   "HTMLButtonElement",
@@ -85,6 +91,7 @@ installDom([
   "KeyboardEvent",
   "MouseEvent",
   "PointerEvent",
+  "MessageEvent",
   "FocusEvent",
   "EventTarget",
   "MutationObserver",
@@ -546,9 +553,9 @@ function typeIn(field: HTMLElement, value: string) {
   fireEvent.keyUp(field, { key: value.at(-1) ?? "a" })
 }
 
-function wrap(children: ReactNode) {
+function wrap(children: ReactNode, queries = new QueryClient()) {
   return (
-    <QueryClientProvider client={new QueryClient()}>
+    <QueryClientProvider client={queries}>
       <LocaleProvider>
         <TooltipProvider>{children}</TooltipProvider>
       </LocaleProvider>
@@ -557,7 +564,7 @@ function wrap(children: ReactNode) {
 }
 
 describe("the editor's pieces", () => {
-  test("a scene on the timeline opens, moves with Alt and an arrow, and renames on a double click", () => {
+  test("a chapter on the timeline opens, moves with Alt and an arrow, and renames on a double click", () => {
     const moves: [string, number][] = []
     const selected: string[] = []
     const renamed: string[] = []
@@ -571,9 +578,8 @@ describe("the editor's pieces", () => {
           scene={talk}
           index={1}
           count={2}
-          timeline={undefined}
-          target={{ artifactId: "art_video", version: 1, files: [] }}
           open={false}
+          playing={false}
           agent
           people={[]}
           dragging={false}
@@ -590,9 +596,9 @@ describe("the editor's pieces", () => {
       )
     )
 
-    const block = view.getByRole("button", { name: "Scene 2, Interview, 7 s" })
+    const block = view.getByRole("button", { name: "Chapter 2, Interview, 7 s" })
     expect(block.parentElement?.className).toContain("sixb-agent-board")
-    expect(block.getAttribute("title")).toBe("The agent is editing this scene")
+    expect(block.getAttribute("title")).toBe("The agent is editing this chapter")
 
     // A press is the timeline's to follow; a click without one, from the keyboard, opens it.
     fireEvent.pointerDown(block, { button: 0, clientX: 10, pointerId: 1 })
@@ -609,9 +615,9 @@ describe("the editor's pieces", () => {
     expect(renamed).toEqual(["talk: In their words"])
   })
 
-  // Guard proof: drop `narrow` from SceneBlock in scenes.tsx: a short scene keeps room for its
+  // Guard proof: drop `narrow` from SceneBlock in scenes.tsx: a short chapter keeps room for its
   // menu, and shows nothing of its name.
-  test("a scene too short for its name shows its number, and its name in a tooltip", async () => {
+  test("a chapter too short for its name shows its number, and its name in a tooltip", async () => {
     const talk = composition().scenes[1]
     if (!talk) throw new Error("No interview scene.")
     // Laid out 30 pixels wide, as a 4 s scene is at a long video's fit.
@@ -628,9 +634,8 @@ describe("the editor's pieces", () => {
             scene={talk}
             index={1}
             count={2}
-            timeline={undefined}
-            target={{ artifactId: "art_video", version: 1, files: [] }}
             open={false}
+            playing={false}
             agent={false}
             people={[]}
             dragging={false}
@@ -647,7 +652,7 @@ describe("the editor's pieces", () => {
         )
       )
 
-      const block = view.getByRole("button", { name: "Scene 2, Interview, 7 s" })
+      const block = view.getByRole("button", { name: "Chapter 2, Interview, 7 s" })
       expect(block.textContent).toBe("2")
       expect(block.getAttribute("title")).toBeNull()
 
@@ -1187,6 +1192,130 @@ describe("the Transcript tab", () => {
   })
 })
 
+describe("the editor", () => {
+  /** The video as the editor opens it, live, the title's words timed so both chapters have clips. */
+  function openEditor(talk = TALK) {
+    const live = new LiveArtifact("art_video", () => false, {
+      list: () => [],
+      write: () => {},
+      remove: () => {},
+    })
+    const files = new Map(FILES)
+    files.set("scenes/title.html", {
+      text: TITLE.replace("<h1>", '<h1 data-start="0" data-duration="3">'),
+    })
+    files.set("scenes/talk.html", { text: talk })
+    Y.applyUpdate(live.doc, Y.encodeStateAsUpdate(createArtifactDocument("video", files)))
+
+    const outline = {
+      kind: "video" as const,
+      width: 1280,
+      height: 720,
+      fps: 30,
+      durationMs: 10_000,
+      scenes: [
+        { id: "title", label: "Title", startMs: 0, durationMs: 3000, renderKey: "a" },
+        { id: "talk", label: "Interview", startMs: 3000, durationMs: 7000, renderKey: "b" },
+      ],
+    }
+    const version = artifactVersion({
+      artifactId: "art_video",
+      title: "Interview",
+      entry: "index.html",
+      outline,
+    })
+    const queries = new QueryClient({
+      defaultOptions: { queries: { enabled: false, retry: false } },
+    })
+    queries.setQueryData(frameLinkKey(version), {
+      path: "/api/artifact-frames/token/",
+      expiresAt: "2026-11-22T13:00:00.000Z",
+    })
+
+    const view = render(
+      wrap(<VideoEditor version={version} outline={outline} live={live} />, queries)
+    )
+    const text = (path: string) => live.doc.getMap<Y.Text>("files").get(path)?.toString() ?? ""
+    return { view, live, text }
+  }
+
+  // Guard proof: give the timeline the open chapter's clips alone in editor.tsx, `clips={clips}`,
+  // as it had without All scenes: with the playhead in the title, the interview shows none.
+  test("shows the whole video on one timeline, with no choice of scenes to make", () => {
+    const { view, live } = openEditor()
+    const tracks = view.container.querySelector<HTMLElement>("[data-video-tracks]")
+    const files = [...(tracks?.querySelectorAll("[data-timeline-file]") ?? [])].map((block) =>
+      block.getAttribute("data-timeline-file")
+    )
+    expect(new Set(files)).toEqual(new Set(["scenes/title.html", "scenes/talk.html", "index.html"]))
+    expect(view.queryByRole("button", { name: "All scenes" })).toBeNull()
+    expect(view.getByText("Chapters")).toBeDefined()
+    live.destroy()
+  })
+
+  // Guard proof: leave the selection as it was after a move in editor.tsx (`follow` false in
+  // `place`): the caption lands in the title, and nothing is selected.
+  test("a caption dragged into the chapter before lands in its file, and stays selected", () => {
+    const { view, live, text } = openEditor()
+    const caption = () => {
+      const found = view.container.querySelector<HTMLElement>(
+        '[data-video-tracks] [data-timeline-clip][aria-label$="Thanks for having me."]'
+      )
+      if (!found) throw new Error("No caption on the timeline.")
+      return found
+    }
+    const xAt = (ms: number) => 112 + ms / 10
+
+    // From 3.5 s, in the interview, to 0.5 s, in the title: its 2 s end there.
+    fireEvent.pointerDown(caption(), { button: 0, clientX: xAt(3500), pointerId: 1 })
+    fireEvent.pointerMove(caption(), { clientX: xAt(500), pointerId: 1, shiftKey: true })
+    fireEvent.pointerUp(caption(), { clientX: xAt(500), pointerId: 1, shiftKey: true })
+
+    expect(text("scenes/talk.html")).not.toContain("Thanks for having me.")
+    expect(text("scenes/title.html")).toContain(
+      '<p class="caption" data-start="0.5" data-duration="2">Thanks for having me.</p>'
+    )
+    expect(caption().getAttribute("data-timeline-file")).toBe("scenes/title.html")
+    expect(caption().style.left).toBe("50px")
+    expect(caption().getAttribute("aria-pressed")).toBe("true")
+    live.destroy()
+  })
+
+  // Guard proof: say every animation left in tellAnimations (editor.tsx), without `told`: the
+  // caption's second trip says it again.
+  test("says once, kindly, that a caption's animation stayed with its chapter", () => {
+    const animated = TALK.replace(
+      "  </div>\n</template>",
+      "    <script>gsap.timeline().from('[data-composition-id=\"talk\"] .caption', { opacity: 0 })</script>\n  </div>\n</template>"
+    )
+    const { view, live } = openEditor(animated)
+    const xAt = (ms: number) => 112 + ms / 10
+    const drag = (from: number, to: number) => {
+      const caption = view.container.querySelector<HTMLElement>(
+        '[data-video-tracks] [data-timeline-clip][aria-label$="Thanks for having me."]'
+      )
+      if (!caption) throw new Error("No caption on the timeline.")
+      fireEvent.pointerDown(caption, { button: 0, clientX: xAt(from), pointerId: 1 })
+      fireEvent.pointerMove(caption, { clientX: xAt(to), pointerId: 1, shiftKey: true })
+      fireEvent.pointerUp(caption, { clientX: xAt(to), pointerId: 1, shiftKey: true })
+    }
+
+    drag(3500, 500)
+    const notice = view.getByText("“Thanks for having me.” keeps its look").closest("[role=status]")
+    expect(notice?.textContent).toContain("Its animation stays with “Interview”.")
+    fireEvent.click(view.getByRole("button", { name: "Dismiss" }))
+
+    // Back into the interview, and out again: said already.
+    drag(500, 3500)
+    drag(3500, 500)
+    expect(view.queryByText(/keeps its look/)).toBeNull()
+    live.destroy()
+  })
+})
+
+/** Where a timeline's recordings would be read from: a version that holds none. */
+const TARGET = { artifactId: "art_video", version: 1, files: [] }
+
 describe("the timeline", () => {
   const video = () => {
     const state = new LiveVideo(createArtifactDocument("video", FILES)).getState()
@@ -1196,19 +1325,17 @@ describe("the timeline", () => {
   }
 
   function timeline(props: Partial<Parameters<typeof Timeline>[0]> & { readonly timeMs: number }) {
-    const { state, composition, talk } = video()
+    const { state, composition } = video()
     return wrap(
       <Timeline
         composition={composition}
-        clips={laidClips(state, composition, talk)}
-        open={talk}
+        clips={everySceneClips(state, composition)}
         selection={null}
         marks={{}}
         snapping
         agentScenes={new Set()}
         people={new Map()}
-        timelines={state.timelines}
-        target={{ artifactId: "art_video", version: 1, files: [] }}
+        target={TARGET}
         uploads={[]}
         toolbar={() => null}
         dropTarget={false}
@@ -1233,9 +1360,9 @@ describe("the timeline", () => {
     )
   }
 
-  // Guard proof: open the scene with something else than `edits.scene.select` on a tap in
-  // timeline.tsx, as it was: a click left the playhead, and the picture, in another scene.
-  test("a tap on a scene opens it as Enter does, which moves the playhead to it", () => {
+  // Guard proof: open the chapter with something else than `edits.scene.select` on a tap in
+  // timeline.tsx, as it was: a click left the playhead, and the picture, in another chapter.
+  test("a tap on a chapter opens it as Enter does, which moves the playhead to it", () => {
     const opened: string[] = []
     const view = render(
       timeline({
@@ -1258,7 +1385,7 @@ describe("the timeline", () => {
       })
     )
 
-    const block = view.getByRole("button", { name: /^Scene 2, Interview/ })
+    const block = view.getByRole("button", { name: /^Chapter 2, Interview/ })
     fireEvent.pointerDown(block, { button: 0, clientX: 300, pointerId: 1 })
     fireEvent.pointerUp(window, { button: 0, clientX: 300, pointerId: 1 })
     expect(opened).toEqual(["talk"])
@@ -1352,7 +1479,8 @@ describe("the timeline", () => {
     test("a drag with the command key selects every clip its rectangle touches, as it grows", () => {
       const { selected, query } = selecting()
       const tracks = query("[data-video-tracks]")
-      const picture = tracks.children[0]?.children[1]
+      // The first row, past the chapters' edges drawn under the clips.
+      const picture = [...tracks.children].find((child) => child.tagName === "DIV")?.children[1]
       if (!picture) throw new Error("No picture track.")
 
       fireEvent.pointerDown(picture, {
@@ -1426,6 +1554,189 @@ describe("the timeline", () => {
     fireEvent.pointerMove(handle, { clientX: 462, pointerId: 1, shiftKey: true })
     fireEvent.pointerUp(handle, { clientX: 462, pointerId: 1, shiftKey: true })
     expect(trims).toHaveLength(1)
+  })
+
+  describe("one film, its chapters on a bar", () => {
+    // 100 px a second from the labels' edge, 112 px in, as above.
+    const xAt = (ms: number) => 112 + ms / 10
+
+    /** The timeline, every edit it asks for kept. */
+    function film(selection: Parameters<typeof Timeline>[0]["selection"] = null) {
+      const moved: [string, string, number][] = []
+      const grouped: [string[], number][] = []
+      const edits = {
+        seek: () => {},
+        select: () => {},
+        moveClip: (laid: { file: string; clip: { ref: string } }, startMs: number) =>
+          moved.push([laid.file, laid.clip.ref, startMs]),
+        moveClips: (clips: readonly { readonly clip: { readonly ref: string } }[], ms: number) =>
+          grouped.push([clips.map((laid) => laid.clip.ref), ms]),
+        trimClip: () => {},
+        sceneLength: () => {},
+        scene: { select: () => {}, move: () => {}, duplicate: () => {}, remove: () => {} },
+      }
+      const view = render(timeline({ timeMs: 0, selection, edits: edits as never }))
+      const block = (ref: string) => {
+        const found = view.container.querySelector<HTMLElement>(`[data-timeline-clip="${ref}"]`)
+        if (!found) throw new Error(`No clip ${ref} on the timeline.`)
+        return found
+      }
+      return { view, moved, grouped, block }
+    }
+
+    // Guard proof: drop the chapters' edges from the tracks in timeline.tsx: nothing on them says
+    // where the interview starts.
+    test("lays every chapter's clips where they play, and marks where each chapter starts", () => {
+      const { view, block } = film()
+      // The interview's footage plays from 3 s, after the title, on the one track.
+      expect(block("clip").style.left).toBe("300px")
+      expect(view.getByText("Chapters")).toBeDefined()
+      const edge = view.container.querySelector<HTMLElement>('[data-chapter-edge="talk"]')
+      expect(edge?.style.left).toBe(`${xAt(3000)}px`)
+      // The chapter under the playhead is marked, and nothing on the tracks is dimmed.
+      const title = view.getByRole("button", { name: /^Chapter 1, Title/ })
+      expect(title.getAttribute("aria-current")).toBe("true")
+      expect(view.container.querySelector(".opacity-50")).toBeNull()
+    })
+
+    // Guard proof: give each clip its chapter's start as its floor in onDragMove (timeline.tsx),
+    // `floorMs: sceneStartOf(each.file)`, as the timeline had it: the group stops at the
+    // interview's start, and moveClips is asked for no move at all.
+    test("a clip dragged across a chapter's edge goes there, alone or with the clips selected", () => {
+      const alone = film()
+      // The caption, at 3.5 s in the interview, dragged two seconds sooner: into the title.
+      fireEvent.pointerDown(alone.block("#1"), { button: 0, clientX: xAt(3500), pointerId: 1 })
+      for (const ms of [3000, 2000, 1500]) {
+        fireEvent.pointerMove(alone.block("#1"), { clientX: xAt(ms), pointerId: 1, shiftKey: true })
+      }
+      // It follows the pointer over the edge.
+      expect(alone.block("#1").style.left).toBe("150px")
+      fireEvent.pointerUp(alone.block("#1"), { clientX: xAt(1500), pointerId: 1, shiftKey: true })
+      expect(alone.moved).toEqual([["scenes/talk.html", "#1", 1500]])
+      cleanup()
+
+      const together = film({
+        type: "clips",
+        clips: [
+          { file: "scenes/talk.html", target: "clip" },
+          {
+            file: "scenes/talk.html",
+            target: { ref: "#1", tag: "p", words: "Thanks for having me." },
+          },
+        ],
+      })
+      fireEvent.pointerDown(together.block("#1"), { button: 0, clientX: xAt(3500), pointerId: 1 })
+      fireEvent.pointerMove(together.block("#1"), {
+        clientX: xAt(500),
+        pointerId: 1,
+        shiftKey: true,
+      })
+      fireEvent.pointerUp(together.block("#1"), { clientX: xAt(500), pointerId: 1, shiftKey: true })
+      // As far as the footage, at 3 s, can go: to the video's start.
+      expect(together.grouped).toEqual([[["clip", "#1"], -3000]])
+    })
+  })
+
+  // Guard proof: drop `memo` from ClipBlock in timeline.tsx; every caption's block is drawn again
+  // at each move of the pointer, 301 of them, where only the one dragged moves.
+  test("a drag draws again only what it moves, on a video of hundreds of captions", () => {
+    // A 40 s video in four chapters of 10 s, each a recording under 75 captions of a word each.
+    const scene = (id: string) => {
+      const words = Array.from(
+        { length: 75 },
+        (_, index) =>
+          `<p class="caption" data-start="${(index * 0.13).toFixed(2)}" data-duration="0.13">w${index}</p>`
+      ).join("\n    ")
+      return `<template>
+  <div data-composition-id="${id}" data-width="1280" data-height="720">
+    <video id="${id}-take" src="media/talk.mp4" data-start="0" data-duration="10" data-has-audio="true"></video>
+    ${words}
+  </div>
+</template>`
+    }
+    const ids = ["one", "two", "three", "four"]
+    const index = `<div data-composition-id="main" data-width="1280" data-height="720" data-duration="40">
+  ${ids
+    .map(
+      (id, at) =>
+        `<div id="${id}" data-composition-id="${id}" data-composition-src="scenes/${id}.html" data-start="${at * 10}" data-duration="10"></div>`
+    )
+    .join("\n  ")}
+</div>`
+    const state = new LiveVideo(
+      createArtifactDocument(
+        "video",
+        new Map([
+          ["index.html", { text: index }],
+          ...ids.map((id) => [`scenes/${id}.html`, { text: scene(id) }] as const),
+          ["media/talk.mp4", { file: ref("media/talk.mp4") }],
+        ])
+      )
+    ).getState()
+    const shown = state.composition
+    if (!shown) throw new Error("No video.")
+    const clips = everySceneClips(state, shown)
+    expect(clips).toHaveLength(304)
+
+    // Each block reads its recording's parts as it draws, and React Query reads a hook's options
+    // again once it is drawn: two reads are a block drawn.
+    const queries = new QueryClient()
+    const read = queries.defaultQueryOptions.bind(queries)
+    let drawn = 0
+    queries.defaultQueryOptions = ((options: Parameters<typeof read>[0]) => {
+      drawn += 1
+      return read(options)
+    }) as typeof queries.defaultQueryOptions
+
+    const view = render(
+      wrap(
+        <Timeline
+          composition={shown}
+          clips={clips}
+          selection={null}
+          timeMs={0}
+          marks={{}}
+          snapping
+          agentScenes={new Set()}
+          people={new Map()}
+          target={TARGET}
+          uploads={[]}
+          toolbar={() => null}
+          dropTarget={false}
+          formatLength={(ms) => `${ms / 1000} s`}
+          edits={{
+            seek: () => {},
+            select: () => {},
+            moveClip: () => {},
+            moveClips: () => {},
+            trimClip: () => {},
+            sceneLength: () => {},
+            scene: {
+              select: () => {},
+              move: () => {},
+              duplicate: () => {},
+              remove: () => {},
+              rename: () => {},
+            },
+          }}
+        />,
+        queries
+      )
+    )
+    const word = view.container.querySelector<HTMLElement>(
+      '[data-timeline-file="scenes/two.html"][data-timeline-clip="#40"]'
+    )
+    if (!word) throw new Error("No caption on the timeline.")
+
+    fireEvent.pointerDown(word, { button: 0, clientX: 1000, pointerId: 1 })
+    const before = drawn
+    const moves = 30
+    for (let step = 1; step <= moves; step += 1) {
+      fireEvent.pointerMove(word, { clientX: 1000 + step * 7, pointerId: 1, shiftKey: true })
+    }
+    // The timeline itself, and the caption it moves: nothing else.
+    expect((drawn - before) / moves / 2).toBeLessThanOrEqual(2)
+    fireEvent.pointerUp(word, { clientX: 1000 + moves * 7, pointerId: 1, shiftKey: true })
   })
 
   // Reproduce by finding the dragged clip by identity, as the timeline did: a change that lands

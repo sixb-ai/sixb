@@ -12,8 +12,8 @@ import {
 import type { LiveVideoState } from "../../../live/video"
 import { type LaidClip, layClips, onRows } from "./model"
 
-// What the reader has selected in the editor, and what follows from it: the scene whose clips the
-// timeline opens, and every clip laid out in the video's time.
+// What the reader has selected in the editor, and what follows from it: every clip laid out in the
+// video's time, as the timeline shows them, and the chapter the Transcript tab reads.
 
 /**
  * A scene, or a clip of a file by its target: its id, else its place with what it held, so a
@@ -116,8 +116,8 @@ export function selectedClips(
 }
 
 /**
- * The clips the timeline lays out: the open scene's, from its start, and the video's own, such as
- * its soundtrack, along its whole length.
+ * The open chapter's clips, from its start, and the video's own, such as its soundtrack, along its
+ * whole length: what the Transcript tab reads.
  */
 export function laidClips(
   state: LiveVideoState,
@@ -135,8 +135,8 @@ export function laidClips(
 }
 
 /**
- * Every scene's clips, laid in the video, and the video's own: the timeline when it shows all the
- * scenes. Scenes that play together, as in a crossfade, share the rows, so their clips lie apart.
+ * Every scene's clips, laid in the video, and the video's own: what the timeline shows. Scenes that
+ * play together, as in a crossfade, share the rows, so their clips lie apart.
  */
 export function everySceneClips(state: LiveVideoState, composition: VideoComposition): LaidClip[] {
   const own = state.timelines.get(VIDEO_ENTRY)

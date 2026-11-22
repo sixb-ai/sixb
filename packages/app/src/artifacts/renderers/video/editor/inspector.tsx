@@ -29,9 +29,10 @@ import { type MediaTarget, useMediaParts } from "./media"
 import { clipName, sceneName, typedText } from "./selection"
 import { TRACK_TONE } from "./timeline"
 
-// What the selection is, and its settings: a scene's name, length and words on screen; a clip's
-// timing, sound and words; for several clips, how many, to split or delete together. Each field changes the video once the reader commits it, with Enter or
-// by leaving it: a step of its own for undo. The arrows nudge a time by a tenth of a second, and a
+// What the selection is, and its settings: a chapter's name, length and words on screen; a clip's
+// timing, sound and words; for several clips, how many, to split or delete together. Each field
+// changes the video once the reader commits it, with Enter or by leaving it: a step of its own for
+// undo. The arrows nudge a time by a tenth of a second, and a
 // whole one with Shift.
 
 export interface InspectorActions {
@@ -601,7 +602,7 @@ function VolumeField({
   )
 }
 
-/** A scene's start, as the reader thinks of it: when another ends, or at a time. */
+/** A chapter's start, as the reader thinks of it: when another ends, or at a time. */
 function startsText(
   scene: VideoScene,
   composition: VideoComposition,

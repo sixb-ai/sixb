@@ -303,7 +303,7 @@ describe("a video held live in the viewer", () => {
       fireEvent.pointerDown(more[0] as Element, { button: 0, ctrlKey: false, pointerType: "mouse" })
     })
     const entry = await ui.findByRole("menuitem", { name: /Edit/ })
-    expect(entry.textContent).toContain("Reorder, trim and retitle its scenes")
+    expect(entry.textContent).toContain("Reorder, trim and retitle its chapters")
     await act(async () => {
       fireEvent.click(entry)
     })

@@ -1,11 +1,6 @@
 // The timeline's choices each reader keeps in this browser. Each is off unless they turned it on.
 
-const EVERY_SCENE_KEY = "sixb.video-editor.every-scene"
 const MAGNETIC_KEY = "sixb.video-editor.magnetic"
-
-/** Whether the reader last chose to see every scene's clips on the timeline. */
-export const readEveryScene = () => readChoice(EVERY_SCENE_KEY)
-export const writeEveryScene = (on: boolean) => writeChoice(EVERY_SCENE_KEY, on)
 
 /** Whether the reader last chose that a trim or a delete closes the gap it leaves. */
 export const readMagnetic = () => readChoice(MAGNETIC_KEY)

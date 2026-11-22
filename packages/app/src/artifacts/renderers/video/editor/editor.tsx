@@ -3,6 +3,7 @@ import {
   type ArtifactLiveUser,
   cutRange,
   duplicateScene,
+  findVideoTarget,
   moveClip,
   moveClips,
   moveScene,
@@ -19,9 +20,11 @@ import {
   splitClips,
   trimClip,
   VIDEO_ENTRY,
+  type VideoAnimationLeft,
   type VideoClip,
   type VideoClipTarget,
   type VideoEditResult,
+  type VideoPlaceResult,
   type VideoScene,
   type VideoSources,
   videoTarget,
@@ -41,7 +44,7 @@ import {
   ArrowRightFromLine,
   ArrowRightToLine,
   FoldHorizontal,
-  GalleryHorizontalEnd,
+  Info,
   Keyboard,
   Maximize2,
   Pause,
@@ -80,17 +83,19 @@ import { InPlaceEditor, type InPlaceText } from "./in-place"
 import { Inspector, type InspectorActions } from "./inspector"
 import type { MediaTarget } from "./media"
 import { MobileScenes } from "./mobile"
-import { editPoints, type LaidClip, nextEditPoint, openingSeek, sceneAt } from "./model"
-import { readEveryScene, readMagnetic, writeEveryScene, writeMagnetic } from "./preferences"
+import { editPoints, type LaidClip, nextEditPoint, openingSeek, sceneAt, sceneFor } from "./model"
+import { readMagnetic, writeMagnetic } from "./preferences"
 import { PlayMark, PreviewScreen, usePreview } from "./preview"
 import {
   choose,
   chosenIn,
+  clipName,
   type EditorSelection,
   everySceneClips,
   heardRecordings,
   laidClips,
   openEnd,
+  sceneName,
   selectedClips,
   selectedScene,
   selectionOf,
@@ -100,15 +105,27 @@ import { Timeline, type ZoomControls } from "./timeline"
 import { TranscriptTab } from "./transcript-panel"
 
 // Editing a video: its picture and the selection's settings at the top, and the timeline at the
-// foot, its scenes along its first track. Every edit is a change to the live document, everyone's at once, and
-// a step of the reader's undo; the Agent's own changes show as they land, and the scene it is
-// changing glows. On a phone, the scenes are a list to reorder, trim and retitle.
+// foot, the whole video as one film, its scenes as chapters along its first bar. The chapter the
+// reader works in, which the Transcript tab reads and Add media fills, is the one selected, else
+// the one under the playhead. Every edit is a change to the live document, everyone's at once, and
+// a step of the reader's undo; the Agent's own changes show as they land, and the chapter it is
+// changing glows. On a phone, the chapters are a list to reorder, trim and retitle.
 
 /** The widest editor laid out as on a phone. */
 const COMPACT_WIDTH = 640
 
 /** How long a refusal stays said. */
 const NOTICE_MS = 5_000
+
+/** What the editor says for a moment: a refusal, or what an edit could not take along. */
+interface EditorNotice {
+  readonly title: string
+  readonly detail?: string
+  readonly tone?: "warning" | "info"
+}
+
+/** The longest a clip's name is said in a notice, its words cut after. */
+const NOTICE_NAME_LENGTH = 40
 
 export default function VideoEditor({
   version,
@@ -127,11 +144,11 @@ export default function VideoEditor({
   const state = useSyncExternalStore(video.subscribe, video.getState, video.getState)
   const liveState = useLiveArtifactState(live)
   const presence = useLivePresence(live)
-  const target: MediaTarget = {
-    artifactId: version.artifactId,
-    version: version.version,
-    files: version.files,
-  }
+  // The same object while the version is, so a clip's block is not drawn again for it.
+  const target = useMemo<MediaTarget>(
+    () => ({ artifactId: version.artifactId, version: version.version, files: version.files }),
+    [version.artifactId, version.version, version.files]
+  )
 
   const root = useRef<HTMLDivElement | null>(null)
   const { width } = useSize(root)
@@ -141,16 +158,16 @@ export default function VideoEditor({
   const timeMs = Math.round(playback.time * 1000)
 
   const [selection, setSelection] = useState<EditorSelection>(null)
-  const [openId, setOpenId] = useState<string | undefined>(undefined)
   const [marks, setMarks] = useState<{ readonly in?: number; readonly out?: number }>({})
   const [magnetic, setMagnetic] = useState(readMagnetic)
   const [snapping, setSnapping] = useState(true)
-  const [everyScene, setEveryScene] = useState(readEveryScene)
   const [panel, setPanel] = useState<"inspector" | "transcript">("inspector")
-  const [notice, setNotice] = useState<{ readonly title: string; readonly detail?: string } | null>(
-    null
-  )
+  const [notice, setNotice] = useState<EditorNotice | null>(null)
   const [dropping, setDropping] = useState(false)
+  // Where files dragged over the tracks would land; null over the rest of the editor.
+  const [filesAt, setFilesAt] = useState<number | null>(null)
+  // The animations already said to stay behind, each once while the editor is open.
+  const told = useRef(new Set<string>())
   const [inPlace, setInPlace] = useState<InPlaceText | null>(null)
   // The click on the picture waiting for the frame's answer, by its own request.
   const picking = useRef<{
@@ -166,27 +183,26 @@ export default function VideoEditor({
 
   const composition = state.composition
   const scenes = composition?.scenes ?? []
-  const open = composition
-    ? (scenes.find((scene) => scene.id === openId) ??
-      selectedScene(composition, selection) ??
-      sceneAt(scenes, timeMs))
-    : undefined
+  const playing = sceneAt(scenes, timeMs)
+  const open =
+    (composition && selection?.type === "scene"
+      ? selectedScene(composition, selection)
+      : undefined) ?? playing
+  // What the Transcript tab reads: the open chapter's clips and the video's own.
   const clips = useMemo(
     () => (composition ? laidClips(state, composition, open) : []),
     [state, composition, open]
   )
-  // What the timeline shows, splits and steps through: the open scene's clips, or every scene's.
-  // The Transcript tab keeps to the open scene's either way.
+  // What the timeline shows, splits and steps through: every chapter's clips, where they play.
   const shown = useMemo(
-    () => (composition && everyScene ? everySceneClips(state, composition) : clips),
-    [state, composition, everyScene, clips]
+    () => (composition ? everySceneClips(state, composition) : []),
+    [state, composition]
   )
   // The clips selected, each in its file, and the one when it is alone.
   const picked = selectedClips(state, selection)
   const clip = picked.length === 1 ? picked[0] : undefined
-  const playing = sceneAt(scenes, timeMs)
 
-  // What the others see this reader working on: the scene open on the timeline.
+  // What the others see this reader working on: the chapter they work in.
   const openSceneId = open?.id
   useEffect(() => {
     shareSelection(live, openSceneId ? [openSceneId] : [])
@@ -219,7 +235,7 @@ export default function VideoEditor({
   // ── Edits ──────────────────────────────────────────────────────────
 
   const refuse = useCallback(
-    (detail: string) => setNotice({ title: messages.refused, detail }),
+    (detail: string) => setNotice({ title: messages.refused, detail, tone: "warning" }),
     [messages.refused]
   )
   const edit = useCallback(
@@ -231,7 +247,55 @@ export default function VideoEditor({
     [video, refuse]
   )
 
-  const { uploads, importFiles } = useMediaImport(video, (detail) => setNotice({ title: detail }))
+  const { uploads, importFiles } = useMediaImport(video, (detail) =>
+    setNotice({ title: detail, tone: "warning" })
+  )
+
+  /**
+   * Makes an edit that places clips. A move's selection follows them to where they start now; a
+   * clip whose animation stayed with its chapter is said once, kindly.
+   */
+  const place = (make: (sources: VideoSources) => VideoPlaceResult, follow: boolean) => {
+    let result: VideoPlaceResult | undefined
+    const made = edit((sources) => {
+      result = make(sources)
+      return result
+    })
+    if (!made || !result || !("edit" in result)) return
+
+    const placed = result.clips ?? []
+    if (follow && placed.length > 0) {
+      setSelection(selectionOf(placed.map(({ file, clip }) => ({ file, target: clip }))))
+    }
+    tellAnimations(result.animationsLeft ?? [])
+  }
+
+  const tellAnimations = (left: readonly VideoAnimationLeft[]) => {
+    const now = video.getState()
+    const fresh = left.flatMap(({ clip, scene }) => {
+      const found = findVideoTarget(now.timelines.get(clip.file)?.clips ?? [], clip.clip)
+      if (Array.isArray(found)) return []
+
+      const name = clipName(found as VideoClip)
+      const key = `${scene}\n${name}`
+      if (told.current.has(key)) return []
+      told.current.add(key)
+      const chapter = now.composition?.scenes.find((each) => each.id === scene)
+      return [{ name, chapter: chapter ? sceneName(chapter) : scene }]
+    })
+
+    const [first] = fresh
+    if (!first) return
+    setNotice(
+      fresh.length === 1
+        ? {
+            title: messages.keepsLook(shortName(first.name)),
+            detail: messages.animationStays(first.chapter),
+            tone: "info",
+          }
+        : { title: messages.keepLooks(fresh.length), detail: messages.animationsStay, tone: "info" }
+    )
+  }
 
   const offsetOf = (file: string) =>
     file === VIDEO_ENTRY ? 0 : (scenes.find((scene) => scene.src === file)?.startMs ?? 0)
@@ -241,7 +305,6 @@ export default function VideoEditor({
     playback.seek(Math.max(0, ms) / 1000, mode)
 
   const openScene = (scene: VideoScene) => {
-    setOpenId(scene.id)
     setSelection({ type: "scene", scene: scene.id })
     const at = openingSeek(scene, timeMs, composition?.fps ?? outline.fps)
     if (at !== undefined) seek(at)
@@ -257,16 +320,10 @@ export default function VideoEditor({
         copy = "scene" in result ? result.scene : undefined
         return result
       })
-      if (made && copy) {
-        setOpenId(copy)
-        setSelection({ type: "scene", scene: copy })
-      }
+      if (made && copy) setSelection({ type: "scene", scene: copy })
     },
     remove: (scene: VideoScene) => {
-      if (edit((sources) => removeScene(sources, scene.id))) {
-        setSelection(null)
-        setOpenId(undefined)
-      }
+      if (edit((sources) => removeScene(sources, scene.id))) setSelection(null)
     },
     rename: (scene: VideoScene, label: string) =>
       edit((sources) => setSceneLabel(sources, scene.id, label)),
@@ -596,6 +653,28 @@ export default function VideoEditor({
     <Banner tone="agent">{messages.agentConflict}</Banner>
   ) : null
 
+  /** Where Add media, or files dropped on the picture, land: the open chapter, at the playhead. */
+  const atPlayhead = () =>
+    open
+      ? {
+          file: open.src,
+          sceneStartMs: open.startMs,
+          atMs: Math.min(Math.max(0, timeMs - open.startMs), open.durationMs),
+        }
+      : undefined
+
+  /** Where files dropped on the tracks land: at that instant, in the chapter there. */
+  const atInstant = (ms: number) => {
+    const chapter = sceneFor(scenes, ms)
+    return chapter
+      ? {
+          file: chapter.src,
+          sceneStartMs: chapter.startMs,
+          atMs: Math.max(0, ms - chapter.startMs),
+        }
+      : undefined
+  }
+
   const drop = {
     onDragOver: (event: React.DragEvent) => {
       if (compact || !event.dataTransfer.types.includes("Files")) return
@@ -604,17 +683,17 @@ export default function VideoEditor({
       setDropping(true)
     },
     onDragLeave: (event: React.DragEvent) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false)
+      if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+      setDropping(false)
+      setFilesAt(null)
     },
     onDrop: (event: React.DragEvent) => {
-      if (compact || !open) return
+      if (compact) return
       event.preventDefault()
+      const at = filesAt === null ? atPlayhead() : atInstant(filesAt)
       setDropping(false)
-      void importFiles([...event.dataTransfer.files], {
-        file: open.src,
-        sceneStartMs: open.startMs,
-        atMs: Math.min(Math.max(0, timeMs - open.startMs), open.durationMs),
-      })
+      setFilesAt(null)
+      if (at) void importFiles([...event.dataTransfer.files], at)
     },
   }
 
@@ -802,51 +881,63 @@ export default function VideoEditor({
         <Timeline
           composition={composition}
           clips={shown}
-          open={open}
           selection={selection}
           timeMs={timeMs}
           marks={marks}
           snapping={snapping}
+          magnetic={magnetic}
           agentScenes={agentScenes}
           people={people}
-          timelines={state.timelines}
           target={target}
           uploads={uploads}
           dropTarget={dropping}
+          filesAt={dropping ? filesAt : null}
           formatLength={length}
           edits={{
             seek,
             select: setSelection,
             moveClip: (laid, startMs) =>
-              edit((sources) =>
-                moveClip(sources, laid.file, videoTarget(laid.clip), startMs - offsetOf(laid.file))
+              place(
+                (sources) =>
+                  moveClip(
+                    sources,
+                    laid.file,
+                    videoTarget(laid.clip),
+                    startMs - offsetOf(laid.file)
+                  ),
+                true
               ),
             moveClips: (group, deltaMs) =>
-              edit((sources) =>
-                moveClips(
-                  sources,
-                  group.map((laid) => ({ file: laid.file, clip: videoTarget(laid.clip) })),
-                  deltaMs
-                )
+              place(
+                (sources) =>
+                  moveClips(
+                    sources,
+                    group.map((laid) => ({ file: laid.file, clip: videoTarget(laid.clip) })),
+                    deltaMs
+                  ),
+                true
               ),
             trimClip: (laid, side, atMs) => {
               const endMs = endOf(laid.file)
-              edit((sources) =>
-                trimClip(
-                  sources,
-                  laid.file,
-                  videoTarget(laid.clip),
-                  side,
-                  atMs - offsetOf(laid.file),
-                  {
-                    ripple: magnetic,
-                    ...(endMs === undefined ? {} : { endMs }),
-                  }
-                )
+              place(
+                (sources) =>
+                  trimClip(
+                    sources,
+                    laid.file,
+                    videoTarget(laid.clip),
+                    side,
+                    atMs - offsetOf(laid.file),
+                    {
+                      ripple: magnetic,
+                      ...(endMs === undefined ? {} : { endMs }),
+                    }
+                  ),
+                false
               )
             },
             sceneLength: sceneActions.sceneLength,
             scene: sceneActions,
+            dropOver: setFilesAt,
           }}
           toolbar={(zoom) => (
             <Toolbar
@@ -874,19 +965,10 @@ export default function VideoEditor({
               }}
               snapping={snapping}
               onSnapping={setSnapping}
-              everyScene={everyScene}
-              onEveryScene={(on) => {
-                setEveryScene(on)
-                writeEveryScene(on)
-              }}
               zoom={zoom}
               onImport={(files) => {
-                if (!open) return
-                void importFiles(files, {
-                  file: open.src,
-                  sceneStartMs: open.startMs,
-                  atMs: Math.min(Math.max(0, timeMs - open.startMs), open.durationMs),
-                })
+                const at = atPlayhead()
+                if (at) void importFiles(files, at)
               }}
               formatLength={length}
             />
@@ -894,7 +976,8 @@ export default function VideoEditor({
         />
       </div>
 
-      {dropping && open ? (
+      {/* Over the tracks, the timeline shows where files land; anywhere else, this says. */}
+      {dropping && filesAt === null && open ? (
         <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-background/70 backdrop-blur-[2px]">
           <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-primary bg-background px-10 py-8 text-center shadow-xl">
             <Upload className="size-6 text-primary" aria-hidden="true" />
@@ -925,6 +1008,13 @@ function formatTenths(ms: number): string {
   return String(Math.round(ms / 100) / 10)
 }
 
+/** A clip's name as a notice says it: its first words, when it is a long caption. */
+function shortName(name: string): string {
+  return name.length > NOTICE_NAME_LENGTH
+    ? `${name.slice(0, NOTICE_NAME_LENGTH - 1).trimEnd()}…`
+    : name
+}
+
 function Banner({
   tone,
   children,
@@ -952,13 +1042,14 @@ function Notice({
   onClose,
   floating = false,
 }: {
-  readonly notice: { readonly title: string; readonly detail?: string }
+  readonly notice: EditorNotice
   readonly onClose: () => void
   readonly floating?: boolean
 }) {
+  const info = notice.tone === "info"
   return (
     <div
-      role="alert"
+      role={info ? "status" : "alert"}
       className={cn(
         "pointer-events-auto flex max-w-lg items-start gap-2.5 rounded-xl border border-border bg-background px-3.5 py-2.5 text-[13px] shadow-lg",
         floating
@@ -966,7 +1057,11 @@ function Notice({
           : "mx-4 mt-3"
       )}
     >
-      <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden="true" />
+      {info ? (
+        <Info className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+      ) : (
+        <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden="true" />
+      )}
       <div className="min-w-0 flex-1">
         <p className="m-0 font-medium">{notice.title}</p>
         {notice.detail ? <p className="m-0 mt-0.5 text-muted-foreground">{notice.detail}</p> : null}
@@ -1001,8 +1096,6 @@ function Toolbar({
   onMagnetic,
   snapping,
   onSnapping,
-  everyScene,
-  onEveryScene,
   zoom,
   onImport,
   formatLength,
@@ -1024,8 +1117,6 @@ function Toolbar({
   readonly onMagnetic: (on: boolean) => void
   readonly snapping: boolean
   readonly onSnapping: (on: boolean) => void
-  readonly everyScene: boolean
-  readonly onEveryScene: (on: boolean) => void
   readonly zoom: ZoomControls
   readonly onImport: (files: File[]) => void
   readonly formatLength: (ms: number) => string
@@ -1133,21 +1224,6 @@ function Toolbar({
             </Toggle>
           </TooltipTrigger>
           <TooltipContent>{editor.snappingHint}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Toggle
-              size="sm"
-              pressed={everyScene}
-              onPressedChange={onEveryScene}
-              aria-label={editor.everyScene}
-              className="h-8 gap-1.5 px-2 text-[13px]"
-            >
-              <GalleryHorizontalEnd />
-              <span className="@max-4xl/toolbar:sr-only">{editor.everyScene}</span>
-            </Toggle>
-          </TooltipTrigger>
-          <TooltipContent>{editor.everySceneHint}</TooltipContent>
         </Tooltip>
         <Divider />
         <ToolButton label={editor.zoomOut} onClick={zoom.zoomOut} disabled={!zoom.canZoomOut}>
