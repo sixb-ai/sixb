@@ -1,7 +1,8 @@
 # @sixb/azure-ai-foundry
 
-Azure AI Foundry models for Sixb. A project URL and API key resolve Azure deployments into
-model capabilities, limits, reasoning controls, and reference prices from [models.dev](https://models.dev).
+Azure AI Foundry models for Sixb. A project URL and its key, or an Entra ID credential, resolve
+Azure deployments into model capabilities, limits, reasoning controls, and reference prices from
+[models.dev](https://models.dev).
 Language, embedding, decision, transcription, reranking, speech and image models are supported.
 
 ## Install
@@ -15,18 +16,32 @@ bun add @sixb/azure-ai-foundry
 ```ts
 import { createAzureAIFoundry } from "@sixb/azure-ai-foundry"
 
-const foundry = createAzureAIFoundry({
-  endpoint: "https://my-resource.services.ai.azure.com/api/projects/my-project",
-  apiKey: () => process.env.AZURE_AI_FOUNDRY_API_KEY,
-})
+// Reads AZURE_AI_FOUNDRY_ENDPOINT, the project endpoint from the Foundry portal
+// (https://my-resource.services.ai.azure.com/api/projects/my-project),
+// and AZURE_AI_FOUNDRY_API_KEY, its key.
+const foundry = createAzureAIFoundry()
 
 const model = foundry("production") // Your Azure deployment name.
 ```
 
+Or pass them, or sign in with Entra ID instead of a key, such as a managed identity in production
+and `az login` on your computer:
+
+```ts
+createAzureAIFoundry({ endpoint: "https://my-resource.services.ai.azure.com/api/projects/my-project", apiKey })
+
+import { DefaultAzureCredential } from "@azure/identity"
+createAzureAIFoundry({ credential: new DefaultAzureCredential() })
+```
+
 The project URL tells Sixb what is deployed; every model call goes to the resource that owns the
-project, `https://my-resource.services.ai.azure.com`, with the same key. Keys may be strings or
-synchronous/asynchronous functions; functions receive an abort signal and are evaluated for each
-Azure HTTP attempt.
+project, `https://my-resource.services.ai.azure.com`, with the same key or token.
+
+| Option | Rule |
+| --- | --- |
+| `endpoint` | The project URL. Default: `AZURE_AI_FOUNDRY_ENDPOINT` |
+| `apiKey` | A string, or a function that receives an abort signal and runs for each Azure HTTP attempt. Default, without `credential`: `AZURE_AI_FOUNDRY_API_KEY`, read for each attempt |
+| `credential` | Anything with `getToken()`, such as `@azure/identity`'s credentials. Sixb asks it for a `https://ai.azure.com` token, the one audience discovery and every model call accept, and renews it five minutes before it expires. The identity needs the Foundry User role on the resource |
 
 Language model resolution follows this sequence:
 

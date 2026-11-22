@@ -31,9 +31,25 @@ const AUDIO_API_VERSION = "2024-10-21"
 /** The first version with GPT Image; v1 does not route FLUX.1 Kontext edits. */
 const IMAGE_API_VERSION = "2025-04-01-preview"
 
+/**
+ * The audience every Foundry call accepts: project discovery refuses a token for
+ * cognitiveservices.azure.com, which model calls also accept (measured November 2026).
+ */
+const ENTRA_SCOPE = "https://ai.azure.com/.default"
+
+/** Entra ID sign-in, such as `DefaultAzureCredential` or `ManagedIdentityCredential` from `@azure/identity`. */
+export interface AzureAIFoundryCredential {
+  getToken(
+    scopes: string | string[]
+  ): Promise<{ readonly token: string; readonly expiresOnTimestamp?: number } | null>
+}
+
 export interface TransportOptions {
   readonly endpoint: string
-  readonly apiKey: ValueSource<string | undefined>
+  /** The project resource's key, sent as `api-key` (`x-api-key` to Messages). */
+  readonly apiKey?: ValueSource<string | undefined>
+  /** Entra ID in place of a key: a bearer token for every call, renewed before it expires. */
+  readonly credential?: AzureAIFoundryCredential
   readonly headers?: ValueSource<Readonly<Record<string, string>>>
   readonly fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
   readonly maxRetries?: number
@@ -53,6 +69,8 @@ export class FoundryTransport {
   /** Every model call: the project URL's origin. */
   readonly resourceUrl: string
   private readonly options: TransportOptions
+  private token?: { readonly value: string; readonly renewAt: number }
+  private pendingToken?: Promise<string>
 
   constructor(options: TransportOptions) {
     if (!URL.canParse(options.endpoint))
@@ -76,11 +94,18 @@ export class FoundryTransport {
       )
     this.projectUrl = `${url.origin}${path}`
     this.resourceUrl = url.origin
-    if (
+    if (options.credential !== undefined) {
+      if (options.apiKey !== undefined)
+        throw new TypeError(`${PREFIX} Configure either apiKey or credential, not both.`)
+      if (typeof options.credential?.getToken !== "function")
+        throw new TypeError(
+          `${PREFIX} credential must have a getToken method, such as DefaultAzureCredential from @azure/identity.`
+        )
+    } else if (
       typeof options.apiKey !== "function" &&
       (typeof options.apiKey !== "string" || !options.apiKey.trim())
     )
-      throw new TypeError(`${PREFIX} apiKey is required.`)
+      throw new TypeError(`${PREFIX} apiKey or credential is required.`)
     if (
       options.maxRetries !== undefined &&
       (!Number.isSafeInteger(options.maxRetries) || options.maxRetries < 0)
@@ -178,13 +203,42 @@ export class FoundryTransport {
     for (const value of headers.values()) diagnostics.add(value)
     for (const reserved of ["authorization", "api-key", "x-api-key"])
       if (headers.has(reserved))
-        throw new TypeError(`${PREFIX} Use apiKey instead of '${reserved}' headers.`)
+        throw new TypeError(`${PREFIX} Use apiKey or credential instead of '${reserved}' headers.`)
+    if (this.options.credential) {
+      const token = await abortable(() => this.bearerToken(), signal)
+      diagnostics.add(token)
+      headers.set("authorization", `Bearer ${token}`)
+      return headers
+    }
     const key = await resolve(this.options.apiKey, signal)
     if (typeof key !== "string" || !key.trim())
-      throw new TypeError(`${PREFIX} apiKey must resolve to a nonempty string.`)
+      throw new TypeError(
+        `${PREFIX} apiKey must resolve to a nonempty string: pass apiKey or credential, or set AZURE_AI_FOUNDRY_API_KEY.`
+      )
     diagnostics.add(key)
     headers.set(keyHeader, key)
     return headers
+  }
+
+  /** One token for every call, renewed five minutes before it expires; concurrent calls share a renewal. */
+  private bearerToken(): Promise<string> {
+    if (this.token && Date.now() < this.token.renewAt) return Promise.resolve(this.token.value)
+    this.pendingToken ??= Promise.resolve()
+      .then(() => this.options.credential!.getToken(ENTRA_SCOPE))
+      .then((token) => {
+        if (typeof token?.token !== "string" || !token.token.trim())
+          throw new TypeError(`${PREFIX} credential returned no token for ${ENTRA_SCOPE}.`)
+        const expires = token.expiresOnTimestamp
+        this.token = {
+          value: token.token,
+          renewAt: typeof expires === "number" ? expires - 5 * 60_000 : 0,
+        }
+        return token.token
+      })
+      .finally(() => {
+        this.pendingToken = undefined
+      })
+    return this.pendingToken
   }
 
   fetch(url: string, init: RequestInit): Promise<Response> {

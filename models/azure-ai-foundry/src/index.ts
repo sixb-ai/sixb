@@ -23,4 +23,4 @@ export type {
   AzureAIFoundryTranscriptionModel,
   AzureAIFoundryTranscriptionOptions,
 } from "./transcription"
-export type { FoundryProtocol } from "./transport"
+export type { AzureAIFoundryCredential, FoundryProtocol } from "./transport"
