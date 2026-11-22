@@ -72,7 +72,7 @@ export function foundryChatRequest(
   options: ChatRequestOptions,
   scope: string
 ): JsonObject {
-  const max = prepareRequest(request, definition, options, scope)
+  const { max, messages } = prepareRequest(request, definition, options, scope)
   const profile = options.profile ?? "openai"
   if (profile !== "deepseek" && options.reasoningReplay === "tool-continuation")
     throw new UnsupportedModelFeatureError(
@@ -118,7 +118,7 @@ export function foundryChatRequest(
   return {
     ...options.request,
     model: definition.modelId,
-    messages: chatInput(request.messages, {
+    messages: chatInput(messages, {
       providerId: definition.providerId,
       errorPrefix: PREFIX,
       systemRole: options.systemRole,

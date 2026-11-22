@@ -338,9 +338,11 @@ the provider with that resource's own project URL and API key.
 | Exact reasoning budgets | — | — | Manual thinking |
 
 Features require both model capability and adapter support. Unsupported controls fail locally.
-Responses use full-history replay with `store: false` and encrypted reasoning. Replay is scoped to
-the endpoint, deployment, and protocol. Chat compatibility is selected with `profile`;
-DeepSeek reasoning replay uses `reasoningReplay: "tool-continuation"`.
+Responses use full-history replay with `store: false` and encrypted reasoning. Reasoning and other
+replay state go back only to the resource, deployment and protocol that produced them: when a
+conversation switches models, the next one gets its text and tool calls without the previous
+model's reasoning. Chat compatibility is selected with `profile`; DeepSeek reasoning replay uses
+`reasoningReplay: "tool-continuation"`.
 
 Every protocol accepts `reasoning`, the level Sixb applies when the model runs without an explicit
 choice, such as `foundry.chat("production", { reasoning: "low" })`, and `name` and `description`,

@@ -502,8 +502,8 @@ test("serializes supported images/PDFs with aggregate byte limits and stable sys
     ).rejects.toBeInstanceOf(Error)
 })
 
-// Regression proof: bypass validateMessages in foundryMessagesRequest. The cross-deployment
-// assertion fails because another inference call receives the signed/redacted history.
+// Regression proof: return `messages` unchanged from ownReplayState in request.ts. Another
+// deployment, protocol and resource then receive the signed and redacted thinking.
 test("runs local tools with fragmented signatures, redacted thinking, and durable scoped replay", async () => {
   const bodies: JsonObject[] = []
   const provider = createAzureAIFoundry({
@@ -611,23 +611,34 @@ test("runs local tools with fragmented signatures, redacted thinking, and durabl
   await collect((await model.stream(request({ messages: history }))).events)
   expect(JSON.stringify(bodies[2]?.messages)).toContain("signed-thinking")
   expect(JSON.stringify(bodies[2]?.messages)).toContain("opaque")
+  // Another deployment, protocol or resource gets the conversation without the signed thinking.
   provider.messages("other", { definition })
   await provider.catalog.refresh()
-  await expect(
-    provider.messages("other", { definition }).stream(request({ messages: history }))
-  ).rejects.toThrow("different endpoint, deployment, or protocol")
-  await expect(
-    provider.responses("deployment", { definition }).stream(request({ messages: history }))
-  ).rejects.toThrow("different endpoint, deployment, or protocol")
-  await expect(
-    createAzureAIFoundry({
-      endpoint: "https://other.services.ai.azure.com/api/projects/test",
-      apiKey: "key",
-    })
-      .messages("deployment", { definition })
-      .stream(request({ messages: history }))
-  ).rejects.toThrow("different endpoint")
-  expect(bodies).toHaveLength(3)
+  await provider.messages("other", { definition }).stream(request({ messages: history }))
+  await provider.responses("deployment", { definition }).stream(request({ messages: history }))
+  const elsewhere: JsonObject[] = []
+  await createAzureAIFoundry({
+    endpoint: "https://other.services.ai.azure.com/api/projects/test",
+    apiKey: "key",
+    fetch: async (_url, init) => {
+      elsewhere.push(JSON.parse(String(init?.body)))
+      return message()
+    },
+  })
+    .messages("deployment", { definition })
+    .stream(request({ messages: history }))
+  const [other, responses] = [bodies[3]?.messages, bodies[4]?.input]
+  for (const sent of [other, responses, elsewhere[0]?.messages]) {
+    expect(JSON.stringify(sent)).not.toContain("signed-thinking")
+    expect(JSON.stringify(sent)).not.toContain("opaque")
+  }
+  expect(JSON.stringify(other)).toContain('"tool_use"')
+  expect(responses).toContainEqual({
+    type: "function_call",
+    call_id: "call-tool",
+    name: "check",
+    arguments: "{}",
+  })
 })
 
 // Regression proof: remove the provider usage hook in Messages MessageState. The shared

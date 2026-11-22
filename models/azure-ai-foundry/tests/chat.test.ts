@@ -400,8 +400,8 @@ test("accepts bounded images and rejects Chat PDFs even when media capabilities 
   ).rejects.toThrow("Input media 'application/pdf' is not supported")
 })
 
-// Regression proof: bypass validateMessages in foundryChatRequest. Cross-protocol and
-// cross-deployment requests then accept scoped Chat reasoning instead of rejecting it.
+// Regression proof: return `messages` unchanged from ownReplayState in request.ts. Another
+// deployment and protocol then receive this deployment's DeepSeek reasoning content.
 test("runs local tools and preserves explicitly enabled DeepSeek continuation through durable history", async () => {
   const bodies: JsonObject[] = []
   const provider = createAzureAIFoundry({
@@ -483,18 +483,22 @@ test("runs local tools and preserves explicitly enabled DeepSeek continuation th
     ).events
   )
   expect(JSON.stringify(bodies[4]?.messages)).not.toContain("reasoning_content")
+  // Another deployment or protocol gets the conversation without this one's reasoning content.
   provider.chat("other", options)
   await provider.catalog.refresh()
-  await expect(
-    provider.chat("other", options).stream(request({ messages: history }))
-  ).rejects.toThrow("different endpoint")
-  await expect(
-    provider.responses("deployment", { definition }).stream(request({ messages: history }))
-  ).rejects.toThrow("different endpoint")
-  await expect(
-    provider.messages("deployment", { definition }).stream(request({ messages: history }))
-  ).rejects.toThrow("different endpoint")
-  expect(bodies).toHaveLength(5)
+  await provider.chat("other", options).stream(request({ messages: history }))
+  await provider.responses("deployment", { definition }).stream(request({ messages: history }))
+  await provider
+    .messages("deployment", { definition: { ...definition, maxOutputTokens: 1024 } })
+    .stream(request({ messages: history }))
+  const [other, responses, messages] = bodies.slice(5)
+  for (const sent of [other?.messages, responses?.input, messages?.messages])
+    expect(JSON.stringify(sent)).not.toContain("Thinking")
+  expect(other?.messages).toContainEqual({
+    role: "assistant",
+    content: null,
+    tool_calls: [{ id: "call", type: "function", function: { name: "check", arguments: "{}" } }],
+  })
 })
 
 test("prices final Chat usage without assuming missing counters or double-billing reasoning", () => {
