@@ -66,7 +66,9 @@ work/launch-teaser/
 - **A host per scene** in the root, in play order: `id` and `data-composition-id` both the scene's
   id (a letter, then letters, digits, `-`, `_`), `data-composition-src`, `data-start`,
   `data-duration`, and `data-label`, its chapter's name. The id names the scene in addresses,
-  comments and renders: keep it across versions.
+  comments and renders: keep it across versions. Scenes are the video's chapters, one after the
+  other: what runs across several of them, such as captions, a logo or a soundtrack, goes in the
+  root, never in a scene of its own laid over the others, which the editor cannot treat as one.
 - **Starts chain.** `data-start` is seconds, or the scene it follows: `"hook"` starts when `hook`
   ends, `"hook - 0.4"` overlaps it for a crossfade, `"hook + 1"` leaves a gap. Chained, a scene you
   lengthen moves the ones after it. An overlap shows both scenes: keep what each repeats, such as a
@@ -86,7 +88,8 @@ work/launch-teaser/
 - **Fonts and scripts** load from Google Fonts, jsDelivr, cdnjs or unpkg, pinned to an exact
   version (`gsap@3.12.5`, never `gsap@3`). Load GSAP and the fonts once, in `index.html`.
 - **Captions are text on the frame**: one timed element per line, `<p class="caption"
-  data-start="1.2" data-duration="2.4">`, set from the transcript. A `<track>` is not rendered.
+  data-start="1.2" data-duration="2.4">`, set from the transcript, in the scene that says it, or in
+  the root when the captions run across scenes. A `<track>` is not rendered.
 - A video holds at most 200 scenes, 10 minutes, and 50 video and sound files; each HTML file at
   most 1 MiB, each recording at most 2 GB.
 
