@@ -1,18 +1,32 @@
 import { posix } from "node:path"
 
 /**
- * Runs a script in a bash that is not a login shell, once a login shell has loaded the profile:
- * the profile's exports reach the script, and its `exit` leaves the login shell alone.
+ * The environment variable a script travels in to its shell, never an argument. `pkill -f` and
+ * `pgrep -f` match a process's arguments: as one, a command such as `pkill -f "sixb dev"; …`
+ * matched its own shell and stopped itself. As one, a script that starts with `-` was also read as
+ * bash's own options.
+ */
+export const SCRIPT_VARIABLE = "SIXB_SCRIPT"
+
+/**
+ * Runs the script, un-exported first so that the commands it starts never inherit it. A sandbox
+ * that dropped the environment fails the command ("SIXB_SCRIPT: parameter not set") instead of
+ * running nothing. Every word here is in the shell's arguments, so it holds no others.
+ */
+const RUN_SCRIPT = `export -n ${SCRIPT_VARIABLE}; eval -- "\${${SCRIPT_VARIABLE}?}"`
+
+/**
+ * Runs the script in {@link SCRIPT_VARIABLE} in a bash that is not a login shell, once a login
+ * shell has loaded the profile: the profile's exports reach the script, and its `exit` leaves the
+ * login shell alone.
  *
  * A login shell runs `~/.bash_logout` when the `exit` builtin ends it, with the script's options
  * still set. Debian's and Ubuntu's default one runs `clear_console`, which fails without a
  * terminal, so a script under `set -e` that ends with `exit 0` exits 1. `exec` replaces the login
  * shell without running that file, and keeps its pid, so a background command's `$!` and process
  * group are still the script's.
- *
- * Arguments: the script.
  */
-export const LOGIN_SHELL_SCRIPT = 'exec "$BASH" -c "$1" bash'
+export const LOGIN_SHELL_SCRIPT = `exec "$BASH" -c '${RUN_SCRIPT}' bash`
 
 /**
  * {@link LOGIN_SHELL_SCRIPT}, in a directory the shell changes to itself. A directory that does not
@@ -20,15 +34,33 @@ export const LOGIN_SHELL_SCRIPT = 'exec "$BASH" -c "$1" bash'
  * to the provider instead, a missing one fails the call itself, not the command. Falling off the
  * end, unlike `exit`, does not run `~/.bash_logout`.
  *
- * Arguments: the directory, then the script.
+ * Arguments: the directory.
  */
-export const LOGIN_SHELL_SCRIPT_IN_DIRECTORY = 'cd -- "$1" && exec "$BASH" -c "$2" bash'
+export const LOGIN_SHELL_SCRIPT_IN_DIRECTORY = `cd -- "$1" && exec "$BASH" -c '${RUN_SCRIPT}' bash`
 
-/** `bash` arguments that run `script` as {@link LOGIN_SHELL_SCRIPT} does, in `directory` if given. */
-export function loginShellArgs(script: string, directory?: string): string[] {
-  return directory === undefined
-    ? ["-lc", LOGIN_SHELL_SCRIPT, "bash", script]
-    : ["-lc", LOGIN_SHELL_SCRIPT_IN_DIRECTORY, "bash", directory, script]
+/** What `runCommand("bash", …)` takes to run a script as {@link LOGIN_SHELL_SCRIPT} does. */
+export interface LoginShellCommand {
+  readonly args: string[]
+  /** The command's environment, with the script. */
+  readonly env: Readonly<Record<string, string>>
+}
+
+/** Run `script` as {@link LOGIN_SHELL_SCRIPT} does, in `directory` if given, with `env`. */
+export function loginShell(
+  script: string,
+  options: {
+    readonly directory?: string | undefined
+    readonly env?: Readonly<Record<string, string>> | undefined
+  } = {}
+): LoginShellCommand {
+  const { directory, env } = options
+  return {
+    args:
+      directory === undefined
+        ? ["-lc", LOGIN_SHELL_SCRIPT, "bash"]
+        : ["-lc", LOGIN_SHELL_SCRIPT_IN_DIRECTORY, "bash", directory],
+    env: { ...env, [SCRIPT_VARIABLE]: script },
+  }
 }
 
 /**

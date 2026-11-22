@@ -19,6 +19,7 @@ import type { RecoverAiModelCall } from "@sixb/core/internal/model-execution"
 import { createModelCatalog } from "@sixb/core/models"
 import { type RunAgentTurnInput, runAgentTurn } from "../src/run-agent-turn"
 import { agentThreadModelContext } from "../src/thread-context"
+import { commandScript } from "./command-script"
 
 /** Poll `fn` until it returns a truthy value or the timeout elapses. */
 export async function waitFor<T>(
@@ -70,9 +71,9 @@ export class LocalBashSandbox implements Sandbox {
     args: readonly string[] = [],
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
-    // `bash -c <script> [name args...]` runs as it is, its arguments in `$@`; anything else runs
-    // its last argument as the script.
-    const script = args.at(-1)
+    // `bash -c <script> [name args...]` runs as it is, its arguments in `$@`; a login shell's
+    // command runs its script alone.
+    const script = commandScript(args, options)
     if (command !== "bash" || typeof script !== "string") {
       throw new Error(`Unexpected command ${command}`)
     }

@@ -9,7 +9,7 @@ import {
   SandboxRequestRefusedError,
 } from "@sixb/core"
 import { waitForAbort } from "./abort"
-import { commandDirectory, LOGIN_SHELL_SCRIPT_IN_DIRECTORY } from "./login-shell"
+import { commandDirectory, LOGIN_SHELL_SCRIPT_IN_DIRECTORY, SCRIPT_VARIABLE } from "./login-shell"
 import { type AgentSandboxHandle, contextPath } from "./sandbox-handle"
 
 // A background command runs in the call that starts it, held open until it ends: a provider that
@@ -171,11 +171,11 @@ export class BackgroundCommands {
         paths.pid,
         paths.exit,
         nonce,
+        LOGIN_SHELL_SCRIPT_IN_DIRECTORY,
         commandDirectory(sandbox.workingDirectory, input.cwd) ?? sandbox.workingDirectory,
-        input.command,
       ],
       {
-        ...(handle.env === undefined ? {} : { env: handle.env }),
+        env: { ...handle.env, [SCRIPT_VARIABLE]: input.command },
         timeout: HELD_TIMEOUT_MS,
         signal: abort.signal,
       }
@@ -383,22 +383,25 @@ export class BackgroundCommands {
     // the wrapper and leave the group it started running.
     await entry.started
 
+    let left = true
     if (await signalGroup(entry, "TERM")) {
       let timer: ReturnType<typeof setTimeout> | undefined
-      await Promise.race([
-        entry.ended,
-        new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, this.options.stopGraceMs ?? STOP_GRACE_MS)
-        }),
-      ])
+      const grace = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, this.options.stopGraceMs ?? STOP_GRACE_MS)
+      })
+      await Promise.race([entry.ended, grace])
+      // Its shell can end at once while a process it started takes longer, or never stops: what
+      // is left of the group has the rest of the grace period.
+      if (entry.status !== "running") {
+        left = await signalGroup(entry, "0")
+        if (left) await grace
+      }
       clearTimeout(timer)
     }
 
-    if (entry.status === "running") {
-      await signalGroup(entry, "KILL")
-      entry.abort.abort()
-      await entry.ended
-    }
+    if (left) await signalGroup(entry, "KILL")
+    if (entry.status === "running") entry.abort.abort()
+    await entry.ended
   }
 
   #end(entry: BackgroundCommand, result: CommandResult | undefined, error?: unknown): void {
@@ -480,11 +483,15 @@ async function readGroup(
 }
 
 /**
- * Signal its process group from inside the sandbox it runs in. False when nothing received it:
- * no group known, or one this sandbox cannot see, as a command run under a PID namespace of its
- * own (bwrap): its stop is then the held call's abort, at once.
+ * Signal its process group from inside the sandbox it runs in; `0` only asks whether anything of
+ * it is left. False when nothing received it: no group known, or one this sandbox cannot see, as
+ * a command run under a PID namespace of its own (bwrap): its stop is then the held call's abort,
+ * at once.
  */
-async function signalGroup(entry: BackgroundCommand, signal: "TERM" | "KILL"): Promise<boolean> {
+async function signalGroup(
+  entry: BackgroundCommand,
+  signal: "TERM" | "KILL" | "0"
+): Promise<boolean> {
   if (entry.group === undefined) return false
 
   try {
@@ -527,12 +534,12 @@ const SIGNAL_SCRIPT = 'kill -s "$1" -- "-$2" 2>/dev/null'
  * `setsid` binary on macOS), its pid written first with the start's nonce, then its exit code once
  * it ended. Its exit is the wrapper's. Its shell changes to the directory itself: one that does not
  * exist ends it with code 1 and bash's message in its output. Arguments: output, pid and exit
- * files, nonce, directory, command.
+ * files, nonce, the login shell's script, directory; the command is in `SIXB_SCRIPT`.
  */
 const START_SCRIPT = `mkdir -p -- "$(dirname -- "$1")" || exit 1
 : > "$1" && rm -f -- "$3" || exit 1
 set -m
-bash -lc '${LOGIN_SHELL_SCRIPT_IN_DIRECTORY}' bash "$5" "$6" < /dev/null >> "$1" 2>&1 &
+bash -lc "$5" bash "$6" < /dev/null >> "$1" 2>&1 &
 pid=$!
 set +m
 echo "$4 $pid" > "$2.tmp" && mv -f -- "$2.tmp" "$2"
@@ -569,9 +576,9 @@ exit 0`
  *
  * A group is its command's only while one of its processes holds the command's output file, which
  * the start opened for every process of it: a group id reused since, by anything else, holds no
- * such file, and is never signalled. The start leaves nothing else to check on macOS: a command
- * line keeps nothing of ours once bash runs the command in its own place, and `ps` shows no
- * environment of Apple's own binaries, bash and sleep among them. Linux lists open files in
+ * such file, and is never signalled. The start leaves nothing else to check on macOS: no command
+ * line names the start, and `ps` shows no environment of Apple's own binaries, bash and sleep
+ * among them. Linux lists open files in
  * `/proc`; macOS through `lsof`.
  */
 const REAP_SCRIPT = `signal() { ${SIGNAL_SCRIPT}; }

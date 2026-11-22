@@ -92,15 +92,16 @@ describe("sixb-agent-runtime/v1 preflight", () => {
 
     expect(sandbox.commands).toHaveLength(2)
     expect(sandbox.commands[0]).toMatchObject({ command: "bash", options: { timeout: 15_000 } })
-    expect(sandbox.commands[0]?.args.slice(0, 3)).toEqual(["-lc", LOGIN_SHELL_SCRIPT, "bash"])
-    expect(sandbox.commands[0]?.args[3]).toContain("SIXB_BASH_ENV_READY")
-    expect(sandbox.commands[0]?.args[3]).toContain("PIPESTATUS")
-    expect(sandbox.commands[0]?.args[3]).toContain("command -v bun")
-    expect(sandbox.commands[0]?.args[3]).not.toContain(ENV.SIXB_API_BASE_URL)
+    expect(sandbox.commands[0]?.args).toEqual(["-lc", LOGIN_SHELL_SCRIPT, "bash"])
+    const probe = sandbox.commands[0]?.options.env?.SIXB_SCRIPT
+    expect(probe).toContain("SIXB_BASH_ENV_READY")
+    expect(probe).toContain("PIPESTATUS")
+    expect(probe).toContain("command -v bun")
+    expect(probe).not.toContain(ENV.SIXB_API_BASE_URL)
     expect(sandbox.commands[1]).toMatchObject({
       command: "bash",
-      args: ["-lc", LOGIN_SHELL_SCRIPT, "bash", "sixb status"],
-      options: { env: ENV, timeout: 15_000 },
+      args: ["-lc", LOGIN_SHELL_SCRIPT, "bash"],
+      options: { env: { ...ENV, SIXB_SCRIPT: "sixb status" }, timeout: 15_000 },
     })
   })
 

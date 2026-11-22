@@ -218,10 +218,11 @@ For a blank sandbox:
    `glob` and `grep` run the run's own `lib/search.mjs` on Bun or Node, with the request as one
    JSON argument ([sandbox-search.ts](../src/tools/sandbox-search.ts), engine in
    [tools/search/](../src/tools/search/)): one walker and one `.gitignore` matcher in every
-   sandbox, where `rg` or GNU tools may be missing. Each `bash` call becomes
-   `runCommand("bash", ["-lc", script], ...)`. Its `cwd` never reaches the provider: the shell
-   changes to it ([login-shell.ts](../src/login-shell.ts)), so a directory that does not exist
-   fails the command with bash's message, which the model reads and corrects.
+   sandbox, where `rg` or GNU tools may be missing. Each `bash` call runs in a login shell
+   ([login-shell.ts](../src/login-shell.ts)), its script in `SIXB_SCRIPT`, never an argument:
+   `pkill -f` matches arguments, and a command that named the process it stops stopped its own
+   shell. Its `cwd` never reaches the provider: the shell changes to it, so a directory that does
+   not exist fails the command with bash's message, which the model reads and corrects.
 4. On run teardown the worker releases it, which calls `destroy()`.
 
 A step's calls run in the order the model gave them
@@ -239,9 +240,10 @@ call leaves behind (a cgroup, a PID namespace) leaves it alone, in a process gro
 (`set -m`: macOS has no `setsid`). Its output, pid and exit code are files under `background/` in
 the context directory; the pid file carries the start's nonce, so a file an earlier start left is
 never read. `stop` waits for the group to be known, sends it SIGTERM from inside the sandbox,
-then SIGKILL after 3 seconds, and aborts the held call. Where the group is out of reach, as under
-bwrap's PID namespace on Linux, the stop is that abort at once: a kill, with no grace period. A
-command reads as stopped when a signal of its stop ended it; one that exited meanwhile, or caught
+then SIGKILL after 3 seconds to whatever of the group is left, and aborts the held call: its shell
+can end at the SIGTERM while a process it started does not. Where the group is out of reach, as
+under bwrap's PID namespace on Linux, the stop is that abort at once: a kill, with no grace period.
+A command reads as stopped when a signal of its stop ended it; one that exited meanwhile, or caught
 the signal and exited, reads as exited.
 
 A run's own commands stop before `beforeFinalize` and teardown, a pause for approval included, and

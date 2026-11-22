@@ -250,6 +250,21 @@ describe("background commands", () => {
     }
   })
 
+  // Removal proof: wait for the wrapper alone in BackgroundCommands' #stop, as it did. Its shell
+  // ends at the SIGTERM, the stop returns, and the process that ignores it runs on. Real time: its
+  // signals are sandbox commands, whose own timeouts fake time would fire.
+  test("kill what is left of its group once its grace period elapsed, after its shell ended", async () => {
+    const started = await commands.start({
+      handle,
+      command: `sh -c 'trap "" TERM; echo $$ > child.pid; while true; do sleep 0.05; done'`,
+    })
+    await waitFor(() => existsSync(join(root, "child.pid")))
+    const child = Number(readFileSync(join(root, "child.pid"), "utf8"))
+
+    expect(await commands.stop(started.id)).toMatchObject({ status: "stopped" })
+    await waitFor(() => gone(child), { label: "the process that ignores SIGTERM exits" })
+  }, 10_000)
+
   // Removal proof: drop `await entry.started` from BackgroundCommands' #stop. The stop then finds
   // no group yet, aborts the held call, which ends the wrapper alone, and the group runs on.
   test("stop one asked to stop as it starts, its whole group", async () => {

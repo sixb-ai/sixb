@@ -2,6 +2,15 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## Unreleased
+
+### Highlights
+
+- A command the agent runs no longer stops itself when it stops processes by name. On Linux,
+  `pkill -f "sixb dev"` matched the agent's own shell, whose arguments held the command; the
+  command now reaches its shell in the environment. Stopping a background command also stops a
+  process it started that ignores SIGTERM, after the grace period, as it did a lone command.
+
 ## 2026-11-24 — Sixb 0.2.8
 
 0.2.8 adds video artifacts: timed HTML scenes over footage, edited in the app on a timeline or by

@@ -8,7 +8,7 @@ import {
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
 import type { ArtifactFrameTarget } from "@sixb/core/storage"
-import { loginShellArgs } from "../../login-shell"
+import { loginShell } from "../../login-shell"
 import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"
 import { asset, CHECKS_DIRECTORY, type LayoutCheck, type LayoutWarning } from "./layout-check"
 import videoScript from "./video.cjs" with { type: "text" }
@@ -240,11 +240,8 @@ export async function checkVideo(input: {
 
   // The script stops itself first, so it reports what it found and kills its browsers.
   const deadlineMs = Math.floor((timeoutMs * 5) / 6)
-  const result = await sandbox.runCommand(
-    "bash",
-    loginShellArgs(
-      'command -v node >/dev/null 2>&1 || { echo \'{"skipped":"no_node"}\'; exit 0; }; exec node "$SIXB_CHECK/video.cjs" "$SIXB_CHECK_OUT" "$SIXB_CHECK_DEADLINE_MS"'
-    ),
+  const shell = loginShell(
+    'command -v node >/dev/null 2>&1 || { echo \'{"skipped":"no_node"}\'; exit 0; }; exec node "$SIXB_CHECK/video.cjs" "$SIXB_CHECK_OUT" "$SIXB_CHECK_DEADLINE_MS"',
     {
       env: {
         ...input.handle.env,
@@ -252,10 +249,13 @@ export async function checkVideo(input: {
         SIXB_CHECK_OUT: output,
         SIXB_CHECK_DEADLINE_MS: String(deadlineMs),
       },
-      timeout: timeoutMs,
-      signal: input.signal,
     }
   )
+  const result = await sandbox.runCommand("bash", shell.args, {
+    env: shell.env,
+    timeout: timeoutMs,
+    signal: input.signal,
+  })
   input.signal.throwIfAborted()
 
   const report = parseReport(result.stdout)
