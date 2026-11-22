@@ -1075,8 +1075,8 @@ describe("placing clips in the video", () => {
     expect(left(moved).map((each) => each.scene)).toEqual(["demo"])
   })
 
-  // Guard proof: place the video's own clips as a scene's in placeFound (edit.ts), by the scene
-  // that plays at their start; the music then leaves index.html for the hook.
+  // Guard proof: give the video's own clips a scene in placeFound (edit.ts), the first; the music
+  // then leaves index.html for the hook.
   test("the video's own clips keep to index.html, and a group across scenes is one edit", () => {
     const result = moveClips(
       SOURCES,
