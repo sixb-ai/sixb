@@ -86,8 +86,9 @@ Every model of every tier stays in the catalog. The Agent sees them grouped by t
 it picks a tier, or a model whose description fits the task.
 
 With tiers, the chat's model chip reads **Auto**, and its menu lists the models by tier. Choosing
-one pins it, with a reasoning control, in that conversation and on that browser; × returns to
-Auto. On Auto, without a [decision model](#decision-models), every message runs on `standard`.
+one pins it, with a reasoning control, in that conversation; × returns to Auto. Opened on another
+browser or device, the conversation stays on the model its last message chose. On Auto, without a
+[decision model](#decision-models), every message runs on `standard`.
 
 With tiers and a [decision model](#decision-models), Sixb picks the model of each chat message that
 names none. Before the answer starts, the default decision model scores the message's tiers. It

@@ -599,6 +599,8 @@ export const AgentRunSchema = z.object({
   model: LanguageModelRefSchema.optional(),
   /** With tiers, the tier of the model the turn runs on. */
   tier: z.enum(LANGUAGE_MODEL_TIERS).optional(),
+  /** Its requester chose `model`; absent when Sixb picked it or the turn ran on the default. */
+  pinned: z.literal(true).optional(),
   reasoning: ModelReasoningSchema.optional(),
   /** What the turn could change without asking. Absent on turns from before approval modes. */
   approvalMode: AgentApprovalModeSchema.optional(),

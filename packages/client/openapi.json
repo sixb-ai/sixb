@@ -43477,6 +43477,10 @@
                           "type": "string",
                           "enum": ["light", "standard", "heavy"]
                         },
+                        "pinned": {
+                          "type": "boolean",
+                          "enum": [true]
+                        },
                         "reasoning": {
                           "anyOf": [
                             {
@@ -48492,6 +48496,10 @@
                           "type": "string",
                           "enum": ["light", "standard", "heavy"]
                         },
+                        "pinned": {
+                          "type": "boolean",
+                          "enum": [true]
+                        },
                         "reasoning": {
                           "anyOf": [
                             {
@@ -50092,6 +50100,10 @@
                           "type": "string",
                           "enum": ["light", "standard", "heavy"]
                         },
+                        "pinned": {
+                          "type": "boolean",
+                          "enum": [true]
+                        },
                         "reasoning": {
                           "anyOf": [
                             {
@@ -50599,6 +50611,10 @@
                         "tier": {
                           "type": "string",
                           "enum": ["light", "standard", "heavy"]
+                        },
+                        "pinned": {
+                          "type": "boolean",
+                          "enum": [true]
                         },
                         "reasoning": {
                           "anyOf": [
@@ -51405,6 +51421,10 @@
                             "type": "string",
                             "enum": ["light", "standard", "heavy"]
                           },
+                          "pinned": {
+                            "type": "boolean",
+                            "enum": [true]
+                          },
                           "reasoning": {
                             "anyOf": [
                               {
@@ -51857,6 +51877,10 @@
                       "type": "string",
                       "enum": ["light", "standard", "heavy"]
                     },
+                    "pinned": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
                     "reasoning": {
                       "anyOf": [
                         {
@@ -52308,6 +52332,10 @@
                         "tier": {
                           "type": "string",
                           "enum": ["light", "standard", "heavy"]
+                        },
+                        "pinned": {
+                          "type": "boolean",
+                          "enum": [true]
                         },
                         "reasoning": {
                           "anyOf": [
@@ -56876,6 +56904,10 @@
                           "type": "string",
                           "enum": ["light", "standard", "heavy"]
                         },
+                        "pinned": {
+                          "type": "boolean",
+                          "enum": [true]
+                        },
                         "reasoning": {
                           "anyOf": [
                             {
@@ -59734,6 +59766,10 @@
                           "tier": {
                             "type": "string",
                             "enum": ["light", "standard", "heavy"]
+                          },
+                          "pinned": {
+                            "type": "boolean",
+                            "enum": [true]
                           },
                           "reasoning": {
                             "anyOf": [

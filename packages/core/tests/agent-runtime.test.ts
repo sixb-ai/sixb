@@ -108,6 +108,7 @@ describe("single project Agent", () => {
     })
     expect(plain.run.spec).toEqual({
       model: { provider: "test", modelId: "plain-model" },
+      pinned: true,
       approvalMode: "auto",
     })
   })

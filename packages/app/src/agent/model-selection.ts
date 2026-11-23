@@ -1,5 +1,5 @@
 import type { ModelReasoningLevel } from "@sixb/core/models"
-import type { LanguageModel } from "./types"
+import type { AgentRun, LanguageModel } from "./types"
 
 /**
  * The explicit choice remembered in the browser, and what a message asks the server for. Without
@@ -84,6 +84,21 @@ export function resolveModelSelection(
     reasoning: reasoning ?? defaultReasoningLevel(model),
     ...(request === undefined ? {} : { request }),
   }
+}
+
+/**
+ * The model a thread's latest turn ran on, when its requester chose it: a browser that pinned
+ * nothing in the thread opens it there, so its next message stays on that model. A turn Sixb
+ * picked the model of leaves the thread on Auto.
+ */
+export function threadModelPreference(
+  run: Pick<AgentRun, "model" | "pinned" | "reasoning"> | null
+): ModelPreference | null {
+  if (!run?.pinned || !run.model) return null
+
+  const { provider, modelId } = run.model
+  const reasoning = typeof run.reasoning === "string" ? run.reasoning : undefined
+  return { model: { provider, modelId }, ...(reasoning === undefined ? {} : { reasoning }) }
 }
 
 /** Choosing an effort keeps the chosen model, if any: it never pins today's default model. */

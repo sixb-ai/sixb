@@ -69,6 +69,7 @@ import {
   preferenceWithoutReasoning,
   preferenceWithReasoning,
   resolveModelSelection,
+  threadModelPreference,
 } from "../model-selection"
 import { transcriptMoves } from "../moves"
 import { openQuestion } from "../questions/interpret"
@@ -132,6 +133,8 @@ const THREAD_APPROVALS_QUERY = { limit: "200" }
 
 const MODEL_PREFERENCE_KEY = "sixb.agent-ui.model-preference"
 const MODEL_PINS_KEY = "sixb.agent-ui.model-pins"
+/** Auto chosen in a thread, over the model its latest turn's requester chose. */
+const AUTO_PIN = "auto"
 /** Pins kept per browser, the most recently chosen last; older ones fall back to Auto. */
 const MAX_MODEL_PINS = 100
 const REASONING_LEVELS = new Set<string>(MODEL_REASONING_LEVELS)
@@ -312,12 +315,6 @@ export function useAgentConversation({
   const tiered = hasTiers(models)
   const [modelPreference, setModelPreference] = useState(readModelPreference)
   const [modelPins, setModelPins] = useState(() => readModelPins() ?? {})
-  const modelSelection = resolveModelSelection(
-    models,
-    tiered ? (threadId === null ? modelPreference : (modelPins[threadId] ?? null)) : modelPreference
-  )
-  const selectedModel = modelSelection.model
-  const selectedReasoning = modelSelection.reasoning
   const reads = threadQueryOptions(threadId ?? "")
   const threadQuery = useQuery({
     ...reads.thread,
@@ -365,6 +362,20 @@ export function useAgentConversation({
   })
   const runs = useMemo(() => runsQuery.data?.runs ?? [], [runsQuery.data])
   const latestRun = runs[0] ?? null
+
+  // A thread this browser pinned nothing in, such as one opened on another device, stays on the
+  // model its latest turn's requester chose.
+  const threadPin = threadId === null ? undefined : modelPins[threadId]
+  const modelSelection = resolveModelSelection(
+    models,
+    !tiered || threadId === null
+      ? modelPreference
+      : threadPin === AUTO_PIN
+        ? null
+        : (threadPin ?? threadModelPreference(latestRun))
+  )
+  const selectedModel = modelSelection.model
+  const selectedReasoning = modelSelection.reasoning
 
   // An edit the reader saved while a turn answered waits in the thread's inbox until that turn
   // ends: read from there, it stands in place after a reload, and on another device.
@@ -1034,11 +1045,11 @@ export function useAgentConversation({
   const updateModelPreference = (preference: ModelPreference | null) => {
     setModelPreference(preference)
     writeModelPreference(preference)
-    if (tiered && threadId !== null) pinModel(threadId, preference)
+    if (tiered && threadId !== null) pinModel(threadId, preference?.model ? preference : AUTO_PIN)
   }
 
   // Start from the stored pins, so the ones another tab wrote since are kept.
-  const pinModel = (pinThreadId: string, pin: ModelPreference | null) => {
+  const pinModel = (pinThreadId: string, pin: ModelPin) => {
     const pins = withModelPin(readModelPins() ?? modelPins, pinThreadId, pin)
     setModelPins(pins)
     writeModelPins(pins)
@@ -1974,8 +1985,11 @@ function writeModelPreference(preference: ModelPreference | null): void {
   }
 }
 
+/** A thread's choice in this browser: a model, or Auto. */
+type ModelPin = ModelPreference | typeof AUTO_PIN
+
 /** The pins this browser stored, or null when it cannot store any. */
-function readModelPins(): Readonly<Record<string, ModelPreference>> | null {
+function readModelPins(): Readonly<Record<string, ModelPin>> | null {
   if (typeof window === "undefined") return null
   try {
     const value = JSON.parse(window.localStorage.getItem(MODEL_PINS_KEY) ?? "null") as unknown
@@ -1983,8 +1997,8 @@ function readModelPins(): Readonly<Record<string, ModelPreference>> | null {
 
     return Object.fromEntries(
       Object.entries(value).filter(
-        (entry): entry is [string, ModelPreference] =>
-          isModelPreference(entry[1]) && entry[1].model !== undefined
+        (entry): entry is [string, ModelPin] =>
+          entry[1] === AUTO_PIN || (isModelPreference(entry[1]) && entry[1].model !== undefined)
       )
     )
   } catch {
@@ -1992,19 +2006,19 @@ function readModelPins(): Readonly<Record<string, ModelPreference>> | null {
   }
 }
 
-/** Set or clear one conversation's pin; a pin set again becomes the most recent. */
+/** Set one conversation's pin; a pin set again becomes the most recent. */
 function withModelPin(
-  pins: Readonly<Record<string, ModelPreference>>,
+  pins: Readonly<Record<string, ModelPin>>,
   key: string,
-  pin: ModelPreference | null
-): Readonly<Record<string, ModelPreference>> {
+  pin: ModelPin
+): Readonly<Record<string, ModelPin>> {
   const entries = Object.entries(pins).filter(([entry]) => entry !== key)
-  if (pin !== null) entries.push([key, pin])
+  entries.push([key, pin])
 
   return Object.fromEntries(entries.slice(-MAX_MODEL_PINS))
 }
 
-function writeModelPins(pins: Readonly<Record<string, ModelPreference>>): void {
+function writeModelPins(pins: Readonly<Record<string, ModelPin>>): void {
   if (typeof window === "undefined") return
   try {
     if (Object.keys(pins).length === 0) window.localStorage.removeItem(MODEL_PINS_KEY)

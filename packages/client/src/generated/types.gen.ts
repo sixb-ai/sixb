@@ -14729,6 +14729,7 @@ export type PostAgentThreadMessageResponses = {
         modelId: string
       }
       tier?: "light" | "standard" | "heavy"
+      pinned?: true
       reasoning?:
         | "provider-default"
         | "none"
@@ -16426,6 +16427,7 @@ export type EditAgentThreadMessageResponses = {
         modelId: string
       }
       tier?: "light" | "standard" | "heavy"
+      pinned?: true
       reasoning?:
         | "provider-default"
         | "none"
@@ -16994,6 +16996,7 @@ export type CancelAgentRunResponses = {
         modelId: string
       }
       tier?: "light" | "standard" | "heavy"
+      pinned?: true
       reasoning?:
         | "provider-default"
         | "none"
@@ -17202,6 +17205,7 @@ export type RetryAgentRunResponses = {
         modelId: string
       }
       tier?: "light" | "standard" | "heavy"
+      pinned?: true
       reasoning?:
         | "provider-default"
         | "none"
@@ -17470,6 +17474,7 @@ export type ListAgentThreadRunsResponses = {
         modelId: string
       }
       tier?: "light" | "standard" | "heavy"
+      pinned?: true
       reasoning?:
         | "provider-default"
         | "none"
@@ -17642,6 +17647,7 @@ export type GetAgentRunResponses = {
       modelId: string
     }
     tier?: "light" | "standard" | "heavy"
+    pinned?: true
     reasoning?:
       | "provider-default"
       | "none"
@@ -17826,6 +17832,7 @@ export type CancelAgentRunByIdResponses = {
         modelId: string
       }
       tier?: "light" | "standard" | "heavy"
+      pinned?: true
       reasoning?:
         | "provider-default"
         | "none"
@@ -19401,6 +19408,7 @@ export type DecideAgentApprovalResponses = {
         modelId: string
       }
       tier?: "light" | "standard" | "heavy"
+      pinned?: true
       reasoning?:
         | "provider-default"
         | "none"
@@ -20461,6 +20469,7 @@ export type ListObservedAgentThreadRunsResponses = {
         modelId: string
       }
       tier?: "light" | "standard" | "heavy"
+      pinned?: true
       reasoning?:
         | "provider-default"
         | "none"

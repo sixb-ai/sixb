@@ -1342,7 +1342,7 @@ describe("agent routes", () => {
       projectId: sixb.id,
       threadId: thread.id,
       triggerMessageId: "msg-user",
-      spec: { model: { provider: "test", modelId: "test-model" }, tier: "standard" },
+      spec: { model: { provider: "test", modelId: "test-model" }, tier: "standard", pinned: true },
       modelId: "test-model",
       execution: testExecution(),
       createdAt: new Date("2026-06-27T10:00:00.000Z"),
@@ -1378,6 +1378,8 @@ describe("agent routes", () => {
       status: "running",
       model: { provider: "test", modelId: "test-model" },
       tier: "standard",
+      // Guard proof: drop `pinned` from serializeAgentRun; the run reads without it.
+      pinned: true,
       modelId: "test-model",
       attempt: 1,
       streamId: `agents.runs.${run.id}`,

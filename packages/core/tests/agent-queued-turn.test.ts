@@ -216,6 +216,34 @@ describe("what a finished turn starts", () => {
     ).toHaveLength(1)
   })
 
+  test("keeps that its sender chose the model, so the chat opens the thread on it", async () => {
+    // Guard proof: drop `pinned` from queuedConversationRunSpec (request.ts); the queued turn
+    // reads as one whose model nobody chose.
+    const { host, ...deps } = setup()
+    const sixb = await userScope(host, "owner")
+    const { thread, run } = await finishedTurn(host, deps, sixb, { status: "succeeded" }, (id) =>
+      sixb.agent.runs.send({
+        threadId: id,
+        text: "Then run the tests.",
+        delivery: "queue",
+        messageId: "msg_inb_1",
+        model: { provider: "test", modelId: "test-model" },
+      })
+    )
+    expect(run.spec).not.toHaveProperty("pinned")
+
+    await afterAgentRunFinished(sessionHost(host, deps), run)
+
+    const started = await host.storage.agents!.runs.list({
+      projectId: host.id,
+      threadId: thread.id,
+      statuses: ["queued"],
+    })
+    expect(started.runs.map((next) => next.kind === "conversation" && next.spec)).toEqual([
+      expect.objectContaining({ model: { provider: "test", modelId: "test-model" }, pinned: true }),
+    ])
+  })
+
   test("starts it where its thread runs now, down to the folder", async () => {
     // Proven by removal: record only `runsOn` in inPlace (request.ts), as before folders were
     // kept; the turn loses its folder, so the next turn reads a move that never happened.

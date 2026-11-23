@@ -426,6 +426,36 @@ describe("editing an Agent thread message", () => {
     expect(editedU1.run.spec?.model.modelId).toBe("flash")
   })
 
+  test("records that the editor chose the edited turn's model", async () => {
+    // Guard proof: drop `pinned` from the spec editAgentMessage writes (request.ts); the edited
+    // turn reads as one Sixb picked the model of.
+    const { host, storage } = setup({
+      language: tiers,
+      decision: [decisionModel(async () => tierAnswer({ light: 0, standard: 0.1, heavy: 0.9 }))],
+    })
+    const sixb = await userScope(host, "alice")
+    const thread = await sixb.agent.threads.create({ title: "Chosen model" })
+
+    const routed = await sixb.agent.runs.request({
+      threadId: thread.id,
+      text: "Plan the release",
+      messageId: "u1",
+    })
+    expect(routed.run.spec).not.toHaveProperty("pinned")
+    await completeTurn(storage, host.id, routed.run.id, thread.id, "Plan ready.")
+
+    const edited = await editNow(sixb, {
+      threadId: thread.id,
+      messageId: "u1",
+      text: "Plan the patch release",
+      model: { provider: "test", modelId: "sonnet" },
+    })
+    expect(edited.run.spec).toMatchObject({
+      model: { provider: "test", modelId: "sonnet" },
+      pinned: true,
+    })
+  })
+
   test("runs an edited turn in the thread's folder and keeps the model whose cache is warm there", async () => {
     // Guard proof: write only `runsOn` into the edited run's spec, or route it without its place
     // (request.ts, editAgentMessage); the turn loses its folder, reads as moved, and steps down to

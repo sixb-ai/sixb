@@ -194,6 +194,7 @@ export async function requestAgentRun(
     model: input.model ?? continued.model,
     reasoning: input.reasoning ?? continued.reasoning,
   }
+  const pinned = input.model !== undefined || continued.pinned === true
   const settings = requesterSettings(input)
   if (input.approvalMode !== undefined) assertAgentApprovalMode(input.approvalMode)
 
@@ -255,7 +256,12 @@ export async function requestAgentRun(
           language: models.language,
         })
       : requested
-  const spec: ConversationAgentRunSpec = Object.freeze({ ...selected, approvalMode, ...place })
+  const spec: ConversationAgentRunSpec = Object.freeze({
+    ...selected,
+    ...(pinned ? { pinned } : {}),
+    approvalMode,
+    ...place,
+  })
 
   const createdThread = existingThread === null
   const thread =
@@ -429,7 +435,12 @@ export async function editAgentMessage(
           language: models.language,
         })
       : requested
-  const spec: ConversationAgentRunSpec = Object.freeze({ ...selected, approvalMode, ...place })
+  const spec: ConversationAgentRunSpec = Object.freeze({
+    ...selected,
+    ...(input.model === undefined ? {} : { pinned: true as const }),
+    approvalMode,
+    ...place,
+  })
 
   const edit: AgentMessageEdit = {
     target,
@@ -1627,10 +1638,12 @@ function queuedConversationRunSpec(
   // nothing on.
   const reasoning =
     item.spec?.reasoning ?? (item.replacesMessageId === undefined ? kept.reasoning : undefined)
+  const pinned = item.spec?.model !== undefined || kept.pinned === true
   const timeZone = item.timeZone ?? kept.timeZone
   const locale = item.locale ?? kept.locale
   return inPlace(thread, {
     model,
+    ...(pinned ? { pinned } : {}),
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(timeZone === undefined ? {} : { timeZone }),
     ...(locale === undefined ? {} : { locale }),
@@ -1827,7 +1840,9 @@ async function continuedSelection(
   runtime: SixbRuntimeContext,
   models: LanguageModelCatalog | undefined,
   input: RequestAgentRunInput
-): Promise<Pick<RequestAgentRunInput, "model" | "reasoning">> {
+): Promise<
+  Pick<RequestAgentRunInput, "model" | "reasoning"> & Pick<ConversationAgentRunSpec, "pinned">
+> {
   const agents = requireAgentStorage(runtime)
   const threadId = input.threadId ?? ""
   if (!(await agents.threads.getById({ projectId: runtime.projectId, id: threadId }))) {
@@ -1842,6 +1857,7 @@ async function continuedSelection(
   return {
     model: spec.model,
     ...(spec.reasoning === undefined ? {} : { reasoning: spec.reasoning }),
+    ...(spec.pinned ? { pinned: spec.pinned } : {}),
   }
 }
 

@@ -406,7 +406,8 @@ describe("the model chip with tiers", () => {
     const menu = within(await view.findByRole("radiogroup", { name: "Model" }))
     fireEvent.click(menu.getByRole("radio", { name: /^Auto/ }))
 
-    await waitFor(() => expect(storedPins()).toEqual({}))
+    // Auto stays pinned, over the model the thread's latest turn's requester chose.
+    await waitFor(() => expect(storedPins()).toEqual({ thr_1: "auto" }))
   })
 
   // Removal proof: always describe Auto as routing; without a decision model it names none.

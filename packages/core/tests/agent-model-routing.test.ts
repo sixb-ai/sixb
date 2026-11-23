@@ -237,7 +237,12 @@ describe("Sixb picks the model of each turn", () => {
     setSystemTime(new Date("2026-10-24T10:00:00.000Z"))
     // An explicit model asks nothing, and its turn takes the tier the model is in.
     const first = await sixb.agent.runs.request({ text: "Compare", model: ref("gpt") })
-    expect(first.run.spec).toEqual({ approvalMode: "auto", model: ref("gpt"), tier: "heavy" })
+    expect(first.run.spec).toEqual({
+      approvalMode: "auto",
+      model: ref("gpt"),
+      tier: "heavy",
+      pinned: true,
+    })
     expect(decision.evaluate).toHaveBeenCalledTimes(0)
     await finish(host, first.run)
     const threadId = first.run.threadId
@@ -472,6 +477,40 @@ describe("Sixb picks the model of each turn", () => {
     })
     const retried = await sixb.agent.runs.retry(continued.run.id)
     expect(retried.run.spec).toEqual(continued.run.spec)
+    expect(decision.evaluate).toHaveBeenCalledTimes(1)
+  })
+
+  test("records that the requester chose a turn's model, through its continuation", async () => {
+    // Guard proof: drop `pinned` from the spec requestAgentRun writes, or from continuedSelection;
+    // the chosen turn, or its continuation, reads as one Sixb picked the model of.
+    const { host, decision, sixb } = await routedSetup()
+    // Each turn a minute after the last, so the latest one reads first.
+    setSystemTime(new Date("2026-11-22T10:00:00.000Z"))
+    decision.answer(HEAVY)
+    const routed = await sixb.agent.runs.request({ text: "Write the report" })
+    expect(routed.run.spec).not.toHaveProperty("pinned")
+    await finish(host, routed.run)
+
+    setSystemTime(new Date("2026-11-22T10:01:00.000Z"))
+    const chosen = await sixb.agent.runs.request({
+      threadId: routed.run.threadId,
+      text: "Shorter, please",
+      model: ref("sonnet"),
+    })
+    expect(chosen.run.spec).toEqual({
+      approvalMode: "auto",
+      model: ref("sonnet"),
+      tier: "standard",
+      pinned: true,
+    })
+    await finish(host, chosen.run)
+
+    setSystemTime(new Date("2026-11-22T10:02:00.000Z"))
+    const continued = await sixb.agent.runs.request({
+      threadId: routed.run.threadId,
+      continue: true,
+    })
+    expect(continued.run.spec).toEqual(chosen.run.spec)
     expect(decision.evaluate).toHaveBeenCalledTimes(1)
   })
 

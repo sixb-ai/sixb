@@ -517,6 +517,11 @@ export interface ConversationAgentRunSpec {
    * calibrate the thresholds the tier is picked from (`heavy` from 0.4, `light` from 0.8).
    */
   readonly tierProbabilities?: LanguageModelTierProbabilities
+  /**
+   * The requester chose the model, rather than Sixb or the project default: the chat opens the
+   * thread on it in any browser. A continuation, retry or queued message keeps its turn's.
+   */
+  readonly pinned?: true
   readonly reasoning?: AgentReasoning
   /** Canonical IANA time zone of the requester. Absent uses the project time zone. */
   readonly timeZone?: string

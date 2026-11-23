@@ -336,6 +336,7 @@ export function serializeAgentRun(
     status: run.status,
     model: run.spec?.model,
     tier: run.spec?.tier,
+    pinned: run.kind === "conversation" ? run.spec?.pinned : undefined,
     reasoning: run.spec?.reasoning,
     approvalMode: run.spec?.approvalMode,
     runsOn: run.kind === "conversation" ? run.spec?.runsOn : undefined,
