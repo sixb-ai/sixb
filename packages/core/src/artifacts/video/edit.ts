@@ -1019,6 +1019,65 @@ function heardDuring(work: Working, fromMs: number, toMs: number): boolean {
   })
 }
 
+/**
+ * Plays another file of the video in a clip's place, one of the same kind: every part of the clip,
+ * from the new file's start on, its timing, sound and look as they were. One edit: the file it
+ * played, once no clip plays it, leaves the version with it.
+ */
+export function replaceClipMedia(
+  sources: VideoSources,
+  file: string,
+  clip: VideoTarget,
+  src: string
+): VideoEditResult {
+  return run(sources, (work) => {
+    const found = clipOf(work, file, clip)
+    const kind = found.kind
+    if (!found.src || (kind !== "video" && kind !== "audio" && kind !== "image")) {
+      throw new EditError(`'${found.ref}' plays no file to replace.`)
+    }
+    if (sources.get(src) !== null) {
+      throw new EditError(`'${src}' is not one of the video's recordings or pictures.`)
+    }
+    const replacing = mediaKind(src)
+    if (replacing !== undefined && replacing !== kind) {
+      throw new EditError(
+        `'${src}' is no ${kind === "image" ? "picture" : kind}: choose one that is.`
+      )
+    }
+
+    const parts =
+      file === VIDEO_ENTRY
+        ? [{ file, clip: found }]
+        : (chainsOf(work).get(`${file}\n${found.ref}`)?.parts ?? [{ file, clip: found }])
+    let intoMs = 0
+    for (const part of parts) {
+      const now = clipOf(work, part.file, part.clip.ref)
+      setAttributes(work, part.file, now.source, {
+        src: writtenPath(work, part.file, src),
+        ...(playsFile(now) ? { "data-media-start": seconds(intoMs) } : {}),
+      })
+      intoMs += now.durationMs ?? 0
+    }
+  })
+}
+
+/** What a file of the video is by its name: footage, a sound or a picture. */
+function mediaKind(path: string): "video" | "audio" | "image" | undefined {
+  const extension = /\.([^./]+)$/.exec(path)?.[1]?.toLowerCase() ?? ""
+  if (["mp4", "mov", "m4v", "webm"].includes(extension)) return "video"
+  if (["mp3", "m4a", "wav", "aac", "ogg", "oga", "flac"].includes(extension)) return "audio"
+  if (["png", "jpg", "jpeg", "webp", "gif", "avif"].includes(extension)) return "image"
+  return undefined
+}
+
+/** A file of the video as `file` names it: from the project's root, else from beside it. */
+function writtenPath(work: Working, file: string, path: string): string {
+  const exists = (each: string) => work.has(each)
+  const up = "../".repeat(file.split("/").length - 1)
+  return [path, `${up}${path}`].find((each) => videoFilePath(file, each, exists) === path) ?? path
+}
+
 /** The files an edit leaves: `sources` with the edit applied. */
 export function applyVideoEdit(sources: VideoSources, edit: VideoEdit): Map<string, string | null> {
   const files = new Map(sources)

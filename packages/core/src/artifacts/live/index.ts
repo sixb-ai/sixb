@@ -25,6 +25,7 @@ export {
   removeClips,
   removeMediaRanges,
   removeScene,
+  replaceClipMedia,
   setClipSound,
   setClipTiming,
   setSceneLabel,
