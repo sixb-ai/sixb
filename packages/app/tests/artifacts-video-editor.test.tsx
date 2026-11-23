@@ -723,6 +723,52 @@ describe("the editor's pieces", () => {
     }
   })
 
+  // Guard proof: drop `bare` from SceneBlock (scenes.tsx); a chapter drawn 12 px wide, as one of
+  // 52 is at the video's fit, then shows its number over its neighbours'.
+  test("a chapter narrower than its number shows nothing but its edge, and all in a tooltip", async () => {
+    const talk = composition().scenes[1]
+    if (!talk) throw new Error("No interview scene.")
+    const chapter = (width: number) =>
+      wrap(
+        <SceneBlock
+          scene={talk}
+          index={51}
+          count={52}
+          open={false}
+          playing
+          agent={false}
+          people={[]}
+          dragging={false}
+          length="1.2 s"
+          width={width}
+          onPress={() => {}}
+          actions={{
+            select: () => {},
+            move: () => {},
+            duplicate: () => {},
+            remove: () => {},
+            rename: () => {},
+          }}
+        />
+      )
+    const view = render(chapter(12))
+    const block = view.getByRole("button", { name: "Chapter 52, Interview, 1.2 s" })
+    expect(block.textContent).toBe("")
+    // Under the playhead, it is still marked; its name and length are a focus away.
+    expect(view.container.querySelector("[data-chapter-playing]")).not.toBeNull()
+    fireEvent.focus(block)
+    await waitFor(() => expect(view.getAllByText("52. Interview").length).toBeGreaterThan(0))
+
+    view.rerender(chapter(20))
+    expect(view.getByRole("button", { name: "Chapter 52, Interview, 1.2 s" }).textContent).toBe(
+      "52"
+    )
+    view.rerender(chapter(40))
+    expect(view.getByRole("button", { name: "Chapter 52, Interview, 1.2 s" }).textContent).toBe(
+      "Interview"
+    )
+  })
+
   // Guard proof: show the number below NAME_FROM_PX in SceneBlock (scenes.tsx), `narrow` as wide
   // as `compact`, as it did; at 58 px the chapter reads "2", where its name's first letters fit.
   test("a chapter with room for a few letters of its name shows them, and the rest in a tooltip", async () => {

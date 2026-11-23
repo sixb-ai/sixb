@@ -36,10 +36,12 @@ export interface SceneActions {
 /**
  * The narrowest a chapter shows its name with room for its menu, in pixels; narrower, its name
  * alone, cut short, its menu on a right click and the whole name in a tooltip; narrower than a few
- * letters, its number.
+ * letters, its number; narrower than its number, nothing but its edge, so no text ever runs into
+ * the next chapter's.
  */
 const NAME_FROM_PX = 72
 const NUMBER_BELOW_PX = 36
+const NUMBER_FROM_PX = 18
 
 export function SceneBlock({
   scene,
@@ -53,6 +55,7 @@ export function SceneBlock({
   length,
   actions,
   onPress,
+  width: drawn,
   children,
 }: {
   readonly scene: VideoScene
@@ -71,6 +74,8 @@ export function SceneBlock({
   readonly actions: SceneActions
   /** A press on it, which a drag reorders and a tap opens. */
   readonly onPress: (event: ReactPointerEvent) => void
+  /** How wide it is drawn, in pixels, when its bar knows: else it is measured once laid out. */
+  readonly width?: number
   /** What lies over it: the handle that drags its end. */
   readonly children?: React.ReactNode
 }) {
@@ -79,8 +84,10 @@ export function SceneBlock({
   const [renaming, setRenaming] = useState(false)
   const [menu, setMenu] = useState(false)
   const box = useRef<HTMLDivElement | null>(null)
-  const { width } = useSize(box)
+  const measured = useSize(box).width
+  const width = drawn ?? measured
   // Until it is measured, it is laid out as a chapter with room for its name.
+  const bare = width > 0 && width < NUMBER_FROM_PX
   const narrow = width > 0 && width < NUMBER_BELOW_PX
   const compact = width > 0 && width < NAME_FROM_PX
 
@@ -116,7 +123,7 @@ export function SceneBlock({
         actions.move(scene, index + (event.key === "ArrowLeft" ? -1 : 1))
       }}
     >
-      {narrow ? (
+      {bare ? null : narrow ? (
         <span
           aria-hidden="true"
           className="text-[10px] font-semibold text-muted-foreground tabular-nums"
