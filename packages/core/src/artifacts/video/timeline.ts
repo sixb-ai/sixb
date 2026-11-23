@@ -52,7 +52,10 @@ export interface VideoClip {
   readonly volume?: number
   readonly fadeInMs?: number
   readonly fadeOutMs?: number
-  /** Footage whose sound is not played: `muted`, unless `data-has-audio="true"`. */
+  /**
+   * Footage whose sound is not played, as HyperFrames mixes it: `muted`, or a `data-has-audio`
+   * other than "true".
+   */
   readonly silent: boolean
   /** What a text clip says. */
   readonly text?: string
@@ -237,7 +240,9 @@ function timelineOf(composition: Element): VideoFileTimeline {
       ...(volume === undefined ? {} : { volume }),
       ...(fadeInMs === undefined ? {} : { fadeInMs }),
       ...(fadeOutMs === undefined ? {} : { fadeOutMs }),
-      silent: kind === "video" && has(element, "muted") && !hasAudio(element),
+      silent:
+        kind === "video" &&
+        (has(element, "muted") || (has(element, "data-has-audio") && !hasAudio(element))),
       ...(text === undefined ? {} : { text }),
       ...(continues ? { continues } : {}),
       source: sourceOf(element),

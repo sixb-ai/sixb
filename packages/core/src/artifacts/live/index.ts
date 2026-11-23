@@ -16,6 +16,7 @@ export {
   duplicateScene,
   findVideoTarget,
   insertClip,
+  MAX_VOLUME,
   moveClip,
   moveClips,
   moveScene,
