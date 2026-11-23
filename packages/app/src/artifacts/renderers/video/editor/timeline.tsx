@@ -4,6 +4,7 @@ import {
   type VideoComposition,
   type VideoScene,
   type VideoTrack,
+  videoChapters,
   videoTarget,
 } from "@sixb/core/artifacts/live"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@sixb/ui/components"
@@ -216,6 +217,8 @@ export function Timeline({
   readonly formatLength: (ms: number) => string
 }) {
   const messages = useArtifactMessages().videoEditor
+  // The scenes the chapters bar shows: an overlay laid over them all is none, its clips the video's.
+  const chapters = useMemo(() => videoChapters(composition.scenes), [composition.scenes])
   const scroller = useRef<HTMLDivElement | null>(null)
   const scenesRow = useRef<HTMLDivElement | null>(null)
   const tracksArea = useRef<HTMLDivElement | null>(null)
@@ -225,8 +228,11 @@ export function Timeline({
     items: () => [...(scenesRow.current?.querySelectorAll<HTMLElement>("[data-reorder-id]") ?? [])],
     axis: "x",
     onMove: (id, _from, to) => {
+      // Among the chapters the bar shows: before the one now there, among all the scenes.
       const scene = composition.scenes.find((each) => each.id === id)
-      if (scene) edits.scene.move(scene, to)
+      const others = composition.scenes.filter((each) => each.id !== id)
+      const before = chapters.filter((each) => each.id !== id)[to]
+      if (scene) edits.scene.move(scene, before ? others.indexOf(before) : others.length)
     },
   })
   const [width, setWidth] = useState(0)
@@ -751,8 +757,8 @@ export function Timeline({
 
   // The chapter selected, the one under the playhead, and where files dragged in would land.
   const chosenScene = selection?.type === "scene" ? selection.scene : undefined
-  const playingScene = sceneAt(composition.scenes, timeMs)?.id
-  const filesScene = filesAt === null ? undefined : sceneFor(composition.scenes, filesAt)
+  const playingScene = sceneAt(chapters, timeMs)?.id
+  const filesScene = filesAt === null ? undefined : sceneFor(chapters, filesAt)
 
   /** Files dragged over the tracks: the instant they would land at, as the pointer goes. */
   const dropping = {
@@ -771,12 +777,12 @@ export function Timeline({
       ? drag.endMs
       : scene.startMs + scene.durationMs
   const spans = sceneSpans(
-    composition.scenes.map((scene) => ({ startMs: scene.startMs, endMs: sceneEnd(scene) }))
+    chapters.map((scene) => ({ startMs: scene.startMs, endMs: sceneEnd(scene) }))
   )
 
   /** Where a scene dropped in `slot` goes: the start of the scene there, or the video's end. */
   const dropAt = (slot: number) => {
-    const scene = composition.scenes[slot]
+    const scene = chapters[slot]
     return px(scene ? scene.startMs : composition.durationMs)
   }
 
@@ -846,7 +852,7 @@ export function Timeline({
             rowRef={scenesRow}
             onBackground={(event) => edits.seek(msAt(event.clientX), "commit")}
           >
-            {composition.scenes.map((scene, index) => {
+            {chapters.map((scene, index) => {
               const span = spans[index]
               if (!span) return null
               const endHandle = (
@@ -878,7 +884,7 @@ export function Timeline({
                     <SceneBlock
                       scene={scene}
                       index={index}
-                      count={composition.scenes.length}
+                      count={chapters.length}
                       open={chosenScene === scene.id}
                       playing={playingScene === scene.id}
                       agent={agentScenes.has(scene.id)}
@@ -922,7 +928,7 @@ export function Timeline({
             }}
           >
             {/* Where each chapter starts, faint across the tracks, under the clips. */}
-            {composition.scenes.map((scene, index) =>
+            {chapters.map((scene, index) =>
               index === 0 ? null : (
                 <span
                   key={scene.id}

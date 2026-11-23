@@ -28,6 +28,7 @@ import {
   type VideoPlaceResult,
   type VideoScene,
   type VideoSources,
+  videoChapters,
   videoTarget,
 } from "@sixb/core/artifacts/live"
 import {
@@ -190,7 +191,10 @@ export default function VideoEditor({
 
   const composition = state.composition
   const scenes = composition?.scenes ?? []
-  const playing = sceneAt(scenes, timeMs)
+  // A scene laid over the others, as captions over the whole video, is no chapter to open or drop
+  // into: under the playhead, the chapter there is.
+  const chapters = useMemo(() => videoChapters(scenes), [scenes])
+  const playing = sceneAt(chapters, timeMs)
   const open = (composition ? selectedScene(composition, selection) : undefined) ?? playing
   // What the Transcript tab reads: the open chapter's clips and the video's own.
   const clips = useMemo(
@@ -739,7 +743,7 @@ export default function VideoEditor({
 
   /** Where files dropped on the tracks land: at that instant, in the chapter there. */
   const atInstant = (ms: number) => {
-    const chapter = sceneFor(scenes, ms)
+    const chapter = sceneFor(chapters, ms)
     return chapter
       ? {
           file: chapter.src,
