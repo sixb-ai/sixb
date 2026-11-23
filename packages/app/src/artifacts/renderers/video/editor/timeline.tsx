@@ -33,7 +33,6 @@ import {
   type PointerEvent as ReactPointerEvent,
   type Ref,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -42,6 +41,7 @@ import { useArtifactMessages } from "../../../messages"
 import { formatClock } from "../../../playback"
 import { Waveform } from "../../../waveform"
 import { commandKey } from "../keys"
+import { useSize } from "../player"
 import { type MediaTarget, useMediaParts } from "./media"
 import {
   type ClipBox,
@@ -259,7 +259,6 @@ export function Timeline({
       if (scene) edits.scene.move(scene, to)
     },
   })
-  const [width, setWidth] = useState(0)
   const [pxPerSecond, setPxPerSecond] = useState<number | null>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
   // The clip that goes on under the pointer, by its key: all its parts outlined, its end in sight.
@@ -274,16 +273,7 @@ export function Timeline({
   dragRef.current = drag
 
   // The timeline's own width, which the first zoom fits the video to.
-  useLayoutEffect(() => {
-    const element = scroller.current
-    if (!element) return
-    const measure = () => setWidth(element.clientWidth)
-    measure()
-    if (typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(measure)
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [])
+  const width = useSize(scroller).width
 
   const fit = fitZoom(composition.durationMs, Math.max(0, width - LABELS_PX - 48))
   const zoom = pxPerSecond ?? fit

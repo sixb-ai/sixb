@@ -14,7 +14,7 @@ import { TooltipProvider } from "@sixb/ui/components"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, fireEvent, render, renderHook, waitFor } from "@testing-library/react"
-import { type ReactNode, useLayoutEffect } from "react"
+import { type ReactNode, useLayoutEffect, useRef } from "react"
 import * as Y from "yjs"
 import { createArtifactDocument } from "../../core/src/artifacts/live/document"
 import { frameLinkKey } from "../src/artifacts/frame"
@@ -75,6 +75,7 @@ import {
   TranscriptTab,
 } from "../src/artifacts/renderers/video/editor/transcript-panel"
 import { appleKeyboard } from "../src/artifacts/renderers/video/keys"
+import { useSize } from "../src/artifacts/renderers/video/player"
 import { artifactVersion } from "./helpers/artifacts"
 import { installDom } from "./helpers/dom"
 
@@ -624,6 +625,81 @@ function wrap(children: ReactNode, queries = new QueryClient()) {
     </QueryClientProvider>
   )
 }
+
+describe("an element's size", () => {
+  // Guard proof: set the size inside the ResizeObserver callback again, as useSize (player.tsx)
+  // did: the size changes within the callback's frame, which a layout answering its own resize
+  // turns into the browser's ResizeObserver loop. Set it whatever it is, and an unchanged size
+  // commits again.
+  test("changes on the next frame, once, and only when it differs", () => {
+    const Observer = globalThis.ResizeObserver
+    const raf = globalThis.requestAnimationFrame
+    const caf = globalThis.cancelAnimationFrame
+    let notify = () => {}
+    const frames: FrameRequestCallback[] = []
+    globalThis.ResizeObserver = class {
+      constructor(callback: () => void) {
+        notify = callback
+      }
+      observe() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver
+    globalThis.requestAnimationFrame = (callback) => frames.push(callback)
+    globalThis.cancelAnimationFrame = () => {}
+
+    // Commits, not renders: React may render once more to find a state unchanged, and commit nothing.
+    let renders = 0
+    let width = 300
+    function Probe() {
+      const box = useRef<HTMLDivElement | null>(null)
+      const size = useSize(box)
+      useLayoutEffect(() => {
+        renders += 1
+      })
+      return (
+        <div
+          ref={(element) => {
+            box.current = element
+            if (element)
+              Object.defineProperty(element, "clientWidth", {
+                configurable: true,
+                get: () => width,
+              })
+          }}
+          data-width={size.width}
+        />
+      )
+    }
+
+    try {
+      const view = render(<Probe />)
+      const shown = () => view.container.querySelector("div")?.getAttribute("data-width")
+      expect(shown()).toBe("300")
+      const settled = renders
+
+      // A resize: nothing changes until the next frame, and two notices make one change.
+      width = 420
+      act(() => {
+        notify()
+        notify()
+      })
+      expect(shown()).toBe("300")
+      expect(frames).toHaveLength(1)
+      act(() => frames.shift()?.(0))
+      expect(shown()).toBe("420")
+      expect(renders).toBe(settled + 1)
+
+      // A notice with the same size renders nothing.
+      act(() => notify())
+      act(() => frames.shift()?.(0))
+      expect(renders).toBe(settled + 1)
+    } finally {
+      globalThis.ResizeObserver = Observer
+      globalThis.requestAnimationFrame = raf
+      globalThis.cancelAnimationFrame = caf
+    }
+  })
+})
 
 describe("the editor's pieces", () => {
   test("a chapter on the timeline opens, moves with Alt and an arrow, and renames on a double click", () => {

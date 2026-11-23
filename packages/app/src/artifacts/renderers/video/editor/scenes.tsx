@@ -11,7 +11,13 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ArrowLeft, ArrowRight, Copy, Ellipsis, Pencil, Sparkles, Trash2 } from "lucide-react"
-import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react"
+import {
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 import { videoStillUrl } from "../../../file-source"
 import { useArtifactMessages } from "../../../messages"
 import { useSize } from "../player"
@@ -32,6 +38,9 @@ export interface SceneActions {
   readonly remove: (scene: VideoScene) => void
   readonly rename: (scene: VideoScene, label: string) => void
 }
+
+/** What a block its bar already sizes observes: nothing. */
+const UNMEASURED: RefObject<HTMLDivElement | null> = { current: null }
 
 /**
  * The narrowest a chapter shows its name with room for its menu, in pixels; narrower, its name
@@ -84,7 +93,8 @@ export function SceneBlock({
   const [renaming, setRenaming] = useState(false)
   const [menu, setMenu] = useState(false)
   const box = useRef<HTMLDivElement | null>(null)
-  const measured = useSize(box).width
+  // Only a block its bar doesn't size measures itself: a bar of fifty chapters observes none.
+  const measured = useSize(drawn === undefined ? box : UNMEASURED).width
   const width = drawn ?? measured
   // Until it is measured, it is laid out as a chapter with room for its name.
   const bare = width > 0 && width < NUMBER_FROM_PX
