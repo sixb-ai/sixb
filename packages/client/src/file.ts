@@ -11,7 +11,7 @@ import {
   uploadFileContent,
   uploadFileRaw,
 } from "./generated/sdk.gen"
-import { computeStreamingBlobDigest } from "./sha256"
+import { computeBlobDigestOffThread, computeStreamingBlobDigest } from "./sha256"
 
 export interface ObjectFileContentUrlInput {
   readonly objectTypeId: string
@@ -129,13 +129,18 @@ export interface UploadFileOptions {
 
 /**
  * A file's digest, as its upload names it: what tells a file already stored from a new one before
- * sending it. Read in slices, as a staged upload reads it, `onBytes` after each.
+ * sending it. Read in slices, as a staged upload reads it, `onBytes` after each; a large one in a
+ * worker, so a page hashing gigabytes never stops answering.
  */
 export async function fileDigest(
   file: File | Blob,
   onBytes?: (hashedBytes: number) => void
 ): Promise<FileRef["digest"]> {
-  return hashFile(file, onBytes ?? (() => {}))
+  try {
+    return await computeBlobDigestOffThread(file, { ...(onBytes ? { onBytes } : {}) })
+  } catch (error) {
+    throw toSixbFileUploadError(error, "hash")
+  }
 }
 
 export interface UploadFileInput extends UploadFileOptions {

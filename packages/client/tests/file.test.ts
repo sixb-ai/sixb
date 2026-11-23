@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { computeBlobDigest } from "@sixb/core/blob-storage/server"
-import { createSixbClient, type FileUploadProgress, SixbFileUploadError, uploadFile } from "../src"
+import {
+  createSixbClient,
+  type FileUploadProgress,
+  fileDigest,
+  SixbFileUploadError,
+  uploadFile,
+} from "../src"
 
 const encoder = new TextEncoder()
 
@@ -410,5 +416,45 @@ describe("uploadFile", () => {
       (request) => request.url === "http://sixb.test/api/files/uploads/upload_1/abort"
     )
     expect(abortRequest?.method).toBe("POST")
+  })
+})
+
+describe("fileDigest", () => {
+  // Nine mebibytes: one slice past what is hashed in place.
+  const bytes = new Uint8Array(9 * 1024 * 1024).map((_, index) => (index * 31) % 251)
+  const large = new Blob([bytes])
+
+  // Guard proof: hash every file in place in computeBlobDigestOffThread (sha256.ts), dropping the
+  // worker; the large file then never reaches one. Drop the fallback, and a page refusing the
+  // worker fails to hash at all.
+  test("hashes a large file in a worker, and in place where none can run", async () => {
+    const expected = computeBlobDigest(bytes)
+    const Original = globalThis.Worker
+    let started = 0
+    globalThis.Worker = class extends Original {
+      constructor(...args: ConstructorParameters<typeof Worker>) {
+        super(...args)
+        started += 1
+      }
+    } as typeof Worker
+
+    const seen: number[] = []
+    try {
+      expect(await fileDigest(large, (hashed) => seen.push(hashed))).toBe(expected)
+      expect(started).toBe(1)
+      expect(seen.at(-1)).toBe(large.size)
+
+      // A worker the page's policy refuses, or none in this runtime: the same digest, in place.
+      globalThis.Worker = class {
+        constructor() {
+          throw new Error("Refused by the page's policy.")
+        }
+      } as unknown as typeof Worker
+      expect(await fileDigest(large)).toBe(expected)
+      Reflect.deleteProperty(globalThis, "Worker")
+      expect(await fileDigest(large)).toBe(expected)
+    } finally {
+      globalThis.Worker = Original
+    }
   })
 })
