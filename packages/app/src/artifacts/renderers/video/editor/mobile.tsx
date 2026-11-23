@@ -4,6 +4,7 @@ import {
   type VideoFileTimeline,
   type VideoScene,
   type VideoTarget,
+  videoChapters,
   videoTarget,
 } from "@sixb/core/artifacts/live"
 import { cn } from "@sixb/ui/lib/utils"
@@ -20,7 +21,7 @@ import {
   Type,
   Video,
 } from "lucide-react"
-import { useRef } from "react"
+import { useMemo, useRef } from "react"
 import { useArtifactMessages } from "../../../messages"
 import { formatClock } from "../../../playback"
 import { formatSeconds, TextField, textKind } from "./inspector"
@@ -66,7 +67,8 @@ export function MobileScenes({
 }) {
   const messages = useArtifactMessages().videoEditor
   const list = useRef<HTMLOListElement | null>(null)
-  const { scenes } = composition
+  // The chapters, as the bar shows them: a scene laid over them is none.
+  const scenes = useMemo(() => videoChapters(composition.scenes), [composition.scenes])
   const { drag, start } = useReorder({
     items: () => [...(list.current?.querySelectorAll<HTMLElement>("[data-reorder-id]") ?? [])],
     axis: "y",

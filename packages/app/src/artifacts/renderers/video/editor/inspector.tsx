@@ -6,6 +6,7 @@ import {
   type VideoScene,
   type VideoTarget,
   type VideoText,
+  videoChapters,
   videoSceneLength,
   videoTarget,
 } from "@sixb/core/artifacts/live"
@@ -195,7 +196,9 @@ function SceneInspector({
   readonly actions: InspectorActions
 }) {
   const messages = useArtifactMessages().videoEditor
-  const index = composition.scenes.findIndex((each) => each.id === scene.id)
+  // Its number on the chapters bar: a scene laid over the chapters counts as none of them.
+  const chapters = videoChapters(composition.scenes)
+  const index = chapters.findIndex((each) => each.id === scene.id)
   const only = composition.scenes.length === 1
 
   return (

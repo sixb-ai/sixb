@@ -8,6 +8,7 @@ import {
   setSceneLength,
   splitClip,
   type VideoCut,
+  type VideoScene,
 } from "@sixb/core/artifacts/live"
 import { TooltipProvider } from "@sixb/ui/components"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
@@ -19,7 +20,7 @@ import { createArtifactDocument } from "../../core/src/artifacts/live/document"
 import { frameLinkKey } from "../src/artifacts/frame"
 import { LiveArtifact } from "../src/artifacts/live/session"
 import { LiveVideo } from "../src/artifacts/live/video"
-import VideoEditor from "../src/artifacts/renderers/video/editor/editor"
+import VideoEditor, { sceneSlot } from "../src/artifacts/renderers/video/editor/editor"
 import { importKind, useMediaImport } from "../src/artifacts/renderers/video/editor/import"
 import {
   formatSeconds,
@@ -35,6 +36,7 @@ import {
   readMediaParts,
   useMediaParts,
 } from "../src/artifacts/renderers/video/editor/media"
+import { MobileScenes } from "../src/artifacts/renderers/video/editor/mobile"
 import {
   coveredEdges,
   editPoints,
@@ -1665,6 +1667,81 @@ describe("the editor", () => {
     expect(text("scenes/talk.html")).toContain("media/talk.mp4")
     expect(live.doc.getMap<unknown>("files").has("media/talk.mp4")).toBe(true)
     live.destroy()
+  })
+
+  // Guard proof: pass the chapter's place to moveScene as it is in the editor's scene actions,
+  // without sceneSlot; with the captions laid over both chapters first among the hosts, ⌥→ on the
+  // title then moves it nowhere.
+  test("a chapter moved by the keyboard goes past the one after it, captions over them kept", () => {
+    const end = INDEX.lastIndexOf("</div>")
+    const index = `${INDEX.slice(0, end).replace(
+      '<div id="title"',
+      '<div id="lines" data-composition-id="lines" data-composition-src="scenes/lines.html" data-start="0" data-duration="10"></div>\n  <div id="title"'
+    )}${INDEX.slice(end)}`
+    const { view, live, text } = openEditor(TALK, (title) => title, {
+      "index.html": index,
+      "scenes/lines.html":
+        '<template><div data-composition-id="lines" data-width="1280" data-height="720"><p class="line" data-start="1" data-duration="2">Calmer operations</p></div></template>',
+    })
+    const title = view.getByRole("button", { name: /^Chapter 1, Title/ })
+    fireEvent.keyDown(title, { key: "ArrowRight", altKey: true })
+
+    const host = (id: string) =>
+      new RegExp(`id="${id}"[^>]*data-start="([^"]*)"`).exec(text("index.html"))?.[1]
+    expect([host("lines"), host("talk"), host("title")]).toEqual(["0", "0", "talk"])
+    live.destroy()
+  })
+
+  // Guard proof: list every scene in MobileScenes (mobile.tsx), without videoChapters; the
+  // captions laid over the chapters are then a chapter of their own on a phone.
+  test("a phone lists the chapters alone, the captions laid over them none", () => {
+    const end = INDEX.lastIndexOf("</div>")
+    const files = new Map(FILES)
+    files.set("index.html", {
+      text: `${INDEX.slice(0, end)}  <div id="lines" data-composition-id="lines" data-composition-src="scenes/lines.html" data-start="0" data-duration="10"></div>\n${INDEX.slice(end)}`,
+    })
+    files.set("scenes/lines.html", {
+      text: '<template><div data-composition-id="lines" data-width="1280" data-height="720"></div></template>',
+    })
+    const state = new LiveVideo(createArtifactDocument("video", files)).getState()
+    if (!state.composition) throw new Error(state.error)
+    const noop = () => {}
+    const view = render(
+      wrap(
+        <MobileScenes
+          composition={state.composition}
+          timelines={state.timelines}
+          target={TARGET}
+          open={undefined}
+          playing={undefined}
+          agentScenes={new Set()}
+          actions={{
+            select: noop,
+            move: noop,
+            sceneLength: noop,
+            duplicate: noop,
+            remove: noop,
+            text: noop,
+            removeClip: noop,
+          }}
+        />
+      )
+    )
+    const listed = [...view.container.querySelectorAll("[data-reorder-id]")].map((each) =>
+      each.getAttribute("data-reorder-id")
+    )
+    expect(listed).toEqual(["title", "talk"])
+  })
+
+  test("a chapter's place among the chapters is its place among every scene", () => {
+    const scene = (id: string) => ({ id }) as VideoScene
+    const [lines, title, talk, end] = ["lines", "title", "talk", "end"].map(scene) as VideoScene[]
+    const scenes = [lines, title, talk, end] as VideoScene[]
+    const chapters = [title, talk, end] as VideoScene[]
+    // First among the chapters: before the title, after the captions laid over them.
+    expect(sceneSlot(scenes, chapters, talk as VideoScene, 0)).toBe(1)
+    expect(sceneSlot(scenes, chapters, title as VideoScene, 1)).toBe(2)
+    expect(sceneSlot(scenes, chapters, title as VideoScene, 2)).toBe(3)
   })
 
   // Guard proof: leave the selection as it was after a move in editor.tsx (`follow` false in

@@ -381,7 +381,10 @@ export default function VideoEditor({
 
   const sceneActions = {
     select: (scene: VideoScene) => openScene(scene),
-    move: (scene: VideoScene, to: number) => edit((sources) => moveScene(sources, scene.id, to)),
+    // `to` is a place among the chapters, as every list of them shows them, wherever a scene laid
+    // over them is among the hosts: the one place that says so.
+    move: (scene: VideoScene, to: number) =>
+      edit((sources) => moveScene(sources, scene.id, sceneSlot(scenes, chapters, scene, to))),
     duplicate: (scene: VideoScene) => {
       let copy: string | undefined
       const made = edit((sources) => {
@@ -1447,6 +1450,21 @@ function shortcuts(
     [messages.shiftDragging, help.free],
     [messages.altDragging(apple ? "⌥" : "Alt"), help.trimEdge],
   ]
+}
+
+/**
+ * Where a chapter moved to place `to` among the chapters goes among every scene, once it has
+ * left its own: before the chapter there now, or last.
+ */
+export function sceneSlot(
+  scenes: readonly VideoScene[],
+  chapters: readonly VideoScene[],
+  scene: VideoScene,
+  to: number
+): number {
+  const others = scenes.filter((each) => each.id !== scene.id)
+  const before = chapters.filter((each) => each.id !== scene.id)[Math.max(0, to)]
+  return before ? others.indexOf(before) : others.length
 }
 
 function Divider() {
