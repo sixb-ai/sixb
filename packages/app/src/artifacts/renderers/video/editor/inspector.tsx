@@ -1,4 +1,5 @@
 import {
+  MAX_VOLUME,
   type VideoClip,
   type VideoComposition,
   type VideoFileTimeline,
@@ -8,7 +9,7 @@ import {
   videoSceneLength,
   videoTarget,
 } from "@sixb/core/artifacts/live"
-import { Button, Slider } from "@sixb/ui/components"
+import { Button, Slider, Switch } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import {
   AudioLines,
@@ -54,7 +55,12 @@ export interface InspectorActions {
   readonly clipSound: (
     file: string,
     clip: VideoClip,
-    sound: { readonly volume?: number; readonly fadeInMs?: number; readonly fadeOutMs?: number }
+    sound: {
+      readonly volume?: number
+      readonly fadeInMs?: number
+      readonly fadeOutMs?: number
+      readonly muted?: boolean
+    }
   ) => void
   readonly text: (file: string, text: VideoTarget, words: string) => void
   readonly clipText: (file: string, clip: VideoClip, text: string) => void
@@ -277,7 +283,8 @@ function ClipInspector({
   const messages = useArtifactMessages().videoEditor
   const plays = clip.kind === "video" || clip.kind === "audio"
   const { failed } = useMediaParts(plays ? target : null, clip.src)
-  const sounds = clip.kind === "audio" || (clip.kind === "video" && !clip.silent)
+  // Footage always has its sound's section, muted or not, to turn it on or off there.
+  const sounds = clip.kind === "audio" || clip.kind === "video"
   const kind = clip.caption ? messages.clipKinds.caption : messages.clipKinds[clip.kind]
 
   return (
@@ -349,22 +356,37 @@ function ClipInspector({
 
       {sounds ? (
         <Section title={messages.tracks.sound}>
-          <VolumeField
-            volume={clip.volume ?? 1}
-            onCommit={(volume) => actions.clipSound(file, clip, { volume })}
-          />
-          <SecondsField
-            label={messages.fadeIn}
-            ms={clip.fadeInMs ?? 0}
-            min={0}
-            onCommit={(ms) => actions.clipSound(file, clip, { fadeInMs: ms })}
-          />
-          <SecondsField
-            label={messages.fadeOut}
-            ms={span.fadeOutMs ?? clip.fadeOutMs ?? 0}
-            min={0}
-            onCommit={(ms) => actions.clipSound(file, clip, { fadeOutMs: ms })}
-          />
+          {clip.kind === "video" ? (
+            <SwitchField
+              label={messages.soundHeard}
+              checked={!clip.silent}
+              onChange={(heard) => actions.clipSound(file, clip, { muted: !heard })}
+            />
+          ) : null}
+          {clip.silent ? (
+            <p className="m-0 text-[12px] leading-snug text-muted-foreground">
+              {messages.soundMuted}
+            </p>
+          ) : (
+            <>
+              <VolumeField
+                volume={clip.volume ?? 1}
+                onCommit={(volume) => actions.clipSound(file, clip, { volume })}
+              />
+              <SecondsField
+                label={messages.fadeIn}
+                ms={clip.fadeInMs ?? 0}
+                min={0}
+                onCommit={(ms) => actions.clipSound(file, clip, { fadeInMs: ms })}
+              />
+              <SecondsField
+                label={messages.fadeOut}
+                ms={span.fadeOutMs ?? clip.fadeOutMs ?? 0}
+                min={0}
+                onCommit={(ms) => actions.clipSound(file, clip, { fadeOutMs: ms })}
+              />
+            </>
+          )}
         </Section>
       ) : null}
 
@@ -590,6 +612,26 @@ export function TextField({
   )
 }
 
+function SwitchField({
+  label,
+  checked,
+  onChange,
+}: {
+  readonly label: string
+  readonly checked: boolean
+  readonly onChange: (checked: boolean) => void
+}) {
+  const id = useId()
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <label htmlFor={id} className="text-[13px] text-muted-foreground">
+        {label}
+      </label>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} />
+    </div>
+  )
+}
+
 function VolumeField({
   volume,
   onCommit,
@@ -600,21 +642,23 @@ function VolumeField({
   const messages = useArtifactMessages().videoEditor
   const [level, setLevel] = useState(volume)
   useEffect(() => setLevel(volume), [volume])
+  // As loud as a clip may be made, or as it already is: a level it did not choose, never clamped.
+  const loudest = Math.max(MAX_VOLUME * 100, Math.ceil(volume * 100))
 
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-[13px] text-muted-foreground">{messages.volume}</span>
-      <div className="flex w-40 items-center gap-2">
+      <div className="flex w-44 items-center gap-2">
         <Slider
           aria-label={messages.volume}
           value={[Math.round(level * 100)]}
           min={0}
-          max={100}
+          max={loudest}
           step={1}
           onValueChange={([value]) => setLevel((value ?? 0) / 100)}
           onValueCommit={([value]) => onCommit((value ?? 0) / 100)}
         />
-        <span className="w-9 text-right text-[13px] tabular-nums">{Math.round(level * 100)}%</span>
+        <span className="w-11 text-right text-[13px] tabular-nums">{Math.round(level * 100)}%</span>
       </div>
     </div>
   )

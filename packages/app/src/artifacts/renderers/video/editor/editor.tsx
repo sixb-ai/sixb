@@ -257,8 +257,10 @@ export default function VideoEditor({
     [video, refuse, messages.chapterTooLarge]
   )
 
-  const { uploads, importFiles } = useMediaImport(video, (detail) =>
-    setNotice({ title: detail, tone: "warning" })
+  const { uploads, importFiles } = useMediaImport(
+    video,
+    (detail) => setNotice({ title: detail, tone: "warning" }),
+    () => setNotice({ title: messages.addedMuted, tone: "info" })
   )
 
   /**

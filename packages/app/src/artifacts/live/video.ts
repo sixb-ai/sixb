@@ -118,6 +118,15 @@ export class LiveVideo {
     return null
   }
 
+  /** The path of a file of the video holding the bytes `digest` names, when one does. */
+  fileWithDigest(digest: string): string | undefined {
+    for (const [path, value] of this.doc.getMap<unknown>(LIVE_FILES)) {
+      if (value instanceof Y.AbstractType || typeof value !== "object" || value === null) continue
+      if ((value as { readonly digest?: unknown }).digest === digest) return path
+    }
+    return undefined
+  }
+
   /** Adds a file the reader uploaded, for good: undoing the clip that plays it leaves it. */
   addFile(path: string, ref: FileRef): void {
     this.doc.transact(() => {

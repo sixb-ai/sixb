@@ -123,6 +123,19 @@ export interface UploadFileOptions {
   readonly stagedUploadThresholdBytes?: number
   readonly signal?: AbortSignal
   readonly onProgress?: (progress: FileUploadProgress) => void
+  /** The file's digest, from {@link fileDigest}: a staged upload then reads it no more. */
+  readonly digest?: FileRef["digest"]
+}
+
+/**
+ * A file's digest, as its upload names it: what tells a file already stored from a new one before
+ * sending it. Read in slices, as a staged upload reads it, `onBytes` after each.
+ */
+export async function fileDigest(
+  file: File | Blob,
+  onBytes?: (hashedBytes: number) => void
+): Promise<FileRef["digest"]> {
+  return hashFile(file, onBytes ?? (() => {}))
 }
 
 export interface UploadFileInput extends UploadFileOptions {
@@ -157,7 +170,8 @@ async function uploadFileSimple(file: File | Blob, options: UploadFileOptions): 
 async function uploadFileStaged(file: File | Blob, options: UploadFileOptions): Promise<FileRef> {
   const progress = (stage: FileUploadProgress["stage"], loadedBytes: number) =>
     options.onProgress?.({ stage, loadedBytes, totalBytes: file.size })
-  const digest = await hashFile(file, (hashedBytes) => progress("hash", hashedBytes))
+  const digest =
+    options.digest ?? (await hashFile(file, (hashedBytes) => progress("hash", hashedBytes)))
   const uploadBody = {
     ...(resolveUploadFileName(file, options.fileName) === undefined
       ? {}

@@ -1,9 +1,10 @@
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test"
-import { client, type GetArtifactMediaResponse } from "@sixb/client"
+import { client, fileDigest, type GetArtifactMediaResponse } from "@sixb/client"
 import {
   type LiveFiles,
   readVideoComposition,
   readVideoFileTimeline,
+  removeClip,
   setSceneLength,
   splitClip,
   type VideoCut,
@@ -11,7 +12,7 @@ import {
 import { TooltipProvider } from "@sixb/ui/components"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, renderHook, waitFor } from "@testing-library/react"
 import { type ReactNode, useLayoutEffect } from "react"
 import * as Y from "yjs"
 import { createArtifactDocument } from "../../core/src/artifacts/live/document"
@@ -19,7 +20,7 @@ import { frameLinkKey } from "../src/artifacts/frame"
 import { LiveArtifact } from "../src/artifacts/live/session"
 import { LiveVideo } from "../src/artifacts/live/video"
 import VideoEditor from "../src/artifacts/renderers/video/editor/editor"
-import { importKind } from "../src/artifacts/renderers/video/editor/import"
+import { importKind, useMediaImport } from "../src/artifacts/renderers/video/editor/import"
 import {
   formatSeconds,
   Inspector,
@@ -439,6 +440,54 @@ describe("the live video", () => {
     const doc = createArtifactDocument("video", FILES)
     return { doc, video: new LiveVideo(doc) }
   }
+
+  // Guard proof: write no `remove` in LiveVideo.apply (live/video.ts) for a file the edit takes;
+  // the interview's recording, its last clip deleted, then stays in the version.
+  test("a file whose last clip an edit deletes leaves with it, and an undo brings it back", () => {
+    const { video } = live()
+    expect(video.apply((sources) => removeClip(sources, "scenes/talk.html", "clip"))).toBeNull()
+    expect(video.getState().sources.has("media/talk.mp4")).toBe(false)
+    video.undo()
+    expect(video.getState().sources.has("media/talk.mp4")).toBe(true)
+    expect(video.getState().timelines.get("scenes/talk.html")?.clips[0]?.ref).toBe("clip")
+  })
+
+  // Guard proof: upload every file in importFiles (import.ts), without `fileWithDigest`; the
+  // picture the video already holds is then sent again, to be stored as a copy.
+  test("a file the video holds already is added again from it, neither sent nor copied", async () => {
+    const picture = new File(["the logo's bytes"], "Logo.png", { type: "image/png" })
+    const digest = await fileDigest(picture)
+    const files = new Map(FILES)
+    files.set("media/logo.png", {
+      file: { blobId: "logo", digest, sizeBytes: picture.size, mediaType: "image/png" } as never,
+    })
+    const video = new LiveVideo(createArtifactDocument("video", files))
+    const sent: string[] = []
+    client.setConfig({
+      baseUrl: "https://api.sixb.test",
+      fetch: Object.assign(
+        async (input: RequestInfo | URL) => {
+          sent.push(String(input))
+          return Response.json({}, { status: 500 })
+        },
+        { preconnect: fetch.preconnect }
+      ),
+    })
+    const errors: string[] = []
+    const { result } = renderHook(() => useMediaImport(video, (error) => errors.push(error)), {
+      wrapper: ({ children }) => wrap(children),
+    })
+    await act(() =>
+      result.current.importFiles([picture], { file: "scenes/title.html", sceneStartMs: 0, atMs: 0 })
+    )
+
+    expect([sent, errors]).toEqual([[], []])
+    const media = [...video.getState().sources.keys()].filter((path) => path.startsWith("media/"))
+    expect(media.sort()).toEqual(["media/logo.png", "media/score.m4a", "media/talk.mp4"])
+    expect(video.getState().timelines.get("scenes/title.html")?.clips[0]?.src).toBe(
+      "media/logo.png"
+    )
+  })
 
   test("reads the composition and each file's clips from the document", () => {
     const { video } = live()
@@ -889,6 +938,82 @@ describe("the editor's pieces", () => {
     cleanup()
     expect(styled.track).toBe("text")
     expect(inspect(styled).queryByRole("textbox", { name: "Text" })).toBeNull()
+  })
+})
+
+describe("a clip's sound in the Inspector", () => {
+  const inspect = (
+    element: string,
+    sounds: { readonly volume?: number; readonly fadeInMs?: number; readonly muted?: boolean }[]
+  ) => {
+    const composition = new LiveVideo(createArtifactDocument("video", FILES)).getState().composition
+    const timeline = readVideoFileTimeline(
+      "scenes/talk.html",
+      `<template><div data-composition-id="talk">${element}</div></template>`
+    )
+    const clip = timeline?.clips[0]
+    if (!composition || !timeline || !clip) throw new Error("No clip.")
+    const noop = () => {}
+    return render(
+      wrap(
+        <Inspector
+          composition={composition}
+          timelines={new Map([["scenes/talk.html", timeline]])}
+          scene={undefined}
+          clip={{ file: "scenes/talk.html", clip }}
+          splittable={false}
+          target={{ artifactId: "art_video", version: 2, files: [] }}
+          actions={{
+            renameScene: noop,
+            sceneLength: noop,
+            duplicateScene: noop,
+            removeScene: noop,
+            clipTiming: noop,
+            clipStart: noop,
+            clipLength: noop,
+            clipSound: (_file, _clip, sound) => sounds.push(sound),
+            text: noop,
+            clipText: noop,
+            removeClip: noop,
+            splitClip: noop,
+            splitClips: noop,
+            removeClips: noop,
+          }}
+        />
+      )
+    )
+  }
+
+  // Guard proof: give the volume slider a `max` of 100 in VolumeField (inspector.tsx), as it had;
+  // a level of 240 % then shows past its end, and a step down saves 100 %.
+  test("a level above as recorded shows on its slider, and a step moves it by one", () => {
+    const sounds: { volume?: number }[] = []
+    const view = inspect(
+      '<audio id="voice" src="media/voice.m4a" data-start="0" data-duration="3" data-volume="2.4"></audio>',
+      sounds
+    )
+    const slider = view.getByRole("slider", { name: "Volume" })
+    expect(slider.getAttribute("aria-valuenow")).toBe("240")
+    expect(slider.getAttribute("aria-valuemax")).toBe("400")
+    expect(view.getByText("240%")).toBeDefined()
+
+    fireEvent.keyDown(slider, { key: "ArrowLeft" })
+    expect(sounds).toEqual([{ volume: 2.39 }])
+  })
+
+  // Guard proof: show the Sound section for footage that is heard alone, `!clip.silent`, as the
+  // Inspector did; muted footage then has no way to be heard again.
+  test("muted footage has its sound section, to turn its sound on", () => {
+    const sounds: { muted?: boolean }[] = []
+    const view = inspect(
+      '<video id="broll" src="media/broll.mp4" data-start="0" data-duration="3" muted></video>',
+      sounds
+    )
+    const heard = view.getByRole("switch", { name: "Play its sound" })
+    expect(heard.getAttribute("aria-checked")).toBe("false")
+    expect(view.queryByRole("slider", { name: "Volume" })).toBeNull()
+    fireEvent.click(heard)
+    expect(sounds).toEqual([{ muted: false }])
   })
 })
 

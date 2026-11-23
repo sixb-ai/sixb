@@ -1,4 +1,4 @@
-import { uploadFile } from "@sixb/client"
+import { fileDigest, uploadFile } from "@sixb/client"
 import { artifactSizeLimits } from "@sixb/core/artifacts"
 import { insertClip, type VideoImportKind, type VideoTrack } from "@sixb/core/artifacts/live"
 import { useLocale } from "@sixb/ui/lib/i18n"
@@ -40,7 +40,9 @@ export interface ImportTarget {
 
 export function useMediaImport(
   video: LiveVideo,
-  onError: (message: string) => void
+  onError: (message: string) => void,
+  /** Footage was added muted, under a clip already heard there. */
+  onMuted: () => void = () => {}
 ): {
   readonly uploads: readonly Upload[]
   readonly importFiles: (files: readonly File[], target: ImportTarget) => Promise<void>
@@ -85,26 +87,43 @@ export function useMediaImport(
         setUploads((current) => [...current, shown])
 
         try {
-          const path = mediaPath(video, file.name)
-          const ref = await uploadFile(file, {
-            fileName: path.split("/").at(-1) ?? path,
-            onProgress: ({ loadedBytes, totalBytes, stage }) => {
-              // Hashing a staged file comes first: it is the first tenth.
-              const share = totalBytes > 0 ? loadedBytes / totalBytes : 0
-              const progress = stage === "hash" ? share * 0.1 : 0.1 + share * 0.9
-              setUploads((current) =>
-                current.map((each) => (each.id === id ? { ...each, progress } : each))
-              )
-            },
-          })
-
-          video.addFile(path, ref)
-          const startMs = atMs
-          const refused = video.apply((sources) =>
-            insertClip(sources, target.file, { kind, src: path, startMs, durationMs })
+          const progressed = (progress: number) =>
+            setUploads((current) =>
+              current.map((each) => (each.id === id ? { ...each, progress } : each))
+            )
+          // Its bytes read first, the first tenth: a file the video holds already is used again,
+          // never sent nor copied twice.
+          const digest = await fileDigest(file, (hashed) =>
+            progressed(file.size > 0 ? (hashed / file.size) * 0.1 : 0.1)
           )
+          let path = video.fileWithDigest(digest)
+          if (path === undefined) {
+            path = mediaPath(video, file.name)
+            const ref = await uploadFile(file, {
+              fileName: path.split("/").at(-1) ?? path,
+              digest,
+              onProgress: ({ loadedBytes, totalBytes, stage }) => {
+                if (stage === "upload") {
+                  progressed(0.1 + (totalBytes > 0 ? loadedBytes / totalBytes : 0) * 0.9)
+                }
+              },
+            })
+            video.addFile(path, ref)
+          }
+
+          const src = path
+          const startMs = atMs
+          let muted = false
+          const refused = video.apply((sources) => {
+            const result = insertClip(sources, target.file, { kind, src, startMs, durationMs })
+            muted = "muted" in result && result.muted === true
+            return result
+          })
           if (refused) onError(refused)
-          else atMs += durationMs
+          else {
+            atMs += durationMs
+            if (muted) onMuted()
+          }
         } catch {
           onError(messages.videoEditor.uploadFailed(file.name))
         } finally {
@@ -112,7 +131,7 @@ export function useMediaImport(
         }
       }
     },
-    [video, onError, messages, locale]
+    [video, onError, onMuted, messages, locale]
   )
 
   return { uploads, importFiles }
