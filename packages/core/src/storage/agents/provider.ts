@@ -56,6 +56,7 @@ import type {
   TakeAgentInboxSteersInput,
   TransitionAgentThreadSandboxInput,
   UpdateAgentInboxItemInput,
+  WriteAgentTurnVectorsInput,
 } from "./types"
 import {
   AGENT_APPROVAL_MODES,
@@ -311,6 +312,101 @@ export function assertDeleteAgentMessagesFromSeqInput(
       "invalid_input",
       `[${prefix}] Agent message 'fromSeq' must be a positive safe integer.`
     )
+  }
+}
+
+/** How long a storage that could not search vectors is believed before it is asked again. */
+export const TURN_VECTOR_SEARCH_PROBE_RETRY_MS = 5 * 60_000
+
+/**
+ * `searchAvailable` for a provider: a yes holds for the process; a no is asked again after a few
+ * minutes, so installing the extension needs no restart. A probe that failed answers no for that
+ * call alone and is asked again on the next: a passing error must not stand for a whole retry
+ * window, which would take the search out of the Agent's prompt meanwhile.
+ */
+export function cachedTurnVectorSearchProbe(
+  probe: () => Promise<boolean>,
+  prefix = "Sixb"
+): () => Promise<boolean> {
+  let answer: { readonly available: boolean; readonly at: number } | undefined
+  let probing: Promise<boolean> | undefined
+
+  return () => {
+    if (answer?.available) return Promise.resolve(true)
+    if (answer && Date.now() - answer.at < TURN_VECTOR_SEARCH_PROBE_RETRY_MS) {
+      return Promise.resolve(false)
+    }
+
+    probing ??= probe()
+      .then(
+        (available) => {
+          answer = { available, at: Date.now() }
+          return available
+        },
+        (error: unknown) => {
+          console.warn(
+            `[${prefix}] Could not check whether storage can search vectors; checking again next time.`,
+            error
+          )
+          return false
+        }
+      )
+      .finally(() => {
+        probing = undefined
+      })
+    return probing
+  }
+}
+
+/**
+ * A write of turn vectors replaces what opens at or after `fromSeq`: each turn it holds opens there
+ * or later, names its opening message once per chunk, and carries a vector a search can score.
+ */
+export function assertWriteAgentTurnVectorsInput(
+  input: WriteAgentTurnVectorsInput,
+  prefix = "Sixb"
+): void {
+  const invalid = (message: string) =>
+    new AgentStorageError("invalid_input", `[${prefix}] Agent turn vectors ${message}`)
+
+  if (!input.configuration.trim()) throw invalid("need a configuration.")
+  if (!Number.isSafeInteger(input.revision) || input.revision < 0) {
+    throw invalid("need the non-negative revision they were read at.")
+  }
+  if (!Number.isSafeInteger(input.fromSeq) || input.fromSeq < 1) {
+    throw invalid("replace from a positive 'fromSeq'.")
+  }
+
+  const keys = new Set<string>()
+  for (const turn of input.turns) {
+    const turnKey = `${turn.messageId}\u0000${turn.chunk}`
+    if (keys.has(turnKey)) {
+      throw invalid(`name chunk ${turn.chunk} of message '${turn.messageId}' twice.`)
+    }
+    keys.add(turnKey)
+
+    if (!Number.isSafeInteger(turn.chunk) || turn.chunk < 0) {
+      throw invalid("number their chunks from 0.")
+    }
+    if (
+      !Number.isSafeInteger(turn.firstSeq) ||
+      !Number.isSafeInteger(turn.lastSeq) ||
+      turn.firstSeq < input.fromSeq ||
+      turn.lastSeq < turn.firstSeq
+    ) {
+      throw invalid(`of message '${turn.messageId}' must open at or after 'fromSeq'.`)
+    }
+    if (!turn.text.trim()) throw invalid("need the text they embed.")
+
+    const embedding = turn.embedding
+    if (
+      embedding.length < 1 ||
+      embedding.length > 16000 ||
+      embedding.some((value) => !Number.isFinite(value)) ||
+      embedding.every((value) => value === 0)
+    ) {
+      throw invalid("need between 1 and 16000 finite values, not all zero.")
+    }
   }
 }
 

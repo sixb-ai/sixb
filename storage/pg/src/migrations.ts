@@ -486,6 +486,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("113-video-generation", videoGenerationSql),
     pgSql("114-artifact-video-export-asks", artifactVideoExportAsksSql),
     pgSql("115-agent-message-artifact-context", agentMessageArtifactContextSql),
+    pgSql("116-agent-turn-vectors", agentTurnVectorsSql),
   ],
 })
 
@@ -607,3 +608,4 @@ import artifactVideoExportAsksSql from "./migrations/114-artifact-video-export-a
 import agentMessageArtifactContextSql from "./migrations/115-agent-message-artifact-context.sql" with {
   type: "text",
 }
+import agentTurnVectorsSql from "./migrations/116-agent-turn-vectors.sql" with { type: "text" }

@@ -257,11 +257,24 @@ export interface AgentModelCallCheckRequestedQueueJob
     }
   > {}
 
+/**
+ * A conversation's turns need their embeddings: the agent worker indexes what changed since its
+ * index was last written. One job per thread, revision and configuration, so repeats coalesce.
+ */
+export interface AgentThreadIndexRequestedQueueJob
+  extends QueueJob<
+    "agent.thread.index.requested",
+    {
+      readonly threadId: string
+    }
+  > {}
+
 export type AgentQueueJob =
   | AgentRunRequestedQueueJob
   | AgentWorkflowNodeRequestedQueueJob
   | AgentAiUsageRecordRequestedQueueJob
   | AgentModelCallCheckRequestedQueueJob
+  | AgentThreadIndexRequestedQueueJob
 
 /** Internal lane hosted by ProjectionWorker. */
 export type VectorIndexingQueueJob = QueueJob<

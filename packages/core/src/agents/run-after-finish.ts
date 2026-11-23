@@ -22,17 +22,30 @@ import { startQueuedAgentTurn } from "./queued-turn"
 import { resolveAgentRunExecutionScope } from "./run-scope"
 import type { AgentRunSessionHost } from "./run-session"
 import { turnAnsweredEveryMessage } from "./turn-answered"
+import { getAgentTurnIndexing } from "./turn-vectors/indexing"
 
 // What follows a turn's end, wherever its runner was: the worker's session does it, and so does
 // the API's for a runner that reaches it over HTTP. Best effort: a failure is logged, and a repair
 // pass catches up.
 
-/** A turn ended: its children still at work stop, and one paused on decided calls goes on. */
+/**
+ * A turn ended: its children still at work stop, what it said is indexed for search, and one paused
+ * on decided calls goes on.
+ */
 export async function afterAgentRunFinished(
   host: AgentRunSessionHost,
   run: AgentRunRecord
 ): Promise<void> {
   if (run.kind !== "conversation") return
+  try {
+    await continueAfterTurn(host, run)
+  } finally {
+    // Last, so a turn that starts next does not wait on it. It never throws.
+    await requestTurnIndexing(host, run)
+  }
+}
+
+async function continueAfterTurn(host: AgentRunSessionHost, run: AgentRunRecord): Promise<void> {
   const ended =
     run.finishReason === "interrupted"
       ? "was interrupted"
@@ -296,6 +309,21 @@ async function resumeDecidedTurn(host: AgentRunSessionHost, run: AgentRunRecord)
     await resumeDecidedAgentTurn(bindDurableAgentExecution(host.sdk, scope), run.id)
   } catch (error) {
     console.error(`[Sixb] Could not resume Agent run '${run.id}'; retrying later.`, error)
+  }
+}
+
+/** What the turn added to its conversation is indexed in the background, when search exists. */
+async function requestTurnIndexing(host: AgentRunSessionHost, run: AgentRunRecord): Promise<void> {
+  const indexing = getAgentTurnIndexing(host.sdk)
+  if (!indexing || run.kind !== "conversation") return
+
+  try {
+    await indexing.request(run.threadId)
+  } catch (error) {
+    console.error(
+      `[Sixb] Could not ask to index Agent thread '${run.threadId}'; the repair pass will.`,
+      error
+    )
   }
 }
 

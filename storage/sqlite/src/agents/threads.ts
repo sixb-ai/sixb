@@ -292,6 +292,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           plan.messages.map((copy) => copy.id),
           input.artifactCopies
         )
+        this.copyTurnVectors(input, plan.messages)
 
         if (plan.checkpoint) {
           this.insertCopiedCheckpoint(plan.checkpoint)
@@ -300,6 +301,63 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
         return this.requireThread(input.projectId, input.id)
       })
       .immediate()
+  }
+
+  /**
+   * A fork takes the indexed turns of the messages it copies, opening on the copies. Its index is
+   * current when the source's was: no message arrived since, so a turn still running is a retry of
+   * one indexed before, which the fork leaves out whole, vectors with it. Otherwise it goes on from
+   * where the source's stood.
+   */
+  private copyTurnVectors(
+    input: ForkAgentThreadInput,
+    copies: readonly { readonly sourceId: string; readonly id: string }[]
+  ): void {
+    this.db
+      .query(`
+        INSERT INTO agent_turn_vectors (
+          project_id, thread_id, message_id, chunk, first_seq, last_seq, turn_at, text,
+          configuration, embedding, indexed_at
+        )
+        SELECT vector.project_id, ?1, json_extract(copy.value, '$[1]'), vector.chunk,
+          vector.first_seq, vector.last_seq, vector.turn_at, vector.text, vector.configuration,
+          vector.embedding, vector.indexed_at
+        FROM json_each(?2) AS copy
+        JOIN agent_turn_vectors AS vector
+          ON vector.project_id = ?3 AND vector.message_id = json_extract(copy.value, '$[0]')
+      `)
+      .run(
+        input.id,
+        JSON.stringify(copies.map((copy) => [copy.sourceId, copy.id])),
+        input.projectId
+      )
+
+    this.db
+      .query(`
+        INSERT INTO agent_thread_index_state (
+          project_id, thread_id, configuration, stale_from_seq, indexed_at
+        )
+        SELECT project_id, ?1, configuration, stale_from_seq, indexed_at
+        FROM agent_thread_index_state
+        WHERE project_id = ?2 AND thread_id = ?3
+      `)
+      .run(input.id, input.projectId, input.sourceThreadId)
+
+    this.db
+      .query(`
+        UPDATE agent_threads
+        SET indexed_revision = message_revision
+        WHERE project_id = ?1 AND id = ?2
+          AND EXISTS (
+            SELECT 1 FROM agent_threads AS source
+            JOIN agent_thread_index_state AS state
+              ON state.project_id = source.project_id AND state.thread_id = source.id
+            WHERE source.project_id = ?1 AND source.id = ?3
+              AND source.indexed_revision = source.message_revision
+              AND state.stale_from_seq IS NULL
+          )
+      `)
+      .run(input.projectId, input.id, input.sourceThreadId)
   }
 
   async getById(params: { projectId: string; id: string }): Promise<AgentThreadRecord | null> {

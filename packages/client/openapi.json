@@ -35442,6 +35442,20 @@
                                             },
                                             "required": ["type", "digest"],
                                             "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["agents.indexTurns"]
+                                              },
+                                              "threadId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "threadId"],
+                                            "additionalProperties": false
                                           }
                                         ]
                                       }
@@ -35625,6 +35639,20 @@
                                               }
                                             },
                                             "required": ["type", "digest"],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["agents.indexTurns"]
+                                              },
+                                              "threadId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "threadId"],
                                             "additionalProperties": false
                                           }
                                         ]
@@ -80504,6 +80532,20 @@
                                             },
                                             "required": ["type", "digest"],
                                             "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["agents.indexTurns"]
+                                              },
+                                              "threadId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "threadId"],
+                                            "additionalProperties": false
                                           }
                                         ]
                                       }
@@ -80687,6 +80729,20 @@
                                               }
                                             },
                                             "required": ["type", "digest"],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["agents.indexTurns"]
+                                              },
+                                              "threadId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "threadId"],
                                             "additionalProperties": false
                                           }
                                         ]
@@ -81717,6 +81773,20 @@
                                                 },
                                                 "required": ["type", "digest"],
                                                 "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["agents.indexTurns"]
+                                                  },
+                                                  "threadId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "threadId"],
+                                                "additionalProperties": false
                                               }
                                             ]
                                           }
@@ -82241,6 +82311,20 @@
                                                   }
                                                 },
                                                 "required": ["type", "digest"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["agents.indexTurns"]
+                                                  },
+                                                  "threadId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "threadId"],
                                                 "additionalProperties": false
                                               }
                                             ]
@@ -82767,6 +82851,20 @@
                                                 },
                                                 "required": ["type", "digest"],
                                                 "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["agents.indexTurns"]
+                                                  },
+                                                  "threadId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "threadId"],
+                                                "additionalProperties": false
                                               }
                                             ]
                                           }
@@ -83261,6 +83359,20 @@
                                                 },
                                                 "required": ["type", "digest"],
                                                 "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["agents.indexTurns"]
+                                                  },
+                                                  "threadId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "threadId"],
+                                                "additionalProperties": false
                                               }
                                             ]
                                           }
@@ -83642,6 +83754,20 @@
                                                   }
                                                 },
                                                 "required": ["type", "digest"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["agents.indexTurns"]
+                                                  },
+                                                  "threadId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "threadId"],
                                                 "additionalProperties": false
                                               }
                                             ]
@@ -84165,6 +84291,20 @@
                                                 },
                                                 "required": ["type", "digest"],
                                                 "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["agents.indexTurns"]
+                                                  },
+                                                  "threadId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "threadId"],
+                                                "additionalProperties": false
                                               }
                                             ]
                                           }
@@ -84686,6 +84826,20 @@
                                                   }
                                                 },
                                                 "required": ["type", "digest"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["agents.indexTurns"]
+                                                  },
+                                                  "threadId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "threadId"],
                                                 "additionalProperties": false
                                               }
                                             ]

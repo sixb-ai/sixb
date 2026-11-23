@@ -142,6 +142,7 @@ export {
   AgentToolPublicError,
   AgentToolResultValidationError,
 } from "./errors"
+export { answerOfSteps } from "./final-answer"
 export {
   agentContextCheckpointId,
   createAgentMessageId,
@@ -389,6 +390,11 @@ export {
   storeAgentToolFile,
 } from "./tool-files"
 export { isAgentToolResult } from "./tool-result"
+export {
+  type AgentTurnIndexing,
+  AgentTurnIndexingDeferred,
+  getAgentTurnIndexing,
+} from "./turn-vectors/indexing"
 export type {
   AgentDescriptor,
   AgentMemoryReference,

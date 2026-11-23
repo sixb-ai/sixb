@@ -232,6 +232,7 @@ const shippedMigrationIds = [
   "110-video-generation",
   "111-artifact-video-export-asks",
   "112-agent-message-artifact-context",
+  "113-agent-turn-vectors",
 ]
 
 afterEach(async () => {
@@ -917,6 +918,61 @@ describe("SQLite storage migrations", () => {
           )
           .all()
       ).toEqual([{ name: "idx_artifact_comments_created" }])
+    } finally {
+      db.close()
+    }
+  })
+
+  // Removal proof: drop ON DELETE CASCADE from either foreign key, and the rewound turn's vector
+  // or the deleted thread's index state outlives it.
+  test("leaves every existing conversation to index, its turns going with their messages", () => {
+    const db = replayedDatabase("113-agent-turn-vectors")
+    try {
+      const at = "2026-01-01T00:00:00.000Z"
+      db.run(
+        `INSERT INTO agent_threads (
+          project_id, id, owner_principal_type, owner_principal_id, status, created_at, updated_at
+        ) VALUES ('p', 'thr_1', 'user', 'usr_alice', 'active', ?, ?)`,
+        [at, at]
+      )
+      db.run(
+        `INSERT INTO agent_messages (
+          project_id, id, thread_id, role, seq, parts, content_version, created_at
+        ) VALUES ('p', 'msg_1', 'thr_1', 'user', 1, '[]', 1, ?)`,
+        [at]
+      )
+
+      migration("113-agent-turn-vectors").up(db)
+      db.run("PRAGMA foreign_keys = ON")
+
+      // Never indexed, so behind its revision: the repair pass asks for it.
+      expect(
+        db.query("SELECT message_revision, indexed_revision FROM agent_threads").all()
+      ).toEqual([{ message_revision: 0, indexed_revision: null }])
+
+      db.run(
+        `INSERT INTO agent_turn_vectors (
+          project_id, thread_id, message_id, chunk, first_seq, last_seq, turn_at, text,
+          configuration, embedding, indexed_at
+        ) VALUES ('p', 'thr_1', 'msg_1', 0, 1, 1, ?, 'Question', 'cfg', ?, ?)`,
+        [at, new Uint8Array(new Float32Array([0.5, 0.25]).buffer), at]
+      )
+      db.run(
+        `INSERT INTO agent_thread_index_state (
+          project_id, thread_id, configuration, indexed_at
+        ) VALUES ('p', 'thr_1', 'cfg', ?)`,
+        [at]
+      )
+
+      db.run("DELETE FROM agent_messages WHERE id = 'msg_1'")
+      expect(db.query("SELECT COUNT(*) AS count FROM agent_turn_vectors").get()).toEqual({
+        count: 0,
+      })
+
+      db.run("DELETE FROM agent_threads WHERE id = 'thr_1'")
+      expect(db.query("SELECT COUNT(*) AS count FROM agent_thread_index_state").get()).toEqual({
+        count: 0,
+      })
     } finally {
       db.close()
     }

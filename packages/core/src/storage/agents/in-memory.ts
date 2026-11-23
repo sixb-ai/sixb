@@ -46,6 +46,7 @@ import {
   assertTakeAgentInboxSteersInput,
   assertTurnInThreadPlace,
   assertUpdateAgentInboxItemInput,
+  assertWriteAgentTurnVectorsInput,
   compareAgentMemoryPaths,
   compareAgentThreadParticipants,
   countsAsThreadMessage,
@@ -92,6 +93,7 @@ import type {
   AgentRunRecord,
   AgentRunStore,
   AgentStorage,
+  AgentThreadIndexProgress,
   AgentThreadParticipantRecord,
   AgentThreadReadRecord,
   AgentThreadReadState,
@@ -99,8 +101,11 @@ import type {
   AgentThreadRecord,
   AgentThreadSandboxState,
   AgentThreadStore,
+  AgentThreadToIndex,
   AgentTokenRateRecord,
   AgentTokenRateStore,
+  AgentTurnVectorRecord,
+  AgentTurnVectorStore,
   AppendAgentMessageInput,
   AssignAgentThreadComputerInput,
   ConfirmAgentRunExecutionOwnershipInput,
@@ -112,6 +117,7 @@ import type {
   CreateSubagentRunInput,
   DecideAgentApprovalInput,
   DecideAgentApprovalResult,
+  DeferAgentThreadIndexingInput,
   DeleteAgentContextCheckpointsAfterSeqInput,
   DeleteAgentMessagesByRunInput,
   DeleteAgentMessagesFromSeqInput,
@@ -120,6 +126,7 @@ import type {
   FinishAgentRunInput,
   FinishQueuedAgentRunInput,
   ForkAgentThreadInput,
+  GetAgentThreadIndexProgressInput,
   ListAgentApprovalsInput,
   ListAgentApprovalsResult,
   ListAgentInboxItemsInput,
@@ -135,6 +142,8 @@ import type {
   ListAgentThreadReadsInput,
   ListAgentThreadsInput,
   ListAgentThreadsResult,
+  ListAgentThreadsToIndexInput,
+  ListAgentTurnVectorsInput,
   ListLatestAgentRunsInput,
   ListThreadSubagentsInput,
   ListWaitingAgentInboxThreadsInput,
@@ -161,6 +170,7 @@ import type {
   TakeNextQueuedAgentInboxInput,
   TransitionAgentThreadSandboxInput,
   UpdateAgentInboxItemInput,
+  WriteAgentTurnVectorsInput,
 } from "./types"
 import { AGENT_RUN_FAILURE_CODES, AGENT_TOKEN_RATE_SAMPLES } from "./types"
 
@@ -235,6 +245,31 @@ interface AgentStoreState {
   readonly tokenRates: Map<string, AgentTokenRateRecord>
   /** By `[projectId, id]`. */
   readonly inbox: Map<string, AgentInboxItemRecord>
+  /**
+   * By thread key: what `agent_threads.message_revision` holds, bumped by every message added or
+   * taken. A thread without an entry is at 0.
+   */
+  readonly messageRevisions: Map<string, number>
+  /** By `[projectId, messageId, chunk]`. */
+  readonly turnVectors: Map<string, AgentTurnVectorRecord>
+  /** By thread key. */
+  readonly threadIndexes: Map<string, StoredAgentThreadIndex>
+}
+
+/** A row of `agent_thread_index_state`: how far a conversation's turns are indexed. */
+interface StoredAgentThreadIndex {
+  readonly configuration: string
+  /**
+   * The revision indexed whole, `agent_threads.indexed_revision` in SQL; null while indexing is
+   * part way, or before it wrote.
+   */
+  readonly revision: number | null
+  /** The first message a deletion took since, whose turn indexing goes back to. */
+  readonly staleFromSeq: number | null
+  readonly deferredUntil: Date | null
+  readonly failures: number
+  /** Null until indexing first wrote. */
+  readonly indexedAt: Date | null
 }
 
 /** A memory repo as its two SQL tables hold it: revisions, and the file versions each wrote. */
@@ -257,6 +292,9 @@ export interface InMemoryAgentStorageSnapshot {
   readonly approvalModes: Map<string, AgentApprovalMode>
   readonly tokenRates: Map<string, AgentTokenRateRecord>
   readonly inbox: Map<string, AgentInboxItemRecord>
+  readonly messageRevisions: Map<string, number>
+  readonly turnVectors: Map<string, AgentTurnVectorRecord>
+  readonly threadIndexes: Map<string, StoredAgentThreadIndex>
 }
 
 // ── threads ───────────────────────────────────────────────────────────────────────────────────
@@ -393,6 +431,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
         throughSeq: Math.min(sourceRead.throughSeq, plan.headSeq),
       })
     }
+    copyTurnVectors(this.state, input, copyIds)
 
     return clone(plan.thread)
   }
@@ -863,6 +902,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
 
     this.state.threads.set(threadKey, clone(thread))
     this.state.messages.set(key(input.projectId, trigger.id), clone(trigger))
+    bumpMessageRevision(this.state, input.projectId, input.thread.id)
     this.state.runs.set(runKey, clone(run))
     return clone(run)
   }
@@ -1220,6 +1260,7 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
         updatedAt: createdAt,
       })
     )
+    bumpMessageRevision(this.state, input.projectId, input.threadId)
 
     return clone(message)
   }
@@ -1257,6 +1298,12 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
       this.state.messages.delete(messageKey)
     }
     clampReadsToHead(this.state, input.projectId, input.threadId)
+    forgetDeletedMessages(
+      this.state,
+      input.projectId,
+      input.threadId,
+      messages.map(([, message]) => message)
+    )
 
     const remainingMessages = [...this.state.messages.values()]
       .filter(
@@ -1301,6 +1348,12 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
       this.state.messages.delete(messageKey)
     }
     clampReadsToHead(this.state, input.projectId, input.threadId)
+    forgetDeletedMessages(
+      this.state,
+      input.projectId,
+      input.threadId,
+      toDelete.map(([, message]) => message)
+    )
 
     const remainingMessages = [...this.state.messages.values()]
       .filter(
@@ -1406,6 +1459,246 @@ function clampReadsToHead(state: AgentStoreState, projectId: string, threadId: s
   for (const [readKey, read] of state.reads) {
     if (read.projectId !== projectId || read.threadId !== threadId) continue
     if (read.throughSeq > headSeq) state.reads.set(readKey, { ...read, throughSeq: headSeq })
+  }
+}
+
+/** A message was added to the thread or taken from it: what was indexed before is behind. */
+function bumpMessageRevision(state: AgentStoreState, projectId: string, threadId: string): void {
+  const threadKey = key(projectId, threadId)
+  state.messageRevisions.set(threadKey, (state.messageRevisions.get(threadKey) ?? 0) + 1)
+}
+
+/**
+ * After a deletion, what the SQL providers' cascade and bookkeeping do: the vectors of the turns
+ * whose opening message went, go, and indexing goes back to the turn that held the first message
+ * taken, which may have lost its answer.
+ */
+function forgetDeletedMessages(
+  state: AgentStoreState,
+  projectId: string,
+  threadId: string,
+  deleted: readonly AgentMessageRecord[]
+): void {
+  bumpMessageRevision(state, projectId, threadId)
+
+  const deletedIds = new Set(deleted.map((message) => message.id))
+  for (const [vectorKey, vector] of state.turnVectors) {
+    if (vector.projectId === projectId && deletedIds.has(vector.messageId)) {
+      state.turnVectors.delete(vectorKey)
+    }
+  }
+
+  const threadKey = key(projectId, threadId)
+  const index = state.threadIndexes.get(threadKey)
+  if (!index) return
+  const firstDeleted = Math.min(...deleted.map((message) => message.seq))
+  state.threadIndexes.set(threadKey, {
+    ...index,
+    staleFromSeq: Math.min(index.staleFromSeq ?? firstDeleted, firstDeleted),
+  })
+}
+
+/**
+ * A fork takes the indexed turns of the messages it copies, opening on the copies. Its index is
+ * current when the source's was: no message arrived since, so a turn still running is a retry of
+ * one indexed before, which the fork leaves out whole, vectors with it. Otherwise it goes on from
+ * where the source's stood.
+ */
+function copyTurnVectors(
+  state: AgentStoreState,
+  input: ForkAgentThreadInput,
+  copyIds: ReadonlyMap<string, string>
+): void {
+  const sourceKey = key(input.projectId, input.sourceThreadId)
+  const index = state.threadIndexes.get(sourceKey)
+  if (!index) return
+
+  for (const vector of [...state.turnVectors.values()]) {
+    if (vector.projectId !== input.projectId || vector.threadId !== input.sourceThreadId) continue
+    const messageId = copyIds.get(vector.messageId)
+    if (messageId === undefined) continue
+
+    state.turnVectors.set(turnVectorKey(input.projectId, messageId, vector.chunk), {
+      ...clone(vector),
+      threadId: input.id,
+      messageId,
+    })
+  }
+
+  const current =
+    index.revision === (state.messageRevisions.get(sourceKey) ?? 0) && index.staleFromSeq === null
+  state.threadIndexes.set(key(input.projectId, input.id), {
+    ...index,
+    revision: current ? (state.messageRevisions.get(key(input.projectId, input.id)) ?? 0) : null,
+    deferredUntil: null,
+    failures: 0,
+  })
+}
+
+function turnVectorKey(projectId: string, messageId: string, chunk: number): string {
+  return JSON.stringify([projectId, messageId, chunk])
+}
+
+// ── turn vectors ──────────────────────────────────────────────────────────────────────────────
+
+class InMemoryAgentTurnVectorStore implements AgentTurnVectorStore {
+  constructor(private readonly state: AgentStoreState) {}
+
+  async searchAvailable(): Promise<boolean> {
+    return true
+  }
+
+  async defer(input: DeferAgentThreadIndexingInput): Promise<void> {
+    const threadKey = key(input.projectId, input.threadId)
+    if (!this.state.threads.has(threadKey)) {
+      throw new AgentStorageError(
+        "thread_not_found",
+        `[Sixb] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
+      )
+    }
+
+    const index = this.state.threadIndexes.get(threadKey) ?? {
+      configuration: input.configuration,
+      revision: null,
+      staleFromSeq: null,
+      deferredUntil: null,
+      failures: 0,
+      indexedAt: null,
+    }
+    this.state.threadIndexes.set(threadKey, {
+      ...index,
+      deferredUntil: new Date(input.until),
+      failures: index.failures + (input.failed ? 1 : 0),
+    })
+  }
+
+  async progress(
+    input: GetAgentThreadIndexProgressInput
+  ): Promise<AgentThreadIndexProgress | null> {
+    const threadKey = key(input.projectId, input.threadId)
+    if (!this.state.threads.has(threadKey)) return null
+
+    const revision = this.state.messageRevisions.get(threadKey) ?? 0
+    const index = this.state.threadIndexes.get(threadKey)
+    const opened = this.vectorsOf(input.projectId, input.threadId)
+      .filter((vector) => vector.configuration === input.configuration)
+      .map((vector) => vector.firstSeq)
+
+    const newest = Math.max(1, ...opened)
+    const stale = index?.staleFromSeq ?? null
+    const holdingStale =
+      stale === null ? newest : Math.max(1, ...opened.filter((seq) => seq <= stale))
+
+    return {
+      threadId: input.threadId,
+      revision,
+      current:
+        index?.configuration === input.configuration &&
+        index.revision === revision &&
+        index.staleFromSeq === null,
+      fromSeq: Math.min(newest, holdingStale),
+      failures: index?.failures ?? 0,
+      ...(index?.deferredUntil ? { deferredUntil: new Date(index.deferredUntil) } : {}),
+    }
+  }
+
+  async write(input: WriteAgentTurnVectorsInput): Promise<boolean> {
+    assertWriteAgentTurnVectorsInput(input)
+
+    const threadKey = key(input.projectId, input.threadId)
+    if (!this.state.threads.has(threadKey)) return false
+    if ((this.state.messageRevisions.get(threadKey) ?? 0) !== input.revision) return false
+
+    // What the SQL providers' foreign key refuses: a turn opening on a message the thread lacks.
+    for (const turn of input.turns) {
+      const message = this.state.messages.get(key(input.projectId, turn.messageId))
+      if (message?.threadId !== input.threadId) {
+        throw new AgentStorageError(
+          "invalid_input",
+          `[Sixb] Agent message '${turn.messageId}' is not in thread '${input.threadId}'.`
+        )
+      }
+    }
+
+    for (const [vectorKey, vector] of this.state.turnVectors) {
+      if (vector.projectId !== input.projectId || vector.threadId !== input.threadId) continue
+      if (vector.firstSeq >= input.fromSeq || vector.configuration !== input.configuration) {
+        this.state.turnVectors.delete(vectorKey)
+      }
+    }
+
+    const indexedAt = new Date(input.indexedAt ?? new Date())
+    for (const turn of input.turns) {
+      this.state.turnVectors.set(turnVectorKey(input.projectId, turn.messageId, turn.chunk), {
+        ...clone(turn),
+        projectId: input.projectId,
+        threadId: input.threadId,
+        configuration: input.configuration,
+        turnAt: new Date(turn.turnAt),
+        indexedAt,
+      })
+    }
+
+    // A deletion before `fromSeq` still waits for its turn; one at or after it is rewritten now.
+    const previous = this.state.threadIndexes.get(threadKey)
+    const stale =
+      previous?.configuration === input.configuration &&
+      previous.staleFromSeq !== null &&
+      previous.staleFromSeq < input.fromSeq
+        ? previous.staleFromSeq
+        : null
+    this.state.threadIndexes.set(threadKey, {
+      configuration: input.configuration,
+      revision: input.complete ? input.revision : null,
+      staleFromSeq: stale,
+      deferredUntil: null,
+      failures: 0,
+      indexedAt,
+    })
+
+    return true
+  }
+
+  async list(input: ListAgentTurnVectorsInput): Promise<readonly AgentTurnVectorRecord[]> {
+    return this.vectorsOf(input.projectId, input.threadId)
+      .filter((vector) => vector.firstSeq >= (input.fromSeq ?? 1))
+      .sort((left, right) => left.firstSeq - right.firstSeq || left.chunk - right.chunk)
+      .map(clone)
+  }
+
+  async listThreadsToIndex(
+    input: ListAgentThreadsToIndexInput
+  ): Promise<readonly AgentThreadToIndex[]> {
+    const activity = (thread: AgentThreadRecord) =>
+      (thread.lastMessageAt ?? thread.createdAt).getTime()
+    const now = (input.now ?? new Date()).getTime()
+
+    return [...this.state.threads.values()]
+      .filter((thread) => thread.projectId === input.projectId)
+      .filter((thread) => thread.kind === "conversation" && thread.activeRunId === null)
+      .filter((thread) => {
+        const threadKey = key(thread.projectId, thread.id)
+        const index = this.state.threadIndexes.get(threadKey)
+        if (index?.deferredUntil && index.deferredUntil.getTime() > now) return false
+
+        // A deletion moves the revision too, so a stale index is behind by it.
+        return (
+          index?.configuration !== input.configuration ||
+          index.revision !== (this.state.messageRevisions.get(threadKey) ?? 0)
+        )
+      })
+      .sort((left, right) => activity(right) - activity(left) || left.id.localeCompare(right.id))
+      .slice(0, input.limit)
+      .map((thread) => ({
+        threadId: thread.id,
+        revision: this.state.messageRevisions.get(key(thread.projectId, thread.id)) ?? 0,
+      }))
+  }
+
+  private vectorsOf(projectId: string, threadId: string): AgentTurnVectorRecord[] {
+    return [...this.state.turnVectors.values()].filter(
+      (vector) => vector.projectId === projectId && vector.threadId === threadId
+    )
   }
 }
 
@@ -2316,6 +2609,9 @@ export class InMemoryAgentStorage implements AgentStorage {
     approvalModes: new Map(),
     tokenRates: new Map(),
     inbox: new Map(),
+    messageRevisions: new Map(),
+    turnVectors: new Map(),
+    threadIndexes: new Map(),
   }
 
   readonly threads: InMemoryAgentThreadStore
@@ -2328,6 +2624,7 @@ export class InMemoryAgentStorage implements AgentStorage {
   readonly approvalModes: InMemoryAgentApprovalModeStore
   readonly tokenRates: InMemoryAgentTokenRateStore
   readonly inbox: InMemoryAgentInboxStore
+  readonly turnVectors: InMemoryAgentTurnVectorStore
   readonly computers = new InMemoryAgentComputerSessionStore()
 
   constructor(executions: ExecutionStorage) {
@@ -2341,6 +2638,7 @@ export class InMemoryAgentStorage implements AgentStorage {
     this.approvalModes = new InMemoryAgentApprovalModeStore(this.state)
     this.tokenRates = new InMemoryAgentTokenRateStore(this.state)
     this.inbox = new InMemoryAgentInboxStore(this.state)
+    this.turnVectors = new InMemoryAgentTurnVectorStore(this.state)
   }
 
   snapshot(): InMemoryAgentStorageSnapshot {
@@ -2356,6 +2654,9 @@ export class InMemoryAgentStorage implements AgentStorage {
       approvalModes: structuredClone(this.state.approvalModes),
       tokenRates: structuredClone(this.state.tokenRates),
       inbox: structuredClone(this.state.inbox),
+      messageRevisions: structuredClone(this.state.messageRevisions),
+      turnVectors: structuredClone(this.state.turnVectors),
+      threadIndexes: structuredClone(this.state.threadIndexes),
     }
   }
 
@@ -2371,6 +2672,9 @@ export class InMemoryAgentStorage implements AgentStorage {
     replace(this.state.approvalModes, snapshot.approvalModes)
     replace(this.state.tokenRates, snapshot.tokenRates)
     replace(this.state.inbox, snapshot.inbox)
+    replace(this.state.messageRevisions, snapshot.messageRevisions)
+    replace(this.state.turnVectors, snapshot.turnVectors)
+    replace(this.state.threadIndexes, snapshot.threadIndexes)
   }
 }
 

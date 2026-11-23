@@ -15,6 +15,7 @@ import { SqliteAgentRunStore } from "./runs"
 import { SqliteAgentApprovalModeStore } from "./settings"
 import { SqliteAgentThreadStore } from "./threads"
 import { SqliteAgentTokenRateStore } from "./token-rates"
+import { SqliteAgentTurnVectorStore } from "./turn-vectors"
 
 export interface SqliteAgentStorageOptions {
   /** Path to SQLite database file. Defaults to ':memory:' for in-memory database. */
@@ -43,6 +44,7 @@ export class SqliteAgentStorage implements AgentStorage {
   readonly computers: SqliteAgentComputerSessionStore
   readonly tokenRates: SqliteAgentTokenRateStore
   readonly inbox: SqliteAgentInboxStore
+  readonly turnVectors: SqliteAgentTurnVectorStore
 
   private readonly connection: SqliteStoreConnection
 
@@ -60,6 +62,7 @@ export class SqliteAgentStorage implements AgentStorage {
     this.computers = new SqliteAgentComputerSessionStore(this.connection.db)
     this.tokenRates = new SqliteAgentTokenRateStore(this.connection.db)
     this.inbox = new SqliteAgentInboxStore(this.connection.db)
+    this.turnVectors = new SqliteAgentTurnVectorStore(this.connection.db)
   }
 
   close(): void {

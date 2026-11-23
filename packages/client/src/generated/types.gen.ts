@@ -12012,6 +12012,10 @@ export type GetObjectLineageResponses = {
                         type: "artifacts.transcribeMedia"
                         digest: string
                       }
+                    | {
+                        type: "agents.indexTurns"
+                        threadId: string
+                      }
                 }
               | {
                   type: "script"
@@ -12074,6 +12078,10 @@ export type GetObjectLineageResponses = {
                     | {
                         type: "artifacts.transcribeMedia"
                         digest: string
+                      }
+                    | {
+                        type: "agents.indexTurns"
+                        threadId: string
                       }
                 }
               | {
@@ -28257,6 +28265,10 @@ export type GetObjectLinkLineageResponses = {
                         type: "artifacts.transcribeMedia"
                         digest: string
                       }
+                    | {
+                        type: "agents.indexTurns"
+                        threadId: string
+                      }
                 }
               | {
                   type: "script"
@@ -28319,6 +28331,10 @@ export type GetObjectLinkLineageResponses = {
                     | {
                         type: "artifacts.transcribeMedia"
                         digest: string
+                      }
+                    | {
+                        type: "agents.indexTurns"
+                        threadId: string
                       }
                 }
               | {
@@ -28667,6 +28683,10 @@ export type ListEventsResponses = {
                       type: "artifacts.transcribeMedia"
                       digest: string
                     }
+                  | {
+                      type: "agents.indexTurns"
+                      threadId: string
+                    }
               }
             | {
                 type: "script"
@@ -28842,6 +28862,10 @@ export type ListEventsResponses = {
                   | {
                       type: "artifacts.transcribeMedia"
                       digest: string
+                    }
+                  | {
+                      type: "agents.indexTurns"
+                      threadId: string
                     }
               }
             | {
@@ -29019,6 +29043,10 @@ export type ListEventsResponses = {
                       type: "artifacts.transcribeMedia"
                       digest: string
                     }
+                  | {
+                      type: "agents.indexTurns"
+                      threadId: string
+                    }
               }
             | {
                 type: "script"
@@ -29184,6 +29212,10 @@ export type ListEventsResponses = {
                       type: "artifacts.transcribeMedia"
                       digest: string
                     }
+                  | {
+                      type: "agents.indexTurns"
+                      threadId: string
+                    }
               }
             | {
                 type: "script"
@@ -29297,6 +29329,10 @@ export type ListEventsResponses = {
                   | {
                       type: "artifacts.transcribeMedia"
                       digest: string
+                    }
+                  | {
+                      type: "agents.indexTurns"
+                      threadId: string
                     }
               }
             | {
@@ -29472,6 +29508,10 @@ export type ListEventsResponses = {
                       type: "artifacts.transcribeMedia"
                       digest: string
                     }
+                  | {
+                      type: "agents.indexTurns"
+                      threadId: string
+                    }
               }
             | {
                 type: "script"
@@ -29645,6 +29685,10 @@ export type ListEventsResponses = {
                   | {
                       type: "artifacts.transcribeMedia"
                       digest: string
+                    }
+                  | {
+                      type: "agents.indexTurns"
+                      threadId: string
                     }
               }
             | {

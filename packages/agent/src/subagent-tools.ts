@@ -17,6 +17,7 @@ import {
   type AgentRunDelegation,
   type AgentRunDelegationModel,
   type AgentRunSession,
+  answerOfSteps,
   createAgentMessageId,
   createSubagentRunId,
   createSubagentThreadId,
@@ -1639,24 +1640,6 @@ function answerBeforeLateMessage(
           "It wrote this answer before your last message came, and did not answer again after reading it.",
       }
     : { earlierAnswer: earlier }
-}
-
-/** The text written after the last local tool call of these steps, as a child's answer is. */
-function answerOfSteps(parts: readonly AgentMessagePart[]): string {
-  const steps: AgentMessagePart[][] = []
-  for (const part of parts) {
-    if (part.type === "step-start" || steps.length === 0) steps.push([])
-    if (part.type !== "step-start") steps.at(-1)?.push(part)
-  }
-  const ranTools = steps.map((step) =>
-    step.some((part) => part.type === "tool-call" && part.providerExecuted !== true)
-  )
-  return steps
-    .slice(ranTools.lastIndexOf(true) + 1)
-    .flat()
-    .flatMap((part) => (part.type === "text" ? [part.text] : []))
-    .join("\n")
-    .trim()
 }
 
 function isTerminalSubagent(

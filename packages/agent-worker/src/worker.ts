@@ -9,12 +9,15 @@ import {
 import {
   AgentFinalizationError,
   type AgentRunSessionHost,
+  type AgentTurnIndexing,
+  AgentTurnIndexingDeferred,
   afterAgentRunFinished,
   claimAgentRun,
   createBrokerStreamSink,
   dispatchQueuedAgentRuns,
   endInterruptedAgentRun,
   endLapsedAgentRuns,
+  getAgentTurnIndexing,
   isolateStreamSink,
   repairAgentInboxes,
   sandboxCredentialIssue,
@@ -73,6 +76,8 @@ const AGENT_DISPATCH_REPAIR_MS = 30_000
 const FINALIZE_RETRY_BACKOFF_MS = 5_000
 const AI_USAGE_RECOVERY_INITIAL_BACKOFF_MS = 5_000
 const AI_USAGE_RECOVERY_MAX_BACKOFF_MS = 5 * 60_000
+/** Before indexing a conversation again after storage failed to record why it stopped. */
+const TURN_INDEXING_RETRY_MS = 60_000
 
 /** What a conversation turn resolves before its first model call. */
 /**
@@ -91,6 +96,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   /** Runs the children of this worker's turns, in this process. */
   private readonly children: ChildRunner | null
   private readonly leaseMs: number
+  /** Keeps each conversation's turn vectors current, when the host has search by meaning. */
+  private readonly turnIndexing: AgentTurnIndexing | undefined
   /**
    * Sandbox teardowns that outlived their run's dispose() (boot still in flight when the turn
    * ended). stop() drains these so a graceful shutdown does not leave machines mid-teardown.
@@ -110,6 +117,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
     this.host = host
     this.leaseMs = leaseMs
+    this.turnIndexing = getAgentTurnIndexing(host)
     const hasAgentWork =
       host.definitions.models?.language !== undefined ||
       host.definitions.workflows
@@ -193,6 +201,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         job.payload.callId,
         signal
       )
+      return
+    }
+    if (job.type === "agent.thread.index.requested") {
+      await this.turnIndexing?.index(job.payload.threadId, job.attempt, signal)
       return
     }
     const context = this.requireContext()
@@ -334,6 +346,24 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
             availableAt: backoff(aiUsageRecoveryBackoffMs(claimed.job.attempt)),
           }
     }
+    if (claimed.job.type === "agent.thread.index.requested") {
+      const threadId = claimed.job.payload.threadId
+      // The thread records how long it waits: an AI limit's reset, or a failure's backoff.
+      if (error instanceof AgentTurnIndexingDeferred) {
+        if (error.cause !== undefined) {
+          console.warn(
+            `[SixbAgentWorker] Could not index Agent thread '${threadId}'; retrying later.`,
+            error.cause
+          )
+        }
+        return { kind: "retry", availableAt: error.availableAt }
+      }
+      console.warn(
+        `[SixbAgentWorker] Could not index Agent thread '${threadId}'; retrying later.`,
+        error
+      )
+      return { kind: "retry", availableAt: backoff(TURN_INDEXING_RETRY_MS) }
+    }
     if (error instanceof RunOwnedElsewhereError) return retryOnceReleased(error)
     // The node's result is durable; only its workflow resume is unpublished. Redeliver until it is.
     if (error instanceof WorkflowResumeDispatchError) {
@@ -396,7 +426,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         availableAt: backoff(aiUsageRecoveryBackoffMs(claimed.job.attempt)),
       }
     }
-    if (claimed.job.type === "agent.workflow-node.requested") {
+    if (
+      claimed.job.type === "agent.workflow-node.requested" ||
+      claimed.job.type === "agent.thread.index.requested"
+    ) {
       return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
     }
     // A deferred duplicate stays deferred during shutdown: failing it would orphan a live run.
@@ -413,7 +446,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
    * Republish queued work and cancel orphaned subagents, at start and then every repair interval.
    * Each read covers only active rows, and the deterministic job ids make republication idempotent.
    * Held calls are repaired in the same pass: expired, run after a crash, and their turns resumed.
-   * So are thread inboxes: what a turn's end did not start, it starts.
+   * So are thread inboxes: what a turn's end did not start, it starts. And every conversation whose
+   * turn vectors are behind is asked for, which is how existing conversations get indexed.
    */
   private async runDispatchLoop(context: AgentWorkerContext, signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
@@ -448,6 +482,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         await repairAgentInboxes(this.sessionHost(context))
       } catch (error) {
         console.error("[SixbAgentWorker] Could not repair Agent thread inboxes; retrying.", error)
+      }
+      try {
+        await this.turnIndexing?.repair()
+      } catch (error) {
+        console.error("[SixbAgentWorker] Could not ask to index Agent threads; retrying.", error)
       }
       await waitForAbort(AGENT_DISPATCH_REPAIR_MS, signal)
     }
