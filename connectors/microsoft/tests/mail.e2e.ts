@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { microsoft } from "../src"
+import { isItemNotFound, microsoft } from "../src"
 
 // Explicit opt-in: writes only uniquely named test drafts/folders. Optional sending requires
 // MICROSOFT_MAIL_TEST_RECIPIENT, a consenting test address. Never use a production recipient.
@@ -73,6 +73,13 @@ describe.skipIf(!enabled)("Outlook live application access", () => {
         if (!found) await Bun.sleep(1000)
       }
       expect(found).toBeTruthy()
+      // A message deleted after its notification: the queued fetch must read it as gone.
+      const gone = await mail.messages.createDraft(mailbox, { subject: `${name} deleted` })
+      drafts.add(gone.id)
+      await mail.messages.delete(mailbox, gone.id)
+      drafts.delete(gone.id)
+      const missing = await mail.messages.get(mailbox, gone.id).catch((error: unknown) => error)
+      expect(isItemNotFound(missing)).toBe(true)
       const recipient = process.env.MICROSOFT_MAIL_TEST_RECIPIENT
       if (recipient) {
         const outgoing = await mail.messages.createDraft(mailbox, {

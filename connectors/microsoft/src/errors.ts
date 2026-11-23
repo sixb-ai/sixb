@@ -71,3 +71,14 @@ export function isMailboxNotEnabled(error: unknown): boolean {
     error.code === "MailboxNotEnabledForRESTAPI"
   )
 }
+
+/**
+ * Whether a mail, calendar or contacts read failed because the item is gone (Graph's
+ * `404 ErrorItemNotFound`). A mailbox that can't be reached is also a 404, with another code, so
+ * this never mistakes it for a deletion.
+ */
+export function isItemNotFound(error: unknown): boolean {
+  return (
+    error instanceof MicrosoftApiError && error.status === 404 && error.code === "ErrorItemNotFound"
+  )
+}
