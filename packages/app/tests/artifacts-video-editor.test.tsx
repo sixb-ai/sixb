@@ -1615,7 +1615,9 @@ describe("the editor", () => {
   function openEditor(
     talk = TALK,
     title = (text: string) => text,
-    extra: Readonly<Record<string, string>> = {}
+    extra: Readonly<Record<string, string>> = {},
+    /** The files the version holds, whose parts the editor asks for. */
+    held: ReturnType<typeof artifactVersion>["files"] = []
   ) {
     const live = new LiveArtifact("art_video", () => false, {
       list: () => [],
@@ -1646,6 +1648,7 @@ describe("the editor", () => {
       title: "Interview",
       entry: "index.html",
       outline,
+      files: held,
     })
     const queries = new QueryClient({
       defaultOptions: { queries: { enabled: false, retry: false } },
@@ -1674,6 +1677,72 @@ describe("the editor", () => {
     expect(view.queryByRole("button", { name: "All scenes" })).toBeNull()
     expect(view.getByText("Chapters")).toBeDefined()
     live.destroy()
+  })
+
+  // Guard proof: give selectedRecording the open chapter's clips in editor.tsx, `clips` for
+  // `shown`, as the editor read the selected clip's recording: with the playhead in the title, the
+  // interview's footage, selected, then reads struck through from its first word to its last.
+  test("the Transcript tab reads a clip selected in another chapter as its own chapter plays it", async () => {
+    // The footage plays its file from 1 s: "Um", said before, is cut; the rest is played.
+    const words = [
+      { text: "Um", startMs: 200, endMs: 500 },
+      { text: "Thanks", startMs: 1200, endMs: 1500 },
+      { text: "for", startMs: 1500, endMs: 1700 },
+      { text: "having", startMs: 1700, endMs: 2000 },
+      { text: "me.", startMs: 2000, endMs: 2300 },
+    ]
+    const unavailable = { status: "unavailable", reason: "It has no picture." }
+    client.setConfig({
+      baseUrl: "https://api.sixb.test",
+      fetch: Object.assign(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const path = new URL(new Request(input, init).url).searchParams.get("path") ?? ""
+          const transcript =
+            path === "media/talk.mp4"
+              ? { status: "ready", url: "/transcripts/talk", mediaType: "application/json" }
+              : unavailable
+          return Response.json({
+            path,
+            version: 3,
+            parts: {
+              probe: { status: "ready", durationMs: 9000, container: "mp4" },
+              proxy: unavailable,
+              poster: unavailable,
+              filmstrip: unavailable,
+              waveform: unavailable,
+              cuts: unavailable,
+              transcript: { sizeBytes: 1, ...transcript },
+            },
+          })
+        },
+        { preconnect: fetch.preconnect }
+      ),
+    })
+    const original = globalThis.fetch
+    globalThis.fetch = Object.assign(
+      async () => Response.json({ text: words.map((word) => word.text).join(" "), words }),
+      { preconnect: original.preconnect }
+    )
+
+    const { view, live } = openEditor(TALK, (title) => title, {}, [
+      { path: "media/talk.mp4", file: ref("media/talk.mp4") },
+    ])
+    try {
+      const footage = view.container.querySelector<HTMLElement>(
+        '[data-video-tracks] [data-timeline-clip="clip"]'
+      )
+      if (!footage) throw new Error("No footage on the timeline.")
+      fireEvent.pointerDown(footage, { button: 0, clientX: 112 + 500, pointerId: 1 })
+      fireEvent.pointerUp(footage, { button: 0, clientX: 112 + 500, pointerId: 1 })
+      fireEvent.click(view.getByRole("tab", { name: "Transcript" }))
+      await waitFor(() => view.getByText("having"))
+
+      const struck = (word: string) => view.getByText(word).className.includes("line-through")
+      expect(words.map(({ text }) => struck(text))).toEqual([true, false, false, false, false])
+    } finally {
+      globalThis.fetch = original
+      live.destroy()
+    }
   })
 
   // Guard proof: show the edit's own reason in `edit` (editor.tsx), as for any refusal; the reader

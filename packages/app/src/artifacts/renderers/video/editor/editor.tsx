@@ -110,6 +110,7 @@ import {
   openEnd,
   sceneName,
   selectedClips,
+  selectedRecording,
   selectedScene,
   selectionOf,
   typedText,
@@ -858,20 +859,10 @@ export default function VideoEditor({
     )
   }
 
-  // What the Transcript tab reads: the recordings heard in the open scene, and the selected clip's.
+  // What the Transcript tab reads: the recordings heard in the open scene, and the selected clip's,
+  // from its own chapter, which need not be the open one.
   const heard = heardRecordings(clips, open, timeMs)
-  // A clip that goes on, its recording's words as one, read in every chapter it plays in.
-  const selectedRecording =
-    clip && (clip.clip.kind === "video" || clip.clip.kind === "audio") && clip.clip.src
-      ? (heard.find(
-          (recording) =>
-            recording.chain && recording.clips.some((laid) => clipKey(laid) === clipKey(clip))
-        ) ?? {
-          src: clip.clip.src,
-          file: clip.file,
-          clips: clips.filter((laid) => laid.file === clip.file && laid.clip.src === clip.clip.src),
-        })
-      : undefined
+  const spoken = selectedRecording(shown, clip)
   const splittable =
     picked.length > 1
       ? groupUnder().length > 0
@@ -977,7 +968,7 @@ export default function VideoEditor({
                   target={target}
                   scene={open?.id}
                   recordings={heard}
-                  selected={selectedRecording}
+                  selected={spoken}
                   timeMs={timeMs}
                   onSeek={(ms) => seek(ms)}
                   onRemove={(recording, ranges) => {

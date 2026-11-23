@@ -299,6 +299,28 @@ export function heardRecordings(
     .map(({ recording }) => recording)
 }
 
+/**
+ * The recording of the clip selected on the timeline, as the Transcript tab reads it: the clips of
+ * its own chapter that play it, or, for a clip that goes on, its parts in every chapter, whichever
+ * chapter is open. `every` is every chapter's clips, as `everySceneClips` lays them.
+ */
+export function selectedRecording(
+  every: readonly LaidClip[],
+  selected: { readonly file: string; readonly clip: VideoClip } | undefined
+): SpokenRecording | undefined {
+  const src = selected?.clip.src
+  if (!selected || !src || (selected.clip.kind !== "video" && selected.clip.kind !== "audio")) {
+    return undefined
+  }
+
+  const chain = every.find((laid) => clipKey(laid) === clipKey(selected))?.chain?.key
+  const clips = every.filter(
+    (laid) =>
+      laid.clip.src === src && (chain ? laid.chain?.key === chain : laid.file === selected.file)
+  )
+  return { src, file: selected.file, ...(chain ? { chain } : {}), clips }
+}
+
 function sum<T>(items: readonly T[], of: (item: T) => number): number {
   return items.reduce((total, item) => total + of(item), 0)
 }
