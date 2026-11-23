@@ -26,7 +26,10 @@ export function renderSpec(document: Document, spec: DOMSpec): Rendered {
   ) {
     start = 1
     for (const [name, value] of Object.entries(first as Record<string, unknown>)) {
-      if (value !== null && value !== undefined) element.setAttribute(name, String(value))
+      if (value === null || value === undefined) continue
+      // Through the style object, as ProseMirror sets it, which writes it back normalized.
+      if (name === "style") element.style.cssText = String(value)
+      else element.setAttribute(name, String(value))
     }
   }
   for (const child of rest.slice(start)) {

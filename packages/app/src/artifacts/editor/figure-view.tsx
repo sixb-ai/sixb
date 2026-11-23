@@ -3,8 +3,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { ImageOff } from "lucide-react"
 import { createContext, useContext, useEffect, useState } from "react"
 import { ArtifactEmbed } from "../references/references"
-import type { Node } from "./core/model"
-import type { NodeViewProps } from "./node-views"
+import { type NodeViewProps, NodeViewWrapper } from "./node-views"
 
 /** Where a document's image path is served from, and what an empty caption says. */
 export const FigureContext = createContext<{
@@ -31,7 +30,7 @@ export function FigureView({
   useEffect(() => setCaption(String(node.attrs.title ?? "")), [node.attrs.title])
 
   return (
-    <figure className={cn("sixb-editor-figure", selected && "is-selected")}>
+    <NodeViewWrapper as="figure" className={cn("sixb-editor-figure", selected && "is-selected")}>
       <div data-drag-handle="" className="sixb-editor-figure-frame">
         {embedded ? (
           // Another artifact, shown as the page shows it; its alt text is its caption.
@@ -68,14 +67,6 @@ export function FigureView({
           }}
         />
       ) : null}
-    </figure>
+    </NodeViewWrapper>
   )
-}
-
-/** A figure's DOM: a block the editor picks whole and drags, React drawing inside it. */
-export function figureDOM(_node: Node): { dom: HTMLElement; portal: HTMLElement } {
-  const dom = document.createElement("div")
-  dom.contentEditable = "false"
-  dom.draggable = true
-  return { dom, portal: dom }
 }

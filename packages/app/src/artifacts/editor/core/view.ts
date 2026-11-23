@@ -120,6 +120,7 @@ export interface ViewProps {
     moved: boolean
   ) => boolean
   readonly handleClick?: (view: EditorView, pos: number, event: MouseEvent) => boolean
+  readonly handleTripleClick?: (view: EditorView, pos: number, event: MouseEvent) => boolean
   readonly handleDOMEvents?: Readonly<Record<string, (view: EditorView, event: Event) => boolean>>
   readonly transformPasted?: (slice: Slice) => Slice
   readonly transformPastedHTML?: (html: string) => string
@@ -645,15 +646,13 @@ export class EditorView {
       const spec = node.type.spec.toDOM?.(node) ?? (["div", 0] as DOMSpec)
       const rendered = renderSpec(this.document, spec)
       desc = new NodeDesc(node, rendered.dom, rendered.contentDOM, null)
-      if (
-        !rendered.contentDOM &&
-        !node.isText &&
-        rendered.dom.nodeName !== "BR" &&
-        isElement(rendered.dom)
-      ) {
-        if (!rendered.dom.hasAttribute("contenteditable")) rendered.dom.contentEditable = "false"
-        if (node.type.spec.draggable) rendered.dom.draggable = true
-      }
+    }
+    // A node without editable content, drawn or a view's own, is not typed into, and is dragged
+    // whole when its type says.
+    const dom = desc.dom
+    if (!desc.contentDOM && !node.isText && dom.nodeName !== "BR" && isElement(dom)) {
+      if (!dom.hasAttribute("contenteditable")) (dom as HTMLElement).contentEditable = "false"
+      if (node.type.spec.draggable) (dom as HTMLElement).draggable = true
     }
     desc.parent = parent
     const own = decorations.filter(
@@ -1320,17 +1319,19 @@ export class EditorView {
       this.settingSelection = true
       try {
         domSelection.setBaseAndExtent(anchor.node, anchor.offset, head.node, head.offset)
-        this.written = {
-          anchor: domSelection.anchorNode,
-          anchorOffset: domSelection.anchorOffset,
-          focus: domSelection.focusNode,
-          focusOffset: domSelection.focusOffset,
-        }
       } catch {
         // A position the browser will not select: leave its own.
       } finally {
         this.settingSelection = false
       }
+    }
+    // What the browser shows now is the editor's selection, written or already there, so the
+    // `selectionchange` that follows reads nothing back.
+    this.written = {
+      anchor: domSelection.anchorNode,
+      anchorOffset: domSelection.anchorOffset,
+      focus: domSelection.focusNode,
+      focusOffset: domSelection.focusOffset,
     }
     this.dom.classList.toggle(
       VIEW_CLASSES.hideSelection,
@@ -1811,7 +1812,10 @@ export class EditorView {
     if (!found) return
     const target = event.target as globalThis.Node
     if (event.detail === 3 && this.editableNow) {
-      if (this.tripleClick(found.inside)) {
+      if (
+        this.props.handleTripleClick?.(this, found.pos, event) ||
+        this.tripleClick(found.inside)
+      ) {
         event.preventDefault()
         return
       }

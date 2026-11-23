@@ -1,12 +1,24 @@
-import { type ComponentType, type ReactNode, useSyncExternalStore } from "react"
+import {
+  type ComponentType,
+  createContext,
+  type DragEvent,
+  type ElementType,
+  type HTMLAttributes,
+  type ReactNode,
+  useContext,
+  useSyncExternalStore,
+} from "react"
 import { createPortal } from "react-dom"
 import type { Attrs, Node } from "./core/model"
 import { NodeSelection } from "./core/state"
 import type { EditorView, NodeView, NodeViewFactory } from "./core/view"
 
-// Nodes drawn by React components: each draws into DOM the editor owns, through a portal the
-// document editor renders, so the components keep the app's context. And nodes drawn with plain
-// DOM: a to-do's checkbox, a table's column widths.
+// Nodes drawn by React components: each draws into an element the editor owns, through a portal
+// the document editor renders, so the components keep the app's context. The element is a
+// `div.react-renderer.node-<type>`; the component draws a `NodeViewWrapper` in it and, for a node
+// with content, a `NodeViewContent` the editor's own element for that content goes into, as
+// Tiptap's React node views (MIT) draw them. And nodes drawn with plain DOM: a to-do's checkbox, a
+// table's column widths.
 
 export interface NodeViewProps {
   readonly node: Node
@@ -76,49 +88,135 @@ function stopEvent(
   return true
 }
 
-/**
- * A node drawn by `Component` into `dom`: into `portal` within it, its content, if it has any, in
- * `contentDOM`.
- */
+interface ViewContextValue {
+  readonly contentRef: (element: HTMLElement | null) => void
+  readonly onDragStart: (event: DragEvent<HTMLElement>) => void
+}
+
+const ViewContext = createContext<ViewContextValue>({ contentRef: () => {}, onDragStart: () => {} })
+
+/** A React node view's outer element; `as` names its tag, and is kept on it as an attribute. */
+export function NodeViewWrapper(props: { readonly as?: string } & HTMLAttributes<HTMLElement>) {
+  const { onDragStart } = useContext(ViewContext)
+  const Tag = (props.as ?? "div") as ElementType
+  return (
+    <Tag
+      {...props}
+      data-node-view-wrapper=""
+      onDragStart={onDragStart}
+      style={{ whiteSpace: "normal", ...props.style }}
+    />
+  )
+}
+
+/** Where a React node view's content goes: the editor's element for it is put inside. */
+export function NodeViewContent({
+  as: Tag = "div",
+  ...props
+}: { readonly as?: ElementType } & HTMLAttributes<HTMLElement>) {
+  const { contentRef } = useContext(ViewContext)
+  return (
+    <Tag
+      {...props}
+      ref={contentRef}
+      data-node-view-content=""
+      style={{ whiteSpace: "pre-wrap", ...props.style }}
+    />
+  )
+}
+
+/** A node drawn by `Component`, which draws a `NodeViewWrapper` and, for content, a `NodeViewContent`. */
 export function reactNodeView(
   portals: NodeViewPortals,
-  Component: ComponentType<NodeViewProps>,
-  make: (node: Node) => {
-    readonly dom: HTMLElement
-    readonly portal: HTMLElement
-    readonly contentDOM?: HTMLElement
-  },
-  sync?: (dom: HTMLElement, node: Node) => void
+  Component: ComponentType<NodeViewProps>
 ): NodeViewFactory {
   return (initial: Node, view: EditorView, getPos: () => number | undefined) => {
     const key = portals.key()
-    const { dom, portal, contentDOM } = make(initial)
+    const document = view.document
+    const dom = document.createElement(initial.isInline ? "span" : "div")
+    dom.classList.add("react-renderer", `node-${initial.type.name}`)
+    // The content's own element, inside `dom` until the component's `NodeViewContent` takes it.
+    let contentDOM: HTMLElement | null = null
+    if (!initial.isLeaf) {
+      contentDOM = document.createElement(initial.isInline ? "span" : "div")
+      contentDOM.dataset.nodeViewContentReact = ""
+      contentDOM.dataset.nodeViewWrapper = ""
+      contentDOM.style.whiteSpace = "inherit"
+      dom.appendChild(contentDOM)
+    }
+    const contentRef = (element: HTMLElement | null) => {
+      if (!element || !contentDOM || element.firstChild === contentDOM) return
+      if (element.hasAttribute("data-node-view-wrapper"))
+        element.removeAttribute("data-node-view-wrapper")
+      const restore = keepSelection(contentDOM)
+      element.appendChild(contentDOM)
+      restore?.()
+    }
+    // Dragged by an element marked `data-drag-handle`, the node moves whole, its picture as drawn.
+    const onDragStart = (event: DragEvent<HTMLElement>) => {
+      const target = event.target as HTMLElement
+      const handle = (target.nodeType === 3 ? target.parentElement : target)?.closest(
+        "[data-drag-handle]"
+      )
+      if (contentDOM?.contains(target) || !handle) return
+      let x = 0
+      let y = 0
+      if (dom !== handle) {
+        const domBox = dom.getBoundingClientRect()
+        const handleBox = handle.getBoundingClientRect()
+        x = handleBox.x - domBox.x + event.nativeEvent.offsetX
+        y = handleBox.y - domBox.y + event.nativeEvent.offsetY
+      }
+      const clone = dom.cloneNode(true) as HTMLElement
+      const box = dom.getBoundingClientRect()
+      clone.style.width = `${Math.round(box.width)}px`
+      clone.style.height = `${Math.round(box.height)}px`
+      clone.style.boxSizing = "border-box"
+      clone.style.pointerEvents = "none"
+      const holder = document.createElement("div")
+      holder.style.position = "absolute"
+      holder.style.top = "-9999px"
+      holder.style.left = "-9999px"
+      holder.style.pointerEvents = "none"
+      holder.appendChild(clone)
+      document.body.appendChild(holder)
+      event.dataTransfer?.setDragImage(clone, x, y)
+      setTimeout(() => holder.remove(), 0)
+      const pos = getPos()
+      if (pos === undefined) return
+      view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)))
+    }
+    const context: ViewContextValue = { contentRef, onDragStart }
     let node = initial
     let selected = false
     const render = () =>
       portals.set(
         key,
-        portal,
-        <Component
-          node={node}
-          selected={selected}
-          editable={view.editable}
-          updateAttributes={(attrs) => {
-            const pos = getPos()
-            if (pos === undefined) return
-            view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...attrs }))
-          }}
-          focusEditor={() => view.focus()}
-        />
+        dom,
+        <ViewContext.Provider value={context}>
+          <Component
+            node={node}
+            selected={selected}
+            editable={view.editable}
+            updateAttributes={(attrs) => {
+              const pos = getPos()
+              if (pos === undefined) return
+              view.dispatch(
+                view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...attrs })
+              )
+            }}
+            focusEditor={() => view.focus()}
+          />
+        </ViewContext.Provider>
       )
     render()
     const nodeView: NodeView = {
       dom,
-      contentDOM: contentDOM ?? null,
+      contentDOM,
       update: (next) => {
         if (next.type !== node.type) return false
+        if (next === node) return true
         node = next
-        sync?.(dom, next)
         render()
         return true
       },
@@ -136,6 +234,22 @@ export function reactNodeView(
       destroy: () => portals.remove(key),
     }
     return nodeView
+  }
+}
+
+/** Puts the browser's selection back after `element` moves, when it was inside it. */
+function keepSelection(element: HTMLElement): (() => void) | null {
+  const selection = element.ownerDocument.getSelection()
+  if (!selection || selection.rangeCount === 0) return null
+  const { anchorNode, anchorOffset, focusNode, focusOffset } = selection
+  if (!anchorNode || !focusNode || !element.contains(anchorNode) || !element.contains(focusNode))
+    return null
+  return () => {
+    try {
+      selection.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset)
+    } catch {
+      // A position the browser will not select.
+    }
   }
 }
 

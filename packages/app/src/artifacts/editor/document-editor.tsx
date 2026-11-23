@@ -7,14 +7,14 @@ import type { Awareness } from "y-protocols/awareness"
 import type * as Y from "yjs"
 import { BlockHandle } from "./block-handle"
 import { blockTypes } from "./blocks"
-import { CalloutView, calloutDOM, syncCallout } from "./callout-view"
+import { CalloutView } from "./callout-view"
 import { insertContentAt } from "./core/commands"
 import { Editor, type EditorPlugin } from "./core/editor"
 import { Fragment, type Node, Slice } from "./core/model"
 import { baseKeymap, caretsPlugin, historyPlugin, placeholderPlugin } from "./core/plugins"
 import { type EditorState, TextSelection as import_TextSelection } from "./core/state"
 import { documentPlugins, softBreaks } from "./document-plugins"
-import { FigureContext, FigureView, figureDOM } from "./figure-view"
+import { FigureContext, FigureView } from "./figure-view"
 import type { EditorMessages } from "./messages"
 import {
   NodeViewPortals,
@@ -209,8 +209,8 @@ export function DocumentEditor({
         role: "textbox",
       },
       nodeViews: {
-        callout: reactNodeView(portals, CalloutView, calloutDOM, syncCallout),
-        image: reactNodeView(portals, FigureView, figureDOM),
+        callout: reactNodeView(portals, CalloutView),
+        image: reactNodeView(portals, FigureView),
         taskItem: taskItemView,
         table: tableView,
       },

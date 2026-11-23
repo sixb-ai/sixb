@@ -53,6 +53,7 @@ export interface EditorPlugin {
     moved: boolean
   ) => boolean
   readonly handleClick?: (view: EditorView, pos: number, event: MouseEvent) => boolean
+  readonly handleTripleClick?: (view: EditorView, pos: number, event: MouseEvent) => boolean
   readonly handleDOMEvents?: Readonly<Record<string, (view: EditorView, event: Event) => boolean>>
   readonly transformPasted?: (slice: Slice) => Slice
   readonly transformPastedHTML?: (html: string) => string
@@ -158,6 +159,7 @@ export class Editor {
       handlePaste: first((plugin) => plugin.handlePaste),
       handleDrop: first((plugin) => plugin.handleDrop),
       handleClick: first((plugin) => plugin.handleClick),
+      handleTripleClick: first((plugin) => plugin.handleTripleClick),
       handleDOMEvents: mergeDOMEvents(this.plugins),
       transformPasted: (slice) =>
         this.plugins.reduce(
@@ -270,29 +272,58 @@ export class Editor {
   dispatch(tr: Transaction): void {
     if (this.destroyed) return
     const before = this.state
-    let state = before.apply(tr)
-    const transactions = [tr]
-    // Plugins may follow what happened with changes of their own: a link typed, a table mended.
-    for (let round = 0; round < 3; round += 1) {
-      let appended = false
-      for (const plugin of this.plugins) {
-        const next = plugin.appendTransaction?.(transactions, before, state)
-        if (next && (next.docChanged || next.selectionSet || next.storedMarksSet)) {
-          state = state.apply(next)
-          transactions.push(next)
-          appended = true
-        }
-      }
-      if (!appended) break
-    }
+    const { state, transactions } = this.applyTransaction(before, tr)
     if (state.doc !== before.doc) {
       this.undoSelection = this.relativeOf(before.selection)
-      const quiet = transactions.some((each) => each.getMeta("addToHistory") === false)
+      // The last change decides whether undo takes it back; one it does not starts a new step.
+      const last = transactions.filter((each) => each.docChanged).pop()
+      const quiet = last?.getMeta("addToHistory") === false
+      if (quiet) this.undoManager.stopCapturing()
       this.binding.write(before.doc, state.doc, quiet ? this.quietOrigin : this.origin)
     }
+    this.finish(state, before, transactions)
+  }
+
+  /**
+   * `tr` applied, then what plugins append to it, each plugin shown the transactions it has not
+   * seen yet, until none appends more: ProseMirror's `applyTransaction` (MIT).
+   */
+  private applyTransaction(
+    before: EditorState,
+    tr: Transaction
+  ): { state: EditorState; transactions: Transaction[] } {
+    const transactions = [tr]
+    let state = before.apply(tr)
+    let seen: { state: EditorState; n: number }[] | null = null
+    for (;;) {
+      let appended = false
+      this.plugins.forEach((plugin, index) => {
+        if (!plugin.appendTransaction) return
+        const n = seen ? (seen[index] as { n: number }).n : 0
+        const old = seen ? (seen[index] as { state: EditorState }).state : before
+        const next =
+          n < transactions.length
+            ? plugin.appendTransaction(n ? transactions.slice(n) : transactions, old, state)
+            : null
+        if (next) {
+          seen ??= this.plugins.map((_, each) =>
+            each < index ? { state, n: transactions.length } : { state: before, n: 0 }
+          )
+          transactions.push(next)
+          state = state.apply(next)
+          appended = true
+        }
+        if (seen) seen[index] = { state, n: transactions.length }
+      })
+      if (!appended) return { state, transactions }
+    }
+  }
+
+  /** Shows `state`, which `transactions` made of `before`. */
+  private finish(state: EditorState, before: EditorState, transactions: Transaction[]): void {
     this.lastTransactions = transactions
     for (const each of transactions) for (const plugin of this.plugins) plugin.apply?.(each)
-    this.updateState(state, before, tr)
+    this.updateState(state, before, transactions[0])
   }
 
   private updateState(state: EditorState, before: EditorState, tr?: Transaction): void {
@@ -303,24 +334,20 @@ export class Editor {
     this.emit("transaction", tr ? { transaction: tr } : {})
   }
 
+  /**
+   * Scrolls the selection into view: every ancestor of the browser's selection that it is out of
+   * scrolls just enough, and a margin, to show it, as ProseMirror (MIT) scrolls it.
+   */
   private scrollIntoView(): void {
-    if (!this.view.hasFocus()) return
-    const rect = this.view.coordsAtPos(this.state.selection.head)
-    const window = this.view.window
-    const margin = 5
-    for (let parent: HTMLElement | null = this.view.dom; parent; parent = parent.parentElement) {
-      const style = window.getComputedStyle(parent)
-      const scrolls =
-        /(auto|scroll)/.test(style.overflowY) || parent === this.view.document.scrollingElement
-      if (!scrolls || parent.scrollHeight <= parent.clientHeight) continue
-      const box =
-        parent === this.view.document.scrollingElement
-          ? { top: 0, bottom: window.innerHeight }
-          : parent.getBoundingClientRect()
-      if (rect.top < box.top + margin) parent.scrollTop -= box.top + margin - rect.top
-      else if (rect.bottom > box.bottom - margin)
-        parent.scrollTop += rect.bottom - (box.bottom - margin)
-      break
+    const focus = this.view.document.getSelection()?.focusNode
+    if (!focus || !this.view.dom.contains(focus.nodeType === 1 ? focus : focus.parentNode)) return
+    const selection = this.state.selection
+    if (selection instanceof NodeSelection) {
+      const target = this.view.nodeDOM(selection.from)
+      if (target && target.nodeType === 1)
+        scrollRectIntoView(this.view, (target as Element).getBoundingClientRect(), focus)
+    } else {
+      scrollRectIntoView(this.view, this.view.coordsAtPos(selection.head, 1), focus)
     }
   }
 
@@ -344,9 +371,11 @@ export class Editor {
     if (restored) tr.setSelection(restored)
     tr.setMeta("addToHistory", false).setMeta("remote", true)
     if (this.relativeSelection !== null && this.caretInView()) tr.scrollIntoView()
-    this.lastTransactions = [tr]
-    for (const plugin of this.plugins) plugin.apply?.(tr)
-    this.updateState(before.apply(tr), before, tr)
+    // Plugins follow it as they follow this editor's changes; what they add reaches the live
+    // document with this editor's next change, as y-prosemirror held it back while it applied
+    // someone else's.
+    const { state, transactions } = this.applyTransaction(before, tr)
+    this.finish(state, before, transactions)
   }
 
   /** Whether this editor has the focus and its selection is on screen, measured once a task. */
@@ -455,6 +484,90 @@ export interface RelativeSelection {
   /** Where its ends were, for finding them again in a block someone moved. */
   readonly absAnchor: number
   readonly absHead: number
+}
+
+/** Scrolls each ancestor of `start` that `given` lies outside of until it shows. */
+function scrollRectIntoView(
+  view: EditorView,
+  given: { left: number; right: number; top: number; bottom: number },
+  start: globalThis.Node
+): void {
+  const margin = 5
+  const doc = view.document
+  let rect = given
+  for (let parent: globalThis.Node | null = start; parent; ) {
+    if (parent.nodeType !== 1) {
+      parent = parentOf(parent)
+      continue
+    }
+    const element = parent as HTMLElement
+    const atTop = element === doc.body
+    const bounding = atTop ? windowRect(doc) : clientRect(element)
+    let moveX = 0
+    let moveY = 0
+    if (rect.top < bounding.top) moveY = -(bounding.top - rect.top + margin)
+    else if (rect.bottom > bounding.bottom)
+      moveY =
+        rect.bottom - rect.top > bounding.bottom - bounding.top
+          ? rect.top + margin - bounding.top
+          : rect.bottom - bounding.bottom + margin
+    if (rect.left < bounding.left) moveX = -(bounding.left - rect.left + margin)
+    else if (rect.right > bounding.right) moveX = rect.right - bounding.right + margin
+    if (moveX || moveY) {
+      if (atTop) {
+        doc.defaultView?.scrollBy(moveX, moveY)
+      } else {
+        const startX = element.scrollLeft
+        const startY = element.scrollTop
+        if (moveY) element.scrollTop += moveY
+        if (moveX) element.scrollLeft += moveX
+        const dX = element.scrollLeft - startX
+        const dY = element.scrollTop - startY
+        rect = {
+          left: rect.left - dX,
+          top: rect.top - dY,
+          right: rect.right - dX,
+          bottom: rect.bottom - dY,
+        }
+      }
+    }
+    if (atTop || /^(fixed|sticky)$/.test(getComputedStyle(element).position)) break
+    parent = parentOf(element)
+  }
+}
+
+function parentOf(node: globalThis.Node): globalThis.Node | null {
+  const parent = (node as HTMLElement).assignedSlot ?? node.parentNode
+  return parent && parent.nodeType === 11 ? (parent as ShadowRoot).host : parent
+}
+
+function windowRect(doc: Document): { left: number; right: number; top: number; bottom: number } {
+  const viewport = doc.defaultView?.visualViewport
+  if (viewport) return { left: 0, right: viewport.width, top: 0, bottom: viewport.height }
+  return {
+    left: 0,
+    right: doc.documentElement.clientWidth,
+    top: 0,
+    bottom: doc.documentElement.clientHeight,
+  }
+}
+
+/** An element's box without its scrollbars, in viewport coordinates. */
+function clientRect(element: HTMLElement): {
+  left: number
+  right: number
+  top: number
+  bottom: number
+} {
+  const rect = element.getBoundingClientRect()
+  const scaleX = rect.width / element.offsetWidth || 1
+  const scaleY = rect.height / element.offsetHeight || 1
+  return {
+    left: rect.left,
+    right: rect.left + element.clientWidth * scaleX,
+    top: rect.top,
+    bottom: rect.top + element.clientHeight * scaleY,
+  }
 }
 
 /**

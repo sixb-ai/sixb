@@ -252,14 +252,16 @@ export function caretsPlugin(
         awareness.setLocalStateField("cursor", next)
       }
       awareness.on("change", redraw)
-      const offFocus = editor.on("focus", publish)
-      const offBlur = editor.on("blur", publish)
+      // Any focus moving in or out, a field of a block's own among them, which the text loses it to.
+      const dom = editor.view.dom
+      dom.addEventListener("focusin", publish)
+      dom.addEventListener("focusout", publish)
       return {
         update: publish,
         destroy: () => {
           awareness.off("change", redraw)
-          offFocus()
-          offBlur()
+          dom.removeEventListener("focusin", publish)
+          dom.removeEventListener("focusout", publish)
           const current = awareness.getLocalState() as { cursor?: unknown } | null
           if (published && current?.cursor === published)
             awareness.setLocalStateField("cursor", null)

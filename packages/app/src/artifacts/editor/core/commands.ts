@@ -972,7 +972,7 @@ export function isNodeActive(tr: Transaction, type: NodeType | null, attrs: Attr
 }
 
 export function isMarkActive(tr: Transaction, type: MarkType | null, attrs: Attrs = {}): boolean {
-  const { empty, from, to } = tr.selection
+  const { empty, ranges } = tr.selection
   if (empty) {
     return (tr.storedMarks ?? tr.selection.$from.marks()).some(
       (mark) => (!type || mark.type === type) && attrsInclude(mark.attrs, attrs)
@@ -980,15 +980,19 @@ export function isMarkActive(tr: Transaction, type: MarkType | null, attrs: Attr
   }
   let selectionRange = 0
   const markRanges: { mark: Mark; from: number; to: number }[] = []
-  tr.doc.nodesBetween(from, to, (node, pos) => {
-    if (type && node.inlineContent && !node.type.allowsMarkType(type)) return false
-    if (!node.isText && !node.marks.length) return true
-    const rangeFrom = Math.max(from, pos)
-    const rangeTo = Math.min(to, pos + node.nodeSize)
-    selectionRange += rangeTo - rangeFrom
-    for (const mark of node.marks) markRanges.push({ mark, from: rangeFrom, to: rangeTo })
-    return true
-  })
+  for (const { $from, $to } of ranges) {
+    const from = $from.pos
+    const to = $to.pos
+    tr.doc.nodesBetween(from, to, (node, pos) => {
+      if (type && node.inlineContent && !node.type.allowsMarkType(type)) return false
+      if (!node.isText && !node.marks.length) return true
+      const rangeFrom = Math.max(from, pos)
+      const rangeTo = Math.min(to, pos + node.nodeSize)
+      selectionRange += rangeTo - rangeFrom
+      for (const mark of node.marks) markRanges.push({ mark, from: rangeFrom, to: rangeTo })
+      return true
+    })
+  }
   if (selectionRange === 0) return false
   const matched = markRanges
     .filter((range) => (!type || range.mark.type === type) && attrsInclude(range.mark.attrs, attrs))
@@ -1086,18 +1090,21 @@ export function setMark(type: MarkType, attrs: Attrs = {}): Command {
     if (selection.empty) {
       tr.addStoredMark(type.create({ ...getMarkAttributes(tr, type), ...attrs }))
     } else {
-      const { from, to } = selection
       const doc = tr.doc
-      doc.nodesBetween(from, to, (node, pos) => {
-        const start = Math.max(pos, from)
-        const end = Math.min(pos + node.nodeSize, to)
-        const existing = node.marks.filter((mark) => mark.type === type)
-        if (existing.length)
-          for (const mark of existing)
-            tr.addMark(start, end, type.create({ ...mark.attrs, ...attrs }))
-        else tr.addMark(start, end, type.create(attrs))
-        return true
-      })
+      for (const { $from, $to } of selection.ranges) {
+        const from = $from.pos
+        const to = $to.pos
+        doc.nodesBetween(from, to, (node, pos) => {
+          const start = Math.max(pos, from)
+          const end = Math.min(pos + node.nodeSize, to)
+          const existing = node.marks.filter((mark) => mark.type === type)
+          if (existing.length)
+            for (const mark of existing)
+              tr.addMark(start, end, type.create({ ...mark.attrs, ...attrs }))
+          else tr.addMark(start, end, type.create(attrs))
+          return true
+        })
+      }
     }
     return can
   }
@@ -1120,7 +1127,7 @@ export function unsetMark(
       }
       tr.removeMark(from, to, type)
     } else {
-      tr.removeMark(selection.from, selection.to, type)
+      for (const range of selection.ranges) tr.removeMark(range.$from.pos, range.$to.pos, type)
     }
     tr.removeStoredMark(type)
     return true

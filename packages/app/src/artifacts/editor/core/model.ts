@@ -398,6 +398,74 @@ function sameValue(left: unknown, right: unknown): boolean {
 export type FragmentSource = Fragment | Node | readonly Node[] | null | undefined
 
 /** A node's content: its children, and how many positions they take. */
+function findDiffStart(a: Fragment, b: Fragment, start: number): number | null {
+  let pos = start
+  for (let index = 0; ; index += 1) {
+    if (index === a.childCount || index === b.childCount)
+      return a.childCount === b.childCount ? null : pos
+    const childA = a.child(index)
+    const childB = b.child(index)
+    if (childA === childB) {
+      pos += childA.nodeSize
+      continue
+    }
+    if (!childA.sameMarkup(childB)) return pos
+    if (childA.isText && childA.text !== childB.text) {
+      const textA = childA.text ?? ""
+      const textB = childB.text ?? ""
+      for (let j = 0; textA[j] === textB[j]; j += 1) pos += 1
+      return pos
+    }
+    if (childA.content.size || childB.content.size) {
+      const inner = findDiffStart(childA.content, childB.content, pos + 1)
+      if (inner != null) return inner
+    }
+    pos += childA.nodeSize
+  }
+}
+
+function findDiffEnd(
+  a: Fragment,
+  b: Fragment,
+  startA: number,
+  startB: number
+): { a: number; b: number } | null {
+  let posA = startA
+  let posB = startB
+  for (let indexA = a.childCount, indexB = b.childCount; ; ) {
+    if (indexA === 0 || indexB === 0) return indexA === indexB ? null : { a: posA, b: posB }
+    indexA -= 1
+    indexB -= 1
+    const childA = a.child(indexA)
+    const childB = b.child(indexB)
+    const size = childA.nodeSize
+    if (childA === childB) {
+      posA -= size
+      posB -= size
+      continue
+    }
+    if (!childA.sameMarkup(childB)) return { a: posA, b: posB }
+    if (childA.isText && childA.text !== childB.text) {
+      const textA = childA.text ?? ""
+      const textB = childB.text ?? ""
+      let same = 0
+      const minSize = Math.min(textA.length, textB.length)
+      while (same < minSize && textA[textA.length - same - 1] === textB[textB.length - same - 1]) {
+        same += 1
+        posA -= 1
+        posB -= 1
+      }
+      return { a: posA, b: posB }
+    }
+    if (childA.content.size || childB.content.size) {
+      const inner = findDiffEnd(childA.content, childB.content, posA - 1, posB - 1)
+      if (inner) return inner
+    }
+    posA -= size
+    posB -= size
+  }
+}
+
 export class Fragment {
   static readonly empty = new Fragment([], 0)
   readonly size: number
@@ -517,6 +585,20 @@ export class Fragment {
       text += nodeText
     })
     return text
+  }
+
+  /** The first position where this fragment and `other` differ, or null where they do not. */
+  findDiffStart(other: Fragment, pos = 0): number | null {
+    return findDiffStart(this, other, pos)
+  }
+
+  /** The last positions, in each, where this fragment and `other` differ, or null. */
+  findDiffEnd(
+    other: Fragment,
+    pos = this.size,
+    otherPos = other.size
+  ): { a: number; b: number } | null {
+    return findDiffEnd(this, other, pos, otherPos)
   }
 
   append(other: Fragment): Fragment {
@@ -685,12 +767,14 @@ export class Node {
   forEach(each: (node: Node, offset: number, index: number) => void): void {
     this.content.forEach(each)
   }
+  /** Calls `each` for the nodes between `from` and `to`, positions counted from `startPos`. */
   nodesBetween(
     from: number,
     to: number,
-    each: (node: Node, pos: number, parent: Node | null, index: number) => unknown
+    each: (node: Node, pos: number, parent: Node | null, index: number) => unknown,
+    startPos = 0
   ): void {
-    this.content.nodesBetween(from, to, each, 0, this)
+    this.content.nodesBetween(from, to, each, startPos, this)
   }
   descendants(
     each: (node: Node, pos: number, parent: Node | null, index: number) => unknown

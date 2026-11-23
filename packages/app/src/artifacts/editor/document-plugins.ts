@@ -25,8 +25,10 @@ import {
 import type { EditorPlugin } from "./core/editor"
 import { gapCursorPlugin } from "./core/gapcursor"
 import { Fragment, type MarkType, type Node, type NodeType, Slice } from "./core/model"
+import { markPasteRule, type PasteFound, pasteRules } from "./core/pasterules"
 import { type InputRule, InputRules } from "./core/plugins"
 import { NodeSelection, Selection, TextSelection, type Transaction } from "./core/state"
+import { keepCellsOnContextMenu, tableDeleteKeys, tableEditing } from "./core/tables"
 import { canJoin, findWrapping, joinPoint, ReplaceStep, replaceStep } from "./core/transform"
 import type { EditorView, InlineDecoration } from "./core/view"
 import { findLinks, wordLink } from "./links"
@@ -485,6 +487,7 @@ const tableKeys = {
     return run(view, (each) => addRowAfter(each) && goToCell(1)(each))
   },
   "Shift-Tab": (view: EditorView) => run(view, goToCell(-1)),
+  ...tableDeleteKeys,
 }
 
 // ── Links ───────────────────────────────────────────────────────────────
@@ -614,6 +617,36 @@ const autolink: EditorPlugin = {
   },
 }
 
+/** Inline code pasted between single backticks, with no backtick just before them. */
+function pastedCode(text: string): PasteFound[] {
+  const found: PasteFound[] = []
+  const pattern = /`([^`]+)`(?!`)/g
+  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+    if (match.index > 0 && text[match.index - 1] === "`") continue
+    found.push({ index: match.index, text: match[0], replaceWith: match[1] as string })
+  }
+  return found
+}
+
+/** The addresses in pasted words that link themselves. */
+function pastedLinks(text: string): PasteFound[] {
+  return findLinks(text)
+    .filter((link) => isAllowedUri(link.value) && linksItself(link.value))
+    .map((link) => ({ text: link.value, data: { href: link.href }, index: link.start }))
+}
+
+/** Whether an address links itself: it names a protocol, or a host with a dot that is not a number. */
+function linksItself(url: string): boolean {
+  const hasProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(url)
+  const hasMaybeProtocol = /^[a-z][a-z0-9+.-]*:/i.test(url)
+  if (hasProtocol || (hasMaybeProtocol && !url.includes("@"))) return true
+  const hostname = (url.includes("@") ? (url.split("@").pop() as string) : url).split(
+    /[/?#:]/
+  )[0] as string
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return false
+  return /\./.test(hostname)
+}
+
 /** An address pasted over selected words links them. */
 const linkOnPaste: EditorPlugin = {
   handlePaste: (view, _event, slice) => {
@@ -682,12 +715,24 @@ export function documentPlugins(options: DocumentPluginsOptions): EditorPlugin[]
   const paragraph = nodes.paragraph as NodeType
   const listWrappers = [nodes.bulletList, nodes.orderedList] as NodeType[]
   return [
+    // Pasted syntax and addresses, ahead of every other plugin's follow-up.
+    ...pasteRules([
+      markPasteRule(pastedLinks, marks.link as MarkType, (match) => ({ href: match.data?.href })),
+      markPasteRule(/(?:^|\s)(~~(?!\s+~~)((?:[^~]+))~~(?!\s+~~))/g, marks.strike as MarkType),
+      markPasteRule(/(?:^|\s)(\*(?!\s+\*)((?:[^*]+))\*(?!\s+\*))/g, marks.italic as MarkType),
+      markPasteRule(/(?:^|\s)(_(?!\s+_)((?:[^_]+))_(?!\s+_))/g, marks.italic as MarkType),
+      markPasteRule(pastedCode, marks.code as MarkType),
+      markPasteRule(/(?:^|\s)(\*\*(?!\s+\*\*)((?:[^*]+))\*\*(?!\s+\*\*))/g, marks.bold as MarkType),
+      markPasteRule(/(?:^|\s)(__(?!\s+__)((?:[^_]+))__(?!\s+__))/g, marks.bold as MarkType),
+    ]),
     options.history,
     { keys: { "Mod-Alt-0": key(setNode(paragraph)) } },
     autolink,
     linkOnPaste,
     ...options.before,
     { keys: tableKeys },
+    tableEditing(),
+    keepCellsOnContextMenu(),
     {
       keys: {
         Enter: key(splitListItem(nodes.taskItem as NodeType)),

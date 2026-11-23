@@ -7,11 +7,22 @@ import { type Mappable, ReplaceAroundStep, ReplaceStep, Transform } from "./tran
 
 // ── Selections ──────────────────────────────────────────────────────────
 
+/** One stretch of a selection: a cell's content, of several selected together. */
+export interface SelectionRange {
+  readonly $from: ResolvedPos
+  readonly $to: ResolvedPos
+}
+
 export abstract class Selection {
   constructor(
     readonly $anchor: ResolvedPos,
     readonly $head: ResolvedPos
   ) {}
+
+  /** What is selected, as one range or, for cells, one per cell. */
+  get ranges(): readonly SelectionRange[] {
+    return [{ $from: this.$from, $to: this.$to }]
+  }
 
   get anchor(): number {
     return this.$anchor.pos
