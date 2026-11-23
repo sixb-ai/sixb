@@ -82,6 +82,7 @@ installDom([
   "location",
   "localStorage",
   "Node",
+  "NodeFilter",
   "Element",
   "HTMLElement",
   "HTMLIFrameElement",
@@ -918,6 +919,7 @@ describe("the editor's pieces", () => {
             splitClip: noop,
             splitClips: noop,
             removeClips: noop,
+            replaceClip: noop,
           }}
         />
       )
@@ -975,6 +977,7 @@ describe("the editor's pieces", () => {
               splitClip: noop,
               splitClips: noop,
               removeClips: noop,
+              replaceClip: noop,
             }}
           />
         )
@@ -1024,6 +1027,7 @@ describe("a clip's sound in the Inspector", () => {
             splitClip: noop,
             splitClips: noop,
             removeClips: noop,
+            replaceClip: noop,
           }}
         />
       )
@@ -1208,6 +1212,7 @@ describe("what is derived of a recording", () => {
             splitClip: noop,
             splitClips: noop,
             removeClips: noop,
+            replaceClip: noop,
           }}
         />
       )
@@ -1619,6 +1624,46 @@ describe("the editor", () => {
       )
     ).toBeDefined()
     expect(view.queryByText(/bytes/)).toBeNull()
+    live.destroy()
+  })
+
+  // Guard proof: drop the clip menu's Replace with… item in Timeline (timeline.tsx); a right click
+  // on the footage then offers no way to swap its file.
+  test("Replace with… plays another of the video's files in a clip, as one step undone at once", async () => {
+    const { view, live, text } = openEditor()
+    live.doc
+      .getMap<unknown>("files")
+      .set("media/b-roll.mp4", { ...(ref("media/b-roll.mp4") as object) })
+    await waitFor(() =>
+      expect(
+        view.container.querySelector('[data-video-tracks] [data-timeline-clip="clip"]')
+      ).not.toBeNull()
+    )
+    const footage = view.container.querySelector<HTMLElement>(
+      '[data-video-tracks] [data-timeline-clip="clip"]'
+    ) as HTMLElement
+    fireEvent.contextMenu(footage, { clientX: 500, clientY: 300 })
+    fireEvent.click(await view.findByRole("menuitem", { name: "Replace with…" }))
+
+    const dialog = await view.findByRole("dialog", { name: /^Replace/ })
+    expect(dialog.textContent).toContain("It keeps its start, its length, its sound and its look.")
+    // The footage it plays now is marked; the soundtrack, no footage, is not offered.
+    expect(view.getByRole("button", { name: "talk.mp4, which it plays now" })).toHaveProperty(
+      "disabled",
+      true
+    )
+    expect(view.queryByRole("button", { name: "score.m4a" })).toBeNull()
+    fireEvent.click(view.getByRole("button", { name: "b-roll.mp4" }))
+
+    await waitFor(() => expect(text("scenes/talk.html")).toContain("media/b-roll.mp4"))
+    expect(text("scenes/talk.html")).toContain('data-start="0" data-duration="7"')
+    expect(live.doc.getMap<unknown>("files").has("media/talk.mp4")).toBe(false)
+
+    // One step: undone, the clip plays its file again, which is back.
+    const command = appleKeyboard() ? { metaKey: true } : { ctrlKey: true }
+    fireEvent.keyDown(document, { key: "z", ...command })
+    expect(text("scenes/talk.html")).toContain("media/talk.mp4")
+    expect(live.doc.getMap<unknown>("files").has("media/talk.mp4")).toBe(true)
     live.destroy()
   })
 

@@ -46,30 +46,82 @@ export function useMediaImport(
 ): {
   readonly uploads: readonly Upload[]
   readonly importFiles: (files: readonly File[], target: ImportTarget) => Promise<void>
+  /** Stores a file among the video's, without a clip: its path, or null once refused. */
+  readonly uploadMedia: (file: File) => Promise<string | null>
 } {
   const messages = useArtifactMessages()
   const locale = useLocale()
   const [uploads, setUploads] = useState<readonly Upload[]>([])
   const counter = useRef(0)
 
+  /**
+   * Where a file is among the video's once stored: its bytes read first, the first tenth, so a
+   * file the video holds already is used again, never sent nor copied twice.
+   */
+  const store = useCallback(
+    async (file: File, progressed: (progress: number) => void): Promise<string> => {
+      const digest = await fileDigest(file, (hashed) =>
+        progressed(file.size > 0 ? (hashed / file.size) * 0.1 : 0.1)
+      )
+      const held = video.fileWithDigest(digest)
+      if (held !== undefined) return held
+
+      const path = mediaPath(video, file.name)
+      const ref = await uploadFile(file, {
+        fileName: path.split("/").at(-1) ?? path,
+        digest,
+        onProgress: ({ loadedBytes, totalBytes, stage }) => {
+          if (stage === "upload") {
+            progressed(0.1 + (totalBytes > 0 ? loadedBytes / totalBytes : 0) * 0.9)
+          }
+        },
+      })
+      video.addFile(path, ref)
+      return path
+    },
+    [video]
+  )
+
+  /** Why a file cannot be added, said as it is refused; null for one that can. */
+  const refusal = useCallback(
+    (file: File) => {
+      if (!importKind(file)) return messages.videoEditor.notMedia(file.name)
+      const { maxFileBytes } = artifactSizeLimits("video")
+      if (file.size <= maxFileBytes) return null
+      return messages.videoEditor.tooLarge(
+        file.name,
+        formatFileSize(maxFileBytes, locale, messages.files)
+      )
+    },
+    [messages, locale]
+  )
+
+  const uploadMedia = useCallback(
+    async (file: File) => {
+      const refused = refusal(file)
+      if (refused) {
+        onError(refused)
+        return null
+      }
+      try {
+        return await store(file, () => {})
+      } catch {
+        onError(messages.videoEditor.uploadFailed(file.name))
+        return null
+      }
+    },
+    [refusal, store, onError, messages]
+  )
+
   const importFiles = useCallback(
     async (files: readonly File[], target: ImportTarget) => {
-      const { maxFileBytes } = artifactSizeLimits("video")
       let atMs = target.atMs
 
       for (const file of files) {
         const kind = importKind(file)
-        if (!kind) {
-          onError(messages.videoEditor.notMedia(file.name))
-          continue
-        }
-        if (file.size > maxFileBytes) {
-          onError(
-            messages.videoEditor.tooLarge(
-              file.name,
-              formatFileSize(maxFileBytes, locale, messages.files)
-            )
-          )
+        const refused = refusal(file)
+        if (!kind || refused) {
+          onError(refused ?? messages.videoEditor.notMedia(file.name))
           continue
         }
 
@@ -91,27 +143,7 @@ export function useMediaImport(
             setUploads((current) =>
               current.map((each) => (each.id === id ? { ...each, progress } : each))
             )
-          // Its bytes read first, the first tenth: a file the video holds already is used again,
-          // never sent nor copied twice.
-          const digest = await fileDigest(file, (hashed) =>
-            progressed(file.size > 0 ? (hashed / file.size) * 0.1 : 0.1)
-          )
-          let path = video.fileWithDigest(digest)
-          if (path === undefined) {
-            path = mediaPath(video, file.name)
-            const ref = await uploadFile(file, {
-              fileName: path.split("/").at(-1) ?? path,
-              digest,
-              onProgress: ({ loadedBytes, totalBytes, stage }) => {
-                if (stage === "upload") {
-                  progressed(0.1 + (totalBytes > 0 ? loadedBytes / totalBytes : 0) * 0.9)
-                }
-              },
-            })
-            video.addFile(path, ref)
-          }
-
-          const src = path
+          const src = await store(file, progressed)
           const startMs = atMs
           let muted = false
           const refused = video.apply((sources) => {
@@ -131,10 +163,10 @@ export function useMediaImport(
         }
       }
     },
-    [video, onError, onMuted, messages, locale]
+    [video, onError, onMuted, messages, refusal, store]
   )
 
-  return { uploads, importFiles }
+  return { uploads, importFiles, uploadMedia }
 }
 
 /** What a file is added as, by its type; null for one a video cannot play or show. */

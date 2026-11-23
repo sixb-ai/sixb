@@ -16,6 +16,7 @@ import {
   Copy,
   Image as ImageIcon,
   Layers,
+  Replace,
   Scissors,
   Trash2,
   TriangleAlert,
@@ -69,6 +70,8 @@ export interface InspectorActions {
   /** Splits the clips selected together at the playhead, and deletes them. */
   readonly splitClips: () => void
   readonly removeClips: () => void
+  /** Opens Replace with… for a clip that plays or shows a file. */
+  readonly replaceClip: (file: string, clip: VideoClip) => void
 }
 
 export function Inspector({
@@ -403,6 +406,12 @@ function ClipInspector({
       ) : null}
 
       <div className="flex flex-wrap gap-2">
+        {clip.src && (plays || clip.kind === "image") ? (
+          <Button variant="outline" size="sm" onClick={() => actions.replaceClip(file, clip)}>
+            <Replace />
+            {messages.replaceWith}
+          </Button>
+        ) : null}
         <Button
           variant="outline"
           size="sm"
