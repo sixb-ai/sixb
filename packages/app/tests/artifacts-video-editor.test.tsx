@@ -1807,6 +1807,69 @@ describe("the timeline", () => {
     )
   }
 
+  // Guard proof: draw every scene on the chapters bar in Timeline (timeline.tsx), without
+  // videoChapters; the captions laid over the whole video then show as a chapter, and the one
+  // under the playhead at 1 s is they.
+  test("captions laid over the whole video are no chapter, and their lines still show", () => {
+    const files = new Map(FILES)
+    const end = INDEX.lastIndexOf("</div>")
+    files.set("index.html", {
+      text: `${INDEX.slice(0, end)}  <div id="lines" data-composition-id="lines" data-composition-src="scenes/lines.html" data-start="0" data-duration="10"></div>\n${INDEX.slice(end)}`,
+    })
+    files.set("scenes/lines.html", {
+      text: '<template><div data-composition-id="lines" data-width="1280" data-height="720"><p class="line" data-start="1" data-duration="2">Calmer operations</p></div></template>',
+    })
+    const state = new LiveVideo(createArtifactDocument("video", files)).getState()
+    const shown = state.composition
+    if (!shown) throw new Error(state.error)
+    expect(shown.scenes.map((scene) => scene.id)).toEqual(["title", "lines", "talk"])
+
+    const view = render(
+      wrap(
+        <Timeline
+          composition={shown}
+          clips={everySceneClips(state, shown)}
+          selection={null}
+          timeMs={1000}
+          marks={{}}
+          snapping
+          agentScenes={new Set()}
+          people={new Map()}
+          target={TARGET}
+          uploads={[]}
+          toolbar={() => null}
+          dropTarget={false}
+          formatLength={(ms) => `${ms / 1000} s`}
+          edits={{
+            seek: () => {},
+            select: () => {},
+            moveClip: () => {},
+            moveClips: () => {},
+            trimClip: () => {},
+            sceneLength: () => {},
+            scene: {
+              select: () => {},
+              move: () => {},
+              duplicate: () => {},
+              remove: () => {},
+              rename: () => {},
+            },
+          }}
+        />
+      )
+    )
+    const chapters = [...view.container.querySelectorAll("[data-timeline-scene]")].map((each) =>
+      each.getAttribute("data-timeline-scene")
+    )
+    expect(chapters).toEqual(["title", "talk"])
+    expect(
+      view.container.querySelector('[data-timeline-scene="title"] [aria-current="true"]')
+    ).not.toBeNull()
+    expect(
+      view.container.querySelector('[data-timeline-clip][data-timeline-file="scenes/lines.html"]')
+    ).not.toBeNull()
+  })
+
   // Guard proof: open the chapter with something else than `edits.scene.select` on a tap in
   // timeline.tsx, as it was: a click left the playhead, and the picture, in another chapter.
   test("a tap on a chapter opens it as Enter does, which moves the playhead to it", () => {
