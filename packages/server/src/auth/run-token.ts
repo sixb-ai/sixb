@@ -3,6 +3,7 @@ import {
   AGENT_RUN_HEADER,
   type AgentRunExecutionScope,
   AgentRunScopeError,
+  agentRunConversationShared,
   agentRunTokenRunId,
   findAgentApiRoute,
   isAgentRunToken,
@@ -110,7 +111,8 @@ export async function resolveRunTokenRequest(input: {
  * - a workflow step publishes no artifact: it has no conversation to publish into;
  * - a child reads its conversation's memory but saves none, and changes nothing once its parent's
  *   turn has ended;
- * - a shared conversation reaches only the project's memory, whoever sends the turn.
+ * - a shared conversation, and each of its children, reaches only the project's memory, whoever
+ *   sends the turn; so does a turn its owner did not ask for, from someone removed since.
  */
 async function runPolicyRefusal(
   host: SixbHostView,
@@ -146,10 +148,14 @@ async function runPolicyRefusal(
   }
   // Anything but the project's exact path is refused, as a route parameter is percent-decoded.
   if (
-    state.agentRun?.kind === "conversation" &&
+    "kind" in run &&
     matchesAgentMemory(path) &&
     pathSegmentsFor(path)[2] !== "project" &&
-    (await hasParticipants(host, state.agentRun))
+    host.storage.agents &&
+    (await agentRunConversationShared(
+      { agents: host.storage.agents, executions: host.storage.executions },
+      run
+    ))
   ) {
     return deny(
       403,
@@ -348,18 +354,6 @@ async function parentRunActive(host: SixbHostView, run: SubagentRunRecord): Prom
 function matchesAgentMemory(pathname: string): boolean {
   const segments = pathSegmentsFor(pathname)
   return segments[0] === "api" && segments[1] === "agent-memory"
-}
-
-/** Anyone added to the run's thread, even one who cannot read it now, as the worker counts them. */
-async function hasParticipants(
-  host: SixbHostView,
-  run: ConversationAgentRunRecord
-): Promise<boolean> {
-  const participants = await host.storage.agents?.threads.listParticipants({
-    projectId: run.projectId,
-    threadIds: [run.threadId],
-  })
-  return (participants?.length ?? 0) > 0
 }
 
 function matchesWorkflowRunStart(pathname: string): boolean {

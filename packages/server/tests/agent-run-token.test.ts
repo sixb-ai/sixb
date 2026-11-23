@@ -730,6 +730,58 @@ describe("run tokens", () => {
     ).toBe(0)
   })
 
+  test("gives a child of a shared conversation the project's memory alone", async () => {
+    // Reproduce by applying the shared-conversation check in runPolicyRefusal to conversation runs
+    // alone: the child then reads its requester's own memory.
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime({
+      executionKind: "subagent",
+    })
+    await storage.agents.threads.addParticipants({
+      projectId: PROJECT_ID,
+      threadId: "thread-1",
+      principals: [{ type: "user", id: "usr_bob" }],
+      addedBy: { type: "user", id: "usr_requester" },
+      maxParticipants: 50,
+    })
+    const read = (repo: string) => app.fetch(new Request(`${apiBaseUrl}/api/agent-memory/${repo}`))
+
+    const refused = { error: expect.stringContaining("only the project's memory") }
+    // A route parameter is percent-decoded: `%75ser` names the user's repo too.
+    for (const response of [await read("user"), await read("%75ser")]) {
+      expect(response.status).toBe(403)
+      await expect(response.json()).resolves.toEqual(refused)
+    }
+
+    // The project's repo passes through, to the runtime's own check of can.run(agent).
+    await expect((await read("project")).json()).resolves.toMatchObject({ code: "not_allowed" })
+  })
+
+  test("gives a participant removed during their turn the project's memory alone", async () => {
+    // Reproduce by counting only the participants in agentRunConversationShared: once Bob removes
+    // the requester, their turn in his conversation reads and saves their own memory.
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime({
+      conversationOwner: "usr_bob",
+    })
+    await storage.agents.threads.addParticipants({
+      projectId: PROJECT_ID,
+      threadId: "thread-1",
+      principals: [{ type: "user", id: "usr_requester" }],
+      addedBy: { type: "user", id: "usr_bob" },
+      maxParticipants: 50,
+    })
+    await storage.agents.threads.removeParticipant({
+      projectId: PROJECT_ID,
+      threadId: "thread-1",
+      principal: { type: "user", id: "usr_requester" },
+    })
+
+    const response = await app.fetch(new Request(`${apiBaseUrl}/api/agent-memory/user`))
+    expect(response.status).toBe(403)
+    await expect(response.json()).resolves.toEqual({
+      error: expect.stringContaining("only the project's memory"),
+    })
+  })
+
   describe("a parent's token naming one of its children", () => {
     /** The child runtime, with what its parent's commands send: the parent's token. */
     async function childOfParent() {
@@ -2295,6 +2347,8 @@ async function createRunTokenRuntime(
     readonly models?: ModelCatalogInput
     /** The turn's frozen approval mode; omitted, the turn predates approval modes. */
     readonly approvalMode?: AgentApprovalMode
+    /** Who owns the conversation the run works for: its requester by default. */
+    readonly conversationOwner?: string
   } = {}
 ): Promise<{
   /** The API as the run's commands call it: with the run token, unless a request names its own. */
@@ -2507,7 +2561,7 @@ async function createRunTokenRuntime(
     await storage.agents.threads.create({
       id: threadId,
       projectId: PROJECT_ID,
-      ownerPrincipal: { type: "user", id: "usr_requester" },
+      ownerPrincipal: { type: "user", id: options.conversationOwner ?? "usr_requester" },
       createdAt: NOW,
       updatedAt: NOW,
     })
@@ -2563,7 +2617,7 @@ async function createRunTokenRuntime(
     await storage.agents.threads.create({
       id: threadId,
       projectId: PROJECT_ID,
-      ownerPrincipal: { type: "user", id: "usr_requester" },
+      ownerPrincipal: { type: "user", id: options.conversationOwner ?? "usr_requester" },
       createdAt: NOW,
       updatedAt: NOW,
     })

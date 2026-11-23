@@ -188,6 +188,7 @@ export type {
   RunModelLoopInput,
 } from "./model-loop"
 export { runModelLoop } from "./model-loop"
+export { agentRunConversationShared } from "./participants"
 export { registerAgentQueuedTurn, startQueuedAgentTurn } from "./queued-turn"
 export { agent } from "./reference"
 export {
