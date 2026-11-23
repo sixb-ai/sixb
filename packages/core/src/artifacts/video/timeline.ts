@@ -53,8 +53,8 @@ export interface VideoClip {
   readonly fadeInMs?: number
   readonly fadeOutMs?: number
   /**
-   * Footage whose sound is not played, as HyperFrames mixes it: `muted`, or a `data-has-audio`
-   * other than "true".
+   * A clip whose sound is not played, as HyperFrames mixes it: footage `muted`, or with a
+   * `data-has-audio` other than "true"; a sound `muted`.
    */
   readonly silent: boolean
   /** What a text clip says. */
@@ -241,8 +241,9 @@ function timelineOf(composition: Element): VideoFileTimeline {
       ...(fadeInMs === undefined ? {} : { fadeInMs }),
       ...(fadeOutMs === undefined ? {} : { fadeOutMs }),
       silent:
-        kind === "video" &&
-        (has(element, "muted") || (has(element, "data-has-audio") && !hasAudio(element))),
+        (kind === "audio" && has(element, "muted")) ||
+        (kind === "video" &&
+          (has(element, "muted") || (has(element, "data-has-audio") && !hasAudio(element)))),
       ...(text === undefined ? {} : { text }),
       ...(continues ? { continues } : {}),
       source: sourceOf(element),
@@ -399,23 +400,31 @@ export function sceneAfter<T extends { readonly startMs: number; readonly durati
 }
 
 /**
- * The scenes that are the video's chapters, in play order: every one but an overlay, a scene that
- * spans another whole, as captions written over the whole video. Two that cross only fade; of two
- * alike, the later is the overlay. An overlay's clips stay its own: no clip goes into it or out.
+ * The scenes that are the video's chapters, in play order: every one but an overlay, a scene laid
+ * over the others, as captions written over the whole video: one that holds two others whole, or
+ * the span of all the others, from the first's start to the last's end. One short chapter inside a
+ * longer one's crossfade leaves both chapters; of two alike, the later is the overlay. An
+ * overlay's clips stay its own: no clip goes into it or out.
  */
 export function videoChapters<T extends { readonly startMs: number; readonly durationMs: number }>(
   scenes: readonly T[]
 ): T[] {
-  const holds = (outer: T, inner: T) =>
-    outer.startMs <= inner.startMs &&
-    inner.startMs + inner.durationMs <= outer.startMs + outer.durationMs
-  return scenes.filter(
-    (scene, at) =>
-      !scenes.some(
-        (other, index) =>
-          other !== scene && holds(scene, other) && (!holds(other, scene) || index < at)
-      )
-  )
+  const end = (scene: T) => scene.startMs + scene.durationMs
+  const holds = (outer: T, inner: T) => outer.startMs <= inner.startMs && end(inner) <= end(outer)
+  // Of two alike, the earlier is held by the later, never the other way round.
+  const within = (outer: T, inner: T, outerAt: number, innerAt: number) =>
+    holds(outer, inner) && (!holds(inner, outer) || innerAt < outerAt)
+
+  return scenes.filter((scene, at) => {
+    const others = scenes.filter((other) => other !== scene)
+    if (others.length === 0) return true
+    const held = others.filter((other) => within(scene, other, at, scenes.indexOf(other)))
+    if (held.length >= 2) return false
+    const first = Math.min(...others.map((other) => other.startMs))
+    const last = Math.max(...others.map(end))
+    const spans = scene.startMs <= first && last <= end(scene)
+    return !(spans && held.length === others.length)
+  })
 }
 
 /**
