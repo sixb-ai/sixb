@@ -2251,7 +2251,8 @@ describe("the timeline", () => {
     })
 
     // Guard proof: give every block both handles at 8 px in ClipBlock (timeline.tsx), as it had;
-    // the one-word caption is then all handles, held only to trim. Drop the command key's branch
+    // the one-word caption is then all handles, held only to trim. Give a block under 16 px none,
+    // as it did, and the shortest caption has no edge to trim by. Drop the command key's branch
     // from the handles' press, and a ⌘-press on an edge trims rather than selects.
     test("a narrow clip keeps a middle to hold, and the command key on an edge selects", () => {
       const files = new Map(FILES)
@@ -2297,8 +2298,8 @@ describe("the timeline", () => {
         ...block.querySelectorAll<HTMLElement>(".cursor-ew-resize"),
       ]
 
-      // 12 px: none, so it moves; 20 px: a quarter of it each.
-      expect(handles(word("So")).length).toBe(0)
+      // 12 px: a slim edge each, seen on hover, its middle held to move; 20 px: a quarter each.
+      expect(handles(word("So")).map((handle) => handle.style.width)).toEqual(["3px", "3px"])
       expect(handles(word("we")).map((handle) => handle.style.width)).toEqual(["5px", "5px"])
       fireEvent.pointerDown(word("So"), { button: 0, clientX: xAt(6050), pointerId: 1 })
       fireEvent.pointerMove(word("So"), { clientX: xAt(6550), pointerId: 1, shiftKey: true })
@@ -2314,6 +2315,115 @@ describe("the timeline", () => {
       const tracks = view.container.querySelector<HTMLElement>("[data-video-tracks]") as HTMLElement
       fireEvent.pointerUp(tracks, { clientX: xAt(3000), pointerId: 2, ...command })
       expect(selected.at(-1)).toEqual({ type: "clip", file: "scenes/talk.html", target: "clip" })
+    })
+
+    // Guard proof: drop the Alt branch from the clips' press in Timeline (timeline.tsx); an
+    // Alt-drag on a caption too short for any edge then moves it, where it trims it. Draw no seam
+    // where a clip goes on in the next chapter, and a press there moves the clip.
+    test("Alt trims a clip at its nearer edge however short, and a clip's seam holds no move", () => {
+      const files = new Map(FILES)
+      files.set("scenes/talk.html", {
+        text: TALK.replace(
+          "  </div>",
+          '  <p class="caption" data-start="3" data-duration="0.05">So</p>\n  </div>'
+        ),
+      })
+      const state = new LiveVideo(createArtifactDocument("video", files)).getState()
+      const shown = state.composition
+      if (!shown) throw new Error("No video.")
+      const trims: [string, string, number][] = []
+      const moved: number[] = []
+      const selected: unknown[] = []
+      const view = render(
+        timeline({
+          timeMs: 0,
+          composition: shown,
+          clips: everySceneClips(state, shown),
+          edits: {
+            seek: () => {},
+            select: (next: unknown) => selected.push(next),
+            moveClip: (_: unknown, ms: number) => moved.push(ms),
+            moveClips: () => {},
+            trimClip: (clip: { clip: { ref: string } }, edge: string, ms: number) =>
+              trims.push([clip.clip.ref, edge, ms]),
+            sceneLength: () => {},
+            scene: {
+              select: () => {},
+              move: () => {},
+              duplicate: () => {},
+              remove: () => {},
+              rename: () => {},
+            },
+          } as never,
+        })
+      )
+      const so = view.container.querySelector<HTMLElement>('[aria-label$=", So"]')
+      if (!so) throw new Error("No caption.")
+      expect(so.querySelectorAll("[data-trim-edge]")).toHaveLength(0)
+
+      // Its block drawn 4 px from 6.0 s: Alt on its right half pulls its end to 6.5 s.
+      fireEvent.pointerDown(so, { button: 0, clientX: xAt(6030), pointerId: 1, altKey: true })
+      fireEvent.pointerMove(so, { clientX: xAt(6500), pointerId: 1, altKey: true, shiftKey: true })
+      fireEvent.pointerUp(so, { clientX: xAt(6500), pointerId: 1, altKey: true, shiftKey: true })
+      expect(moved).toEqual([])
+      expect(trims.map(([ref, edge]) => [ref, edge])).toEqual([["#2", "end"]])
+      cleanup()
+
+      // A caption from the title on into the interview: hovered, both its parts are outlined, and
+      // a press on the title part's end, its seam, selects it without moving it.
+      const chained = new Map(FILES)
+      chained.set("scenes/title.html", {
+        text: TITLE.replace(
+          "<h1>",
+          '<p id="spill" class="caption" data-start="2.5" data-duration="0.5">Hello there</p>\n    <h1>'
+        ),
+      })
+      chained.set("scenes/talk.html", {
+        text: TALK.replace(
+          "  </div>",
+          '  <p id="spill-2" class="caption" data-start="0" data-duration="1" data-continues="spill">Hello there</p>\n  </div>'
+        ),
+      })
+      const linked = new LiveVideo(createArtifactDocument("video", chained)).getState()
+      const film = linked.composition
+      if (!film) throw new Error("No video.")
+      const chainView = render(
+        timeline({
+          timeMs: 0,
+          composition: film,
+          clips: everySceneClips(linked, film),
+          edits: {
+            seek: () => {},
+            select: (next: unknown) => selected.push(next),
+            moveClip: (_: unknown, ms: number) => moved.push(ms),
+            moveClips: () => {},
+            trimClip: () => {},
+            sceneLength: () => {},
+            scene: {
+              select: () => {},
+              move: () => {},
+              duplicate: () => {},
+              remove: () => {},
+              rename: () => {},
+            },
+          } as never,
+        })
+      )
+      const part = (file: string) =>
+        chainView.container.querySelector<HTMLElement>(
+          `[data-timeline-clip][data-timeline-file="${file}"][aria-label$="Hello there"]`
+        ) as HTMLElement
+      fireEvent.pointerEnter(part("scenes/title.html"))
+      expect(part("scenes/talk.html").className).toContain("ring-foreground/55")
+
+      const seam = part("scenes/title.html").querySelector<HTMLElement>("[data-seam-end]")
+      if (!seam) throw new Error("No seam.")
+      expect(seam.getAttribute("title")).toBe("Goes on in the next chapter")
+      fireEvent.pointerDown(seam, { button: 0, clientX: xAt(2990), pointerId: 3 })
+      fireEvent.pointerMove(seam, { clientX: xAt(3500), pointerId: 3 })
+      fireEvent.pointerUp(seam, { clientX: xAt(3500), pointerId: 3 })
+      expect(moved).toEqual([])
+      expect(selected.at(-1)).toEqual({ type: "clip", file: "scenes/title.html", target: "spill" })
     })
 
     // Guard proof: drop `narrow` from ClipBlock's classes (timeline.tsx), and start each handle at
