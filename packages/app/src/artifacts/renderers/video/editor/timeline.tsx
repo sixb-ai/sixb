@@ -254,11 +254,9 @@ export function Timeline({
     items: () => [...(scenesRow.current?.querySelectorAll<HTMLElement>("[data-reorder-id]") ?? [])],
     axis: "x",
     onMove: (id, _from, to) => {
-      // Among the chapters the bar shows: before the one now there, among all the scenes.
-      const scene = composition.scenes.find((each) => each.id === id)
-      const others = composition.scenes.filter((each) => each.id !== id)
-      const before = chapters.filter((each) => each.id !== id)[to]
-      if (scene) edits.scene.move(scene, before ? others.indexOf(before) : others.length)
+      // A place among the chapters the bar shows, as every list of them moves one.
+      const scene = chapters.find((each) => each.id === id)
+      if (scene) edits.scene.move(scene, to)
     },
   })
   const [width, setWidth] = useState(0)

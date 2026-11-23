@@ -896,7 +896,8 @@ export const en = {
     /** Whether footage's own sound is heard. */
     soundHeard: "Play its sound",
     soundMuted: "Its sound isn’t heard. Turn it on to hear it under the rest.",
-    addedMuted: "Added muted so it doesn’t cover the voice — turn its sound on in the Inspector.",
+    addedMuted:
+      "Added muted so it doesn’t cover what’s being said — turn its sound on in the Inspector.",
     fadeIn: "Fade in",
     fadeOut: "Fade out",
     words: "Words on screen",
@@ -1925,7 +1926,8 @@ export const fr: Translation<ArtifactMessages> = {
     volume: "Volume",
     soundHeard: "Faire entendre son son",
     soundMuted: "Son son n’est pas entendu. Activez-le pour l’entendre sous le reste.",
-    addedMuted: "Ajouté sans son pour ne pas couvrir la voix — activez son son dans l’inspecteur.",
+    addedMuted:
+      "Ajouté sans son pour ne pas couvrir ce qui est dit — activez son son dans l’inspecteur.",
     fadeIn: "Fondu d’entrée",
     fadeOut: "Fondu de sortie",
     words: "Textes à l’écran",
