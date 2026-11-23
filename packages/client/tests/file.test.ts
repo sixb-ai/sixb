@@ -426,7 +426,7 @@ describe("fileDigest", () => {
 
   // Guard proof: hash every file in place in computeBlobDigestOffThread (sha256.ts), dropping the
   // worker; the large file then never reaches one. Drop the fallback, and a page refusing the
-  // worker fails to hash at all.
+  // worker fails to hash at all; revoke nothing when it refuses at once, and its source is kept.
   test("hashes a large file in a worker, and in place where none can run", async () => {
     const expected = computeBlobDigest(bytes)
     const Original = globalThis.Worker
@@ -450,7 +450,26 @@ describe("fileDigest", () => {
           throw new Error("Refused by the page's policy.")
         }
       } as unknown as typeof Worker
-      expect(await fileDigest(large)).toBe(expected)
+      const made: string[] = []
+      const revoked: string[] = []
+      const { createObjectURL, revokeObjectURL } = URL
+      URL.createObjectURL = (blob: Blob) => {
+        const url = createObjectURL(blob)
+        made.push(url)
+        return url
+      }
+      URL.revokeObjectURL = (url: string) => {
+        revoked.push(url)
+        revokeObjectURL(url)
+      }
+      try {
+        expect(await fileDigest(large)).toBe(expected)
+      } finally {
+        URL.createObjectURL = createObjectURL
+        URL.revokeObjectURL = revokeObjectURL
+      }
+      // The worker's source, refused, is let go of.
+      expect(revoked).toEqual(made)
       Reflect.deleteProperty(globalThis, "Worker")
       expect(await fileDigest(large)).toBe(expected)
     } finally {
