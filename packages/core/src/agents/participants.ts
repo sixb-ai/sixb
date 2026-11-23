@@ -119,6 +119,12 @@ export async function removeAgentThreadParticipant(
   await announceAgentApprovals(runtime.broker, cancelled)
 }
 
+/** What a run's conversation is read from. */
+export interface AgentRunConversationStorage {
+  readonly agents: Pick<AgentStorage, "threads" | "runs">
+  readonly executions: Pick<ExecutionStorage, "getById">
+}
+
 /**
  * Whether the conversation a run works for is shared: someone was added to it, even one who can no
  * longer read it, or the run acts for someone else than its owner. Only the owner's run in a
@@ -128,23 +134,54 @@ export async function removeAgentThreadParticipant(
  * shared.
  */
 export async function agentRunConversationShared(
-  storage: {
-    readonly agents: Pick<AgentStorage, "threads">
-    readonly executions: Pick<ExecutionStorage, "getById">
-  },
-  run: Pick<AgentRunRecord, "projectId" | "kind" | "threadId" | "executionId">
+  storage: AgentRunConversationStorage,
+  run: AgentRunRecord
+): Promise<boolean> {
+  const threadId = await conversationOfRun(storage.agents, run)
+  return threadId === undefined || conversationShared(storage, run, threadId)
+}
+
+/**
+ * The conversation a run works for, its own or a sub-agent's parent's, and whether it is shared,
+ * as {@link agentRunConversationShared} decides. Refused when a sub-agent's conversation cannot be
+ * told, since what is left out of the run's reach is that conversation.
+ */
+export async function agentRunConversation(
+  storage: AgentRunConversationStorage,
+  run: AgentRunRecord
+): Promise<{ readonly threadId: string; readonly shared: boolean }> {
+  const threadId = await conversationOfRun(storage.agents, run)
+  if (threadId === undefined) {
+    throw new AgentRequestError(
+      "thread_not_found",
+      `[Sixb] Sub-agent run '${run.id}' works for a conversation that is gone.`
+    )
+  }
+  return { threadId, shared: await conversationShared(storage, run, threadId) }
+}
+
+/** A sub-agent's parent conversation: from its thread, or from its parent's run once that is gone. */
+async function conversationOfRun(
+  agents: AgentRunConversationStorage["agents"],
+  run: AgentRunRecord
+): Promise<string | undefined> {
+  if (run.kind !== "subagent") return run.threadId
+
+  const { projectId } = run
+  const thread = await agents.threads.getById({ projectId, id: run.threadId })
+
+  // One level only: a child's parent is always a conversation, as storage admits no other.
+  if (thread) return conversationThreadId(thread)
+  return (await agents.runs.getById({ projectId, id: run.parentRunId }))?.threadId
+}
+
+async function conversationShared(
+  storage: AgentRunConversationStorage,
+  run: AgentRunRecord,
+  threadId: string
 ): Promise<boolean> {
   const { agents, executions } = storage
   const { projectId } = run
-  let threadId = run.threadId
-
-  if (run.kind === "subagent") {
-    const thread = await agents.threads.getById({ projectId, id: run.threadId })
-    if (!thread) return true
-
-    // One level only: a child's parent is always a conversation, as storage admits no other.
-    threadId = conversationThreadId(thread)
-  }
 
   const participants = await agents.threads.listParticipants({ projectId, threadIds: [threadId] })
   if (participants.length > 0) return true

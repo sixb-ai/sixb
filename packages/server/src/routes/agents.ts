@@ -11,6 +11,7 @@ import {
 } from "@sixb/core"
 import { sameComputerPlace } from "@sixb/core/internal/agent-run-storage-provider"
 import {
+  agentRunReadsConversation,
   assertConversationThread,
   isRetryableAgentRun,
   readAgentThreadContextUse,
@@ -28,6 +29,7 @@ import {
   AgentStorageError,
   type AgentThreadComputer,
   type AgentThreadRecord,
+  type ExecutionStorage,
   type Principal,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
@@ -78,6 +80,8 @@ import {
   PostAgentMessageBodySchema,
   PostAgentMessageResponseSchema,
   RetryAgentRunResponseSchema,
+  SearchAgentThreadsBodySchema,
+  SearchAgentThreadsResponseSchema,
   UpdateAgentInboxItemBodySchema,
   UpdateAgentInboxItemResponseSchema,
 } from "../schemas/agents"
@@ -354,24 +358,45 @@ export function serializeAgentRun(
   })
 }
 
-async function getAgentMessageFileContentThread(params: {
+/**
+ * The thread whose messages and files a request reads. A person reads what they own or take part
+ * in. A run reads its own thread, and the earlier conversations its search finds: its requester's,
+ * never the one it works for, and from a shared conversation none of their private ones. A
+ * workflow's agent node reads none.
+ */
+async function readableThreadForRequest(params: {
   readonly authState: RequestAuthState
   readonly storage: AgentStorage
+  readonly executions: ExecutionStorage
   readonly projectId: string
   readonly threadId: string
 }): Promise<Pick<AgentThreadRecord, "id"> | null> {
-  const { agentRun } = params.authState
-  if (agentRun) {
-    if (agentRun.projectId !== params.projectId || agentRun.threadId !== params.threadId) {
-      return null
-    }
-    return params.storage.threads.getById({ projectId: params.projectId, id: params.threadId })
-  }
-
-  if (!params.authState.sixb) {
+  const { authState, storage, executions, projectId, threadId } = params
+  if (!authState.sixb) {
     throw new Error("[SixbServer] Execution scope is not available for this route.")
   }
-  return params.authState.sixb.agent.threads.getById(params.threadId)
+
+  const execution = authState.agentExecution
+  if (!execution) return authState.sixb.agent.threads.getById(threadId)
+  if (execution.kind === "workflow") return null
+
+  const run = authState.agentRun ?? (await storage.runs.getById({ projectId, id: execution.runId }))
+  if (!run || run.projectId !== projectId) return null
+  if (run.threadId === threadId) return storage.threads.getById({ projectId, id: threadId })
+
+  const thread = await authState.sixb.agent.threads.getById(threadId)
+  if (!thread) return null
+
+  // A sub-agent whose conversation is gone reads none.
+  const readable = await agentRunReadsConversation(
+    { agents: storage, executions },
+    run,
+    thread
+  ).catch((error: unknown) => {
+    if (error instanceof AgentRequestError && error.code === "thread_not_found") return false
+    throw error
+  })
+  return readable ? thread : null
 }
 
 /**
@@ -440,6 +465,7 @@ export function handleAgentRouteError(
       case "not_message_author":
       case "not_thread_owner":
       case "not_run_requester":
+      case "search_not_allowed":
         set.status = 403
         break
       case "storage_unavailable":
@@ -453,6 +479,7 @@ export function handleAgentRouteError(
       case "invalid_message":
       case "invalid_participant":
       case "invalid_approval_mode":
+      case "invalid_search":
       case "model_not_found":
         set.status = 400
         break
@@ -478,7 +505,7 @@ export async function agentMessageFileContentResponse(
   },
   options: {
     readonly head?: boolean
-    /** Who may read the thread. Default: its owner, or the Agent run working in it. */
+    /** Who may read the thread. Default: whoever reads its messages. */
     readonly readThread?: () => Promise<Pick<AgentThreadRecord, "id"> | null>
   } = {}
 ) {
@@ -493,9 +520,10 @@ export async function agentMessageFileContentResponse(
     const parsed = AgentMessageFileContentQuerySchema.parse(context.query)
     const thread = options.readThread
       ? await options.readThread()
-      : await getAgentMessageFileContentThread({
+      : await readableThreadForRequest({
           authState,
           storage,
+          executions: host.storage.executions,
           projectId: host.id,
           threadId: context.params.threadId,
         })
@@ -751,6 +779,62 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
         },
       }
     )
+    .post(
+      "/api/agent-threads/search",
+      async (context) => {
+        const { body, set } = context
+        const sixb = requireRequestSixb(context)
+        try {
+          if (!host.storage.agents) {
+            return missingAgentStorageResponse(set)
+          }
+
+          const parsed = SearchAgentThreadsBodySchema.parse(body)
+          const result = await sixb.agent.threads.search({
+            text: parsed.text,
+            ...(parsed.since === undefined ? {} : { since: new Date(parsed.since) }),
+            ...(parsed.until === undefined ? {} : { until: new Date(parsed.until) }),
+            ...(parsed.limit === undefined ? {} : { limit: parsed.limit }),
+          })
+
+          return SearchAgentThreadsResponseSchema.parse({
+            conversations: result.conversations.map(({ thread, score, turns }) => ({
+              thread: {
+                id: thread.id,
+                title: thread.title,
+                createdAt: toIsoString(thread.createdAt),
+                lastMessageAt: thread.lastMessageAt && toIsoString(thread.lastMessageAt),
+                shared: thread.shared,
+              },
+              score,
+              turns: turns.map((turn) => ({ ...turn, at: toIsoString(turn.at) })),
+            })),
+            searchedFrom: result.searchedFrom && toIsoString(result.searchedFrom),
+          })
+        } catch (error) {
+          return handleAgentRouteError(error, set)
+        }
+      },
+      {
+        body: SearchAgentThreadsBodySchema,
+        response: {
+          200: SearchAgentThreadsResponseSchema,
+          400: AgentRequestErrorResponseSchema,
+          403: AgentRequestErrorResponseSchema,
+          429: AgentRequestErrorResponseSchema,
+          501: AgentRequestErrorResponseSchema,
+          502: AgentRequestErrorResponseSchema,
+        },
+        detail: {
+          summary: "Search the caller's earlier agent conversations by meaning",
+          description:
+            "The conversations the caller owns or was added to, never one they only observe. With a run's token, never the conversation the run works for, and from a shared conversation only conversations someone else reads too. Answers 501 with `agent.search_unavailable` without an embedding model or storage that can search vectors.",
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          operationId: "searchAgentThreads",
+          security: accessTokenSecurityRequirement("searchAgentThreads"),
+        },
+      }
+    )
     .get(
       "/api/agent-threads/:threadId",
       async (context) => {
@@ -990,17 +1074,14 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return missingAgentStorageResponse(set)
           }
 
-          // A run reads its own conversation alone, as it reads that conversation's files; a
-          // child or a workflow step reads none.
-          const thread =
-            authState.agentExecution && !authState.agentRun
-              ? null
-              : await getAgentMessageFileContentThread({
-                  authState,
-                  storage,
-                  projectId: host.id,
-                  threadId: params.threadId,
-                })
+          // Read as the thread's files are.
+          const thread = await readableThreadForRequest({
+            authState,
+            storage,
+            executions: host.storage.executions,
+            projectId: host.id,
+            threadId: params.threadId,
+          })
           if (!thread) {
             set.status = 404
             return { error: "Agent thread not found" }

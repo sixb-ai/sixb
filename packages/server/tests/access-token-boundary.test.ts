@@ -47,8 +47,9 @@ describe("access token auth boundary", () => {
       ["GET", "/api/workflow-runs"],
       ["GET", "/api/workflow-runs/run_1"],
       ["GET", "/api/workflow-runs/run_1/files/content?path=/input/document"],
-      // The Agent reads its own conversation with `sixb history`: run tokens reach only agentApi
-      // routes, which access tokens reach too.
+      // The Agent reads its own conversation with `sixb history`, and finds earlier ones by
+      // meaning: run tokens reach only agentApi routes, which access tokens reach too.
+      ["POST", "/api/agent-threads/search"],
       ["GET", "/api/agent-threads/thr_1/messages"],
       ["GET", "/api/agent-threads/thr_1/messages/msg_1/files/content?path=/parts/1/fileRef"],
       ["GET", "/api/events"],

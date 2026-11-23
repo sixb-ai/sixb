@@ -7,6 +7,7 @@ import { isFileRef } from "../../blob-storage/validation"
 import { isJsonObject, isPlainRecord } from "../../json"
 import { isLanguageModelTier, LANGUAGE_MODEL_TIERS } from "../../models/catalog"
 import { isModelReasoning } from "../../models/language-model"
+import { vectorSearchCandidateLimit } from "../../objects/vectors/profile"
 import type { ExecutionRecord, ExecutionStorage } from "../executions"
 import { findAgentRunExecution } from "../executions/run-link"
 import { AgentStorageError } from "./errors"
@@ -49,6 +50,7 @@ import type {
   ListAgentApprovalsInput,
   RequestAgentApprovalInput,
   SaveAgentMemoryInput,
+  SearchAgentTurnVectorsInput,
   StopAgentApprovalsInput,
   SubagentRunFile,
   SubagentRunRecord,
@@ -407,6 +409,51 @@ export function assertWriteAgentTurnVectorsInput(
     ) {
       throw invalid("need between 1 and 16000 finite values, not all zero.")
     }
+  }
+}
+
+/**
+ * A search names a configuration and a scope, a query vector a search can score, bounds within
+ * what one search may read, and a time window that is one.
+ */
+export function assertSearchAgentTurnVectorsInput(
+  input: SearchAgentTurnVectorsInput,
+  prefix = "Sixb"
+): void {
+  const invalid = (message: string) =>
+    new AgentStorageError("invalid_input", `[${prefix}] A turn search ${message}`)
+
+  if (!input.configuration.trim()) throw invalid("needs a configuration.")
+  if (input.scope !== "all" && input.scope !== "shared") {
+    throw invalid("reads the 'all' or the 'shared' scope.")
+  }
+
+  const vector = input.vector
+  if (
+    vector.length < 1 ||
+    vector.length > 16000 ||
+    vector.some((value) => !Number.isFinite(value)) ||
+    vector.every((value) => value === 0)
+  ) {
+    throw invalid("needs a vector of between 1 and 16000 finite values, not all zero.")
+  }
+
+  const positive = (value: number) => Number.isSafeInteger(value) && value >= 1
+  if (!positive(input.k) || input.k > 1000) throw invalid("returns between 1 and 1000 turns.")
+  if (!positive(input.perThread)) throw invalid("keeps at least one turn of a conversation.")
+
+  const most = vectorSearchCandidateLimit(vector.length)
+  if (!positive(input.candidates) || input.candidates > most) {
+    throw invalid(`scores between 1 and ${most} chunks at ${vector.length} dimensions.`)
+  }
+
+  for (const bound of [input.since, input.until]) {
+    if (bound !== undefined && !(bound instanceof Date && Number.isFinite(bound.getTime()))) {
+      throw invalid("is bounded by valid dates.")
+    }
+  }
+  if (input.since && input.until && input.since > input.until) {
+    throw invalid("opens its window ('since') before it closes it ('until').")
   }
 }
 

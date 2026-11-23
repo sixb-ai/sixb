@@ -74,6 +74,10 @@ cannot be saved. Calling a provider's `embed()` method directly bypasses these c
 Automatic projection indexing uses the project's budget. If the budget is exhausted, embedding
 generation waits while projections continue updating objects.
 
+So does indexing conversations for the agent to
+[find earlier ones](./overview.md#it-finds-earlier-conversations): it counts toward no one's own
+usage or limit, and waits while the project's budget is exhausted.
+
 ## Audio transcription
 
 Calls to `sixb.models.audio.transcribe()` appear in **AI usage** with their cost and audio duration,

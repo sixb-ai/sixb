@@ -228,6 +228,46 @@ Each save is a revision with the agent's own description of what it learned. `ME
 most 16 KB, any other file 256 KB, and each memory 4 MB in all. Earlier versions of a file are
 kept for 90 days.
 
+### It finds earlier conversations
+
+With an embedding model, the agent finds the user's earlier conversations by meaning, such as
+"the reminder we drafted for late invoices", and reads the ones it finds.
+
+- **What it needs:** a model in `models.embedding` (the first one is used), and storage that can
+  search vectors: PostgreSQL with pgvector in `public`, or a SQLite that loads sqlite-vec.
+  Conversations are indexed in the background, earlier ones included. Without either, a search
+  fails with `agent.search_unavailable`.
+- **What it finds:** each turn by what was asked, the final answer, and the titles of what it
+  published. Never a sub-agent's work, nor a conversation the user can only
+  [observe](#control-access).
+- **What it costs:** indexing is the project's own usage, under its limits only: it never counts
+  toward a person's usage or limit, and waits when the project's limit is reached. A search is
+  billed to the turn that searches, like its other model calls.
+
+| The conversation it works in | It finds and reads |
+| --- | --- |
+| Private | Every conversation of the user's: theirs, and those shared with them |
+| Shared | Only shared ones, so the others never see the user's private conversations |
+
+It never finds the conversation it works in. A turn of someone removed from a conversation while
+it runs stays in the shared row. Sub-agents find what their conversation finds; AI workflow steps
+find nothing.
+
+Search from your code, or with `POST /api/agent-threads/search`:
+
+```ts
+const { conversations, searchedFrom } = await sixb.agent.threads.search({
+  text: "reminder for late invoices",
+  since: new Date("2026-03-01"),
+})
+```
+
+It answers the caller's conversations, theirs and those shared with them, the best first (10 by
+default, `limit` up to 25). Each comes with its best turns: an excerpt, and what they published that
+the caller can open. One search scores at most the 10,000 most recent passages, fewer with a model
+of over 1,600 dimensions; a long turn is several passages. When there are more, `searchedFrom` says
+where it stopped, and passing it as `until` goes further back.
+
 ## It delegates
 
 When a request splits into independent investigations, the chat agent can hand each one to a

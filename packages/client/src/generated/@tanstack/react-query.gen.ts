@@ -214,6 +214,7 @@ import {
   revokeConnectorConnection,
   revokeSharedAccessGrant,
   saveAgentMemory,
+  searchAgentThreads,
   searchObjects,
   selectConnectorConnectionRunAccount,
   setAgentThreadApprovalMode,
@@ -832,6 +833,9 @@ import type {
   SaveAgentMemoryData,
   SaveAgentMemoryError,
   SaveAgentMemoryResponse,
+  SearchAgentThreadsData,
+  SearchAgentThreadsError,
+  SearchAgentThreadsResponse,
   SearchObjectsData,
   SearchObjectsError,
   SearchObjectsResponse,
@@ -4877,6 +4881,35 @@ export const createAgentThreadMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await createAgentThread({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Search the caller's earlier agent conversations by meaning
+ *
+ * The conversations the caller owns or was added to, never one they only observe. With a run's token, never the conversation the run works for, and from a shared conversation only conversations someone else reads too. Answers 501 with `agent.search_unavailable` without an embedding model or storage that can search vectors.
+ */
+export const searchAgentThreadsMutation = (
+  options?: Partial<Options<SearchAgentThreadsData>>
+): UseMutationOptions<
+  SearchAgentThreadsResponse,
+  SearchAgentThreadsError,
+  Options<SearchAgentThreadsData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    SearchAgentThreadsResponse,
+    SearchAgentThreadsError,
+    Options<SearchAgentThreadsData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await searchAgentThreads({
         ...options,
         ...fnOptions,
         throwOnError: true,

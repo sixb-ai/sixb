@@ -1828,12 +1828,79 @@ export interface AgentThreadToIndex {
   readonly revision: number
 }
 
+/** Which of a principal's conversations a search reads. */
+export type AgentTurnSearchScope = "all" | "shared"
+
+export interface SearchAgentTurnVectorsInput {
+  readonly projectId: string
+  readonly configuration: string
+  /** The query's embedding: as many values as the configuration's vectors. */
+  readonly vector: readonly number[]
+  /**
+   * Whose conversations: those they own and those they were added to, never one they only
+   * observe. Omitted, every conversation of the project: code without a caller.
+   */
+  readonly principal?: Principal
+  /** `shared`: only conversations someone was added to, so never a private one. */
+  readonly scope: AgentTurnSearchScope
+  /** A conversation left out: the one the searching run works for. */
+  readonly excludeThreadId?: string
+  /** Only turns opened at or after this. */
+  readonly since?: Date
+  /** Only turns opened before this. */
+  readonly until?: Date
+  /** At most this many turns. */
+  readonly k: number
+  /** At most this many turns of one conversation. */
+  readonly perThread: number
+  /**
+   * How many of the most recent eligible chunks are scored: at most
+   * `vectorSearchCandidateLimit(dimensions)`. Older ones are left for a search with `until`.
+   */
+  readonly candidates: number
+}
+
+/** A turn search found, by the chunk of it that matched best. */
+export interface AgentTurnSearchHit {
+  readonly threadId: string
+  /** The person's message that opens the turn. */
+  readonly messageId: string
+  readonly chunk: number
+  readonly firstSeq: number
+  readonly lastSeq: number
+  readonly turnAt: Date
+  /** What the chunk embedded. */
+  readonly text: string
+  /** Cosine similarity, from -1 to 1. */
+  readonly score: number
+}
+
+export interface SearchAgentTurnVectorsResult {
+  /** Best first; equal scores the most recent first, then by thread and message id. */
+  readonly hits: readonly AgentTurnSearchHit[]
+  /**
+   * Set when more chunks were eligible than `candidates`: only turns opened at or after this were
+   * scored. A search with `until` set to it reads the older ones. The window never splits an
+   * instant but one: when the newest instant alone holds more chunks than `candidates`, the first
+   * of them are scored and the others are never read, since `until` then moves past it.
+   */
+  readonly searchedFrom?: Date
+}
+
 export interface AgentTurnVectorStore {
   /**
    * Whether this storage can search the vectors it keeps: PostgreSQL with pgvector in schema
    * `public`, SQLite with sqlite-vec loadable. A yes is remembered; a no is asked again later.
    */
   searchAvailable(): Promise<boolean>
+  /**
+   * The turns closest to `vector` among the principal's conversations. Eligibility is decided
+   * before ranking: a conversation they own or were added to (never a sub-agent's), within the
+   * scope, not excluded, opened within `since`/`until`, of this configuration and dimension. When
+   * more chunks are eligible than `candidates`, the most recent are scored, and `searchedFrom`
+   * says from when. Fails with `vector_extension_missing` where `searchAvailable` is false.
+   */
+  search(input: SearchAgentTurnVectorsInput): Promise<SearchAgentTurnVectorsResult>
   /** Null when the thread does not exist. */
   progress(input: GetAgentThreadIndexProgressInput): Promise<AgentThreadIndexProgress | null>
   /**

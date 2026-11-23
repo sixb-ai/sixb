@@ -124,6 +124,7 @@ export {
 } from "./context-token-rate"
 export type { AgentThreadContextUse } from "./context-use"
 export { readAgentThreadContextUse } from "./context-use"
+export { agentRunReadsConversation } from "./conversation-search"
 export type {
   AgentRunDispatchFailure,
   DispatchedAgentRun,
@@ -390,6 +391,7 @@ export {
   storeAgentToolFile,
 } from "./tool-files"
 export { isAgentToolResult } from "./tool-result"
+export { agentTurnVectorConfiguration } from "./turn-vectors/configuration"
 export {
   type AgentTurnIndexing,
   AgentTurnIndexingDeferred,

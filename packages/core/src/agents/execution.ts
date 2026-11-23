@@ -57,6 +57,11 @@ import {
   listAgentChildren,
   readAgentChild,
 } from "./children"
+import {
+  type AgentThreadSearchResult,
+  type SearchAgentThreadsInput,
+  searchAgentThreads,
+} from "./conversation-search"
 import { AgentRequestError } from "./errors"
 import { forkAgentThread } from "./fork"
 import { createAgentThreadId, createAgentThreadSandboxName } from "./ids"
@@ -175,6 +180,13 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
      * Agent has not written it yet. `null` when the caller cannot read the artifact.
      */
     listForArtifact(artifactId: string): Promise<readonly AgentThreadView[] | null>
+    /**
+     * The caller's earlier conversations closest in meaning to `text`, the best first: those they
+     * own and those they were added to. Inside a run, never the conversation it works for, and
+     * from a shared one only conversations someone else reads too. Fails with
+     * `agent.search_unavailable` without an embedding model or storage that can search vectors.
+     */
+    search(input: SearchAgentThreadsInput): Promise<AgentThreadSearchResult>
     /**
      * Record that the caller's reading of a thread reached a message, or its newest when omitted,
      * which is what a Done button sends. It never moves backwards, so another device that read
@@ -1200,6 +1212,7 @@ export function createAgentRuntime<
           )
         return withThreadState(threads, readViewer())
       },
+      search: (input) => searchAgentThreads(runtime, { execution, scope: rule.scope() }, input),
       participants: {
         add: (threadId, users) =>
           addAgentThreadParticipants(runtime, rule, security, threadId, users),

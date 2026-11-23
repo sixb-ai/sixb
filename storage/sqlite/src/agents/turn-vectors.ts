@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite"
 import { ObjectQueryExecutionError } from "@sixb/core"
 import {
+  assertSearchAgentTurnVectorsInput,
   assertWriteAgentTurnVectorsInput,
   cachedTurnVectorSearchProbe,
 } from "@sixb/core/internal/agent-run-storage-provider"
@@ -15,6 +16,8 @@ import {
   type HaltAgentThreadIndexingInput,
   type ListAgentThreadsToIndexInput,
   type ListAgentTurnVectorsInput,
+  type SearchAgentTurnVectorsInput,
+  type SearchAgentTurnVectorsResult,
   type WriteAgentTurnVectorsInput,
 } from "@sixb/core/storage"
 import { ensureSqliteVectorSearch } from "../objects/vector-extension"
@@ -32,6 +35,18 @@ interface AgentTurnVectorRow {
   configuration: string
   embedding: Uint8Array
   indexed_at: string
+}
+
+interface AgentTurnSearchRow {
+  searched_from: string | null
+  thread_id: string | null
+  message_id: string
+  chunk: number
+  first_seq: number
+  last_seq: number
+  turn_at: string
+  text: string
+  score: number
 }
 
 interface AgentThreadIndexProgressRow {
@@ -257,6 +272,140 @@ export class SqliteAgentTurnVectorStore implements AgentTurnVectorStore {
       `)
       .all(input.projectId, input.threadId, input.fromSeq ?? 1) as AgentTurnVectorRow[]
     return rows.map(rowToTurnVector)
+  }
+
+  async search(input: SearchAgentTurnVectorsInput): Promise<SearchAgentTurnVectorsResult> {
+    assertSearchAgentTurnVectorsInput(input, "SixbSqlite")
+    ensureSqliteVectorSearch(this.db)
+
+    const { projectId, principal } = input
+
+    // The principal's conversations, read from two indexes: those they own
+    // (idx_agent_threads_project_owner_activity) and those they were added to
+    // (idx_agent_thread_participants_principal). Only a conversation takes participants.
+    const theirs = principal
+      ? `SELECT id FROM agent_threads
+          WHERE project_id = ?1 AND kind = 'conversation'
+            AND owner_principal_type = ?2 AND owner_principal_id = ?3
+          UNION
+          SELECT thread_id FROM agent_thread_participants
+          WHERE project_id = ?1 AND principal_type = ?2 AND principal_id = ?3`
+      : "SELECT id FROM agent_threads WHERE project_id = ?1 AND kind = 'conversation'"
+    const shared =
+      input.scope === "shared"
+        ? `AND EXISTS (
+            SELECT 1 FROM agent_thread_participants AS participant
+            WHERE participant.project_id = ?1 AND participant.thread_id = theirs.id
+          )`
+        : ""
+
+    // `recent` reads keys alone, the most recent first, one past the candidates: whether that one
+    // exists says whether the window is cut, and where. Only the candidates' embeddings are read,
+    // by primary key, and scored exactly. ISO timestamps order as times.
+    const rows = this.db
+      .query(`
+        WITH theirs AS (${theirs}),
+        eligible AS (
+          SELECT theirs.id FROM theirs WHERE (?4 IS NULL OR theirs.id <> ?4) ${shared}
+        ),
+        recent AS MATERIALIZED (
+          SELECT vector.thread_id, vector.message_id, vector.chunk, vector.turn_at
+          FROM eligible
+          JOIN agent_turn_vectors AS vector
+            ON vector.project_id = ?1 AND vector.thread_id = eligible.id
+          WHERE vector.configuration = ?5
+            AND (?6 IS NULL OR vector.turn_at >= ?6)
+            AND (?7 IS NULL OR vector.turn_at < ?7)
+          ORDER BY vector.turn_at DESC, vector.thread_id, vector.message_id, vector.chunk
+          LIMIT ?8 + 1
+        ),
+        bound AS (
+          SELECT CASE WHEN COUNT(*) > ?8 THEN COALESCE(
+            MIN(turn_at) FILTER (WHERE turn_at > (SELECT MIN(turn_at) FROM recent)),
+            MIN(turn_at)
+          ) END AS searched_from
+          FROM recent
+        ),
+        candidates AS (
+          SELECT recent.* FROM recent, bound
+          WHERE bound.searched_from IS NULL OR recent.turn_at >= bound.searched_from
+          ORDER BY recent.turn_at DESC, recent.thread_id, recent.message_id, recent.chunk
+          LIMIT ?8
+        ),
+        scored AS (
+          SELECT candidates.thread_id, candidates.message_id, candidates.chunk,
+            candidates.turn_at,
+            max(-1, min(1, 1 - vec_distance_cosine(vector.embedding, ?9))) AS score
+          FROM candidates
+          JOIN agent_turn_vectors AS vector
+            ON vector.project_id = ?1
+              AND vector.message_id = candidates.message_id AND vector.chunk = candidates.chunk
+          WHERE length(vector.embedding) / 4 = ?10
+        ),
+        turns AS (
+          SELECT * FROM (
+            SELECT scored.*, row_number() OVER (
+              PARTITION BY message_id ORDER BY score DESC, chunk
+            ) AS chunk_place
+            FROM scored
+          )
+          WHERE chunk_place = 1
+        ),
+        ranked AS (
+          SELECT turns.*, row_number() OVER (
+            PARTITION BY thread_id ORDER BY score DESC, turn_at DESC, message_id
+          ) AS place
+          FROM turns
+        ),
+        best AS (
+          SELECT * FROM ranked WHERE place <= ?11
+          ORDER BY score DESC, turn_at DESC, thread_id, message_id
+          LIMIT ?12
+        )
+        SELECT bound.searched_from, best.thread_id, best.message_id, best.chunk, best.turn_at,
+          best.score, vector.first_seq, vector.last_seq, vector.text
+        FROM bound
+        LEFT JOIN best ON true
+        LEFT JOIN agent_turn_vectors AS vector
+          ON vector.project_id = ?1
+            AND vector.message_id = best.message_id AND vector.chunk = best.chunk
+        ORDER BY best.score DESC, best.turn_at DESC, best.thread_id, best.message_id
+      `)
+      .all(
+        projectId,
+        principal?.type ?? null,
+        principal?.id ?? null,
+        input.excludeThreadId ?? null,
+        input.configuration,
+        input.since?.toISOString() ?? null,
+        input.until?.toISOString() ?? null,
+        input.candidates,
+        encodeSqliteVector(input.vector),
+        input.vector.length,
+        input.perThread,
+        input.k
+      ) as AgentTurnSearchRow[]
+
+    const searchedFrom = rows[0]?.searched_from
+    return {
+      hits: rows.flatMap((row) =>
+        row.thread_id === null
+          ? []
+          : [
+              {
+                threadId: row.thread_id,
+                messageId: row.message_id,
+                chunk: row.chunk,
+                firstSeq: row.first_seq,
+                lastSeq: row.last_seq,
+                turnAt: new Date(row.turn_at),
+                text: row.text,
+                score: row.score,
+              },
+            ]
+      ),
+      ...(searchedFrom ? { searchedFrom: new Date(searchedFrom) } : {}),
+    }
   }
 
   async listThreadsToIndex(

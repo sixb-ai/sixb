@@ -4,6 +4,7 @@ import {
   type AgentStorage,
   AgentStorageError,
   type AgentTurnVectorInput,
+  type SearchAgentTurnVectorsInput,
   type WriteAgentTurnVectorsInput,
 } from "../storage/agents"
 import type { AuthStorage } from "../storage/auth"
@@ -21,10 +22,17 @@ export interface AgentTurnVectorStorageContractSuiteOptions<
 > {
   readonly createStorage: () => TStorage | Promise<TStorage>
   readonly teardown?: (storage: TStorage) => void | Promise<void>
+  /**
+   * Whether this storage can search here, true by default: false skips the searches, for a SQLite
+   * that cannot load sqlite-vec.
+   */
+  readonly searches?: boolean
 }
 
 const projectId = "turn-vectors-contract"
 const alice: UserPrincipal = { type: "user", id: "usr_alice" }
+const bob: UserPrincipal = { type: "user", id: "usr_bob" }
+const carol: UserPrincipal = { type: "user", id: "usr_carol" }
 const configuration = "cfg_model_a"
 const otherConfiguration = "cfg_model_b"
 const t0 = Date.parse("2026-11-20T09:00:00.000Z")
@@ -32,6 +40,12 @@ const t0 = Date.parse("2026-11-20T09:00:00.000Z")
 /** Exactly representable in float32, so every provider reads back what it was given. */
 const vectorA = [0.5, -0.25, 0.75]
 const vectorB = [-0.5, 0.125, 0.25]
+
+/** Searches ask with `east`: a chunk scores 1, 0.6, 0 and -1 against it. */
+const east = [1, 0, 0]
+const northeast = [0.6, 0.8, 0]
+const north = [0, 1, 0]
+const west = [-1, 0, 0]
 
 function at(seconds: number): Date {
   return new Date(t0 + seconds * 1000)
@@ -96,6 +110,70 @@ export function runAgentTurnVectorStorageContractSuite<
     })
   }
 
+  /**
+   * `thr_busy`, whose turn still runs, and the thread of the sub-agent that turn spawned,
+   * `thr_child`, opened by its task message `child_task`. The child has ended.
+   */
+  const busyConversationWithChild = async (storage: TStorage): Promise<void> => {
+    await conversation(storage, "thr_busy", 0, 300)
+    const parentExecution = await createTestAgentExecution(storage, {
+      projectId,
+      runId: "run_busy",
+    })
+    await storage.agents.messages.append({
+      id: "thr_busy_q1",
+      projectId,
+      threadId: "thr_busy",
+      runId: null,
+      role: "user",
+      parts: [{ type: "text", text: "Research" }],
+      createdAt: at(310),
+    })
+    await storage.agents.runs.create({
+      id: "run_busy",
+      projectId,
+      executionId: parentExecution,
+      threadId: "thr_busy",
+      triggerMessageId: "thr_busy_q1",
+      spec: { model: { provider: "test", modelId: "large" } },
+      createdAt: at(310),
+    })
+    await storage.agents.runs.start({
+      id: "run_busy",
+      projectId,
+      execution: { token: "exec_busy", queueLeaseExpiresAt: at(900) },
+    })
+    const childExecution = await createTestAgentExecution(storage, {
+      projectId,
+      runId: "child_1",
+      sourceExecutionId: parentExecution,
+    })
+    await storage.agents.runs.createSubagent({
+      id: "child_1",
+      projectId,
+      executionId: childExecution,
+      parentRunId: "run_busy",
+      parentExecutionToken: "exec_busy",
+      spawnKey: "research",
+      spec: {
+        model: { provider: "test", modelId: "small" },
+        task: "Research.",
+        toolNames: [],
+      },
+      thread: { id: "thr_child", create: true },
+      trigger: { id: "child_task", parts: [{ type: "text", text: "Research." }] },
+      maxActiveChildren: 4,
+      createdAt: at(320),
+    })
+    // The child ends, so only its kind keeps its thread out.
+    await storage.agents.runs.finishQueued({
+      id: "child_1",
+      projectId,
+      status: "cancelled",
+      completedAt: at(330),
+    })
+  }
+
   /** Turn `n` of a conversation built by `conversation`: messages `2n - 1` and `2n`. */
   const turnVector = (
     threadId: string,
@@ -153,6 +231,88 @@ export function runAgentTurnVectorStorageContractSuite<
     (await storage.agents.turnVectors.list({ projectId, threadId })).map(
       (vector) => `${vector.messageId}#${vector.chunk}`
     )
+
+  /** A conversation of `owner`'s, with these users added to it. */
+  const ownedBy = async (
+    storage: TStorage,
+    threadId: string,
+    owner: UserPrincipal,
+    participants: readonly UserPrincipal[] = []
+  ): Promise<void> => {
+    await storage.agents.threads.create({
+      id: threadId,
+      projectId,
+      ownerPrincipal: owner,
+      createdAt: at(0),
+    })
+    if (participants.length === 0) return
+
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId,
+      principals: participants,
+      addedBy: owner,
+      maxParticipants: 50,
+    })
+  }
+
+  /** Turns asked in this order, each opened at `seconds`, with one embedding per chunk. */
+  const indexTurns = async (
+    storage: TStorage,
+    threadId: string,
+    turns: readonly {
+      readonly seconds: number
+      readonly chunks: readonly (readonly number[])[]
+    }[],
+    config = configuration
+  ): Promise<void> => {
+    for (const [index, { seconds }] of turns.entries()) {
+      await ask(storage, threadId, index + 1, seconds)
+    }
+
+    const progress = await progressOf(storage, threadId, config)
+    await storage.agents.turnVectors.write({
+      projectId,
+      threadId,
+      configuration: config,
+      revision: progress!.revision,
+      fromSeq: 1,
+      turns: turns.flatMap(({ seconds, chunks }, index) =>
+        chunks.map((embedding, chunk) =>
+          turnVector(threadId, index + 1, {
+            chunk,
+            turnAt: at(seconds),
+            text: `Turn ${index + 1} of ${threadId}, part ${chunk}`,
+            embedding,
+          })
+        )
+      ),
+      complete: true,
+    })
+  }
+
+  const search = (storage: TStorage, input: Partial<SearchAgentTurnVectorsInput> = {}) =>
+    storage.agents.turnVectors.search({
+      projectId,
+      configuration,
+      vector: east,
+      principal: alice,
+      scope: "all",
+      k: 100,
+      perThread: 100,
+      candidates: 1000,
+      ...input,
+    })
+
+  /** Each hit as `messageId#chunk`, best first. */
+  const found = async (storage: TStorage, input: Partial<SearchAgentTurnVectorsInput> = {}) =>
+    (await search(storage, input)).hits.map((hit) => `${hit.messageId}#${hit.chunk}`)
+
+  /** The conversations of the hits, each once. */
+  const threadsFound = async (
+    storage: TStorage,
+    input: Partial<SearchAgentTurnVectorsInput> = {}
+  ) => [...new Set((await search(storage, input)).hits.map((hit) => hit.threadId))]
 
   describe(label, () => {
     test("replaces a thread's turns from a seq on, and resumes at its newest turn", async () => {
@@ -428,63 +588,7 @@ export function runAgentTurnVectorStorageContractSuite<
         await indexAll(storage, "thr_done", [turnVector("thr_done", 1)])
 
         // A turn holds this one, and its child's thread is a sub-agent's: neither is listed.
-        await conversation(storage, "thr_busy", 0, 300)
-        const parentExecution = await createTestAgentExecution(storage, {
-          projectId,
-          runId: "run_busy",
-        })
-        await storage.agents.messages.append({
-          id: "thr_busy_q1",
-          projectId,
-          threadId: "thr_busy",
-          runId: null,
-          role: "user",
-          parts: [{ type: "text", text: "Research" }],
-          createdAt: at(310),
-        })
-        await storage.agents.runs.create({
-          id: "run_busy",
-          projectId,
-          executionId: parentExecution,
-          threadId: "thr_busy",
-          triggerMessageId: "thr_busy_q1",
-          spec: { model: { provider: "test", modelId: "large" } },
-          createdAt: at(310),
-        })
-        await storage.agents.runs.start({
-          id: "run_busy",
-          projectId,
-          execution: { token: "exec_busy", queueLeaseExpiresAt: at(900) },
-        })
-        const childExecution = await createTestAgentExecution(storage, {
-          projectId,
-          runId: "child_1",
-          sourceExecutionId: parentExecution,
-        })
-        await storage.agents.runs.createSubagent({
-          id: "child_1",
-          projectId,
-          executionId: childExecution,
-          parentRunId: "run_busy",
-          parentExecutionToken: "exec_busy",
-          spawnKey: "research",
-          spec: {
-            model: { provider: "test", modelId: "small" },
-            task: "Research.",
-            toolNames: [],
-          },
-          thread: { id: "thr_child", create: true },
-          trigger: { id: "child_task", parts: [{ type: "text", text: "Research." }] },
-          maxActiveChildren: 4,
-          createdAt: at(320),
-        })
-        // The child ends, so only its kind keeps its thread out.
-        await storage.agents.runs.finishQueued({
-          id: "child_1",
-          projectId,
-          status: "cancelled",
-          completedAt: at(330),
-        })
+        await busyConversationWithChild(storage)
 
         expect(await threadsToIndex(storage, configuration, 10)).toEqual(["thr_new", "thr_old"])
         expect(await threadsToIndex(storage, configuration, 1)).toEqual(["thr_new"])
@@ -631,6 +735,237 @@ export function runAgentTurnVectorStorageContractSuite<
         expect(error).toBeInstanceOf(AgentStorageError)
         expect((error as AgentStorageError).code).toBe("invalid_input")
         expect(await listed(storage, "thr_1")).toEqual([])
+      })
+    })
+
+    describe.if(options.searches ?? true)("search", () => {
+      test("reads the conversations a principal owns or was added to, within the scope", async () => {
+        // Guard proof: drop the participant branch of the eligible conversations; `thr_added` is
+        // never found. Drop the shared-scope filter; Alice's private `thr_mine` is found from a
+        // shared conversation.
+        await withStorage(async (storage) => {
+          await ownedBy(storage, "thr_mine", alice)
+          await ownedBy(storage, "thr_mine_shared", alice, [bob])
+          await ownedBy(storage, "thr_added", bob, [alice])
+          await ownedBy(storage, "thr_bobs", bob)
+          await ownedBy(storage, "thr_bob_and_carol", bob, [carol])
+          for (const threadId of [
+            "thr_mine",
+            "thr_mine_shared",
+            "thr_added",
+            "thr_bobs",
+            "thr_bob_and_carol",
+          ]) {
+            await indexTurns(storage, threadId, [{ seconds: 10, chunks: [east] }])
+          }
+
+          expect(await threadsFound(storage)).toEqual(["thr_added", "thr_mine", "thr_mine_shared"])
+          expect(await threadsFound(storage, { scope: "shared" })).toEqual([
+            "thr_added",
+            "thr_mine_shared",
+          ])
+          expect(await threadsFound(storage, { principal: carol })).toEqual(["thr_bob_and_carol"])
+          expect(await threadsFound(storage, { principal: bob, scope: "shared" })).toEqual([
+            "thr_added",
+            "thr_bob_and_carol",
+            "thr_mine_shared",
+          ])
+
+          // The conversation a run works for is left out.
+          expect(await threadsFound(storage, { excludeThreadId: "thr_mine" })).toEqual([
+            "thr_added",
+            "thr_mine_shared",
+          ])
+
+          // Code without a caller reads every conversation.
+          expect(await threadsFound(storage, { principal: undefined })).toEqual([
+            "thr_added",
+            "thr_bob_and_carol",
+            "thr_bobs",
+            "thr_mine",
+            "thr_mine_shared",
+          ])
+        })
+      })
+
+      test("never reads a sub-agent's thread", async () => {
+        // Guard proof: drop `kind = 'conversation'` from the eligible conversations; the child's
+        // task is found, as its thread's owner is the conversation's.
+        await withStorage(async (storage) => {
+          await busyConversationWithChild(storage)
+          const progress = await progressOf(storage, "thr_child")
+          await storage.agents.turnVectors.write({
+            projectId,
+            threadId: "thr_child",
+            configuration,
+            revision: progress!.revision,
+            fromSeq: 1,
+            turns: [
+              {
+                messageId: "child_task",
+                chunk: 0,
+                firstSeq: 1,
+                lastSeq: 1,
+                turnAt: at(320),
+                text: "Research.",
+                embedding: east,
+              },
+            ],
+            complete: true,
+          })
+
+          expect(
+            await storage.agents.turnVectors.list({ projectId, threadId: "thr_child" })
+          ).toHaveLength(1)
+          expect(await found(storage)).toEqual([])
+          expect(await found(storage, { principal: undefined })).toEqual([])
+        })
+      })
+
+      test("reads only turns opened within the window, of the configuration and its dimension", async () => {
+        // Guard proof: make `until` inclusive; `until: at(30)` finds turn 3 as well.
+        await withStorage(async (storage) => {
+          await ownedBy(storage, "thr_mine", alice)
+          await indexTurns(storage, "thr_mine", [
+            { seconds: 10, chunks: [east] },
+            { seconds: 20, chunks: [east] },
+            { seconds: 30, chunks: [east] },
+          ])
+
+          expect(await found(storage, { since: at(20) })).toEqual([
+            "thr_mine_q3#0",
+            "thr_mine_q2#0",
+          ])
+          expect(await found(storage, { until: at(30) })).toEqual([
+            "thr_mine_q2#0",
+            "thr_mine_q1#0",
+          ])
+          expect(await found(storage, { since: at(20), until: at(30) })).toEqual(["thr_mine_q2#0"])
+          expect(await found(storage, { since: at(20), until: at(20) })).toEqual([])
+
+          // Another model's vectors, and vectors of another length, are never compared.
+          await ownedBy(storage, "thr_other_model", alice)
+          await indexTurns(
+            storage,
+            "thr_other_model",
+            [{ seconds: 40, chunks: [east] }],
+            otherConfiguration
+          )
+          await ownedBy(storage, "thr_wider", alice)
+          await indexTurns(storage, "thr_wider", [{ seconds: 40, chunks: [[1, 0, 0, 0]] }])
+
+          expect(await threadsFound(storage)).toEqual(["thr_mine"])
+          expect(
+            await found(storage, { configuration: otherConfiguration, since: at(40) })
+          ).toEqual(["thr_other_model_q1#0"])
+        })
+      })
+
+      test("ranks turns by their best chunk, keeping a few of each conversation", async () => {
+        // Guard proof: rank chunks instead of turns; turn 1 of `thr_a` is found twice. Drop the
+        // per-conversation bound; `thr_a`'s weaker turns crowd out what is asked for.
+        await withStorage(async (storage) => {
+          await ownedBy(storage, "thr_a", alice)
+          await indexTurns(storage, "thr_a", [
+            { seconds: 10, chunks: [north, east] },
+            { seconds: 20, chunks: [east] },
+            { seconds: 30, chunks: [northeast] },
+            { seconds: 40, chunks: [west] },
+          ])
+          await ownedBy(storage, "thr_b", alice)
+          await indexTurns(storage, "thr_b", [
+            { seconds: 20, chunks: [east] },
+            { seconds: 50, chunks: [east, east] },
+          ])
+
+          // Equal scores: the most recent first, then by conversation.
+          const { hits } = await search(storage)
+          expect(hits.map((hit) => `${hit.messageId}#${hit.chunk}`)).toEqual([
+            "thr_b_q2#0",
+            "thr_a_q2#0",
+            "thr_b_q1#0",
+            "thr_a_q1#1",
+            "thr_a_q3#0",
+            "thr_a_q4#0",
+          ])
+          expect(hits.map((hit) => Number(hit.score.toFixed(5)))).toEqual([1, 1, 1, 1, 0.6, -1])
+          expect(hits[3]).toMatchObject({
+            threadId: "thr_a",
+            firstSeq: 1,
+            lastSeq: 2,
+            turnAt: at(10),
+            text: "Turn 1 of thr_a, part 1",
+          })
+
+          expect(await found(storage, { perThread: 2 })).toEqual([
+            "thr_b_q2#0",
+            "thr_a_q2#0",
+            "thr_b_q1#0",
+            "thr_a_q1#1",
+          ])
+          expect(await found(storage, { perThread: 2, k: 3 })).toEqual([
+            "thr_b_q2#0",
+            "thr_a_q2#0",
+            "thr_b_q1#0",
+          ])
+        })
+      })
+
+      test("scores the most recent chunks within its bound, and says from when", async () => {
+        // Guard proof: cut the window at the bound itself; turn 2's second chunk is never scored,
+        // neither by this search nor by the one asking before `searchedFrom`.
+        await withStorage(async (storage) => {
+          await ownedBy(storage, "thr_mine", alice)
+          await indexTurns(storage, "thr_mine", [
+            { seconds: 10, chunks: [north] },
+            { seconds: 20, chunks: [north, east] },
+            { seconds: 30, chunks: [north] },
+          ])
+
+          const everything = await search(storage)
+          expect(everything.hits).toHaveLength(3)
+          expect(everything.searchedFrom).toBeUndefined()
+
+          // Two chunks: turn 3 alone, since turn 2 does not fit whole.
+          const newest = await search(storage, { candidates: 2 })
+          expect(newest.hits.map((hit) => hit.messageId)).toEqual(["thr_mine_q3"])
+          expect(newest.searchedFrom).toEqual(at(30))
+
+          const before = await search(storage, { candidates: 2, until: newest.searchedFrom })
+          expect(before.hits.map((hit) => `${hit.messageId}#${hit.chunk}`)).toEqual([
+            "thr_mine_q2#1",
+          ])
+          expect(before.searchedFrom).toEqual(at(20))
+
+          const oldest = await search(storage, { candidates: 2, until: before.searchedFrom })
+          expect(oldest.hits.map((hit) => hit.messageId)).toEqual(["thr_mine_q1"])
+          expect(oldest.searchedFrom).toBeUndefined()
+
+          // More chunks at one instant than the bound: the first ones, and the search goes on
+          // from before it.
+          await ownedBy(storage, "thr_long", alice)
+          await indexTurns(storage, "thr_long", [{ seconds: 40, chunks: [north, north, east] }])
+          const crowded = await search(storage, { candidates: 2 })
+          expect(crowded.hits.map((hit) => `${hit.messageId}#${hit.chunk}`)).toEqual([
+            "thr_long_q1#0",
+          ])
+          expect(crowded.searchedFrom).toEqual(at(40))
+        })
+      })
+
+      test("refuses more candidates than one search may score, and a window closed before it opens", async () => {
+        await withStorage(async (storage) => {
+          for (const input of [
+            { candidates: 10_001 },
+            { since: at(20), until: at(10) },
+            { k: 0 },
+            { vector: [0, 0, 0] },
+          ]) {
+            const error = await search(storage, input).catch((caught: unknown) => caught)
+            expect(error).toBeInstanceOf(AgentStorageError)
+            expect((error as AgentStorageError).code).toBe("invalid_input")
+          }
+        })
       })
     })
 

@@ -629,6 +629,9 @@ import type {
   SaveAgentMemoryData,
   SaveAgentMemoryErrors,
   SaveAgentMemoryResponses,
+  SearchAgentThreadsData,
+  SearchAgentThreadsErrors,
+  SearchAgentThreadsResponses,
   SearchObjectsData,
   SearchObjectsErrors,
   SearchObjectsResponses,
@@ -3131,6 +3134,32 @@ export const createAgentThread = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/agent-threads",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Search the caller's earlier agent conversations by meaning
+ *
+ * The conversations the caller owns or was added to, never one they only observe. With a run's token, never the conversation the run works for, and from a shared conversation only conversations someone else reads too. Answers 501 with `agent.search_unavailable` without an embedding model or storage that can search vectors.
+ */
+export const searchAgentThreads = <ThrowOnError extends boolean = false>(
+  options: Options<SearchAgentThreadsData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    SearchAgentThreadsResponses,
+    SearchAgentThreadsErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/search",
     ...options,
     headers: {
       "Content-Type": "application/json",
