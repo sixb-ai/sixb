@@ -58,6 +58,7 @@ import type {
   ListArtifactMediaInput,
   ListArtifactsInput,
   ListArtifactsResult,
+  ListArtifactThreadIdsInput,
   ListArtifactVersionsInput,
   ListArtifactVersionsResult,
   ListArtifactVideoRendersInput,
@@ -71,6 +72,7 @@ import type {
   UndoArtifactTurnInput,
   UndoneArtifactTurn,
 } from "@sixb/core/storage"
+import { READER_CONVERSATIONS } from "./agents/readers"
 import { runImmediateTransaction, type SqliteStoreConnection } from "./transactions"
 
 const ARTIFACT_COLUMNS = `
@@ -527,13 +529,31 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     return rows.map(parseArtifactVersionRow)
   }
 
-  async listThreadIds(input: GetArtifactInput): Promise<string[]> {
+  async listThreadIds(input: ListArtifactThreadIdsInput): Promise<string[]> {
+    if (!input.reader) {
+      const rows = this.db
+        .query(
+          `SELECT thread_id AS threadId FROM artifact_threads
+           WHERE project_id = ? AND artifact_id = ? ORDER BY thread_id`
+        )
+        .all(input.projectId, input.id) as { readonly threadId: string }[]
+      return rows.map((row) => row.threadId)
+    }
+
+    // A reader's: their conversations first, each looked up among the artifact's by its key.
     const rows = this.db
       .query(
-        `SELECT thread_id AS threadId FROM artifact_threads
-         WHERE project_id = ? AND artifact_id = ? ORDER BY thread_id`
+        `SELECT readable.thread_id AS threadId FROM (${READER_CONVERSATIONS}) AS readable
+         WHERE EXISTS (
+           SELECT 1 FROM artifact_threads AS shared
+           WHERE shared.project_id = ?1 AND shared.artifact_id = ?2
+             AND shared.thread_id = readable.thread_id
+         )
+         ORDER BY readable.thread_id`
       )
-      .all(input.projectId, input.id) as { readonly threadId: string }[]
+      .all(input.projectId, input.id, input.reader.type, input.reader.id) as {
+      readonly threadId: string
+    }[]
     return rows.map((row) => row.threadId)
   }
 

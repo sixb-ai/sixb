@@ -252,6 +252,11 @@ export interface GetArtifactInput {
   readonly id: string
 }
 
+export interface ListArtifactThreadIdsInput extends GetArtifactInput {
+  /** Only the conversations this principal owns or takes part in; every one without it. */
+  readonly reader?: Principal
+}
+
 export interface ListArtifactsInput {
   readonly projectId: string
   readonly owner?: Principal
@@ -732,9 +737,9 @@ export interface ArtifactStorage {
   listVersions(input: ListArtifactVersionsInput): Promise<ListArtifactVersionsResult>
   /**
    * The threads the artifact is shared in, by id: each one it was written from, and the one it was
-   * copied for.
+   * copied for. With a reader, only theirs or those they take part in, found from their side.
    */
-  listThreadIds(input: GetArtifactInput): Promise<string[]>
+  listThreadIds(input: ListArtifactThreadIdsInput): Promise<string[]>
   /**
    * Copies an artifact with every version under its number, frozen or open as it is, each without
    * its origin, as a new artifact shared in `threadId` for as long as it lasts: a fork's copy,

@@ -1,6 +1,7 @@
 import { ARTIFACT_COMMENT_LIMITS, ARTIFACT_RESTORE_POINTS } from "../../artifacts/limits"
 import { type Principal, principalsEqual } from "../../auth"
 import type { FileRef } from "../../blob-storage"
+import type { AgentStorage } from "../agents"
 import { paginate } from "../pagination"
 import {
   artifactStateBytes,
@@ -46,6 +47,7 @@ import type {
   ListArtifactMediaInput,
   ListArtifactsInput,
   ListArtifactsResult,
+  ListArtifactThreadIdsInput,
   ListArtifactVersionsInput,
   ListArtifactVersionsResult,
   ListArtifactVideoRendersInput,
@@ -97,6 +99,12 @@ interface InMemoryArtifactSnapshot {
 }
 
 export class InMemoryArtifactStorage implements ArtifactStorage {
+  /**
+   * `agents` says who owns a thread and takes part in it, which a database joins: the threads of a
+   * reader are listed from it.
+   */
+  constructor(private readonly agents?: Pick<AgentStorage, "threads">) {}
+
   private artifacts = new Map<string, StoredArtifact>()
   private frameGrants = new Map<string, ArtifactFrameGrantRecord>()
   /** By artifact and reader, then by key. */
@@ -372,10 +380,35 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     return { versions: structuredClone(page), hasMore, total }
   }
 
-  async listThreadIds(input: GetArtifactInput): Promise<string[]> {
+  async listThreadIds(input: ListArtifactThreadIdsInput): Promise<string[]> {
     const stored = this.artifacts.get(artifactKey(input.projectId, input.id))
     // Code-unit order, as SQLite compares text.
-    return [...(stored?.threads.keys() ?? [])].sort((left, right) => (left < right ? -1 : 1))
+    const threadIds = [...(stored?.threads.keys() ?? [])].sort((left, right) =>
+      left < right ? -1 : 1
+    )
+    const { reader } = input
+    if (!reader || threadIds.length === 0) return threadIds
+
+    if (!this.agents) {
+      throw new Error("[Sixb] Listing a reader's threads needs the agent storage beside it.")
+    }
+    const query = { projectId: input.projectId, threadIds }
+    const [threads, participants] = await Promise.all([
+      this.agents.threads.getByIds({ projectId: input.projectId, ids: threadIds }),
+      this.agents.threads.listParticipants(query),
+    ])
+    const read = new Set([
+      ...threads
+        .filter(
+          (thread) =>
+            thread.kind === "conversation" && principalsEqual(thread.ownerPrincipal, reader)
+        )
+        .map((thread) => thread.id),
+      ...participants
+        .filter((participant) => principalsEqual(participant.principal, reader))
+        .map((participant) => participant.threadId),
+    ])
+    return threadIds.filter((threadId) => read.has(threadId))
   }
 
   async copy(input: CopyArtifactInput): Promise<ArtifactRecord> {

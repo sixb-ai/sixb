@@ -3687,6 +3687,53 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    // Regression proof: drop the reader's condition from a provider's
+    // listThreadIdsByArtifactContext; the other user's conversation is then listed to the owner.
+    test("finds a reader's conversations carrying an artifact, theirs or those they take part in", async () => {
+      await withStorage(async (storage) => {
+        const brought = {
+          type: "context",
+          context: { kind: "artifact", id: "art_teaser" },
+          origin: "ambient",
+        } as const
+
+        for (const [id, ownerPrincipal] of [
+          ["thr_mine", owner],
+          ["thr_joined", otherUser],
+          ["thr_theirs", otherUser],
+          ["thr_service", serviceAccount],
+        ] as const) {
+          await storage.threads.create(threadInput({ id, ownerPrincipal }))
+          await storage.messages.append({
+            id: `msg_${id}`,
+            projectId,
+            threadId: id,
+            runId: null,
+            role: "user",
+            parts: [brought],
+          })
+        }
+        await storage.threads.addParticipants({
+          projectId,
+          threadId: "thr_joined",
+          principals: [{ type: "user", id: owner.id }],
+          addedBy: otherUser,
+          maxParticipants: 10,
+        })
+
+        const threadIds = (reader?: Principal) =>
+          storage.messages.listThreadIdsByArtifactContext({
+            projectId,
+            artifactId: "art_teaser",
+            ...(reader ? { reader } : {}),
+          })
+        expect(await threadIds()).toEqual(["thr_joined", "thr_mine", "thr_service", "thr_theirs"])
+        expect(await threadIds(owner)).toEqual(["thr_joined", "thr_mine"])
+        expect(await threadIds(otherUser)).toEqual(["thr_joined", "thr_theirs"])
+        expect(await threadIds(serviceAccount)).toEqual(["thr_service"])
+      })
+    })
+
     test("rejects appends to missing threads, duplicate messages, and unknown runs", async () => {
       await withStorage(async (storage) => {
         await expectAgentError(

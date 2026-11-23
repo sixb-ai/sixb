@@ -56,6 +56,7 @@ export type {
   ListArtifactMediaInput,
   ListArtifactsInput,
   ListArtifactsResult,
+  ListArtifactThreadIdsInput,
   ListArtifactVersionsInput,
   ListArtifactVersionsResult,
   ListArtifactVideoRendersInput,

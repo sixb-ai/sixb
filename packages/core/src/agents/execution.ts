@@ -1172,19 +1172,25 @@ export function createAgentRuntime<
       listForArtifact: async (artifactId) => {
         if (!(await getCallerArtifacts(runtime).get(artifactId))) return null
 
-        const projectId = runtime.projectId
+        const scope = rule.scope()
+        if (scope === "none") return []
+
         // The conversations the artifact is shared in, and those a message brought it to as
-        // context, before the Agent wrote it or without it ever doing so.
+        // context, before the Agent wrote it or without it ever doing so: only the caller's, or
+        // those they take part in, asked of storage as such, so the cost is theirs.
+        const projectId = runtime.projectId
+        const reader = scope === "every" ? {} : { reader: scope.reader }
         const [shared, carried] = await Promise.all([
-          runtime.storage.artifacts?.listThreadIds({ projectId, id: artifactId }) ?? [],
+          runtime.storage.artifacts?.listThreadIds({ projectId, id: artifactId, ...reader }) ?? [],
           runtime.storage.agents?.messages.listThreadIdsByArtifactContext({
             projectId,
             artifactId,
+            ...reader,
           }) ?? [],
         ])
 
-        // Each as the caller reads it, so only a conversation of theirs, or one they take part in,
-        // is listed: an artifact they read opens no conversation they do not.
+        // Each as the caller reads it still: an artifact they read opens no conversation they
+        // do not.
         const readable = await rule.readConversations([...shared, ...carried])
         const threads = readable
           .map(({ thread }) => thread)

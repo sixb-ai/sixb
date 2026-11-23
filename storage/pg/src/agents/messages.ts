@@ -17,6 +17,7 @@ import {
 import type { SQLClient, SqlParameter } from "../pg-client"
 import { isUniqueViolation } from "../storage-errors"
 import { type PgStoreClient, runPgTransaction } from "../transactions"
+import { readerConversations } from "./readers"
 import { type AgentMessageRow, queryAgentList, rowToMessageRecord } from "./rows"
 
 export class PgAgentMessageStore implements AgentMessageStore {
@@ -285,19 +286,39 @@ export class PgAgentMessageStore implements AgentMessageStore {
   ): Promise<string[]> {
     // Both terms are idx_agent_messages_artifact_context's, written as it is so the index serves
     // the query: its condition, and the ids of the artifacts a message carries, which it indexes.
-    const rows = await this.sql<{ thread_id: string }[]>`
-      SELECT thread_id FROM agent_messages
-      WHERE project_id = ${input.projectId}
-        AND role = 'user'
-        AND parts @> '[{"type":"context","context":{"kind":"artifact"}}]'
-        AND jsonb_path_query_array(
-          parts,
-          '$[*] ? (@.type == "context" && @.context.kind == "artifact").context.id'
-        ) @> ${JSON.stringify([input.artifactId])}::text::jsonb
-      GROUP BY thread_id
-      ORDER BY thread_id COLLATE "C"
+    const carries = this.sql`
+      message.project_id = ${input.projectId}
+      AND message.role = 'user'
+      AND message.parts @> '[{"type":"context","context":{"kind":"artifact"}}]'
+      AND jsonb_path_query_array(
+        message.parts,
+        '$[*] ? (@.type == "context" && @.context.kind == "artifact").context.id'
+      ) @> ${JSON.stringify([input.artifactId])}::text::jsonb
     `
 
+    if (!input.reader) {
+      const rows = await this.sql<{ thread_id: string }[]>`
+        SELECT message.thread_id FROM agent_messages AS message
+        WHERE ${carries}
+        GROUP BY message.thread_id
+        ORDER BY message.thread_id COLLATE "C"
+      `
+      return rows.map((row) => row.thread_id)
+    }
+
+    // A reader's: each of their conversations, looked into through its own user messages for the
+    // first that carries it. LIMIT keeps it a lookup per conversation, which a join of every
+    // message carrying the artifact, all users', would not be.
+    const rows = await this.sql<{ thread_id: string }[]>`
+      SELECT readable.thread_id
+      FROM (${readerConversations(this.sql, input.projectId, input.reader)}) AS readable
+      CROSS JOIN LATERAL (
+        SELECT 1 FROM agent_messages AS message
+        WHERE message.thread_id = readable.thread_id AND ${carries}
+        LIMIT 1
+      ) AS carried
+      ORDER BY readable.thread_id COLLATE "C"
+    `
     return rows.map((row) => row.thread_id)
   }
 }

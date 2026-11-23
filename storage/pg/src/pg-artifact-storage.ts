@@ -57,6 +57,7 @@ import type {
   ListArtifactMediaInput,
   ListArtifactsInput,
   ListArtifactsResult,
+  ListArtifactThreadIdsInput,
   ListArtifactVersionsInput,
   ListArtifactVersionsResult,
   ListArtifactVideoRendersInput,
@@ -70,6 +71,7 @@ import type {
   UndoArtifactTurnInput,
   UndoneArtifactTurn,
 } from "@sixb/core/storage"
+import { readerConversations } from "./agents/readers"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
@@ -477,11 +479,29 @@ export class PgArtifactStorage implements ArtifactStorage {
     return row ? parseArtifactVersionRow(row) : null
   }
 
-  async listThreadIds(input: GetArtifactInput): Promise<string[]> {
+  async listThreadIds(input: ListArtifactThreadIdsInput): Promise<string[]> {
+    if (!input.reader) {
+      const rows = await this.sql<{ thread_id: string }[]>`
+        SELECT thread_id FROM artifact_threads
+        WHERE project_id = ${input.projectId} AND artifact_id = ${input.id}
+        ORDER BY thread_id COLLATE "C"
+      `
+      return rows.map((row) => row.thread_id)
+    }
+
+    // A reader's: each of their conversations, looked up among the artifact's by its key. LIMIT
+    // keeps it a lookup per conversation, rather than a read of every thread it is shared in.
     const rows = await this.sql<{ thread_id: string }[]>`
-      SELECT thread_id FROM artifact_threads
-      WHERE project_id = ${input.projectId} AND artifact_id = ${input.id}
-      ORDER BY thread_id COLLATE "C"
+      SELECT readable.thread_id
+      FROM (${readerConversations(this.sql, input.projectId, input.reader)}) AS readable
+      CROSS JOIN LATERAL (
+        SELECT 1 FROM artifact_threads AS shared
+        WHERE shared.project_id = ${input.projectId}
+          AND shared.artifact_id = ${input.id}
+          AND shared.thread_id = readable.thread_id
+        LIMIT 1
+      ) AS linked
+      ORDER BY readable.thread_id COLLATE "C"
     `
     return rows.map((row) => row.thread_id)
   }

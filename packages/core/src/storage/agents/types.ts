@@ -826,6 +826,8 @@ export interface ListAgentThreadIdsByArtifactContextInput {
   readonly projectId: string
   /** The artifact a user message carries as context, as `agentContext.artifact()` sends it. */
   readonly artifactId: string
+  /** Only the conversations this principal owns or takes part in; every thread without it. */
+  readonly reader?: Principal
 }
 
 // ── agent_context_checkpoints — append-only model-context boundaries ──────────────────────────
@@ -992,7 +994,8 @@ export interface AgentMessageStore {
   list(input: ListAgentMessagesInput): Promise<ListAgentMessagesResult>
   /**
    * The threads holding a user message that carries the artifact as context, each once, ordered by
-   * id. A message deleted, by a retry or an edit, no longer counts.
+   * id. A message deleted, by a retry or an edit, no longer counts. With a reader, only theirs or
+   * those they take part in, found from their side: the cost is theirs, not the project's.
    */
   listThreadIdsByArtifactContext(input: ListAgentThreadIdsByArtifactContextInput): Promise<string[]>
 }

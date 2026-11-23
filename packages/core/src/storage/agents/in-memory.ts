@@ -1346,9 +1346,11 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     input: ListAgentThreadIdsByArtifactContextInput
   ): Promise<string[]> {
     const threadIds = new Set<string>()
+    const { reader } = input
 
     for (const message of this.state.messages.values()) {
       if (message.projectId !== input.projectId || message.role !== "user") continue
+      if (reader && !readsThread(this.state, input.projectId, message.threadId, reader)) continue
 
       const carries = message.parts.some(
         (part) =>
@@ -1362,6 +1364,21 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     // Code-unit order, as SQLite compares text.
     return [...threadIds].sort((left, right) => (left < right ? -1 : 1))
   }
+}
+
+/** Whether `reader` owns the conversation or takes part in it. */
+function readsThread(
+  state: AgentStoreState,
+  projectId: string,
+  threadId: string,
+  reader: Principal
+): boolean {
+  const thread = state.threads.get(key(projectId, threadId))
+  if (thread?.kind !== "conversation") return false
+  if (principalsEqual(thread.ownerPrincipal, reader)) return true
+
+  const participants = state.participants.get(key(projectId, threadId)) ?? []
+  return participants.some((participant) => principalsEqual(participant.principal, reader))
 }
 
 /** The `seq` of a thread's newest message, 0 when it has none. */

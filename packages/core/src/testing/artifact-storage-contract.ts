@@ -6,6 +6,7 @@ import {
 } from "../artifacts/limits"
 import type { Principal } from "../auth"
 import type { FileRef } from "../blob-storage"
+import type { AgentStorage } from "../storage/agents"
 import {
   type ArtifactCommentAuthor,
   type ArtifactFrameGrantRecord,
@@ -21,6 +22,8 @@ import type { Storage } from "../storage/types"
 
 export interface ArtifactStorageContractStorage extends Pick<Storage, "transaction"> {
   readonly artifacts: ArtifactStorage
+  /** Who owns a thread and takes part in it, for the threads listed to one reader. */
+  readonly agents: AgentStorage
 }
 
 export interface ArtifactStorageContractSuiteOptions<
@@ -1044,6 +1047,43 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         await artifacts.undoTurnWrites({ projectId, turnRunId: "run_5" })
         expect(await artifacts.listThreadIds({ projectId, id: "art_undone" })).toEqual([])
         expect((await artifacts.list({ projectId, threadId: "thr_5" })).total).toBe(0)
+      })
+    })
+
+    // Regression proof: drop the reader's condition from a provider's listThreadIds; the other
+    // owner's conversation is then listed to the owner too.
+    test("lists to a reader only the conversations they own or take part in", async () => {
+      await withStorage(async (artifacts, storage) => {
+        // Shared in thr_1 by its creation, then in thr_2 and thr_3.
+        await artifacts.create(createInput({ id: "art_mine" }))
+        for (const threadId of ["thr_2", "thr_3"]) {
+          await artifacts.publish(
+            publishInput({ origin: { threadId, runId: `run_${threadId}` } }, "art_mine")
+          )
+        }
+
+        // thr_1 is the owner's; thr_2 and thr_3 the other's, who added the owner to thr_2.
+        for (const [id, ownerPrincipal] of [
+          ["thr_1", owner],
+          ["thr_2", otherOwner],
+          ["thr_3", otherOwner],
+        ] as const) {
+          await storage.agents.threads.create({ projectId, id, ownerPrincipal })
+        }
+        await storage.agents.threads.addParticipants({
+          projectId,
+          threadId: "thr_2",
+          principals: [{ type: "user", id: owner.id }],
+          addedBy: otherOwner,
+          maxParticipants: 10,
+        })
+
+        const listed = (reader?: Principal) =>
+          artifacts.listThreadIds({ projectId, id: "art_mine", ...(reader ? { reader } : {}) })
+        expect(await listed()).toEqual(["thr_1", "thr_2", "thr_3"])
+        expect(await listed(owner)).toEqual(["thr_1", "thr_2"])
+        expect(await listed(otherOwner)).toEqual(["thr_2", "thr_3"])
+        expect(await listed({ type: "user", id: "usr_nobody" })).toEqual([])
       })
     })
 
