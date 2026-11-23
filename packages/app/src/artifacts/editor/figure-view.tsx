@@ -1,9 +1,10 @@
 import { isArtifactAddress } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
-import { type NodeViewProps, NodeViewWrapper } from "@tiptap/react"
 import { ImageOff } from "lucide-react"
 import { createContext, useContext, useEffect, useState } from "react"
 import { ArtifactEmbed } from "../references/references"
+import type { Node } from "./core/model"
+import type { NodeViewProps } from "./node-views"
 
 /** Where a document's image path is served from, and what an empty caption says. */
 export const FigureContext = createContext<{
@@ -15,7 +16,13 @@ export const FigureContext = createContext<{
  * A figure as it reads: the image, and its caption, which is typed into in place. The caption is
  * the image's title, as Markdown keeps it.
  */
-export function FigureView({ node, updateAttributes, selected, editor }: NodeViewProps) {
+export function FigureView({
+  node,
+  updateAttributes,
+  selected,
+  editable,
+  focusEditor,
+}: NodeViewProps) {
   const { source: resolve, caption: captionPlaceholder } = useContext(FigureContext)
   const src = String(node.attrs.src ?? "")
   const embedded = isArtifactAddress(src)
@@ -24,7 +31,7 @@ export function FigureView({ node, updateAttributes, selected, editor }: NodeVie
   useEffect(() => setCaption(String(node.attrs.title ?? "")), [node.attrs.title])
 
   return (
-    <NodeViewWrapper as="figure" className={cn("sixb-editor-figure", selected && "is-selected")}>
+    <figure className={cn("sixb-editor-figure", selected && "is-selected")}>
       <div data-drag-handle="" className="sixb-editor-figure-frame">
         {embedded ? (
           // Another artifact, shown as the page shows it; its alt text is its caption.
@@ -40,12 +47,12 @@ export function FigureView({ node, updateAttributes, selected, editor }: NodeVie
           </div>
         )}
       </div>
-      {!embedded && (editor.isEditable || caption) ? (
+      {!embedded && (editable || caption) ? (
         <input
           className="sixb-editor-caption"
           value={caption}
           placeholder={captionPlaceholder}
-          readOnly={!editor.isEditable}
+          readOnly={!editable}
           aria-label={String(node.attrs.alt ?? "")}
           onChange={(event) => setCaption(event.target.value)}
           onBlur={() => {
@@ -56,11 +63,19 @@ export function FigureView({ node, updateAttributes, selected, editor }: NodeVie
             if (event.key === "Enter") {
               event.preventDefault()
               event.currentTarget.blur()
-              editor.commands.focus()
+              focusEditor()
             }
           }}
         />
       ) : null}
-    </NodeViewWrapper>
+    </figure>
   )
+}
+
+/** A figure's DOM: a block the editor picks whole and drags, React drawing inside it. */
+export function figureDOM(_node: Node): { dom: HTMLElement; portal: HTMLElement } {
+  const dom = document.createElement("div")
+  dom.contentEditable = "false"
+  dom.draggable = true
+  return { dom, portal: dom }
 }

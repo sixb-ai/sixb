@@ -9,27 +9,23 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@sixb/ui/components"
-import type { Editor } from "@tiptap/core"
-import { DragHandle } from "@tiptap/extension-drag-handle-react"
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
-import { TextSelection, type Transaction } from "@tiptap/pm/state"
 import { ArrowDown, ArrowUp, Copy, GripVertical, Plus, Repeat2, Trash2 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import type { RelativePosition } from "yjs"
 import type { BlockChoice, BlockType } from "./blocks"
+import { insertContentAt } from "./core/commands"
+import type { Editor } from "./core/editor"
+import type { Node } from "./core/model"
+import { NodeSelection, TextSelection } from "./core/state"
+import { floatingPosition } from "./floating"
 import type { EditorMessages } from "./messages"
 
 // The handle beside the block the pointer is over: `+` adds a block below and opens the `/` menu
 // there; the grip drags the block, and a click on it opens what can be done to it. While its menu
 // is open, the handle stays with its block.
 
-/**
- * Where the handle sits: at the start of its block's first line. One object for the editor's
- * life: the handle registers its plugin again whenever this changes, which ends any open `/` menu.
- */
-const HANDLE_POSITION = { placement: "left-start", strategy: "absolute" } as const
-
 interface Hovered {
-  readonly node: ProseMirrorNode
+  readonly node: Node
   readonly pos: number
 }
 
@@ -43,23 +39,123 @@ export function BlockHandle({
   readonly messages: EditorMessages
 }) {
   const hovered = useRef<Hovered | null>(null)
+  const handle = useRef<HTMLDivElement | null>(null)
   const [menu, setMenu] = useState(false)
+  const locked = useRef(false)
+  /** The block the handle is beside, and where, as the handle follows it: by position, and by
+   * a Yjs position for others' changes, after which the document is read whole again. */
+  const current = useRef<Node | null>(null)
+  const at = useRef(-1)
+  const relative = useRef<RelativePosition | null>(null)
+  const [shown, setShown] = useState(false)
 
-  // The block pointed at moves with what anyone changes before it, while its menu is open too;
-  // one taken out is pointed at no more.
+  /** Puts the handle at the start of its block's first line. */
+  const place = useCallback((dom: Element) => {
+    const element = handle.current
+    if (!element) return
+    const { x, y } = floatingPosition(dom.getBoundingClientRect(), element, {
+      placement: "left-start",
+    })
+    element.style.left = `${x}px`
+    element.style.top = `${y}px`
+  }, [])
+
+  const hide = useCallback(() => {
+    hovered.current = null
+    current.current = null
+    at.current = -1
+    relative.current = null
+    setShown(false)
+  }, [])
+
+  // The top-level block under the pointer, found once a frame as it moves.
   useEffect(() => {
-    const follow = ({ transaction }: { readonly transaction: Transaction }) => {
-      const current = hovered.current
-      if (!current || !transaction.docChanged) return
-      const mapped = transaction.mapping.mapResult(current.pos)
-      const node = mapped.deleted ? null : transaction.doc.nodeAt(mapped.pos)
+    const view = editor.view
+    let frame = 0
+    let pending: { x: number; y: number } | null = null
+    const find = () => {
+      frame = 0
+      if (!pending || locked.current) return
+      const { x, y } = pending
+      pending = null
+      const block = blockAt(editor, x, y)
+      if (!block || block.node === current.current) return
+      current.current = block.node
+      at.current = block.pos
+      relative.current = editor.binding.relative(block.pos)
+      hovered.current = { node: block.node, pos: block.pos }
+      place(block.dom)
+      setShown(editor.isEditable)
+    }
+    const move = (event: MouseEvent) => {
+      if (locked.current) return
+      pending = { x: event.clientX, y: event.clientY }
+      if (!frame) frame = requestAnimationFrame(find)
+    }
+    const leave = (event: MouseEvent) => {
+      if (locked.current) return
+      if (handle.current?.parentElement?.contains(event.relatedTarget as globalThis.Node | null))
+        return
+      hide()
+    }
+    const key = () => {
+      if (locked.current || !view.hasFocus()) return
+      hide()
+    }
+    view.dom.addEventListener("mousemove", move)
+    view.dom.addEventListener("mouseleave", leave)
+    view.dom.addEventListener("keydown", key)
+    // The handle stays at the position it was at: after a change, beside whatever block is there
+    // now. The block pointed at moves with what anyone changes before it, while its menu is
+    // open too; one taken out is pointed at no more.
+    let previousDoc = editor.state.doc
+    const offTransaction = editor.on("transaction", ({ transaction }) => {
+      const doc = editor.state.doc
+      if (at.current !== -1 && doc !== previousDoc && transaction) {
+        if (transaction.getMeta("remote")) {
+          at.current = (relative.current && editor.binding.absolute(relative.current)) || 0
+        } else if (transaction.docChanged) {
+          const pos = transaction.mapping.map(at.current)
+          if (pos !== at.current) {
+            at.current = pos
+            relative.current = editor.binding.relative(pos)
+          }
+        }
+      }
+      if (doc !== previousDoc && !doc.eq(previousDoc) && at.current !== -1) {
+        let dom = editor.view.nodeDOM(
+          Math.min(at.current, doc.content.size)
+        ) as globalThis.Node | null
+        while (dom?.parentNode && dom.parentNode !== view.dom) dom = dom.parentNode
+        if (dom && dom !== view.dom && dom.nodeType === 1) {
+          const $pos = doc.resolve(Math.max(0, view.posFromDOM(dom, 0, -1)))
+          const pos = $pos.depth > 0 ? $pos.before(1) : $pos.pos
+          const node = doc.nodeAt(pos)
+          if (node) {
+            current.current = node
+            at.current = pos
+            relative.current = editor.binding.relative(pos)
+            if (!locked.current) hovered.current = { node, pos }
+            place(dom as Element)
+          }
+        }
+      }
+      previousDoc = doc
+      // While its menu is open, the block it acts on moves with what anyone changes before it.
+      const pointed = hovered.current
+      if (!pointed || !locked.current || !transaction?.docChanged) return
+      const mapped = transaction.mapping.mapResult(pointed.pos)
+      const node = mapped.deleted ? null : doc.nodeAt(mapped.pos)
       hovered.current = node ? { node, pos: mapped.pos } : null
-    }
-    editor.on("transaction", follow)
+    })
     return () => {
-      editor.off("transaction", follow)
+      cancelAnimationFrame(frame)
+      view.dom.removeEventListener("mousemove", move)
+      view.dom.removeEventListener("mouseleave", leave)
+      view.dom.removeEventListener("keydown", key)
+      offTransaction()
     }
-  }, [editor])
+  }, [editor, place, hide])
 
   const block = () => {
     const current = hovered.current
@@ -68,146 +164,202 @@ export function BlockHandle({
     return node ? { node, pos: current.pos } : null
   }
 
-  const lock = (locked: boolean) => {
-    const commands = editor.commands as unknown as Record<string, () => boolean>
-    commands[locked ? "lockDragHandle" : "unlockDragHandle"]?.()
-  }
-
   const addBelow = () => {
     const at = block()
     if (!at) return
     const after = at.pos + at.node.nodeSize
     // An empty paragraph is reused; anything else gets a new one below it.
     if (at.node.type.name === "paragraph" && at.node.content.size === 0) {
-      editor
-        .chain()
-        .focus(at.pos + 1)
-        .insertContent("/")
-        .run()
+      editor.run((tr) => {
+        tr.setSelection(TextSelection.near(tr.doc.resolve(at.pos + 1)))
+        return insertContentAt({ from: tr.selection.from, to: tr.selection.to }, "/")(tr)
+      })
+      editor.focus()
       return
     }
-    editor
-      .chain()
-      .insertContentAt(after, { type: "paragraph" })
-      .focus(after + 1)
-      .insertContent("/")
-      .run()
+    editor.run((tr) => {
+      insertContentAt(after, editor.schema.nodeType("paragraph").create())(tr)
+      tr.setSelection(TextSelection.near(tr.doc.resolve(after + 1)))
+      return insertContentAt({ from: tr.selection.from, to: tr.selection.to }, "/")(tr)
+    })
+    editor.focus()
   }
 
   const duplicate = () => {
     const at = block()
     if (!at) return
-    editor
-      .chain()
-      .insertContentAt(at.pos + at.node.nodeSize, at.node.toJSON())
-      .focus()
-      .run()
+    editor.run(
+      insertContentAt(at.pos + at.node.nodeSize, editor.schema.nodeFromJSON(at.node.toJSON()))
+    )
+    editor.focus()
   }
 
   const remove = () => {
     const at = block()
     if (!at) return
-    editor
-      .chain()
-      .deleteRange({ from: at.pos, to: at.pos + at.node.nodeSize })
-      .focus()
-      .run()
+    editor.run((tr) => {
+      tr.delete(at.pos, at.pos + at.node.nodeSize)
+      return true
+    })
+    editor.focus()
   }
 
   const move = (by: -1 | 1) => {
     const at = block()
     if (!at) return
     const $pos = editor.state.doc.resolve(at.pos)
-    const index = $pos.index()
-    const parent = $pos.parent
-    const sibling = parent.maybeChild(index + by)
+    const sibling = $pos.parent.maybeChild($pos.index() + by)
     if (!sibling) return
-    const tr = editor.state.tr
     const target = by === 1 ? at.pos + sibling.nodeSize : at.pos - sibling.nodeSize
+    const tr = editor.state.tr
     tr.delete(at.pos, at.pos + at.node.nodeSize)
     tr.insert(target, at.node)
-    editor.view.dispatch(tr.scrollIntoView())
+    editor.dispatch(tr.scrollIntoView())
     // Where it went, which mapping its old place cannot tell.
     hovered.current = { node: at.node, pos: target }
-    editor.commands.focus()
+    editor.focus()
   }
 
   const turnInto = (type: BlockType) => {
     const at = block()
     if (!at) return
     // Its words are selected, so the block they are in becomes the new one.
-    const tr = editor.state.tr.setSelection(
-      TextSelection.create(editor.state.doc, at.pos + 1, at.pos + at.node.nodeSize - 1)
+    editor.dispatch(
+      editor.state.tr.setSelection(
+        TextSelection.create(editor.state.doc, at.pos + 1, at.pos + at.node.nodeSize - 1)
+      )
     )
-    editor.view.dispatch(tr)
     type.make(editor)
   }
 
-  const textual = (node: ProseMirrorNode | undefined) => !!node && node.isTextblock
+  /** The grip drags its block: the block is picked and dropped where it lands. */
+  const dragStart = (event: React.DragEvent) => {
+    const at = block()
+    if (!at || !event.dataTransfer) return
+    const selection = NodeSelection.create(editor.state.doc, at.pos)
+    editor.dispatch(editor.state.tr.setSelection(selection))
+    const dom = editor.view.nodeDOM(at.pos)
+    if (dom instanceof HTMLElement) event.dataTransfer.setDragImage(dom, 0, 0)
+    event.dataTransfer.effectAllowed = "copyMove"
+    event.dataTransfer.setData("text/plain", at.node.textContent)
+    editor.view.dragging = { slice: selection.content(), move: true, node: selection }
+  }
+
+  const textual = (node: Node | undefined) => !!node && node.isTextblock
 
   return (
-    <DragHandle
-      editor={editor}
-      className="sixb-editor-handle"
-      onNodeChange={({ node, pos }) => {
-        if (!menu) hovered.current = node ? { node, pos } : null
-      }}
-      computePositionConfig={HANDLE_POSITION}
-    >
-      <div className="flex items-center gap-0.5 pr-2">
-        <button
-          type="button"
-          aria-label={messages.handle.add}
-          title={messages.handle.add}
-          className="sixb-editor-handle-button"
-          onClick={addBelow}
-        >
-          <Plus className="size-[18px]" strokeWidth={1.75} />
-        </button>
-        <DropdownMenu
-          open={menu}
-          onOpenChange={(open) => {
-            setMenu(open)
-            lock(open)
-          }}
-        >
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={messages.handle.menu}
-              title={`${messages.handle.drag}\n${messages.handle.menu}`}
-              className="sixb-editor-handle-button cursor-grab active:cursor-grabbing"
-            >
-              <GripVertical className="size-[18px]" strokeWidth={1.75} />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            side="left"
-            align="start"
-            sideOffset={6}
-            className="w-56"
-            onCloseAutoFocus={(event) => {
-              event.preventDefault()
-              editor.commands.focus()
+    <div className="pointer-events-none absolute top-0 left-0 z-10">
+      <div
+        ref={handle}
+        className="sixb-editor-handle"
+        draggable={!menu}
+        onDragStart={dragStart}
+        onDragEnd={hide}
+        style={{
+          position: "absolute",
+          visibility: shown && editor.isEditable ? undefined : "hidden",
+          pointerEvents: shown ? "auto" : "none",
+        }}
+      >
+        <div className="flex items-center gap-0.5 pr-2">
+          <button
+            type="button"
+            aria-label={messages.handle.add}
+            title={messages.handle.add}
+            className="sixb-editor-handle-button"
+            onClick={addBelow}
+          >
+            <Plus className="size-[18px]" strokeWidth={1.75} />
+          </button>
+          <DropdownMenu
+            open={menu}
+            onOpenChange={(open) => {
+              setMenu(open)
+              locked.current = open
             }}
           >
-            <BlockMenuItems
-              textual={textual(hovered.current?.node)}
-              types={types}
-              messages={messages}
-              onTurnInto={(id) => {
-                const type = types.find((each) => each.id === id)
-                if (type) turnInto(type)
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={messages.handle.menu}
+                title={`${messages.handle.drag}\n${messages.handle.menu}`}
+                className="sixb-editor-handle-button cursor-grab active:cursor-grabbing"
+              >
+                <GripVertical className="size-[18px]" strokeWidth={1.75} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="left"
+              align="start"
+              sideOffset={6}
+              className="w-56"
+              onCloseAutoFocus={(event) => {
+                event.preventDefault()
+                editor.focus()
               }}
-              onDuplicate={duplicate}
-              onMove={move}
-              onRemove={remove}
-            />
-          </DropdownMenuContent>
-        </DropdownMenu>
+            >
+              <BlockMenuItems
+                textual={textual(hovered.current?.node)}
+                types={types}
+                messages={messages}
+                onTurnInto={(id) => {
+                  const type = types.find((each) => each.id === id)
+                  if (type) turnInto(type)
+                }}
+                onDuplicate={duplicate}
+                onMove={move}
+                onRemove={remove}
+              />
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
-    </DragHandle>
+    </div>
   )
+}
+
+/** The top-level block beside a point: the pointer is kept within the blocks' column. */
+function blockAt(
+  editor: Editor,
+  x: number,
+  y: number
+): { node: Node; pos: number; dom: Element } | null {
+  const view = editor.view
+  const blocks = Array.from(view.dom.children).filter(
+    (child) => child.getBoundingClientRect().height > 0
+  )
+  const first = blocks[0]?.getBoundingClientRect()
+  const last = blocks[blocks.length - 1]?.getBoundingClientRect()
+  if (!first || !last) return null
+  const inset = 5
+  const clampedY = Math.min(Math.max(first.top + inset, y), last.bottom - inset)
+  const clampedX = Math.min(Math.max(first.left + inset, x), first.right - inset)
+  const elements = view.document.elementsFromPoint(clampedX, clampedY)
+  let dom: Element | null = null
+  for (const element of elements) {
+    if (!view.dom.contains(element) || element === view.dom) continue
+    let current: Element | null = element
+    while (current?.parentElement && current.parentElement !== view.dom)
+      current = current.parentElement
+    if (current?.parentElement === view.dom) {
+      dom = current
+      break
+    }
+  }
+  if (!dom) {
+    const found = view.posAtCoords({ left: clampedX, top: clampedY })
+    if (!found) return null
+    const $pos = editor.state.doc.resolve(found.pos)
+    const pos = $pos.depth > 0 ? $pos.before(1) : $pos.pos
+    const node = editor.state.doc.nodeAt(pos)
+    const nodeDom = view.nodeDOM(pos)
+    return node && nodeDom instanceof Element ? { node, pos, dom: nodeDom } : null
+  }
+  const pos = view.posFromDOM(dom, 0, -1)
+  const $pos = editor.state.doc.resolve(Math.max(0, pos))
+  const blockPos = $pos.depth > 0 ? $pos.before(1) : $pos.pos
+  const node = editor.state.doc.nodeAt(blockPos)
+  return node ? { node, pos: blockPos, dom } : null
 }
 
 /** What can be done to a block from its handle's menu, whichever editor it is in. */

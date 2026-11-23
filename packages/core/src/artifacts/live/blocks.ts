@@ -20,9 +20,9 @@ import { gfm } from "micromark-extension-gfm"
 import * as Y from "yjs"
 import { diffSequences, interleave, mergeSequences, mergeText } from "./diff"
 
-// A Markdown document as blocks, which its editor edits: the nodes and marks ProseMirror holds,
-// named as the app's TipTap editor names them, so the live document's `Y.XmlFragment` is what the
-// editor's collaboration reads and writes.
+// A Markdown document as blocks, which its editor edits: the nodes and marks the app's editor
+// holds, named as its schema names them, so the live document's `Y.XmlFragment` is what the
+// editor reads and writes.
 //
 //   doc ─ paragraph · heading{level} · blockquote · callout{kind} · bulletList · orderedList{start}
 //         · taskList · listItem · taskItem{checked} · codeBlock{language, meta} · horizontalRule

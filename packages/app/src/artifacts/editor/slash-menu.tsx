@@ -1,16 +1,15 @@
 import { cn } from "@sixb/ui/lib/utils"
-import { type Editor, Extension, type Range } from "@tiptap/core"
-import { PluginKey } from "@tiptap/pm/state"
-import { Suggestion, type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion"
 import { type Ref, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
-import type { BlockChoice, BlockType } from "./blocks"
+import type { BlockChoice, BlockType, Range } from "./blocks"
+import type { Editor, EditorPlugin } from "./core/editor"
+import { Suggestion } from "./core/plugins"
 import { findBlockTypes } from "./find-blocks"
 import type { EditorMessages } from "./messages"
 
 // The `/` menu: typed anywhere but in code, it lists the blocks that match what follows it, and
 // Enter or a click makes one in place of what was typed. Its state lives in a store the menu
-// reads, so ProseMirror's keys and React's rendering meet in one place.
+// reads, so the editor's keys and React's rendering meet in one place.
 
 interface SlashState {
   readonly open: boolean
@@ -36,6 +35,7 @@ export class SlashMenuStore {
   private readonly listeners = new Set<() => void>()
 
   get = (): SlashState => this.state
+
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
@@ -59,56 +59,33 @@ export class SlashMenuStore {
   }
 }
 
-const slashKey = new PluginKey("sixb-slash-menu")
-
 /** The `/` trigger, which fills `store` as the person types. */
-export function SlashCommand(store: SlashMenuStore, types: () => readonly BlockType[]) {
-  return Extension.create({
-    name: "slashCommand",
-    addProseMirrorPlugins() {
-      return [
-        Suggestion<BlockType>({
-          editor: this.editor,
-          pluginKey: slashKey,
-          char: "/",
-          // Not inside code, where `/` is a character like any other.
-          allow: ({ state, range }) => {
-            const $from = state.doc.resolve(range.from)
-            return !$from.parent.type.spec.code
-          },
-          items: ({ query }) => findBlockTypes(types(), query),
-          render: () => ({
-            onStart: (props: SuggestionProps<BlockType>) => open(store, props),
-            onUpdate: (props: SuggestionProps<BlockType>) => open(store, props),
-            onKeyDown: ({ event }: SuggestionKeyDownProps) => keyDown(store, event),
-            onExit: () => store.close(),
-          }),
-        }),
-      ]
-    },
-  })
-}
-
-function open(store: SlashMenuStore, props: SuggestionProps<BlockType>): void {
-  const keep = store.get().open && store.get().items.length === props.items.length
-  store.set({
-    open: true,
-    items: props.items,
-    index: keep ? Math.min(store.get().index, Math.max(0, props.items.length - 1)) : 0,
-    // On the first key the typed `/` is not drawn yet: where ProseMirror places it.
-    rect: props.clientRect?.() ?? caretRect(props.editor, props.range.from),
-    range: props.range,
-    editor: props.editor,
-  })
-}
-
-function caretRect(editor: Editor, pos: number): DOMRect | null {
-  try {
-    const { left, right, top, bottom } = editor.view.coordsAtPos(pos)
-    return new DOMRect(left, top, right - left, bottom - top)
-  } catch {
-    return null
+export function slashCommand(
+  store: SlashMenuStore,
+  types: () => readonly BlockType[],
+  editor: () => Editor | null
+): EditorPlugin {
+  // Each key typed filters the kinds again and picks the first; the menu sits under the `/` and
+  // what is typed after it, which are drawn before it opens. Its list is drawn empty and filled a
+  // microtask later, before anything is painted, which is how its words have always been
+  // rasterized: Chrome draws a list built in one go a fraction of a pixel differently.
+  const open = (range: Range, query: string, rect: () => DOMRect | null) => {
+    store.set({ open: true, items: [], index: 0, rect: rect(), range, editor: editor() })
+    const emptied = store.get()
+    // Unless the menu closed or moved on meanwhile.
+    queueMicrotask(() => {
+      if (store.get() === emptied) store.set({ items: findBlockTypes(types(), query) })
+    })
   }
+  const suggestion = new Suggestion("/", {
+    // Not inside code, where `/` is a character like any other.
+    allow: (state, range) => !state.doc.resolve(range.from).parent.type.spec.code,
+    onStart: (state, rect) => open(state.range, state.query ?? "", rect),
+    onUpdate: (state, rect) => open(state.range, state.query ?? "", rect),
+    onExit: () => store.close(),
+    onKeyDown: (event) => keyDown(store, event),
+  })
+  return suggestion.plugin(() => editor()?.isEditable ?? false)
 }
 
 function keyDown(store: SlashMenuStore, event: KeyboardEvent): boolean {

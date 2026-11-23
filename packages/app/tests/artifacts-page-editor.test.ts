@@ -1,14 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { Editor, getSchema } from "@tiptap/core"
-import { Collaboration } from "@tiptap/extension-collaboration"
-import { DOMParser, DOMSerializer } from "@tiptap/pm/model"
-import { TextSelection } from "@tiptap/pm/state"
-import { prosemirrorToYXmlFragment, yXmlFragmentToProseMirrorRootNode } from "@tiptap/y-tiptap"
 import * as Y from "yjs"
 import { frameRuntime } from "../../core/src/artifacts/frames/runtime"
 import { PAGE_BODY, pageEntry, pageEntryHtml } from "../../core/src/artifacts/live/page"
+import { parserFor, serializeFragment } from "../src/artifacts/editor/core/clipboard"
+import { Editor, editorOf } from "../src/artifacts/editor/core/editor"
+import type { Node } from "../src/artifacts/editor/core/model"
+import { baseKeymap } from "../src/artifacts/editor/core/plugins"
+import { TextSelection } from "../src/artifacts/editor/core/state"
+import { YBinding } from "../src/artifacts/editor/core/yjs"
 import {
   duplicate,
   insertBlock,
@@ -18,13 +19,13 @@ import {
   turnInto,
 } from "../src/artifacts/frame-editor/commands"
 import { startFrameEditor } from "../src/artifacts/frame-editor/frame"
-import { PageKeys } from "../src/artifacts/frame-editor/keys"
+import { pageKeys } from "../src/artifacts/frame-editor/keys"
 import {
   type AppToEditor,
   type EditorToApp,
   FRAME_EDITOR_GLOBAL,
 } from "../src/artifacts/frame-editor/protocol"
-import { drawnTag, pageSchemaExtensions, sanitize } from "../src/artifacts/frame-editor/schema"
+import { drawnTag, pageSchema, sanitize } from "../src/artifacts/frame-editor/schema"
 import { installDom } from "./helpers/dom"
 
 // A designed document's editor and core's page are one format: the editor reads whole what the
@@ -90,16 +91,15 @@ function live(source: string) {
   return { doc, entry, body: entry.get(PAGE_BODY) as Y.XmlFragment }
 }
 
-/** The editor over a live page, as the frame mounts it, without its frame. */
+/** The editor over a live page, with the frame's keys, without its frame. */
 function editorOver(source: string) {
   const page = live(source)
-  const editor = new Editor({
-    element: document.createElement("div"),
-    extensions: [
-      ...pageSchemaExtensions(),
-      Collaboration.configure({ fragment: page.body }),
-      PageKeys,
-    ],
+  const editor: Editor = new Editor({
+    mount: document.createElement("div"),
+    fragment: page.body,
+    schema: pageSchema,
+    editable: true,
+    plugins: [pageKeys(() => editor, { toggleMark: () => {}, onLink: () => {} }), baseKeymap(null)],
   })
   return { ...page, editor, html: () => pageEntryHtml(page.entry) }
 }
@@ -114,7 +114,7 @@ function caret(editor: Editor, words: string, select = false): void {
   })
   if (found < 0) throw new Error(`No '${words}'.`)
   const end = found + words.length
-  editor.view.dispatch(
+  editor.dispatch(
     editor.state.tr.setSelection(TextSelection.create(editor.state.doc, select ? found : end, end))
   )
 }
@@ -124,15 +124,44 @@ function endOf(editor: Editor, words: string): void {
   const pos = blockOf(editor, words)
   const node = editor.state.doc.nodeAt(pos)
   if (!node) throw new Error(`No block with '${words}'.`)
-  editor.view.dispatch(
+  editor.dispatch(
     editor.state.tr.setSelection(TextSelection.create(editor.state.doc, pos + node.nodeSize - 1))
   )
 }
 
-/** A key, as the editor takes it from the keyboard. */
-function press(editor: Editor, key: string): void {
+/** A key, as the editor takes it from the keyboard; whether the editor took it. */
+function press(editor: Editor, key: string): boolean {
   const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })
-  editor.view.someProp("handleKeyDown", (handle) => handle(editor.view, event))
+  editor.view.dom.dispatchEvent(event)
+  return event.defaultPrevented
+}
+
+/** Types `text` over the selection. */
+function type(editor: Editor, text: string): void {
+  editor.dispatch(editor.state.tr.insertText(text))
+}
+
+/** A page of HTML pasted into the editor, as the browser hands it over. */
+function pasteHTML(editor: Editor, html: string): void {
+  const event = new Event("paste", { bubbles: true, cancelable: true })
+  Object.defineProperty(event, "clipboardData", {
+    value: { files: [], getData: (kind: string) => (kind === "text/html" ? html : "") },
+  })
+  editor.view.dom.dispatchEvent(event)
+}
+
+/** Throws where a node holds what its type does not allow. */
+function check(node: Node): void {
+  if (!node.type.validContent(node.content))
+    throw new Error(`Invalid content for ${node.type.name}.`)
+  node.forEach(check)
+}
+
+/** A live page's body holding `node` as the editor writes it. */
+function write(entry: Y.Map<unknown>, node: Node): void {
+  entry.set(PAGE_BODY, new Y.XmlFragment())
+  const binding = new YBinding(entry.get(PAGE_BODY) as Y.XmlFragment, pageSchema)
+  binding.write(binding.document(), node, null)
 }
 
 /** The position of the innermost block of words whose words start with `words`. */
@@ -147,10 +176,9 @@ function blockOf(editor: Editor, words: string): number {
 
 describe("a designed document's editor", () => {
   test("reads the page the server builds whole, and writes it back as the server does", () => {
-    const schema = getSchema(pageSchemaExtensions())
     const { body } = live(PROPOSAL)
-    const node = yXmlFragmentToProseMirrorRootNode(body, schema)
-    node.check()
+    const node = new YBinding(body, pageSchema).document()
+    check(node)
 
     const doc = new Y.Doc()
     const written = doc.getMap("files")
@@ -158,7 +186,7 @@ describe("a designed document's editor", () => {
     written.set("document.html", entry)
     entry.set("head", (live(PROPOSAL).entry.get("head") as string) ?? "")
     entry.set("tail", (live(PROPOSAL).entry.get("tail") as string) ?? "")
-    entry.set(PAGE_BODY, prosemirrorToYXmlFragment(node))
+    write(entry, node)
     expect(pageEntryHtml(entry)).toBe(PROPOSAL)
   })
 
@@ -173,7 +201,7 @@ describe("a designed document's editor", () => {
     const { editor, html } = editorOver(PAGE)
     endOf(editor, "A fixed fee")
     press(editor, "Enter")
-    editor.commands.insertContent("Next")
+    type(editor, "Next")
     expect(html()).toContain("<strong>$4,000</strong>.</p>\n    <p>Next</p>\n    <ul>")
     editor.destroy()
   })
@@ -182,10 +210,10 @@ describe("a designed document's editor", () => {
     const { editor, html } = editorOver(PAGE)
     caret(editor, "Two")
     press(editor, "Enter")
-    editor.commands.insertContent("Three")
+    type(editor, "Three")
     press(editor, "Enter")
     press(editor, "Enter")
-    editor.commands.insertContent("After")
+    type(editor, "After")
     expect(html()).toContain("<li>Two</li>\n      <li>Three</li>\n    </ul>\n    <p>After</p>")
     editor.destroy()
   })
@@ -194,7 +222,7 @@ describe("a designed document's editor", () => {
     const { editor, html } = editorOver(PAGE)
     // At the start of the second section's first block, a heading: it becomes a paragraph.
     caret(editor, "Terms")
-    editor.view.dispatch(
+    editor.dispatch(
       editor.state.tr.setSelection(
         TextSelection.create(editor.state.doc, editor.state.selection.from - 5)
       )
@@ -225,7 +253,7 @@ describe("a designed document's editor", () => {
     endOf(editor, "A fixed fee")
     press(editor, "Enter")
     insertBlock(editor, "heading1")
-    editor.commands.insertContent("Scope")
+    type(editor, "Scope")
     caret(editor, "Scope")
     press(editor, "Enter")
     insertBlock(editor, "table")
@@ -238,7 +266,7 @@ describe("a designed document's editor", () => {
     const { editor, html } = editorOver(PAGE)
     caret(editor, "One")
     insertBlock(editor, "quote")
-    editor.commands.insertContent("Quoted")
+    type(editor, "Quoted")
     expect(html()).toContain("<li>Two</li>\n    </ul>\n    <blockquote>Quoted</blockquote>")
     expect(placeAfter(editor.state.doc, blockOf(editor, "One"))).toBe(blockOf(editor, "Quoted"))
     editor.destroy()
@@ -256,7 +284,7 @@ describe("a designed document's editor", () => {
     // An item in the middle of a list leaves it between the list's two halves.
     caret(editor, "One")
     press(editor, "Enter")
-    editor.commands.insertContent("Middle")
+    type(editor, "Middle")
     turnInto(editor, "heading2")
     expect(html()).toMatch(
       /<li>One<\/li>\s*<\/ul>\s*<h2 class="section">Middle<\/h2>\s*<ul>\s*<li>Two<\/li>/
@@ -294,11 +322,10 @@ describe("a designed document's editor", () => {
     const { editor } = editorOver(
       '<body><p class="lede">Total: <span data-sixb-field="total">$1</span> due</p></body>'
     )
-    const { schema } = editor
     const copied = editor.state.doc.slice(0, editor.state.doc.content.size)
     const holder = document.createElement("div")
-    holder.append(DOMSerializer.fromSchema(schema).serializeFragment(copied.content))
-    const pasted = DOMParser.fromSchema(schema).parseSlice(holder)
+    holder.append(serializeFragment(document, copied.content))
+    const pasted = parserFor(editor.schema).parseSlice(holder)
     const paragraph = pasted.content.firstChild
     expect(paragraph?.attrs.open).toBe('<p class="lede">')
     expect(paragraph?.child(1).type.name).toBe("rawInline")
@@ -348,10 +375,9 @@ describe("a designed document's editor", () => {
   // Reproduce by reading every pasted element but words as a box: a rule becomes a box holding
   // an empty paragraph, and a list's items holding paragraphs lose their list.
   test("pastes a list of paragraphs as a list, and a rule as it was", () => {
-    const schema = getSchema(pageSchemaExtensions())
     const holder = document.createElement("div")
     holder.innerHTML = "<ul><li><p>Item one</p></li><li><p>Item two</p></li></ul><hr>"
-    const pasted = DOMParser.fromSchema(schema).parse(holder)
+    const pasted = parserFor(pageSchema).parseSlice(holder)
     const [list, rule] = pasted.content.content
     expect([list?.type.name, list?.attrs.tag]).toEqual(["box", "ul"])
     expect(list?.firstChild?.attrs.tag).toBe("li")
@@ -376,10 +402,10 @@ describe("a designed document's editor", () => {
     )
     endOf(editor, "One")
     press(editor, "Enter")
-    editor.commands.insertContent("Two")
+    type(editor, "Two")
     press(editor, "Enter")
     press(editor, "Enter")
-    editor.commands.insertContent("After")
+    type(editor, "After")
     const written = html()
     expect(written).toContain("<li><p>One</p></li>")
     expect(written).toMatch(/<li>\s*<p>Two<\/p>\s*<\/li>\s*<\/ul>\s*<p>After<\/p>/)
@@ -390,9 +416,7 @@ describe("a designed document's editor", () => {
   test("lets Tab leave the frame outside a table", () => {
     const { editor } = editorOver(PAGE)
     caret(editor, "Harbor")
-    const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true })
-    const handled = editor.view.someProp("handleKeyDown", (handle) => handle(editor.view, event))
-    expect(handled).toBeFalsy()
+    expect(press(editor, "Tab")).toBe(false)
     editor.destroy()
   })
 
@@ -422,11 +446,12 @@ describe("a designed document's editor", () => {
       },
     })
     // The body is the editor, as in the frame.
-    const { editor } = body as HTMLElement & { editor?: Editor }
+    const editor = editorOf(body)
     if (!editor) throw new Error("The frame's editor did not start.")
 
     endOf(editor, "A fixed fee")
-    editor.view.pasteHTML(
+    pasteHTML(
+      editor,
       '<p>Acme ships the parts.</p><img src="https://acme.com/logo.png" alt="Acme"><img src="images/depot.png" alt="Depot">'
     )
 
