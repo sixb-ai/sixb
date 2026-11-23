@@ -402,7 +402,7 @@ export function sceneAfter<T extends { readonly startMs: number; readonly durati
 /**
  * The scenes that are the video's chapters, in play order: every one but an overlay, a scene laid
  * over the others, as captions written over the whole video: one that holds two others whole, or
- * the span of all the others, from the first's start to the last's end. One short chapter inside a
+ * the span of all the others, two at least, from the first's start to the last's end. One short chapter inside a
  * longer one's crossfade leaves both chapters; of two alike, the later is the overlay. An
  * overlay's clips stay its own: no clip goes into it or out.
  */
@@ -423,7 +423,7 @@ export function videoChapters<T extends { readonly startMs: number; readonly dur
     const first = Math.min(...others.map((other) => other.startMs))
     const last = Math.max(...others.map(end))
     const spans = scene.startMs <= first && last <= end(scene)
-    return !(spans && held.length === others.length)
+    return !(others.length >= 2 && spans && held.length === others.length)
   })
 }
 

@@ -202,6 +202,15 @@ export function moveScene(sources: VideoSources, scene: string, to: number): Vid
     order.splice(from, 1)
     order.splice(target, 0, moving)
 
+    // A scene laid over them that starts after one of them starts at its time from now on: it
+    // stays where it plays, wherever that chapter goes.
+    for (const scene of before.scenes) {
+      if (chapters.includes(scene) || scene.start.type !== "after") continue
+      setAttributes(work, VIDEO_ENTRY, hostOf(work, scene.id).host, {
+        "data-start": seconds(scene.startMs),
+      })
+    }
+
     // Each chapter whose predecessor changed starts after its new one, and so, from there on,
     // does each that starts at a number of seconds: its predecessor's place changed.
     const played = order.filter((each) => chapters.includes(each))
@@ -1008,19 +1017,37 @@ export function insertClip(
 }
 
 /**
- * Whether something is said between `fromMs` and `toMs`: a scene's sound, or its footage, heard at
- * a volume above none. The video's own sounds, music or ambience under all of it, are not.
+ * Whether something is said between `fromMs` and `toMs`: a scene's sound, or its footage, or a line
+ * of the video's own voice-over that belongs to a chapter, heard at a volume above none. The video's
+ * own sounds under it all, music or ambience, are not.
  */
 function heardDuring(work: Working, fromMs: number, toMs: number): boolean {
-  return rootOf(work).scenes.some((scene) => {
+  const heard = (clip: VideoClip) =>
+    (clip.kind === "audio" || clip.kind === "video") && !clip.silent && clip.volume !== 0
+  const during = (from: number, to: number) => from < toMs && fromMs < to
+
+  const root = rootOf(work)
+  const chapters = { ...root, scenes: videoChapters(root.scenes) }
+  const voiceOver = (readTimeline(work, VIDEO_ENTRY)?.clips ?? []).some(
+    (clip) =>
+      heard(clip) &&
+      clip.durationMs !== undefined &&
+      numericStart(work, VIDEO_ENTRY, clip) &&
+      sceneOfClip(chapters, clip) !== undefined &&
+      during(clip.startMs, clip.startMs + clip.durationMs)
+  )
+  if (voiceOver) return true
+
+  return root.scenes.some((scene) => {
     if (work.textOf(scene.src) === undefined) return false
     const endMs = scene.startMs + scene.durationMs
     return (readTimeline(work, scene.src)?.clips ?? []).some((clip) => {
-      const sounds = (clip.kind === "audio" || clip.kind === "video") && !clip.silent
-      if (!sounds || clip.volume === 0) return false
+      if (!heard(clip)) return false
       const from = scene.startMs + clip.startMs
-      const to = Math.min(endMs, clip.durationMs === undefined ? endMs : from + clip.durationMs)
-      return from < toMs && fromMs < to
+      return during(
+        from,
+        Math.min(endMs, clip.durationMs === undefined ? endMs : from + clip.durationMs)
+      )
     })
   })
 }
@@ -1415,10 +1442,26 @@ function unplayed(
   return [...gone]
     .filter((path) => {
       const name = path.slice(path.lastIndexOf("/") + 1)
-      const spellings = new Set([name, encodeURIComponent(name), encodeURI(name)])
+      const spellings = new Set(
+        [name, encodeURIComponent(name), encodeURI(name)].flatMap((each) => [
+          each,
+          // As HTML writes it, `a&amp;b.png`, and as CSS escapes it, `my\ clip.png`.
+          each.replace(/[&<>"']/g, (char) => HTML_ENTITIES[char] ?? char),
+          each.replace(/[^\w.-]/g, (char) => `\\${char}`),
+        ])
+      )
       return !texts.some((text) => [...spellings].some((spelling) => text.includes(spelling)))
     })
     .map((path) => ({ path, remove: true as const }))
+}
+
+/** How HTML writes the characters it escapes. */
+const HTML_ENTITIES: Readonly<Record<string, string>> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
 }
 
 /** Runs an operation that places clips, and returns where it placed them with its edit. */

@@ -239,7 +239,8 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
 - **Sound and files.** A clip's `data-volume` goes up to 4 times as recorded, or stays as loud as
   the Agent made it; footage is muted and heard again as HyperFrames mixes it, `muted` or a
   `data-has-audio` other than "true" never heard, nor a muted sound. Footage imported where a
-  scene says something, B-roll over a voice, comes in muted; the video's own music is no reason.
+  scene says something, or a line of the video's own voice-over that belongs to a chapter, B-roll
+  over a voice, comes in muted; the video's own music under it all is no reason.
   `replaceClipMedia` plays another file of the same kind in a clip's place, every part of it from
   the new file's start; it and `removeMediaRanges` know a file however a clip names it. An edit
   that takes the last clip playing a recording or a picture takes the file too (`unplayed`), and an
@@ -247,10 +248,10 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
   version names it, hosted or not, in a style, a script or a picture's `href`, under any spelling;
   when unsure, it stays.
 - **Chapters** (`videoChapters`): every scene but an overlay, one that holds two others whole, or
-  the span of all the others, as captions laid over the whole video; a short chapter in another's
-  crossfade is still one. Placement never puts a clip in an overlay nor goes on in one past a
-  chapter's end, and an overlay's own clips stay in it. A reorder chains the chapters alone, an
-  overlay keeping its start.
+  the span of all the others, two at least, as captions laid over the whole video; a short chapter
+  in another's crossfade is still one. Placement never puts a clip in an overlay nor goes on in one
+  past a chapter's end, and an overlay's own clips stay in it. A reorder chains the chapters alone,
+  an overlay keeping where it plays: one that starts after a chapter starts at its time from then.
 - **Placing** (`placeFound`): every edit that puts a scene's clip at a time of the video, a move,
   an end trim without ripple, an import, goes through it. The clip lives in the scene that plays
   where it starts: its own while that holds it, else the one on top there (the later in play
