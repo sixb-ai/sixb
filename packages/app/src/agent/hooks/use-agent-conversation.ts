@@ -10,6 +10,8 @@ import {
   getAgentThreadContextOptions,
   getAgentThreadContextQueryKey,
   getAgentThreadQueryKey,
+  getAuthSessionOptions,
+  getProjectInfoOptions,
   listAgentApprovalsQueryKey,
   listAgentComputersOptions,
   listAgentComputersQueryKey,
@@ -35,6 +37,7 @@ import {
 import { MODEL_REASONING_LEVELS, type ModelReasoningLevel } from "@sixb/core/models"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { takeAgentDraft } from "../../artifacts/view-context"
 import { useCurrentUser } from "../../session"
 import {
   type AgentApproval,
@@ -53,6 +56,7 @@ import { type ComputerOfflineNoticeProps, folderName } from "../components/compu
 import type { PendingMessagesProps } from "../components/pending-messages"
 import type { SandboxRecoveryProps } from "../components/sandbox-recovery"
 import type { TranscriptProps } from "../components/transcript"
+import { useComposerInsertion } from "../composer-insertion"
 import {
   type AgentConversationTurn,
   conversationMessages,
@@ -248,6 +252,27 @@ export function useAgentConversation({
   const user = useCurrentUser()
   const agentQuery = useQuery(getAgentOptions())
   const modelsQuery = useQuery(listModelsOptions())
+
+  // Words an artifact hands the input, as comments it asks the Agent to act on. Those an artifact
+  // on its own page asked before the app came here start it, when they were this person's, in this
+  // project, a moment ago: whichever page draws this conversation's composer, Home or a dock.
+  const { insertion, insert: insertDraft, inserted } = useComposerInsertion()
+  useEffect(() => {
+    let current = true
+    Promise.all([
+      queryClient.fetchQuery({ ...getProjectInfoOptions(), staleTime: Number.POSITIVE_INFINITY }),
+      queryClient.fetchQuery({ ...getAuthSessionOptions(), staleTime: Number.POSITIVE_INFINITY }),
+    ])
+      .then(([project, session]) => {
+        const userId = session.authenticated ? session.user.id : null
+        const pending = current ? takeAgentDraft({ userId, projectId: project.id }) : null
+        if (pending) insertDraft(pending)
+      })
+      .catch(() => {})
+    return () => {
+      current = false
+    }
+  }, [insertDraft, queryClient])
   const refreshThreads = () =>
     queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
   const refreshApprovals = (threadId: string) =>
@@ -1643,6 +1668,8 @@ export function useAgentConversation({
       draftContext: draftReseed.context,
       draftNonce: draftReseed.nonce,
       draftReseedKey: draftReseed.draftKey,
+      ...(insertion ? { insertion } : {}),
+      onInserted: inserted,
       approvalMode,
       onApprovalModeChange: stableSetApprovalMode,
       awaitingApproval,
@@ -1674,6 +1701,8 @@ export function useAgentConversation({
       modelRouting,
       threadId,
       draftReseed,
+      insertion,
+      inserted,
       approvalMode,
       stableSetApprovalMode,
       awaitingApproval,
@@ -1810,6 +1839,11 @@ export function useAgentConversation({
     transcriptProps,
     /** Spread into `<Composer>`, then add the page's own props such as `placeholder`. */
     composerProps,
+    /**
+     * Adds words to the composer's input and context to its chips, as an artifact's comments sent
+     * to the Agent; the reader sends them.
+     */
+    insertDraft,
     /**
      * Spread into `<QuestionComposer>` while set, in the composer's place: the Agent's question,
      * until the reader answers it or sets it aside.
