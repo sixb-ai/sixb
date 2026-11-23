@@ -891,6 +891,7 @@ export function Timeline({
                       people={people.get(scene.id) ?? []}
                       dragging={reorder?.id === scene.id}
                       length={formatLength(sceneEnd(scene) - scene.startMs)}
+                      width={Math.max(4, px(span.endMs - span.startMs))}
                       actions={edits.scene}
                       onPress={(event) =>
                         startReorder(event, scene.id, () => edits.scene.select(scene))
