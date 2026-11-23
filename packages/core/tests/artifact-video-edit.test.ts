@@ -24,6 +24,7 @@ import {
   removeClips,
   removeMediaRanges,
   removeScene,
+  replaceClipMedia,
   setClipSound,
   setClipTiming,
   setSceneLabel,
@@ -675,6 +676,24 @@ describe("editing clips", () => {
     expect(removed(removeClip(copied, "scenes/demo.html", "screen"))).toEqual([])
     expect(removed(removeClip(SOURCES, "scenes/demo.html", "talk"))).toEqual(["media/talk.mp4"])
     expect(applied(removeClip(SOURCES, "scenes/demo.html", "talk")).has("media/new.mp4")).toBe(true)
+  })
+
+  test("a clip plays another file in its place, its timing and sound kept, the old file gone", () => {
+    const result = replaceClipMedia(SOURCES, "scenes/demo.html", "talk", "media/new.mp4")
+    const files = applied(result)
+    expect(demoClips(files)[0]).toMatchObject({
+      ref: "talk",
+      src: "media/new.mp4",
+      startMs: 0,
+      durationMs: 5000,
+      mediaStartMs: 0,
+      silent: false,
+    })
+    // What it played leaves with it.
+    expect(files.has("media/talk.mp4")).toBe(false)
+
+    const picture = replaceClipMedia(SOURCES, "scenes/demo.html", "talk", "media/logo.png")
+    expect("error" in picture && picture.error).toContain("is no video")
   })
 
   test("a fade of 0 is no fade", () => {
@@ -2247,6 +2266,27 @@ describe("a clip that goes on in later scenes", () => {
     }
     return byTime.map((each) => [each.file, each.ref, each.from, each.to, each.media])
   }
+
+  // Guard proof: write the new file in the part named alone in replaceClipMedia (edit.ts); the
+  // demo's part of the clip then plays the old file on.
+  test("a clip that goes on plays another file in every part, on from its start", () => {
+    const sources = new Map(toFive).set("media/b.mp4", null)
+    const files = applied(
+      replaceClipMedia(sources, "scenes/demo.html", "intro-2", "media/b.mp4"),
+      sources
+    )
+    expect(intro(files).map((part) => part[0])).toEqual([])
+    const parts = ["scenes/hook.html", "scenes/demo.html"].map((file) =>
+      readSceneTimeline(files.get(file) as string)?.clips.find((clip) => clip.src === "media/b.mp4")
+    )
+    expect(
+      parts.map((part) => [part?.ref, part?.startMs, part?.durationMs, part?.mediaStartMs])
+    ).toEqual([
+      ["intro", 0, 3000, 0],
+      ["intro-2", 0, 2000, 3000],
+    ])
+    expect(files.has("media/a.mp4")).toBe(false)
+  })
 
   // Guard proof: judge a recording's part by where the part before it ends in goesOn
   // (timeline.ts), as it did: once the hook is shorter, its end hidden, the chain breaks, and the
