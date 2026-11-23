@@ -10,16 +10,21 @@ the export renders the same files to MP4, frame by frame.
 | A recording the user wants delivered as it is | a `file` |
 | Shots side by side, a storyboard to approve before filming | a `canvas` |
 
+How a video looks, sounds and moves, its length, pacing, cuts, type, motion, music and format,
+comes from the person, their brief and the project's own instructions and skills. This guide sets
+none of it: it is the format, the tools, and how to check that the result works. When a choice
+that matters is left open, ask, or make it and say what you chose.
+
 ```text
 work/launch-teaser/
 ├── index.html          the root: the frame, the soundtrack, one host per scene in play order
-├── styles.css          the look every scene shares
+├── styles.css          what every scene shares
 ├── scenes/
 │   ├── hook.html       a scene: one <template> holding its composition
 │   ├── demo.html
 │   └── outro.html
 └── media/
-    ├── dispatch.mp4    footage: a recording of the product
+    ├── dispatch.mp4    footage
     └── music.m4a
 ```
 
@@ -48,7 +53,7 @@ work/launch-teaser/
     <script>
       const demo = gsap.timeline({ paused: true })
       const scene = '[data-composition-id="demo"]'
-      demo.from(`${scene} .callout`, { y: 24, opacity: 0, duration: 0.5, ease: "power3.out" }, 2.2)
+      demo.from(`${scene} .callout`, { opacity: 0, duration: 0.5 }, 2.2)
       window.__timelines = window.__timelines || {}
       window.__timelines["demo"] = demo
     </script>
@@ -84,69 +89,47 @@ work/launch-teaser/
   plays from a URL. Each `<video>` and `<audio>` has an `id`, or it renders silent, and its
   `data-start` and `data-duration`; `data-media-start` is where in the file it starts. Footage is
   `muted`, or `data-has-audio="true"` to keep its sound. `data-volume` (1 is as recorded),
-  `data-fade-in`, `data-fade-out`.
+  `data-fade-in`, `data-fade-out`. An element meant to move past the frame or its box takes
+  `data-layout-allow-overflow`, or the check reports it.
 - **Fonts and scripts** load from Google Fonts, jsDelivr, cdnjs or unpkg, pinned to an exact
   version (`gsap@3.12.5`, never `gsap@3`). Load GSAP and the fonts once, in `index.html`.
 - **Captions are text on the frame**: one timed element per line, `<p class="caption"
   data-start="1.2" data-duration="2.4">`, set from the transcript, in the scene that says it, or in
   the root when the captions run across scenes. A `<track>` is not rendered.
+- **Cost.** `filter: blur()` and `backdrop-filter` about double a scene's export time, more over
+  footage, as Chromium draws them without a GPU.
 - A video holds at most 200 scenes, 10 minutes, and 50 video and sound files; each HTML file at
   most 1 MiB, each recording at most 2 GB.
 
-## Make it premium
+## Tools
 
-A video is judged in its first three seconds, on a phone, with the sound off. Make what a senior
-motion designer would ship.
+The sandbox has FFmpeg, the HyperFrames CLI and Playwright; `sixb models` makes what the project's
+models make: images (`sixb models image`), speech (`sixb models speech`), and video when the project
+has a model for it (`sixb models list` says which). Use what the brief calls for.
 
-- **Real footage first.** Show the actual product, recorded, never a mock-up of it nor a run of
-  stills. Generated images (`sixb models image`) and voice (`sixb models speech`) come in when
-  they serve the story, as does generated video when the project has a model for it. Never draw
-  a product or a person as shapes, and never make music in code, from tones, oscillators or
-  notes you write: a voice alone is better than a cheap bed.
-- **Cut more than you think.** One idea per scene, three to five seconds each; a teaser is 15 to
-  45 seconds. Every scene earns its time: when you hesitate, cut it. Hold only the end card.
-- **The first frame is the thumbnail, and the hook.** Frame 0 shows a moment or a problem, in
-  words over the footage ("A boiler just went down."), never the product's name, a tagline or an
-  empty ground: the name belongs on the end card. The first three seconds say why this matters.
-- **Hierarchy.** One thing to read at a time, in three sizes at most. At 1080p, titles 120 to
-  180 px set tight (-0.03em), lines and callouts 44 to 64 px, nothing under 36 px: it must read on
-  a phone. Margins of at least 120 px; a 9:16 frame keeps words out of its top 250 px and bottom
-  400 px, where the apps draw their own.
-- **Motion with intent.** Things arrive eased out (`power3.out`) in 0.4 to 0.8 s, staggered
-  0.1 to 0.2 s, and leave faster than they came. Push in slowly on what matters. No spins,
-  bounces, or effects for their own sake; one move at a time.
-- **Interface footage reads.** An app at its own size in a 1080p frame is unreadable on a phone:
-  its 14 px text needs to be 24 px or more on the frame. Record at the frame's size with the page
-  zoomed 1.6 to 1.8 times (Real footage), so the app lays itself out larger and stays sharp, and
-  push in on the part where the action happens. Frame it with a radius and a shadow on a quiet
-  ground, and mark what a push-in moves past its frame `data-layout-allow-overflow`.
-- **Restraint with blur.** `filter: blur()` and `backdrop-filter` double the export's time: one
-  soft background at most, never on what moves.
-- **Sound.** Music under a voice sits at about a fifth of its volume (`data-volume="0.2"`) and
-  fades in and out; alone, half. Bring a voice to -16 LUFS with
-  `hyperframes normalize-audio --target <id> --write`. Cut on the beat
-  (`hyperframes audio <file> --only beats`) or between sentences, never mid-word. A voice-over is
-  one `sixb models speech` call per line, each its own `<audio>`, so its caption shares its start
-  and length. Music comes from the user or the project's files: the sandbox cannot fetch any from
-  the web, so ask for a track when the video needs one.
-- **An ending that lands.** The logo or product, one line, one thing to do: an end card of three
-  to four seconds in all, still for the last two. Never a frame with nothing on it, at a cut
-  either: a scene's last frame still shows its subject.
+- **Slow work in the background.** Start speech, recordings and transcriptions as background
+  commands (`run_in_background`), write the scenes while they run, and `wait` for them before you
+  publish. Long commands, such as `hyperframes snapshot --at 1.5,4 --output work/shots` on a copy of
+  the folder, take a `timeoutMs` up to ten minutes; in the background, bound them with
+  `timeout 900`.
+- **FFmpeg** always takes `-nostdin`, and `-t` with `-loop 1`: without them it waits for input, or
+  runs on, until the command is killed. Look at a frame of a file with
+  `ffmpeg -nostdin -ss 3 -i <file> -frames:v 1 shot.png`, then `read` it.
+- **HyperFrames** in a sandbox whose home is read only takes no frame: run it with
+  `HYPERFRAMES_CHROME_SANDBOX=0` and `HYPERFRAMES_CACHE_DIR=$PWD/.hyperframes-cache`.
+  `hyperframes normalize-audio --target <id> --write` evens out a clip's loudness,
+  `hyperframes audio <file> --only beats` finds its beats, and `hyperframes timeline --json` lists
+  the scenes' timing. `hyperframes transcribe` needs whisper.cpp, which the sandbox does not have.
+- **Speech.** One `sixb models speech` call per line, each its own `<audio>`, lets its caption share
+  its start and length.
+- **Music** comes from the user or the project's files: the sandbox cannot fetch any from the web,
+  so ask for a track when the video needs one.
 
-## Work from a plan
+### Recording an app
 
-Write the story once, outside the video's folder, as `work/plan.json`: each scene's id, length,
-line, caption and shot. A small script writes `index.html` and the scenes from it, so a change of
-words or length is one edit there. Start what takes time in parallel, as background commands
-(`run_in_background`): the voice-over, one `sixb models speech` per line, and the recordings.
-Write the scenes while they run, and `wait` for them before you publish.
-
-## Real footage
-
-Record the product with Playwright in the sandbox, at the address the user gives; ask for it when
-you don't have one. Script the story: where the cursor goes, what it types, what it waits for.
-What you do in it is real: a message sent starts a run, a button changes data. Film what only
-reads, rehearse once with screenshots, and record a change once, when the story needs it.
+Playwright records a page in the sandbox, at the address the user gives; ask for it when you don't
+have one. What you do in it is real: a message sent starts a run, a button changes data. Rehearse
+with screenshots, and record what changes data once.
 
 ```js
 // record.cjs: node record.cjs <url>, then convert what it wrote
@@ -157,8 +140,6 @@ const { chromium } = require(process.env.SIXB_PLAYWRIGHT ?? "/opt/sixb/js/node_m
   const context = await browser.newContext({ viewport: size, recordVideo: { dir: "work/rec", size } })
   const page = await context.newPage()
   await page.goto(process.argv[2], { waitUntil: "networkidle" })
-  // Its text read on a phone: 14 px becomes about 24 px on the frame.
-  await page.evaluate(() => { document.documentElement.style.zoom = "1.75" })
   await page.waitForTimeout(1500)
   await page.click("text=Assign")
   await page.waitForTimeout(3000)
@@ -172,20 +153,18 @@ ffmpeg -nostdin -i work/rec/*.webm -c:v libx264 -crf 18 -pix_fmt yuv420p -movfla
   work/launch-teaser/media/dispatch.mp4
 ```
 
-A recording keeps the viewport's size whatever its `deviceScaleFactor`, and shows no cursor: when
-the story is a click, draw one in the page before acting (an element that follows
-`page.mouse.move`, with `steps` for a glide). A video holds at most one still, a hero shot: a
-`page.screenshot` taken in a context of `deviceScaleFactor: 2`, moved in HTML. A product shown in
-stills is a slideshow: record it. Look at a few frames of what you recorded
-(`ffmpeg -nostdin -ss 3 -i <file> -frames:v 1 shot.png`, then read it) before you build on it.
+A recording keeps the viewport's size whatever its `deviceScaleFactor`; CSS `zoom` on the page lays
+it out larger at that size. It shows no cursor: one the video needs is drawn in the page before
+acting, an element that follows `page.mouse.move` (`steps` for a glide). Look at a few frames of
+what you recorded before you build on it.
 
-## The user's clips
+### The user's clips
 
 A clip the user gives goes into `media/` as it is: 4K, from a phone, up to 2 GB. Never re-encode,
 cut, crop or scale it with FFmpeg first: the app plays a proxy Sixb makes of it, the export reads
 the original, and both show a phone's clip upright. Cut it with `data-media-start` and
-`data-duration`, and frame it with CSS (`object-fit: cover`, a `transform`). A phone stores its
-clips sideways with a rotation: ffprobe's width and height are the stored frame, and the frame
+`data-duration`, and frame it with CSS (`object-fit`, a `transform`). A phone stores its clips
+sideways with a rotation: ffprobe's width and height are the stored frame, and the frame
 `$SIXB_ARTIFACTS` lists once it is published is the one shown.
 
 An attachment goes in by its key, never downloaded: publish the folder with
@@ -195,7 +174,7 @@ update keeps a recording its scenes still play, so pass it once. Any other recor
 outside the folder, and never publish it in the original's place:
 `sixb artifacts media <id> --path media/talk.mov --part proxy --output work/footage/talk.mp4`.
 
-## Edit from the transcript
+### Editing from the transcript
 
 Once published, `$SIXB_ARTIFACTS` lists each recording of a video under `media`, with its length,
 its frame, and each part derived of it: `ready`, `pending`, or why it will not come. Its copy
@@ -207,30 +186,29 @@ holds, under `.derived/<path>/`:
 1. Publish the recordings in the video first, so they are transcribed; `pending` means a few
    seconds more: `sixb artifacts media <id> --path media/talk.mov` says where it stands, and
    `--part transcript --output work/talk.transcript.json` fetches it once it is ready.
-2. Cut on words, never inside one. A clip starts up to 0.1 s before its first word's `startMs`
-   and ends up to 0.15 s after its last word's `endMs`, never reaching into the word beside it;
-   a picture cut lands on a `cuts.json` instant.
+2. Cut on words, never inside one. A clip starts a little before its first word's `startMs`
+   (up to 0.1 s) and ends a little after its last word's `endMs` (up to 0.15 s), never reaching
+   into the word beside it; a picture cut lands on a `cuts.json` instant.
 3. When `words` is missing, or its entries hold several words or last seconds, only phrases are
    timed. Look for a model that times words (`sixb models list --kind transcription`) and run
    `sixb models transcribe <audio> --model <model>`. When none does, cut only on the pauses
    `ffmpeg -nostdin -i <audio> -af silencedetect=noise=-35dB:d=0.12 -f null -` finds, never at
    an instant you estimate, and tell the user so: a model that times words, such as
    `elevenlabs/scribe-v2` first in the project's `models.audio.transcription`, cuts on every
-   word. `hyperframes transcribe` needs whisper.cpp, which the sandbox does not have.
-4. Choose the cut in text: the sentences that carry it, in the order that tells it best. Write
-   each kept stretch as a clip, a `<video>` with `data-media-start` and `data-duration`, chained
-   one after the other, and set the captions from the same words, three to seven at a time.
+   word.
+4. Choose in the text the stretches the brief asks for, then write each as a clip, a `<video>`
+   with `data-media-start` and `data-duration`, chained one after the other, and set the captions
+   from the same words.
 
 ## Check
 
 Publishing refuses a scene whose file or host is missing, a start it cannot resolve, a file from
 outside the video, and limits passed, naming the scene. Then Sixb checks the published video in the
-sandbox with HyperFrames, on the files the export renders, and the result names a contact sheet of
-its first frame and of each scene 0.4 s in, at its middle and at its end, and its warnings.
-HyperFrames finds text off the frame, text under 28 px (what a phone reads at 1080p), low
-contrast and a silent clip; the check measures a frame with nearly nothing on it, footage or an
-image never seen while it plays, a box framing it left empty, a scene under a second, an end card
-past 4.5 s and a teaser past 45 s. Each names its scene and when.
+sandbox with HyperFrames, on the files the export renders, for what breaks: script errors, files
+that fail to load or play nothing, text off its box or the frame, the motion a `*.motion.json`
+beside a scene asserts, footage or an image never seen while it plays, and a box framing it left
+on screen empty. It judges no style. The result names a contact sheet of its first frame and of
+each scene 0.4 s in, at its middle and at its end, and its warnings, each with its scene and when.
 
 A sandbox without the CDNs checks without them, and says so: its frames show no GSAP motion and
 fallback fonts, which the app and the export do load. Keep the scripts and fonts as they are.
@@ -238,25 +216,17 @@ fallback fonts, which the app and the export do load. Keep the scripts and fonts
 Agents believe they succeeded far more often than they did: a video that publishes is not a video
 that works. Never say it is ready without having looked.
 
-1. Open each contact sheet with `read`. For every frame, ask what a viewer sees on a phone: is the
-   one thing to read readable, is the app's text in the footage readable too, is nothing cut off,
-   stacked, loading or empty, is the footage there, not black, and does it show what the words
-   claim? Is the end card three to four seconds? A frame that fails is fixed before anything else.
+1. Open each contact sheet with `read`. For every frame, ask: is anything cut off, stacked,
+   loading or empty that should not be, is the footage there and not black, and does it show what
+   the brief and the project's instructions ask for? A frame that fails is fixed first.
 2. Have it reviewed by someone who did not make it: `spawn_agent` a reviewer with the contact
-   sheets and the scenes' timing (`hyperframes timeline --json` in the folder) and what is said,
-   but not your intent or your plan, and ask what is weak, confusing, slow, unreadable on a phone
-   or broken. A review needs eyes, not the strongest model: give it `model: "standard"`, unless
-   that model cannot read images. Hand it the sheets at the paths the result names. One reviewer
-   reads every sheet; then look again yourself rather than spawning one per frame.
+   sheets, the scenes' timing (`hyperframes timeline --json` in the folder), what is said, and the
+   brief and the project's instructions, but not your plan, and ask what is broken, confusing, or
+   misses the brief. A review needs eyes, not the strongest model: give it `model: "standard"`,
+   unless that model cannot read images. Hand it the sheets at the paths the result names. One
+   reviewer reads every sheet; then look again yourself rather than spawning one per frame.
 3. Answer each point the review and the warnings raise: fix it, or know why not. Update the
    artifact with its `id`, look again, and name in your reply each point you left open.
-
-Long commands, such as `hyperframes snapshot --at 1.5,4 --output work/shots` on a copy of the
-folder, take a `timeoutMs` up to ten minutes; in the background, bound them with `timeout 900`.
-FFmpeg always takes `-nostdin`, and `-t` with `-loop 1`: without them it waits for input, or runs
-on, until the command is killed. Where HyperFrames takes no frame, as in a sandbox whose home is
-read only, run it with `HYPERFRAMES_CHROME_SANDBOX=0` and
-`HYPERFRAMES_CACHE_DIR=$PWD/.hyperframes-cache`.
 
 ## Revise
 
@@ -325,6 +295,7 @@ In your message, say which comments you resolved and which you answered.
 
 ## Examples
 
-`examples/video/launch-teaser/` is a finished 15-second teaser: a hook that is on screen from its
-first frame, a recording of the product pushed in on the action with one callout, and an end card
-that holds. Its `media/` is not included: a Playwright recording and a music file.
+`examples/video/launch-teaser/` is a 15-second video in this format: a root with a soundtrack and
+three chained scenes, the second crossfading in over the first, with a recording in a framed
+window and a timed callout. It shows the format, not a style to follow. Its `media/` is not
+included: a Playwright recording and a music file.

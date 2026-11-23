@@ -1,4 +1,4 @@
-/* One look for every scene: an ink ground, one accent, Inter Tight set tight. */
+/* What every scene shares: its colors, its font, and the classes the scenes use. */
 :root {
   --ink: #0e1116;
   --paper: #f4f2ee;

@@ -17,8 +17,8 @@
       const hook = gsap.timeline({ paused: true })
       const scene = '[data-composition-id="hook"]'
 
-      // Frame 0 is the thumbnail: the promise is on screen from the start, and settles. The
-      // second line answers it, eased out, never spun.
+      // Positions are seconds from the scene's start: the first line moves from 0, the second
+      // comes in at 0.6 s.
       hook.from(`${scene} .line:first-child`, { y: 24, duration: 0.8, ease: "power3.out" }, 0)
       hook.from(`${scene} .line:last-child`, { y: 64, opacity: 0, duration: 0.7, ease: "power3.out" }, 0.6)
 
