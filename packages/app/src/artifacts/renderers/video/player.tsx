@@ -981,19 +981,39 @@ function useWidth(element: RefObject<HTMLElement | null>): number {
   return useSize(element).width
 }
 
-/** An element's size, as it changes. */
+/**
+ * An element's size, as it changes. It is measured before the first paint, so a phone never shows
+ * the wide layout first; after that, a change lands on the next frame, and only when the size
+ * differs. A layout that answers its own resize then never resizes what is observed within the
+ * same frame, which the browser reports as a ResizeObserver loop.
+ */
 function useSize(element: RefObject<HTMLElement | null>): { width: number; height: number } {
   const [size, setSize] = useState({ width: 0, height: 0 })
-  // Before the first paint, so a phone never shows the wide layout first.
   useLayoutEffect(() => {
     const target = element.current
     if (!target) return
-    const measure = () => setSize({ width: target.clientWidth, height: target.clientHeight })
+    const measure = () =>
+      setSize((last) =>
+        last.width === target.clientWidth && last.height === target.clientHeight
+          ? last
+          : { width: target.clientWidth, height: target.clientHeight }
+      )
     measure()
     if (typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(measure)
+
+    let frame: number | null = null
+    const observer = new ResizeObserver(() => {
+      if (frame !== null) return
+      frame = requestAnimationFrame(() => {
+        frame = null
+        measure()
+      })
+    })
     observer.observe(target)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      if (frame !== null) cancelAnimationFrame(frame)
+    }
   }, [element])
   return size
 }
