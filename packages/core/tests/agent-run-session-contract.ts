@@ -25,6 +25,8 @@ import { lostConnectionCode, modelCallInterrupted } from "../src/agents/model-ca
 import type { UserPrincipal } from "../src/auth"
 import { emptyGrantIndex } from "../src/authorization/types"
 import {
+  createModelCatalog,
+  type EmbeddingModel,
   type LanguageModel,
   type ModelMessage,
   ModelProviderError,
@@ -143,6 +145,16 @@ const searchingModel: WebSearchModel = {
       results: [{ url: "https://example.com/bun", title: "Bun", snippet: request.query }],
       reportedCost: { money: { currency: "USD", amountNanos: "5000000" } },
     }
+  },
+}
+
+/** An embedding model, which makes the project's conversations searchable. */
+const embeddingModel: EmbeddingModel = {
+  providerId: "test",
+  modelId: "test-embedding",
+  definition: { kind: "embedding", providerId: "test", modelId: "test-embedding", dimensions: 2 },
+  async embed(input) {
+    return { vectors: input.texts.map(() => [1, 0]) }
   },
 }
 
@@ -514,6 +526,27 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       if (!nextSession) throw new Error("Expected the next run to be claimed.")
       expect((await nextSession.plan()).tokenRates).toEqual([{ bytes: 36_000, tokens: 15_000 }])
       nextSession.close()
+    })
+
+    // Guard proof: drop `conversationSearch` from the session's plan; the Agent is never told its
+    // `sixb` can search.
+    test("plans a conversation search with an embedding model, on storage that searches", async () => {
+      const plain = await seedAgentRun()
+      const searching = await seedAgentRun("run-2")
+      const models = createModelCatalog({ language: [answeringModel], embedding: [embeddingModel] })
+
+      const without = await claim(plain.host, { run: plain.run, leaseExpiresAt: LEASE })
+      if (!without) throw new Error("Expected the run to be claimed.")
+      expect((await without.plan()).conversationSearch).toBe(false)
+      without.close()
+
+      const withModel = await claim(
+        { ...searching.host, definitions: { ...searching.host.definitions, models } },
+        { run: searching.run, leaseExpiresAt: LEASE }
+      )
+      if (!withModel) throw new Error("Expected the run to be claimed.")
+      expect((await withModel.plan()).conversationSearch).toBe(true)
+      withModel.close()
     })
 
     // Guard proof: measure every call in AgentRunSession.models.language whatever its options, or

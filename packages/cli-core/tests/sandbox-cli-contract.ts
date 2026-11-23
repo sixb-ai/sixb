@@ -160,6 +160,8 @@ export function runSandboxCliContractSuite(implementation: SandboxCliContractImp
         ["--help"],
         ["status", "--help"],
         ["context", "--help"],
+        ["history", "--help"],
+        ["history", "search", "--help"],
         ["project", "--help"],
         ["project", "show", "--help"],
         ["ontology", "--help"],
@@ -362,6 +364,15 @@ export function runSandboxCliContractSuite(implementation: SandboxCliContractImp
           {
             args: ["workflows", "start", "review-customer", "--input-file", "input.json"],
             message: "Unknown workflows start option '--input-file'.",
+          },
+          {
+            args: ["history", "search", "invoices", "--since", "last week"],
+            message:
+              "--since must be a date (2026-11-20) or a timestamp with its offset (2026-11-20T15:04Z).",
+          },
+          {
+            args: ["history", "search", "invoices", "--limit", "26"],
+            message: "--limit must be an integer from 1 through 25.",
           },
         ] as const
         for (const { args, message } of invalidOptions) {
@@ -1025,6 +1036,69 @@ export function runSandboxCliContractSuite(implementation: SandboxCliContractImp
       } finally {
         api.close()
         await rm(tempDir, { recursive: true, force: true })
+      }
+    })
+
+    test("searches earlier conversations and reads one of them", async () => {
+      const api = startTestApi((request) => {
+        if (request.method === "POST" && request.url.pathname === "/api/agent-threads/search") {
+          return json({
+            conversations: [
+              {
+                thread: { id: "thread/1", createdAt: "2026-11-20T15:04:00.000Z", shared: false },
+                score: 0.8,
+                turns: [
+                  {
+                    messageId: "msg_1",
+                    firstSeq: 1,
+                    lastSeq: 2,
+                    at: "2026-11-20T15:04:00.000Z",
+                    score: 0.8,
+                    excerpt: "Request: Draft the reminder.",
+                    artifacts: [],
+                  },
+                ],
+              },
+            ],
+          })
+        }
+        if (request.url.pathname === "/api/agent-threads/thread%2F1/messages") {
+          return json({
+            messages: [{ seq: 1, role: "user", parts: [{ type: "text", text: "Draft it." }] }],
+            authors: [],
+            hasMore: false,
+            total: 2,
+          })
+        }
+      })
+      try {
+        const found = await runCli(
+          implementation,
+          ["history", "search", "the reminder", "--since", "2026-11-01"],
+          apiEnv(api)
+        )
+        expect(found.exitCode).toBe(0)
+        expect(found.stderr).toBe("")
+        expect(found.stdout).toContain("── thread/1 · untitled")
+
+        const read = await runCli(implementation, ["history", "--thread", "thread/1", "1"], {
+          ...apiEnv(api),
+          SIXB_THREAD_ID: "thread_own",
+        })
+        expect(read.exitCode).toBe(0)
+        expect(read.stderr).toBe("")
+        expect(read.stdout).toContain("── #1 user\nDraft it.")
+
+        expect(api.requests.map((request) => `${request.method} ${request.url.pathname}`)).toEqual([
+          "POST /api/agent-threads/search",
+          "GET /api/agent-threads/thread%2F1/messages",
+        ])
+        expect(api.requests[0]?.body).toEqual({
+          text: "the reminder",
+          since: "2026-11-01T00:00:00.000Z",
+        })
+      } finally {
+        api.close()
       }
     })
 

@@ -5,11 +5,14 @@ import { useState } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { type AgentToolView, defineAgentToolView } from "../src"
 import { BashToolView } from "../src/agent/bash/bash-tool-view"
+import { coerceBashOutput } from "../src/agent/bash/interpret"
+import { EarlierConversationsView } from "../src/agent/bash/renderers"
 import { AssistantBody } from "../src/agent/components/message-parts"
 import { EditToolView, WriteToolView } from "../src/agent/file-edits/file-edit-tool-view"
 import type { NormalizedPart, NormalizedTool } from "../src/agent/parts"
 import { ReadToolView } from "../src/agent/read/read-tool-view"
 import { GlobToolView, GrepToolView } from "../src/agent/search/search-tool-view"
+import { ThreadNavigationContext } from "../src/agent/thread-navigation"
 import { agentToolViews } from "../src/agent/tool-views/define"
 import { AgentToolViewsProvider } from "../src/agent/tool-views/registry"
 import { installDom } from "./helpers/dom"
@@ -577,5 +580,48 @@ describe("the Agent's question in its reply", () => {
     ])
     // The card alone: no work line before it.
     expect(view.container.textContent).toBe("Asked youWhich year?")
+  })
+})
+
+describe("the conversations a search found", () => {
+  const found = coerceBashOutput({
+    exitCode: 0,
+    stdout: [
+      "1 earlier conversation found, the closest first.",
+      "",
+      '── thread_acme · "Reminder for Acme"',
+      "started 2026-11-20T15:04Z",
+      "  #3 · 2026-11-20T15:04Z · Request: Draft a reminder. Answer: Done.",
+    ].join("\n"),
+    stderr: "",
+  })
+  if (!found) throw new Error("Expected parsed output.")
+
+  // Removal proof: render a react-router Link again; without a router around it, it throws.
+  test("open through the chat's navigation, with no router around them", () => {
+    const opened: string[] = []
+    const view = mount(
+      <ThreadNavigationContext.Provider value={(threadId) => opened.push(threadId)}>
+        <EarlierConversationsView parsed={found} />
+      </ThreadNavigationContext.Provider>
+    )
+    try {
+      fireEvent.click(view.getByRole("button", { name: /Reminder for Acme/ }))
+      expect(opened).toEqual(["thread_acme"])
+    } finally {
+      view.unmount()
+    }
+  })
+
+  test("are only named outside a chat, where nothing opens them", () => {
+    const view = mount(<EarlierConversationsView parsed={found} />)
+    try {
+      expect(view.container.textContent).toContain("Reminder for Acme")
+      expect(view.container.textContent).toContain("Draft a reminder.")
+      expect(view.queryByRole("button")).toBeNull()
+      expect(view.container.querySelector("a")).toBeNull()
+    } finally {
+      view.unmount()
+    }
   })
 })

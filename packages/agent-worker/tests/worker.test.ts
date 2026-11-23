@@ -2483,7 +2483,10 @@ function executionPlanFor(sixb: TestSixb) {
   const model = sixb.definitions.models?.language?.default.model
   if (!model) throw new Error("Expected a default language model.")
   // A project none of whose runs measured the model yet.
-  return resolveRunPlan({ ...plan, sandboxModels: [], tokenRates: [] }, { model })
+  return resolveRunPlan(
+    { ...plan, sandboxModels: [], tokenRates: [], conversationSearch: false },
+    { model }
+  )
 }
 
 /** A run's execution context, which also keeps the worker's storage for the test to seed and read. */
@@ -14039,6 +14042,8 @@ describe("AgentWorker", () => {
       expect(env?.SIXB_ACTOR_ID).toBeUndefined()
       expect(env?.SIXB_THREAD_ID).toBe(threadId)
       expect(env?.SIXB_RUN_ID).toBe(runId)
+      // The requester's, not the project's: `sixb` reads a date alone as their day.
+      expect(env?.SIXB_TIME_ZONE).toBe("Asia/Kolkata")
       expect(env?.SIXB_CONTEXT_DIR).toContain("/.sixb/agent")
       expect(env?.SIXB_SKILLS_DIR).toContain("/.sixb/agent/skills")
       expect(env?.SIXB_BIN_DIR).toContain("/.sixb/agent/bin")

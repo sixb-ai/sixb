@@ -3,6 +3,7 @@ import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { formatRelativeTime } from "../format"
 import { useAgentMessages } from "../i18n"
+import { useThreadNavigation } from "../thread-navigation"
 import {
   arrayLen,
   extractObjects,
@@ -22,6 +23,7 @@ import {
 import {
   capitalize,
   commandPreview,
+  foundConversations,
   humanize,
   isRecord,
   type ParsedBashOutput,
@@ -300,6 +302,85 @@ export function ActionRunView({ parsed }: CommandViewProps) {
         </div>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * `sixb history search` — the earlier conversations found, the closest first: what each is called,
+ * when it was last written in, and what was asked in it. Each opens as the chat around it
+ * navigates; outside a chat, it is only named.
+ */
+/**
+ * A conversation's title is most often the start of its first request, cut short. When what was
+ * asked only goes on from it, the request alone names the conversation, in one line.
+ */
+export function conversationLines(conversation: {
+  readonly title?: string
+  readonly asked?: string
+}): { readonly title?: string; readonly asked?: string } {
+  const { title, asked } = conversation
+  const stem = title?.replace(/(?:\.{3}|…)$/, "").trim()
+
+  if (asked && stem && asked.startsWith(stem)) return { title: asked }
+  return { ...(title ? { title } : {}), ...(asked ? { asked } : {}) }
+}
+
+export function EarlierConversationsView({ parsed }: CommandViewProps) {
+  const messages = useAgentMessages()
+  const locale = useLocale()
+  const openThread = useThreadNavigation()
+  const found = foundConversations(parsed.stdout)
+  if (!found) return <StructuredDataView parsed={parsed} />
+  if (found.length === 0) return <Empty message={messages.results.noEarlierConversations} />
+
+  return (
+    <ul className="divide-y divide-border/40">
+      {found.map((conversation) => {
+        const { title, asked } = conversationLines(conversation)
+
+        const row = (
+          <>
+            <span className="min-w-0 flex-1">
+              <span
+                className={cn(
+                  "block truncate font-medium text-foreground",
+                  openThread && "underline-offset-2 group-hover:underline"
+                )}
+              >
+                {title ?? messages.results.untitledConversation}
+              </span>
+              {asked ? (
+                <span className="mt-0.5 block truncate text-muted-foreground">{asked}</span>
+              ) : null}
+            </span>
+            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/60">
+              {[
+                conversation.shared ? messages.results.sharedConversation : "",
+                formatRelativeTime(conversation.at, locale, messages.time),
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          </>
+        )
+
+        return (
+          <li key={conversation.id}>
+            {openThread ? (
+              <button
+                type="button"
+                onClick={() => openThread(conversation.id)}
+                className="group flex w-full min-w-0 items-baseline gap-3 rounded-sm py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {row}
+              </button>
+            ) : (
+              <div className="flex min-w-0 items-baseline gap-3 py-1.5">{row}</div>
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 

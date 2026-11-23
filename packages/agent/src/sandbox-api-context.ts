@@ -44,6 +44,11 @@ export interface PrepareAgentSandboxApiContextInput {
   readonly actorId?: string
   readonly threadId?: string
   readonly runId: string
+  /**
+   * The requester's IANA time zone, else the project's: where `sixb` reads a date alone, such as
+   * `sixb history search --since 2026-11-20`, as the user's day.
+   */
+  readonly timeZone?: string
   readonly attachments?: PreparedAgentAttachmentContext
   readonly skills: readonly AgentSkillDefinition[]
   /** The run's ontology reference docs and scripts, by path relative to the ontology directory. */
@@ -192,6 +197,7 @@ export async function prepareAgentSandboxApiContext(
       ...(input.actorId === undefined ? {} : { SIXB_ACTOR_ID: input.actorId }),
       ...(input.threadId ? { SIXB_THREAD_ID: input.threadId } : {}),
       SIXB_RUN_ID: input.runId,
+      ...(input.timeZone ? { SIXB_TIME_ZONE: input.timeZone } : {}),
     },
   }
 }

@@ -10,6 +10,8 @@ export const CLI_LIMITS = {
   users: { default: 20, maximum: 200 },
   /** A page of a conversation's messages, as `sixb history` prints them. */
   history: { default: 20, maximum: 100 },
+  /** The server answers 10 conversations by default, 25 at most. */
+  historySearch: { default: 10, maximum: 25 },
   /** The server's dataset bounds: 100 versions and 1,000 rows per page. */
   datasetVersions: { default: 20, maximum: 100 },
   datasetRows: { default: 100, maximum: 1_000 },

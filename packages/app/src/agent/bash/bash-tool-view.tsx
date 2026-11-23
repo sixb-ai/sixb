@@ -13,6 +13,7 @@ import {
   Hash,
   Image as ImageIcon,
   type LucideIcon,
+  MessagesSquare,
   Quote,
   Sparkles,
   Table2,
@@ -40,6 +41,7 @@ import {
 import { ModelAnswerView, ModelMediaView } from "./model-media-view"
 import {
   ActionRunView,
+  EarlierConversationsView,
   FacetsView,
   GenericCommandView,
   ObjectDetailView,
@@ -73,6 +75,7 @@ const ICONS: Record<BashIcon, LucideIcon> = {
   image: ImageIcon,
   audio: AudioLines,
   transcript: Quote,
+  conversations: MessagesSquare,
   model: Sparkles,
   memory: Bookmark,
   terminal: Terminal,
@@ -309,6 +312,8 @@ function BashResult({
       return <ObjectTypeSchemaView parsed={parsed} />
     case "objects.facets":
       return <FacetsView parsed={parsed} />
+    case "history.search":
+      return <EarlierConversationsView parsed={parsed} />
     case "telemetry.history":
       return <TelemetryHistoryView parsed={parsed} />
     case "telemetry.query":

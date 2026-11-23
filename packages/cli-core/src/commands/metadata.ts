@@ -217,12 +217,19 @@ export const GROUP_HELP = {
   status: "Usage: sixb status",
   context: "Usage: sixb context",
   history: `Usage:
-  sixb history [--offset <n>] [--limit <1-${CLI_LIMITS.history.maximum}>]
-  sixb history <seq>
+  sixb history [--thread <id>] [--offset <n>] [--limit <1-${CLI_LIMITS.history.maximum}>]
+  sixb history [--thread <id>] <seq>
+  sixb history search <text> [--since <date>] [--until <date>] [--limit <1-${CLI_LIMITS.historySearch.maximum}>]
 
 Prints this conversation's messages as text, oldest first, including those summarized when it
 was compacted: what was said, the files sent, and each tool call with its result. A page holds
-${CLI_LIMITS.history.default} messages by default and cuts long text; \`sixb history <seq>\` prints one message whole.`,
+${CLI_LIMITS.history.default} messages by default and cuts long text; \`sixb history <seq>\` prints one message whole.
+--thread reads another of the user's conversations the same way.
+
+\`sixb history search\` finds the user's earlier conversations by meaning, the closest first, each
+with its best turns and the command that reads each; ${CLI_LIMITS.historySearch.default} by default. --since and
+--until take a timestamp with its offset, or a date: a day in the user's time zone
+($SIXB_TIME_ZONE, UTC without it), --since from its start and --until through its end.`,
   project: "Usage: sixb project show",
   ontology: `Usage:
   sixb ontology list [--full]

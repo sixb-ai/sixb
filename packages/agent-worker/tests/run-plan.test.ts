@@ -84,7 +84,16 @@ describe("resolveRunPlan", () => {
     sandboxModels: [],
     ontologyDocs: { files: [], index: [] },
     tokenRates: [{ bytes: 24_000, tokens: 10_000 }],
+    conversationSearch: false,
   }
+
+  // Proven by removal: drop `conversationSearch` from resolveRunPlan; the prompt never says it.
+  test("carries a turn's conversation search to its prompt", () => {
+    expect(resolveRunPlan({ ...plan, conversationSearch: true }, { model })).toMatchObject({
+      conversationSearch: true,
+    })
+    expect(resolveRunPlan(plan, { model })).not.toHaveProperty("conversationSearch")
+  })
 
   test("takes the session's model and the plan's tool specs, and adds the harness's skills", () => {
     const resolved = resolveRunPlan(plan, { model })
@@ -325,6 +334,7 @@ describe("resolveWorkflowAgentStepPlan", () => {
       ontologyDocs: { files: [], index: [] },
       tokenRates: [],
       web,
+      conversationSearch: false,
     }
     expect(resolveRunPlan(turn, { model }).web).toEqual(web)
   })

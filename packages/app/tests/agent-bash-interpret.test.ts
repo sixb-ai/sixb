@@ -7,8 +7,11 @@ import {
   commandPreview,
   commandTimeout,
   describeBash,
+  foundConversations,
   modelMedia,
 } from "../src/agent/bash/interpret"
+import { conversationLines } from "../src/agent/bash/renderers"
+import { fr } from "../src/agent/i18n/fr"
 
 function output(stdout: string, exitCode = 0) {
   return coerceBashOutput({
@@ -273,6 +276,105 @@ describe("describeBash", () => {
     expect(message.icon).toBe("transcript")
     expect(message.title).toBe("Read message 12")
     expect(message.runningTitle).toBe("Reading message 12")
+  })
+
+  // Guard proof: drop the `search` branch or the `--thread` check from classifySixbCommand and
+  // describeSixb; a search reads "Read message search", another conversation "Read message 4".
+  test("names a search of earlier conversations, and reading one, in the user's words", () => {
+    const search = describeBash(
+      classifyCommand('sixb history search "reminder for late invoices" --since 2026-11-01'),
+      output("2 earlier conversations found, the closest first.")
+    )
+    expect(search).toEqual({
+      icon: "conversations",
+      title: "Searched your earlier conversations",
+      runningTitle: "Searching your earlier conversations",
+      detail: "“reminder for late invoices”",
+    })
+    expect(
+      describeBash(classifyCommand("sixb history search late invoices"), null, fr)
+    ).toMatchObject({
+      title: "Recherche effectuée dans vos conversations précédentes",
+      runningTitle: "Recherche dans vos conversations précédentes",
+      detail: "« late invoices »",
+    })
+
+    const described = (command: string) => describeBash(classifyCommand(command), null)
+    expect(described("sixb history --thread thr_1 4")).toMatchObject({
+      title: "Read message 4 of an earlier conversation",
+      runningTitle: "Reading message 4 of an earlier conversation",
+    })
+    expect(described("sixb history --thread=thr_1 --offset 20").title).toBe(
+      "Read an earlier conversation"
+    )
+    expect(described("sixb history --offset 20").title).toBe("Read the earlier conversation")
+  })
+
+  // Guard proof: return null from pagedHistoryCommand; the piped search becomes a compound step,
+  // whose view is the raw command and its output.
+  test("shows a search piped into head as the search itself", () => {
+    expect(classifyCommand(`sixb history search "quote email" 2>&1 | head -50`)).toEqual({
+      kind: "sixb",
+      command: "history.search",
+      args: ["quote email"],
+    })
+    expect(classifyCommand("sixb history --thread thr_1 | tail -20")).toMatchObject({
+      kind: "sixb",
+      command: "history",
+    })
+
+    // Anything else in the pipe changes the text, so the step stays a compound one.
+    expect(classifyCommand(`sixb history search "quote" | grep Q-879`).kind).toBe("compound")
+    expect(classifyCommand("sixb objects list Quote | head -5").kind).toBe("compound")
+  })
+
+  // Guard proof: return null from foundConversations; the step then shows the raw listing.
+  test("reads the conversations a search found from the text the Agent reads", () => {
+    const listing = [
+      "2 earlier conversations found, the closest first.",
+      "",
+      '── thread_acme · "Reminder · Acme"',
+      "started 2026-11-20T15:04Z · last message 2026-11-21T09:10Z · shared",
+      "  #3 · 2026-11-20T15:04Z · Request: Draft a reminder for invoice 1042. Answer: Done.",
+      '    Published: "Acme reminder" (artifact:art_1)',
+      "    Read it: sixb history --thread thread_acme --offset 2 --limit 4",
+      "",
+      "── thread_q3 · untitled",
+      "started 2026-11-12T08:00Z",
+      "  #1 · 2026-11-12T08:00Z · Summarize Q3.",
+      "    Read it: sixb history --thread thread_q3 --offset 0 --limit 2",
+      "",
+      "A whole conversation: sixb history --thread <id>.",
+    ].join("\n")
+
+    expect(foundConversations(listing)).toEqual([
+      {
+        id: "thread_acme",
+        title: "Reminder · Acme",
+        at: "2026-11-21T09:10Z",
+        shared: true,
+        asked: "Draft a reminder for invoice 1042.",
+      },
+      { id: "thread_q3", at: "2026-11-12T08:00Z", shared: false },
+    ])
+    expect(foundConversations("No earlier conversation matches.\n")).toEqual([])
+    expect(foundConversations('{"error":"unexpected"}')).toBeNull()
+  })
+
+  // Guard proof: return both lines from conversationLines; a title cut from the request repeats it.
+  test("names a conversation by its request alone when its title only cuts it short", () => {
+    expect(
+      conversationLines({
+        title: "Draft a short, warm email to the customer whose quote is ...",
+        asked: "Draft a short, warm email to the customer whose quote is waiting on approval",
+      })
+    ).toEqual({
+      title: "Draft a short, warm email to the customer whose quote is waiting on approval",
+    })
+    expect(conversationLines({ title: "Acme renewal", asked: "Draft the reminder" })).toEqual({
+      title: "Acme renewal",
+      asked: "Draft the reminder",
+    })
   })
 
   // Guard proof: name the dataset from intent.args[0] again; it reads "the limit dataset".

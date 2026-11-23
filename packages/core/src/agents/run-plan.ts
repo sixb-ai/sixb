@@ -12,7 +12,7 @@ import type { OntologyDocsCatalog } from "../ontology/docs"
 import { type RenderedOntologyDocs, renderOntologyDocs } from "../ontology/docs-markdown"
 import type { SixbDefinitions } from "../runtime/definitions"
 import type { Sixb } from "../runtime/sixb"
-import type { AgentRunRecord } from "../storage/agents"
+import type { AgentRunRecord, AgentTurnVectorStore } from "../storage/agents"
 import type { AgentContextTokenRateSample } from "./context-token-rate"
 import { AgentMemoryError } from "./errors"
 import type { AgentMemoryRepoName } from "./memory"
@@ -56,6 +56,11 @@ export interface AgentRunPlan {
   readonly tokenRates: readonly AgentContextTokenRateSample[]
   /** Its web tools. Absent: `agent.web: false`, so it has none. */
   readonly web?: AgentRunWebPlan
+  /**
+   * Whether its `sixb` can search its requester's earlier conversations: the project has an
+   * embedding model, and its storage searches vectors (see readAgentRunConversationSearch).
+   */
+  readonly conversationSearch: boolean
 }
 
 /** The web tools a run offers, and the domains they reach. */
@@ -121,7 +126,7 @@ export function readAgentRunPlan(
   definitions: AgentRunPlanDefinitions,
   run: AgentRunRecord,
   view: AgentRunView
-): Omit<AgentRunPlan, "tokenRates"> {
+): Omit<AgentRunPlan, "tokenRates" | "conversationSearch"> {
   const { agent, models, tools } = definitions
   const web = readAgentRunWebPlan(definitions)
   const shared = {
@@ -198,6 +203,20 @@ export function readAgentRunWebPlan(
     ...(web?.allowedDomains ? { allowedDomains: web.allowedDomains } : {}),
     ...(web?.blockedDomains ? { blockedDomains: web.blockedDomains } : {}),
   })
+}
+
+/**
+ * Whether a turn or a child can search its requester's earlier conversations, as
+ * `sixb.agent.threads.search` decides: with the project's first embedding model, on storage that
+ * searches vectors. A no from storage is asked again a few minutes later, so the prompt that
+ * advertises the search stays the same from one turn to the next.
+ */
+export async function readAgentRunConversationSearch(
+  definitions: Pick<SixbDefinitions, "models">,
+  turnVectors: Pick<AgentTurnVectorStore, "searchAvailable">
+): Promise<boolean> {
+  if (!definitions.models?.embedding.list().length) return false
+  return turnVectors.searchAvailable()
 }
 
 /**

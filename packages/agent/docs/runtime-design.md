@@ -184,7 +184,9 @@ its window less the output reserve (see `context-budget.ts`):
   own thread. A run token also reads the earlier conversations its search finds
   (`POST /api/agent-threads/search`): its requester's, never the one it works for, and from a shared
   conversation none of their private ones. A sub-agent reads as its conversation does; a workflow's
-  agent node reads no other thread.
+  agent node reads no other thread. `sixb history search` finds them and `sixb history --thread`
+  reads one. The prompt names them only when the plan's `conversationSearch` is true: the project
+  has an embedding model, on storage that searches vectors.
 
 ## How agents use a sandbox
 

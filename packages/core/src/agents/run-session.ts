@@ -64,6 +64,7 @@ import {
   type AgentRunMemory,
   type AgentRunPlan,
   type AgentRunPlanDefinitions,
+  readAgentRunConversationSearch,
   readAgentRunMemory,
   readAgentRunPlan,
 } from "./run-plan"
@@ -654,7 +655,11 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         projectId: host.projectId,
         model: { providerId: plan.model.provider, modelId: plan.model.modelId },
       })
-      return Object.freeze({ ...plan, tokenRates })
+      const conversationSearch = await readAgentRunConversationSearch(
+        host.definitions,
+        agents.turnVectors
+      )
+      return Object.freeze({ ...plan, tokenRates, conversationSearch })
     },
     async memory({ asOf }) {
       // Others read a shared conversation, so its runs and its children's reach no one's own memory;
