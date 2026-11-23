@@ -213,7 +213,15 @@ self.onmessage = async (event) => {
 }`
   const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }))
   return new Promise<`sha256:${string}`>((resolve, reject) => {
-    const worker = new Worker(url)
+    let worker: Worker
+    try {
+      worker = new Worker(url)
+    } catch (error) {
+      // Refused at once, as a page's policy may: its source goes with it.
+      URL.revokeObjectURL(url)
+      reject(error)
+      return
+    }
     const done = () => {
       worker.terminate()
       URL.revokeObjectURL(url)
