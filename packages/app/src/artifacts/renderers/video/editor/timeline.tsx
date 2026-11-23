@@ -7,9 +7,25 @@ import {
   videoChapters,
   videoTarget,
 } from "@sixb/core/artifacts/live"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@sixb/ui/components"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { AudioLines, Image as ImageIcon, TriangleAlert, Type, Video } from "lucide-react"
+import {
+  AudioLines,
+  Image as ImageIcon,
+  Replace,
+  Trash2,
+  TriangleAlert,
+  Type,
+  Video,
+} from "lucide-react"
 import {
   Fragment,
   memo,
@@ -158,6 +174,9 @@ export interface TimelineEdits {
   readonly scene: SceneActions
   /** Files dragged over the tracks would land at this instant; null once they leave. */
   readonly dropOver?: (ms: number | null) => void
+  /** A clip's menu: Replace with… for one that plays or shows a file, and Delete. */
+  readonly replaceClip?: (clip: LaidClip) => void
+  readonly removeClip?: (clip: LaidClip) => void
 }
 
 /** What a clip's block does with the pointer, the same functions from one render to the next. */
@@ -167,6 +186,8 @@ interface ClipHandlers {
   readonly select: (laid: LaidClip) => void
   /** The pointer over a clip's block, or off it: every part of a clip that goes on shows. */
   readonly hover: (laid: LaidClip | null) => void
+  /** A right click on it, or its menu key, where it was. */
+  readonly menu: (laid: LaidClip, x: number, y: number) => void
   readonly onPointerMove: (event: ReactPointerEvent) => void
   readonly onPointerUp: (event: ReactPointerEvent) => void
   readonly onPointerCancel: () => void
@@ -245,6 +266,12 @@ export function Timeline({
   const [drag, setDrag] = useState<Drag | null>(null)
   // The clip that goes on under the pointer, by its key: all its parts outlined, its end in sight.
   const [hovered, setHovered] = useState<string | null>(null)
+  // A clip's menu, open where it was asked for.
+  const [clipMenu, setClipMenu] = useState<{
+    readonly laid: LaidClip
+    readonly x: number
+    readonly y: number
+  } | null>(null)
   const dragRef = useRef<Drag | null>(null)
   dragRef.current = drag
 
@@ -578,6 +605,11 @@ export function Timeline({
     },
     select: (laid) => edits.select(selectionOfClip(headOf(laid))),
     hover: (laid) => setHovered(laid?.chain ? laid.chain.key : null),
+    menu: (laid, x, y) => {
+      if (!edits.replaceClip && !edits.removeClip) return
+      edits.select(selectionOfClip(headOf(laid)))
+      setClipMenu({ laid: headOf(laid), x, y })
+    },
     ...dragHandlers,
   }
   const clipHandlers = useMemo<ClipHandlers>(
@@ -586,6 +618,7 @@ export function Timeline({
       trim: (event, laid, edge) => latest.current?.trim(event, laid, edge),
       select: (laid) => latest.current?.select(laid),
       hover: (laid) => latest.current?.hover(laid),
+      menu: (laid, x, y) => latest.current?.menu(laid, x, y),
       onPointerMove: (event) => latest.current?.onPointerMove(event),
       onPointerUp: (event) => latest.current?.onPointerUp(event),
       onPointerCancel: () => latest.current?.onPointerCancel(),
@@ -818,8 +851,39 @@ export function Timeline({
     drag && "target" in drag && drag.target !== undefined ? px(drag.target) : undefined
   const { major, minor } = rulerSteps(zoom)
 
+  const menuClip = clipMenu?.laid.clip
+  const replaceable =
+    menuClip?.src !== undefined &&
+    (menuClip.kind === "video" || menuClip.kind === "audio" || menuClip.kind === "image")
+
   return (
     <section aria-label={messages.timeline} className="flex min-h-0 flex-1 flex-col">
+      <DropdownMenu open={clipMenu !== null} onOpenChange={(open) => open || setClipMenu(null)}>
+        <DropdownMenuTrigger asChild>
+          <span
+            aria-hidden="true"
+            className="pointer-events-none fixed size-0"
+            style={{ left: clipMenu?.x ?? 0, top: clipMenu?.y ?? 0 }}
+          />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-44">
+          {replaceable && edits.replaceClip ? (
+            <DropdownMenuItem onSelect={() => clipMenu && edits.replaceClip?.(clipMenu.laid)}>
+              <Replace />
+              {messages.replaceWith}
+            </DropdownMenuItem>
+          ) : null}
+          {edits.removeClip ? (
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={() => clipMenu && edits.removeClip?.(clipMenu.laid)}
+            >
+              <Trash2 />
+              {messages.delete}
+            </DropdownMenuItem>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
       {toolbar({
         zoomIn: () => zoomBy(1.5),
         zoomOut: () => zoomBy(1 / 1.5),
@@ -1480,6 +1544,11 @@ const ClipBlock = memo(function ClipBlock({
       onPointerDown={(event) => handlers.press(event, laid)}
       onPointerEnter={() => handlers.hover(laid)}
       onPointerLeave={() => handlers.hover(null)}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        const box = event.currentTarget.getBoundingClientRect()
+        handlers.menu(laid, event.clientX || box.left, event.clientY || box.bottom)
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault()

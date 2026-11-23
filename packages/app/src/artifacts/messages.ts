@@ -1010,6 +1010,14 @@ export const en = {
     commandClicking: (key: string) => `${key} while clicking`,
     shiftDragging: "Shift while dragging",
     altDragging: (key: string) => `${key} while dragging`,
+    /** Plays another file in a clip's place. */
+    replaceWith: "Replace with…",
+    replaceTitle: (name: string) => `Replace “${name}”`,
+    replaceHint: "It keeps its start, its length, its sound and its look.",
+    noOtherMedia: "The video holds no other file of this kind yet.",
+    uploadMedia: "Upload a file…",
+    inUse: "In use",
+    playingNow: (name: string) => `${name}, which it plays now`,
     /** Where a clip goes on in the next chapter, which its edge there is not. */
     continues: "Goes on in the next chapter",
   },
@@ -2026,6 +2034,13 @@ export const fr: Translation<ArtifactMessages> = {
     commandClicking: (key) => `${key} en cliquant`,
     shiftDragging: "Maj en glissant",
     altDragging: (key) => `${key} en glissant`,
+    replaceWith: "Remplacer par…",
+    replaceTitle: (name) => `Remplacer « ${name} »`,
+    replaceHint: "Il garde son début, sa durée, son son et son style.",
+    noOtherMedia: "La vidéo ne contient pas encore d’autre fichier de ce type.",
+    uploadMedia: "Importer un fichier…",
+    inUse: "Utilisé",
+    playingNow: (name) => `${name}, qu’il lit maintenant`,
     continues: "Continue dans le chapitre suivant",
   },
   picker: {

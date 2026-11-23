@@ -11,6 +11,7 @@ import {
   removeClips,
   removeMediaRanges,
   removeScene,
+  replaceClipMedia,
   setClipSound,
   setClipTiming,
   setSceneLabel,
@@ -97,6 +98,7 @@ import {
 } from "./model"
 import { readMagnetic, writeMagnetic } from "./preferences"
 import { PlayMark, PreviewScreen, usePreview } from "./preview"
+import { mediaOfKind, ReplaceDialog } from "./replace"
 import {
   choose,
   chosenIn,
@@ -261,7 +263,12 @@ export default function VideoEditor({
     [video, refuse, messages.chapterTooLarge]
   )
 
-  const { uploads, importFiles } = useMediaImport(
+  // The clip whose file Replace with… is choosing another for.
+  const [replacing, setReplacing] = useState<{
+    readonly file: string
+    readonly clip: VideoClip
+  } | null>(null)
+  const { uploads, importFiles, uploadMedia } = useMediaImport(
     video,
     (detail) => setNotice({ title: detail, tone: "warning" }),
     () => setNotice({ title: messages.addedMuted, tone: "info" })
@@ -486,6 +493,15 @@ export default function VideoEditor({
     splitClip: (file, target) => splitAt(file, target),
     splitClips: () => splitNow(),
     removeClips: () => removeGroup(picked),
+    replaceClip: (file, target) => setReplacing({ file, clip: target }),
+  }
+
+  /** Plays the file at `path` in the clip being replaced, as one step: every part of it. */
+  const replaceWith = (path: string) => {
+    const replaced = replacing
+    if (!replaced) return
+    setReplacing(null)
+    edit((sources) => replaceClipMedia(sources, replaced.file, videoTarget(replaced.clip), path))
   }
 
   /** The clip the playhead splits: the one selected when it is under it, else the picture on top. */
@@ -976,6 +992,18 @@ export default function VideoEditor({
         </aside>
       </div>
 
+      <ReplaceDialog
+        clip={replacing?.clip ?? null}
+        media={replacing ? mediaOfKind(state.sources, replacing.clip.kind) : []}
+        target={target}
+        onChoose={replaceWith}
+        onUpload={(file) => {
+          void uploadMedia(file).then((path) => {
+            if (path) replaceWith(path)
+          })
+        }}
+        onClose={() => setReplacing(null)}
+      />
       {banner}
 
       {/* A height of its own, so opening a scene with more rows never moves the picture. */}
@@ -1041,6 +1069,8 @@ export default function VideoEditor({
             sceneLength: sceneActions.sceneLength,
             scene: sceneActions,
             dropOver: setFilesAt,
+            replaceClip: (laid) => setReplacing({ file: laid.file, clip: laid.clip }),
+            removeClip: (laid) => removeSelected({ file: laid.file, clip: laid.clip }),
           }}
           toolbar={(zoom) => (
             <Toolbar
