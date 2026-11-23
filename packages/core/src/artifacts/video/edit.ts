@@ -42,6 +42,7 @@ import {
   type VideoText,
   type VideoTrack,
   videoChains,
+  videoChapters,
 } from "./timeline"
 
 // What an editor does to a video, as the smallest changes to the text of its files: a scene made
@@ -3243,11 +3244,17 @@ function placeFound(work: Working, placing: readonly Placing[]): Placement {
  * frames past a scene's edge, is left out, unless it is all there is.
  */
 function partsOf(
-  scenes: readonly Scene[],
+  every: readonly Scene[],
   own: Scene,
   startMs: number,
   durationMs: number | undefined
 ): Part[] {
+  // An overlay keeps its clips, where they are moved to in it; a chapter's go to chapters alone.
+  const scenes = videoChapters(every)
+  if (!scenes.includes(own)) {
+    return [{ scene: own, startMs: Math.max(startMs, own.startMs), durationMs, intoMs: 0 }]
+  }
+
   const end = (scene: Scene) => scene.startMs + scene.durationMs
   const holds = (scene: Scene, ms: number) => scene.startMs <= ms && ms < end(scene)
   const onTop = (ms: number, except?: Scene) =>

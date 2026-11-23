@@ -38,7 +38,12 @@ import {
   type VideoSources,
   videoTarget,
 } from "../src/artifacts/video/edit"
-import { readRootTimeline, readSceneTimeline, videoChains } from "../src/artifacts/video/timeline"
+import {
+  readRootTimeline,
+  readSceneTimeline,
+  videoChains,
+  videoChapters,
+} from "../src/artifacts/video/timeline"
 
 // Editing a video changes the text of its files as little as it can, and leaves a video: each
 // operation is checked by reading the files it leaves as publishing reads them.
@@ -1653,6 +1658,69 @@ describe("placing clips in the video", () => {
       7000
     )
     expect("edit" in quiet ? quiet.animationsJoined : undefined).toEqual([])
+  })
+
+  // Guard proof: place among every scene in partsOf (edit.ts), without videoChapters, and the
+  // hook's title moved to 5 s lands in the subtitles laid over the demo; go on in any scene in
+  // sceneAfter (timeline.ts), and the title pulled on past the hook is two clips.
+  test("a scene laid over the others is no chapter: no clip goes into it or out of it", () => {
+    const sources = with_({
+      "index.html": INDEX.replace(
+        "  </div>\n</body>",
+        '    <div id="subtitles" data-composition-id="subtitles" data-composition-src="scenes/subtitles.html" data-start="2.6" data-duration="12.4"></div>\n  </div>\n</body>'
+      ),
+      "scenes/subtitles.html": `<template>
+  <div data-composition-id="subtitles" data-width="1920" data-height="1080">
+    <p class="line" data-start="1" data-duration="2">Every job, one screen</p>
+  </div>
+</template>
+`,
+    })
+    const scenes = composition(sources).scenes
+    expect(videoChapters(scenes).map((scene) => scene.id)).toEqual(["hook", "demo", "outro"])
+
+    // A caption moved into the hook's time goes into the hook.
+    const moved = applied(
+      moveClip(sources, "scenes/demo.html", caption("in two taps"), -2000),
+      sources
+    )
+    expect(
+      readSceneTimeline(moved.get("scenes/hook.html") as string)?.clips.map((clip) => clip.text)
+    ).toEqual(["in two taps"])
+    expect(moved.get("scenes/subtitles.html")).toBe(sources.get("scenes/subtitles.html"))
+
+    // A line of the subtitles moved to the demo's time stays in the subtitles.
+    const line = applied(moveClip(sources, "scenes/subtitles.html", "#0", 6000), sources)
+    expect(readSceneTimeline(line.get("scenes/subtitles.html") as string)?.clips[0]?.startMs).toBe(
+      6000
+    )
+    expect(line.get("scenes/demo.html")).toBe(sources.get("scenes/demo.html"))
+
+    // The hook's title moved to 5 s, under the subtitles over the demo, goes into the demo.
+    const short = new Map(sources).set(
+      "scenes/hook.html",
+      HOOK.replace('<h1 class="title">', '<h1 class="title" data-start="0" data-duration="1">')
+    )
+    const later = applied(moveClip(short, "scenes/hook.html", "#0", 5000), short)
+    expect(later.get("scenes/demo.html")).toContain("Every job, one screen")
+    expect(later.get("scenes/subtitles.html")).toBe(sources.get("scenes/subtitles.html"))
+
+    // Pulled on past the hook, the title goes on in the demo.
+    const titled = new Map(sources).set(
+      "scenes/hook.html",
+      HOOK.replace('<h1 class="title">', '<h1 class="title" data-start="0" data-duration="3">')
+    )
+    const long = applied(trimClip(titled, "scenes/hook.html", "#0", "end", 4000), titled)
+    expect(long.get("scenes/demo.html")).toContain("Every job, one screen")
+    expect(long.get("scenes/subtitles.html")).toBe(sources.get("scenes/subtitles.html"))
+    // And it is one clip: from the hook it goes on in the demo, the subtitles over both no step.
+    const chains = videoChains(
+      composition(long).scenes,
+      (file) => readSceneTimeline(long.get(file) as string) ?? undefined
+    )
+    expect(chains.map((chain) => chain.parts.map((part) => part.file))).toEqual([
+      ["scenes/hook.html", "scenes/demo.html"],
+    ])
   })
 
   // Guard proof: give the video's own clips a scene in placeFound (edit.ts), the first; the music
