@@ -8,7 +8,6 @@ import {
   type VideoSourceSpan,
   type VideoStart,
   videoFilePath,
-  videoFilesPlayed,
 } from "./composition"
 import {
   type CssBlock,
@@ -186,27 +185,35 @@ export function setSceneLabel(
 export function moveScene(sources: VideoSources, scene: string, to: number): VideoEditResult {
   return run(sources, (work) => {
     const before = openRoot(work)
-    const order = [...before.scenes]
-    const from = order.findIndex((each) => each.id === scene)
-    if (from < 0) throw new EditError(noScene(scene))
+    // The chapters play one after the other; a scene laid over them keeps its start.
+    const chapters = videoChapters(before.scenes)
+    const moving = before.scenes.find((each) => each.id === scene)
+    if (!moving) throw new EditError(noScene(scene))
+    if (!chapters.includes(moving)) {
+      throw new EditError(
+        `'${scene}' is laid over the other scenes: it plays in no order of theirs.`
+      )
+    }
 
+    const order = [...before.scenes]
+    const from = order.indexOf(moving)
     const target = Math.min(Math.max(Math.round(to), 0), order.length - 1)
     if (target === from) return
+    order.splice(from, 1)
+    order.splice(target, 0, moving)
 
-    const [moved] = order.splice(from, 1)
-    if (!moved) return
-    order.splice(target, 0, moved)
-
-    // Each scene whose predecessor changed starts after its new one, and so, from there on, does
-    // each that starts at a number of seconds: its predecessor's place changed.
-    const was = new Map(before.scenes.map((each, index) => [each.id, before.scenes[index - 1]?.id]))
-    const changed = order.findIndex((each, index) => was.get(each.id) !== order[index - 1]?.id)
-    order.forEach((each, index) => {
-      const after = order[index - 1]
+    // Each chapter whose predecessor changed starts after its new one, and so, from there on,
+    // does each that starts at a number of seconds: its predecessor's place changed.
+    const played = order.filter((each) => chapters.includes(each))
+    const was = new Map(chapters.map((each, index) => [each.id, chapters[index - 1]?.id]))
+    const changed = played.findIndex((each, index) => was.get(each.id) !== played[index - 1]?.id)
+    if (changed < 0) return
+    played.forEach((each, index) => {
+      const after = played[index - 1]
       const kept = was.get(each.id) === after?.id
       if (kept && (index < changed || each.start.type === "after")) return
 
-      const start = after ? chainedStart(after.id, gapBefore(before.scenes, each)) : "0"
+      const start = after ? chainedStart(after.id, gapBefore(chapters, each)) : "0"
       setAttributes(work, VIDEO_ENTRY, hostOf(work, each.id).host, { "data-start": start })
     })
 
@@ -836,8 +843,14 @@ export function removeMediaRanges(
 ): VideoEditResult {
   return run(sources, (work) => {
     const removed = mergeCuts(ranges)
+    // The file, however the clips name it: `media/a.mp4` and `../media/a.mp4` are one.
+    const exists = (path: string) => work.has(path)
+    const recording = videoFilePath(file, src, exists) ?? src
     const played = timelineOf(work, file).clips.filter(
-      (clip) => clip.src === src && playsFile(clip)
+      (clip) =>
+        clip.src !== undefined &&
+        (videoFilePath(file, clip.src, exists) ?? clip.src) === recording &&
+        playsFile(clip)
     )
     const parts = chainParts(work, file, played)
     const endOf = (part: { readonly file: string; readonly clip: VideoClip }) =>
@@ -941,8 +954,8 @@ export function cutRange(sources: VideoSources, range: VideoRange): VideoEditRes
  * Adds a clip that plays or shows a file of the video, at `startMs` in its composition, for
  * `durationMs`: footage fills the frame under what the scene shows, a sound plays under it. It is
  * placed as {@link moveClips} places a clip: past its scene's end, it goes on in the next scene,
- * or the last scene grows to hold it. Footage added where another clip is heard is added muted,
- * as B-roll over a voice is, which `muted` says. Returns the clip's id with the edit.
+ * or the last scene grows to hold it. Footage added where a scene's clip is heard is added muted,
+ * as B-roll over a voice is, which `muted` says; the video's own music is no reason. Returns the clip's id with the edit.
  */
 export function insertClip(
   sources: VideoSources,
@@ -995,24 +1008,17 @@ export function insertClip(
 }
 
 /**
- * Whether a clip of the video is heard between `fromMs` and `toMs`: a sound, or footage that is not
- * muted, at a volume above none, the video's own or a scene's.
+ * Whether something is said between `fromMs` and `toMs`: a scene's sound, or its footage, heard at
+ * a volume above none. The video's own sounds, music or ambience under all of it, are not.
  */
 function heardDuring(work: Working, fromMs: number, toMs: number): boolean {
-  const files = [
-    { file: VIDEO_ENTRY, startMs: 0, endMs: Number.POSITIVE_INFINITY },
-    ...rootOf(work).scenes.map((scene) => ({
-      file: scene.src,
-      startMs: scene.startMs,
-      endMs: scene.startMs + scene.durationMs,
-    })),
-  ]
-  return files.some(({ file, startMs, endMs }) => {
-    if (work.textOf(file) === undefined) return false
-    return (readTimeline(work, file)?.clips ?? []).some((clip) => {
-      const sounds = clip.kind === "audio" || (clip.kind === "video" && !clip.silent)
+  return rootOf(work).scenes.some((scene) => {
+    if (work.textOf(scene.src) === undefined) return false
+    const endMs = scene.startMs + scene.durationMs
+    return (readTimeline(work, scene.src)?.clips ?? []).some((clip) => {
+      const sounds = (clip.kind === "audio" || clip.kind === "video") && !clip.silent
       if (!sounds || clip.volume === 0) return false
-      const from = startMs + clip.startMs
+      const from = scene.startMs + clip.startMs
       const to = Math.min(endMs, clip.durationMs === undefined ? endMs : from + clip.durationMs)
       return from < toMs && fromMs < to
     })
@@ -1036,10 +1042,12 @@ export function replaceClipMedia(
     if (!found.src || (kind !== "video" && kind !== "audio" && kind !== "image")) {
       throw new EditError(`'${found.ref}' plays no file to replace.`)
     }
-    if (sources.get(src) !== null) {
+    // The file, however it is named: from the clip's file, or from the project's root.
+    const path = videoFilePath(file, src, (each) => work.has(each)) ?? src
+    if (sources.get(path) !== null) {
       throw new EditError(`'${src}' is not one of the video's recordings or pictures.`)
     }
-    const replacing = mediaKind(src)
+    const replacing = mediaKind(path)
     if (replacing !== undefined && replacing !== kind) {
       throw new EditError(
         `'${src}' is no ${kind === "image" ? "picture" : kind}: choose one that is.`
@@ -1054,7 +1062,7 @@ export function replaceClipMedia(
     for (const part of parts) {
       const now = clipOf(work, part.file, part.clip.ref)
       setAttributes(work, part.file, now.source, {
-        src: writtenPath(work, part.file, src),
+        src: writtenPath(work, part.file, path, now.src?.startsWith("../") ?? false),
         ...(playsFile(now) ? { "data-media-start": seconds(intoMs) } : {}),
       })
       intoMs += now.durationMs ?? 0
@@ -1071,11 +1079,15 @@ function mediaKind(path: string): "video" | "audio" | "image" | undefined {
   return undefined
 }
 
-/** A file of the video as `file` names it: from the project's root, else from beside it. */
-function writtenPath(work: Working, file: string, path: string): string {
+/**
+ * A file of the video as `file` names it: from the project's root, else from beside it, or from
+ * beside it first, as the file named the one it replaces.
+ */
+function writtenPath(work: Working, file: string, path: string, beside = false): string {
   const exists = (each: string) => work.has(each)
-  const up = "../".repeat(file.split("/").length - 1)
-  return [path, `${up}${path}`].find((each) => videoFilePath(file, each, exists) === path) ?? path
+  const up = `${"../".repeat(file.split("/").length - 1)}${path}`
+  const spellings = beside ? [up, path] : [path, up]
+  return spellings.find((each) => videoFilePath(file, each, exists) === path) ?? path
 }
 
 /** The files an edit leaves: `sources` with the edit applied. */
@@ -1370,15 +1382,15 @@ function run(sources: VideoSources, operation: (work: Working) => void): VideoEd
 
 /**
  * The recordings and pictures an edit took the last clip of: each leaves the version with it, and
- * an undo of the edit brings it back. Only those a file the edit changed named, and no file names
- * now: what nothing played before it stays, as the Agent may have put it there for later.
+ * an undo of the edit brings it back. Only those a file the edit changed played, and no text file
+ * of the version names now, under any spelling: what nothing played before it stays, as the Agent
+ * may have put it there for later, and when unsure, a file stays.
  */
 function unplayed(
   sources: VideoSources,
   files: ReadonlyMap<string, string | null>,
   edit: VideoEdit
 ): VideoFileEdit[] {
-  const exists = (path: string) => files.has(path)
   const named = (path: string, text: string | null | undefined) =>
     new Set(
       [...(text ?? "").matchAll(/\ssrc\s*=\s*(["'])([^"']+)\1/gi)].flatMap((match) => {
@@ -1397,18 +1409,15 @@ function unplayed(
   }
   if (gone.size === 0) return []
 
-  const index = files.get(VIDEO_ENTRY)
-  if (typeof index !== "string") return []
-  const played = videoFilesPlayed(
-    index,
-    (path) => {
-      const text = files.get(path)
-      return typeof text === "string" ? text : undefined
-    },
-    exists
-  )
+  // Still named anywhere, it stays: by any text file of the version, hosted or not, in a style, a
+  // script, a picture's `href`, under any spelling that reaches it, whose name ends with its own.
+  const texts = [...files.values()].filter((text): text is string => typeof text === "string")
   return [...gone]
-    .filter((path) => !played.has(path))
+    .filter((path) => {
+      const name = path.slice(path.lastIndexOf("/") + 1)
+      const spellings = new Set([name, encodeURIComponent(name), encodeURI(name)])
+      return !texts.some((text) => [...spellings].some((spelling) => text.includes(spelling)))
+    })
     .map((path) => ({ path, remove: true as const }))
 }
 

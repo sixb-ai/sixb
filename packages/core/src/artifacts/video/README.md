@@ -238,14 +238,19 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
   one cut.
 - **Sound and files.** A clip's `data-volume` goes up to 4 times as recorded, or stays as loud as
   the Agent made it; footage is muted and heard again as HyperFrames mixes it, `muted` or a
-  `data-has-audio` other than "true" never heard. Footage imported where a clip is already heard,
-  B-roll over a voice, comes in muted. `replaceClipMedia` plays another file of the same kind in a
-  clip's place, every part of it from the new file's start. An edit that takes the last clip
-  playing a recording or a picture takes the file too (`unplayed`), and an undo brings both back:
-  only a file an edited file named, so one the Agent stored for later stays.
-- **Chapters** (`videoChapters`): every scene but an overlay, one that holds another whole, as
-  captions laid over the whole video; a crossfade only overlaps. Placement never puts a clip in an
-  overlay nor goes on in one past a chapter's end, and an overlay's own clips stay in it.
+  `data-has-audio` other than "true" never heard, nor a muted sound. Footage imported where a
+  scene says something, B-roll over a voice, comes in muted; the video's own music is no reason.
+  `replaceClipMedia` plays another file of the same kind in a clip's place, every part of it from
+  the new file's start; it and `removeMediaRanges` know a file however a clip names it. An edit
+  that takes the last clip playing a recording or a picture takes the file too (`unplayed`), and an
+  undo brings both back: only a file an edited file played, and only once no text file of the
+  version names it, hosted or not, in a style, a script or a picture's `href`, under any spelling;
+  when unsure, it stays.
+- **Chapters** (`videoChapters`): every scene but an overlay, one that holds two others whole, or
+  the span of all the others, as captions laid over the whole video; a short chapter in another's
+  crossfade is still one. Placement never puts a clip in an overlay nor goes on in one past a
+  chapter's end, and an overlay's own clips stay in it. A reorder chains the chapters alone, an
+  overlay keeping its start.
 - **Placing** (`placeFound`): every edit that puts a scene's clip at a time of the video, a move,
   an end trim without ripple, an import, goes through it. The clip lives in the scene that plays
   where it starts: its own while that holds it, else the one on top there (the later in play

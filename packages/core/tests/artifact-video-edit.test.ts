@@ -696,6 +696,63 @@ describe("editing clips", () => {
     expect("error" in picture && picture.error).toContain("is no video")
   })
 
+  // Guard proof: read what still plays a file as hosted scenes' clips alone in unplayed (edit.ts),
+  // `videoFilesPlayed`, as it did; the logo a style still paints, the mark an <svg> still shows,
+  // the take a draft scene plays, and the background styles.css names, each then leaves.
+  test("a file any text of the version still names stays, however it names it", () => {
+    const sceneOf = (id: string, inner: string) =>
+      `<template>\n  <div data-composition-id="${id}" data-width="1920" data-height="1080">\n    ${inner}\n  </div>\n</template>\n`
+    const index = `<html><head><link rel="stylesheet" href="styles.css"></head><body><div data-composition-id="main" data-width="1920" data-height="1080" data-fps="30" data-duration="8">
+  <div id="a" data-composition-id="a" data-composition-src="scenes/a.html" data-start="0" data-duration="4"></div>
+  <div id="b" data-composition-id="b" data-composition-src="scenes/b.html" data-start="a" data-duration="4"></div>
+</div></body></html>`
+    const base = new Map<string, string | null>([
+      ["index.html", index],
+      [
+        "scenes/a.html",
+        sceneOf("a", '<img id="logo" src="media/logo.png" data-start="0" data-duration="2">'),
+      ],
+      [
+        "scenes/b.html",
+        sceneOf(
+          "b",
+          '<div class="badge" data-start="0" data-duration="4"></div><svg><image href="media/mark.png"/></svg><img id="mk" src="media/mark.png" data-start="1" data-duration="1"><style>[data-composition-id="b"] .badge { background: url(../media/logo.png) }</style>'
+        ),
+      ],
+      ["styles.css", ".x { background: url(media/bg%20one.jpg) }"],
+      [
+        "drafts/next.html",
+        sceneOf("next", '<video src="../media/take.mp4" data-start="0" data-duration="3"></video>'),
+      ],
+      ["media/logo.png", null],
+      ["media/mark.png", null],
+      ["media/bg one.jpg", null],
+      ["media/take.mp4", null],
+      ["media/alone.png", null],
+    ])
+    const removed = (result: VideoEditResult) =>
+      "edit" in result
+        ? result.edit.flatMap((each) => ("remove" in each ? [each.path] : []))
+        : [result.error]
+    const playing = (inner: string) => new Map(base).set("scenes/a.html", sceneOf("a", inner))
+
+    expect(removed(removeClip(base, "scenes/a.html", "logo"))).toEqual([])
+    expect(removed(removeClip(base, "scenes/b.html", "mk"))).toEqual([])
+    const take = playing(
+      '<video id="t" src="../media/take.mp4" data-start="0" data-duration="3"></video>'
+    )
+    expect(removed(removeClip(take, "scenes/a.html", "t"))).toEqual([])
+    const background = playing(
+      '<img id="bg" src="media/bg one.jpg" data-start="0" data-duration="2">'
+    )
+    expect(removed(removeClip(background, "scenes/a.html", "bg"))).toEqual([])
+    expect(removed(removeScene(base, "a"))).toEqual(["scenes/a.html"])
+
+    // Named nowhere else, it goes.
+    const alone = playing('<img id="only" src="media/alone.png" data-start="0" data-duration="2">')
+    expect(removed(removeClip(alone, "scenes/a.html", "only"))).toEqual(["media/alone.png"])
+  })
+
   test("a fade of 0 is no fade", () => {
     const files = applied(setClipSound(SOURCES, "index.html", "music", { fadeOutMs: 0 }))
     expect(files.get("index.html")).not.toContain("data-fade-out")
@@ -713,8 +770,10 @@ describe("editing clips", () => {
   })
 
   // Guard proof: write `data-has-audio="true"` on all footage added in clipHtml (edit.ts), as it
-  // did; B-roll added over the talk then plays its sound over the voice.
-  test("footage added where a clip is heard is added muted, and where none is, heard", () => {
+  // did; B-roll added over the talk then plays its sound over the voice. Count the video's own
+  // sounds in heardDuring, and footage added under the music alone comes in muted too; count a
+  // muted sound, and so does footage under one.
+  test("footage added where something is said is added muted, and under music alone, heard", () => {
     const over = insertClip(SOURCES, "scenes/demo.html", {
       kind: "video",
       src: "media/new.mp4",
@@ -726,19 +785,30 @@ describe("editing clips", () => {
       '<video id="new" src="media/new.mp4" data-start="1" data-duration="1" data-media-start="0" muted playsinline'
     )
 
-    // Without the music, nothing is heard in the outro: it keeps its sound.
-    const quiet = new Map(SOURCES).set(
-      "index.html",
-      INDEX.replace(/\n\s*<audio id="music"[^>]*><\/audio>/, "")
-    )
-    const alone = insertClip(quiet, "scenes/outro.html", {
+    // In the outro, under the video's music alone, nothing is said: it keeps its sound, and so it
+    // does under a sound the outro mutes.
+    const underMusic = insertClip(SOURCES, "scenes/outro.html", {
       kind: "video",
       src: "media/new.mp4",
       startMs: 1000,
       durationMs: 1000,
     })
-    expect("muted" in alone).toBe(false)
-    expect(applied(alone, quiet).get("scenes/outro.html")).toContain('data-has-audio="true"')
+    expect("muted" in underMusic).toBe(false)
+    expect(applied(underMusic).get("scenes/outro.html")).toContain('data-has-audio="true"')
+    const hushed = new Map(SOURCES).set(
+      "scenes/outro.html",
+      OUTRO.replace(
+        "<h2>",
+        '<audio id="room" src="media/music.m4a" data-start="0" data-duration="4" muted></audio>\n    <h2>'
+      )
+    )
+    const underHushed = insertClip(hushed, "scenes/outro.html", {
+      kind: "video",
+      src: "media/new.mp4",
+      startMs: 1000,
+      durationMs: 1000,
+    })
+    expect("muted" in underHushed).toBe(false)
   })
 
   test("an imported recording joins its scene over the footage, and the scene grows to hold it", () => {
@@ -1679,6 +1749,63 @@ describe("placing clips in the video", () => {
     expect("edit" in quiet ? quiet.animationsJoined : undefined).toEqual([])
   })
 
+  // Guard proof: chain every scene in play order in moveScene (edit.ts), as it did; the captions
+  // laid over the chapters then start after the one moved first, 10 s late. Count a scene holding
+  // one other whole as an overlay in videoChapters (timeline.ts), and a chapter a short one sits
+  // in, or one a crossfade holds, is taken for one.
+  test("chapters reorder among themselves, a scene laid over them keeping its start", () => {
+    const sceneOf = (id: string) =>
+      `<template>\n  <div data-composition-id="${id}" data-width="1920" data-height="1080">\n  </div>\n</template>\n`
+    const host = (id: string, start: string, seconds: number) =>
+      `  <div id="${id}" data-composition-id="${id}" data-composition-src="scenes/${id}.html" data-start="${start}" data-duration="${seconds}"></div>`
+    const video = (...hosts: string[]) =>
+      new Map<string, string | null>([
+        [
+          "index.html",
+          `<div data-composition-id="main" data-width="1920" data-height="1080" data-fps="30" data-duration="30">\n${hosts.join("\n")}\n</div>`,
+        ],
+        ...["o", "a", "b", "c"].map((id) => [`scenes/${id}.html`, sceneOf(id)] as [string, string]),
+      ])
+    const laid = (files: ReadonlyMap<string, string | null>) => {
+      const scenes = composition(files).scenes
+      const chapters = new Set(videoChapters(scenes).map((scene) => scene.id))
+      return scenes.map((scene) => [scene.id, scene.startMs, chapters.has(scene.id)])
+    }
+
+    const sources = video(
+      host("o", "0", 30),
+      host("a", "0", 10),
+      host("b", "a", 10),
+      host("c", "b", 10)
+    )
+    expect(laid(applied(moveScene(sources, "b", 1), sources))).toEqual([
+      ["o", 0, false],
+      ["b", 0, true],
+      ["a", 10_000, true],
+      ["c", 20_000, true],
+    ])
+    expect(laid(applied(moveScene(sources, "c", 0), sources))).toEqual([
+      ["o", 0, false],
+      ["c", 0, true],
+      ["a", 10_000, true],
+      ["b", 20_000, true],
+    ])
+    const overlay = moveScene(sources, "o", 2)
+    expect("error" in overlay && overlay.error).toContain("laid over the other scenes")
+
+    // A short chapter in another's crossfade, or in its last seconds, leaves both chapters.
+    expect(
+      laid(video(host("a", "0", 10), host("b", "a - 1", 1), host("c", "b", 5))).map(
+        (each) => each[2]
+      )
+    ).toEqual([true, true, true])
+    expect(
+      laid(video(host("a", "0", 10), host("b", "a", 10), host("c", "b - 3", 2))).map(
+        (each) => each[2]
+      )
+    ).toEqual([true, true, true])
+  })
+
   // Guard proof: place among every scene in partsOf (edit.ts), without videoChapters, and the
   // hook's title moved to 5 s lands in the subtitles laid over the demo; go on in any scene in
   // sceneAfter (timeline.ts), and the title pulled on past the hook is two clips.
@@ -1686,7 +1813,7 @@ describe("placing clips in the video", () => {
     const sources = with_({
       "index.html": INDEX.replace(
         "  </div>\n</body>",
-        '    <div id="subtitles" data-composition-id="subtitles" data-composition-src="scenes/subtitles.html" data-start="2.6" data-duration="12.4"></div>\n  </div>\n</body>'
+        '    <div id="subtitles" data-composition-id="subtitles" data-composition-src="scenes/subtitles.html" data-start="2.5" data-duration="12.5"></div>\n  </div>\n</body>'
       ),
       "scenes/subtitles.html": `<template>
   <div data-composition-id="subtitles" data-width="1920" data-height="1080">
@@ -2266,6 +2393,28 @@ describe("a clip that goes on in later scenes", () => {
     }
     return byTime.map((each) => [each.file, each.ref, each.from, each.to, each.media])
   }
+
+  // Guard proof: compare a clip's `src` with the file as written in removeMediaRanges (edit.ts),
+  // `clip.src === src`, as it did; the hook names its file from beside it, and its words are cut
+  // nowhere. Look the new file up as named in replaceClipMedia, and `../media/b.mp4` is refused.
+  test("a file is the same however a clip names it, from the root or from beside it", () => {
+    // Both parts name it from beside them.
+    const sources = new Map(sixSeconds).set("media/b.mp4", null)
+    for (const file of ["scenes/hook.html", "scenes/demo.html"]) {
+      sources.set(
+        file,
+        (sixSeconds.get(file) as string).replace('src="media/a.mp4"', 'src="../media/a.mp4"')
+      )
+    }
+    const cut = removeMediaRanges(sources, "scenes/hook.html", "media/a.mp4", [
+      { startMs: 1000, endMs: 1500 },
+    ])
+    expect("edit" in cut && cut.edit.some((each) => each.path === "scenes/hook.html")).toBe(true)
+
+    const replaced = replaceClipMedia(sources, "scenes/hook.html", "intro", "../media/b.mp4")
+    if ("error" in replaced) throw new Error(replaced.error)
+    expect(applied(replaced, sources).get("scenes/demo.html")).toContain("media/b.mp4")
+  })
 
   // Guard proof: write the new file in the part named alone in replaceClipMedia (edit.ts); the
   // demo's part of the clip then plays the old file on.
