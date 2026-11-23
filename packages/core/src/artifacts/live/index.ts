@@ -57,6 +57,7 @@ export {
   type VideoText,
   type VideoTrack,
   videoChains,
+  videoChapters,
 } from "../video/timeline"
 export {
   type BlockMark,

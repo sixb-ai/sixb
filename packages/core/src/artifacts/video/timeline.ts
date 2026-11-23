@@ -382,18 +382,40 @@ export interface VideoSceneSpan {
 }
 
 /**
- * The scene a clip that runs past `scene`'s end goes on in: the one on top at that instant, the
- * later in play order, else the next to start; none past the last. `scenes` in play order.
+ * The scene a clip that runs past `scene`'s end goes on in: the chapter on top at that instant,
+ * the later in play order, else the next to start; none past the last. `scenes` in play order.
+ * An overlay is never one (see {@link videoChapters}).
  */
 export function sceneAfter<T extends { readonly startMs: number; readonly durationMs: number }>(
   scenes: readonly T[],
   scene: T
 ): T | undefined {
+  const chapters = videoChapters(scenes)
   const end = scene.startMs + scene.durationMs
-  const onTop = scenes
+  const onTop = chapters
     .filter((each) => each !== scene && each.startMs <= end && end < each.startMs + each.durationMs)
     .at(-1)
-  return onTop ?? scenes.find((each) => each !== scene && each.startMs >= end)
+  return onTop ?? chapters.find((each) => each !== scene && each.startMs >= end)
+}
+
+/**
+ * The scenes that are the video's chapters, in play order: every one but an overlay, a scene that
+ * spans another whole, as captions written over the whole video. Two that cross only fade; of two
+ * alike, the later is the overlay. An overlay's clips stay its own: no clip goes into it or out.
+ */
+export function videoChapters<T extends { readonly startMs: number; readonly durationMs: number }>(
+  scenes: readonly T[]
+): T[] {
+  const holds = (outer: T, inner: T) =>
+    outer.startMs <= inner.startMs &&
+    inner.startMs + inner.durationMs <= outer.startMs + outer.durationMs
+  return scenes.filter(
+    (scene, at) =>
+      !scenes.some(
+        (other, index) =>
+          other !== scene && holds(scene, other) && (!holds(other, scene) || index < at)
+      )
+  )
 }
 
 /**
