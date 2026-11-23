@@ -2,7 +2,12 @@ MIT License
 
 Copyright (c) 2026 Sixb contributors
 Provider logo paths: Copyright (c) 2023 LobeHub (https://github.com/lobehub/lobe-icons).
-Both are distributed under the MIT terms below.
+The document editor (src/artifacts/editor/core and what builds on it) adapts code from:
+  ProseMirror: Copyright (C) 2015-2017 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+  y-prosemirror: Copyright (c) 2019 Kevin Jahns <kevin.jahns@protonmail.com>, Copyright (c) 2025 Tiptap GmbH
+  Tiptap: Copyright (c) 2025, Tiptap GmbH
+  Floating UI: Copyright (c) 2021-present Floating UI contributors
+All are distributed under the MIT terms below.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
