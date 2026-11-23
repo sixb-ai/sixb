@@ -332,7 +332,8 @@ For an editor built around the artifact, such as a post's video next to the post
 ```
 
 Editing works as on the artifact's page: Done leaves it, and Edit starts it again. Someone who may
-only read the artifact sees it without editing.
+only read the artifact sees it without editing. On a phone, a video being edited keeps its picture
+under half the screen, so its chapters follow right under it, even for a tall video.
 
 Without `inlineOnPhone`, a phone shows the artifact's card, which opens its page. A person who cannot open the
 artifact sees why in its place. Through a
