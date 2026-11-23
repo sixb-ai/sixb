@@ -13,6 +13,7 @@ import {
   type DeleteAgentMessagesFromSeqInput,
   type ListAgentMessagesInput,
   type ListAgentMessagesResult,
+  type ListAgentThreadIdsByArtifactContextInput,
 } from "@sixb/core/storage"
 import type { SqliteValue } from "../run-list-query"
 import { isUniqueConstraintError } from "../storage-errors"
@@ -295,6 +296,32 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
     })
 
     return { messages: rows.map(rowToMessageRecord), hasMore, total }
+  }
+
+  async listThreadIdsByArtifactContext(
+    input: ListAgentThreadIdsByArtifactContextInput
+  ): Promise<string[]> {
+    // The first `instr` term is idx_agent_messages_artifact_context's own condition, written as it
+    // is so the index serves the query: it narrows the scan to the messages that carry an artifact.
+    // The second skips, unparsed, those that never name this one; json_each then reads the rest.
+    const rows = this.db
+      .query(`
+        SELECT DISTINCT message.thread_id FROM agent_messages AS message
+        WHERE message.project_id = ?1
+          AND message.role = 'user'
+          AND instr(message.parts, '"kind":"artifact"') > 0
+          AND instr(message.parts, json_quote(?2)) > 0
+          AND EXISTS (
+            SELECT 1 FROM json_each(message.parts) AS part
+            WHERE json_extract(part.value, '$.type') = 'context'
+              AND json_extract(part.value, '$.context.kind') = 'artifact'
+              AND json_extract(part.value, '$.context.id') = ?2
+          )
+        ORDER BY message.thread_id
+      `)
+      .all(input.projectId, input.artifactId) as { thread_id: string }[]
+
+    return rows.map((row) => row.thread_id)
   }
 
   private requireMessage(projectId: string, id: string): AgentMessageRecord {

@@ -130,6 +130,7 @@ import type {
   ListAgentRunsInput,
   ListAgentRunsResult,
   ListAgentThreadChildrenInput,
+  ListAgentThreadIdsByArtifactContextInput,
   ListAgentThreadParticipantsInput,
   ListAgentThreadReadsInput,
   ListAgentThreadsInput,
@@ -1339,6 +1340,27 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
 
     const { page, hasMore, total } = applyWindow(filtered, input.offset, input.limit)
     return { messages: page.map(clone), hasMore, total }
+  }
+
+  async listThreadIdsByArtifactContext(
+    input: ListAgentThreadIdsByArtifactContextInput
+  ): Promise<string[]> {
+    const threadIds = new Set<string>()
+
+    for (const message of this.state.messages.values()) {
+      if (message.projectId !== input.projectId || message.role !== "user") continue
+
+      const carries = message.parts.some(
+        (part) =>
+          part.type === "context" &&
+          part.context.kind === "artifact" &&
+          part.context.id === input.artifactId
+      )
+      if (carries) threadIds.add(message.threadId)
+    }
+
+    // Code-unit order, as SQLite compares text.
+    return [...threadIds].sort((left, right) => (left < right ? -1 : 1))
   }
 }
 

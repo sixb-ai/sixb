@@ -2945,6 +2945,8 @@ function withObservedAgentMessageAppendStorage(
       },
       deleteByRunId: (input) => agents.messages.deleteByRunId(input),
       deleteFromSeq: (input) => agents.messages.deleteFromSeq(input),
+      listThreadIdsByArtifactContext: (input) =>
+        agents.messages.listThreadIdsByArtifactContext(input),
     },
   })
   return {

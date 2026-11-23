@@ -99,6 +99,11 @@ export interface AgentThreadAccessRule {
   readonly caller: Principal
   /** The thread and how the caller takes part in it; `null` when it cannot read it. */
   read(threadId: string): Promise<ReadableAgentThread | null>
+  /**
+   * The conversations among these threads the caller reads, each once, as `read` answers each but
+   * read together, in a few queries however many there are. A sub-agent's thread is left out.
+   */
+  readConversations(threadIds: readonly string[]): Promise<readonly ReadableAgentThread[]>
 }
 
 export function createAgentThreadAccessRule(
@@ -141,7 +146,24 @@ export function createAgentThreadAccessRule(
     return thread && access ? { thread, access } : null
   }
 
-  return { caller, read }
+  const readConversations = async (
+    threadIds: readonly string[]
+  ): Promise<readonly ReadableAgentThread[]> => {
+    if (blocked || threadIds.length === 0) return []
+
+    const storage = agents ?? runtime.storage.agents
+    const stored =
+      (await storage?.threads.getByIds({ projectId: runtime.projectId, ids: threadIds })) ?? []
+    const conversations = stored.filter((thread) => thread.kind === "conversation")
+
+    const views = await agentThreadViews(runtime, conversations, storage)
+    return views.flatMap((thread) => {
+      const access = accessIn(thread)
+      return access ? [{ thread, access }] : []
+    })
+  }
+
+  return { caller, read, readConversations }
 }
 
 /** Refuse what only a conversation takes: a message, a fork, a participant, a mode, a sandbox. */

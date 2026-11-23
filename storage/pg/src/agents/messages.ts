@@ -12,6 +12,7 @@ import {
   type DeleteAgentMessagesFromSeqInput,
   type ListAgentMessagesInput,
   type ListAgentMessagesResult,
+  type ListAgentThreadIdsByArtifactContextInput,
 } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "../pg-client"
 import { isUniqueViolation } from "../storage-errors"
@@ -277,6 +278,27 @@ export class PgAgentMessageStore implements AgentMessageStore {
     })
 
     return { messages: rows.map(rowToMessageRecord), hasMore, total }
+  }
+
+  async listThreadIdsByArtifactContext(
+    input: ListAgentThreadIdsByArtifactContextInput
+  ): Promise<string[]> {
+    // Both terms are idx_agent_messages_artifact_context's, written as it is so the index serves
+    // the query: its condition, and the ids of the artifacts a message carries, which it indexes.
+    const rows = await this.sql<{ thread_id: string }[]>`
+      SELECT thread_id FROM agent_messages
+      WHERE project_id = ${input.projectId}
+        AND role = 'user'
+        AND parts @> '[{"type":"context","context":{"kind":"artifact"}}]'
+        AND jsonb_path_query_array(
+          parts,
+          '$[*] ? (@.type == "context" && @.context.kind == "artifact").context.id'
+        ) @> ${JSON.stringify([input.artifactId])}::text::jsonb
+      GROUP BY thread_id
+      ORDER BY thread_id COLLATE "C"
+    `
+
+    return rows.map((row) => row.thread_id)
   }
 }
 

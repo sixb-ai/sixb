@@ -588,6 +588,57 @@ describe("agent routes", () => {
     expect((await read(alice, "art_zzzzzzzzzz")).status).toBe(404)
   })
 
+  // Reproduce by listing only `listThreadIds` in listForArtifact (packages/core agents/execution.ts):
+  // the conversation is sent the artifact as context, and its page loses it on reload.
+  test("lists a conversation started beside an artifact, before the Agent writes it", async () => {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const alice = await seedSession(storage, "usr_alice")
+    const asAlice = createTestSixb(sixb, {
+      authorization: resolveAuthorizationContext({
+        principal: { type: "user", id: "usr_alice" },
+        groupIds: ["support-users"],
+        roles: sixb.definitions.security.listResolvedRoles(),
+      }),
+    })
+    const file = await createTestSixb(sixb).blobs.put({
+      body: new TextEncoder().encode("# Teaser"),
+      fileName: "document.md",
+      mediaType: "text/markdown",
+    })
+    const { artifact } = await asAlice.artifacts.create({
+      kind: "document",
+      title: "Teaser",
+      files: [{ path: "document.md", file }],
+    })
+
+    const created = await app.fetch(
+      jsonRequest("/api/agent-threads", "POST", {}, alice.csrfHeaders)
+    )
+    const { thread } = (await created.json()) as { thread: { id: string } }
+    const sent = await app.fetch(
+      jsonRequest(
+        `/api/agent-threads/${thread.id}/messages`,
+        "POST",
+        {
+          text: "Tighten the intro",
+          context: [{ context: agentContextOf(artifact.id), origin: "ambient" }],
+        },
+        alice.csrfHeaders
+      )
+    )
+    expect(sent.status).toBe(202)
+
+    const listed = await app.fetch(
+      new Request(`http://localhost/api/artifacts/${artifact.id}/threads`, {
+        headers: alice.headers,
+      })
+    )
+    expect(listed.status).toBe(200)
+    expect(await listed.json()).toMatchObject({
+      threads: [{ id: thread.id, kind: "conversation", owner: { id: "usr_alice" } }],
+    })
+  })
+
   test.each([
     {
       name: "a malformed artifact context id",

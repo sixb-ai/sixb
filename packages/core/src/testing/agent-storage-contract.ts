@@ -3626,6 +3626,67 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    test("finds the threads whose messages carry an artifact as context, each once", async () => {
+      await withStorage(async (storage) => {
+        const artifact = (id: string) =>
+          ({ type: "context", context: { kind: "artifact", id }, origin: "ambient" }) as const
+        const say = (
+          id: string,
+          threadId: string,
+          parts: AgentMessagePart[],
+          project = projectId
+        ) =>
+          storage.messages.append({
+            id,
+            projectId: project,
+            threadId,
+            runId: null,
+            role: "user",
+            parts,
+          })
+
+        for (const id of ["thr_b", "thr_a", "thr_other", "thr_mention"]) {
+          await storage.threads.create(threadInput({ id }))
+        }
+        await storage.threads.create(threadInput({ id: "thr_a", projectId: otherProjectId }))
+
+        // Created out of id order, and carried twice in thr_b.
+        await say("m1", "thr_b", [
+          { type: "text", text: "Tighten the intro" },
+          artifact("art_teaser"),
+        ])
+        await say("m2", "thr_b", [artifact("art_teaser")])
+        await say("m3", "thr_a", [artifact("art_poster"), artifact("art_teaser")])
+        await say("m4", "thr_other", [artifact("art_poster")])
+        // Naming the artifact elsewhere is not carrying it: in text, or in an app's own state.
+        await say("m5", "thr_mention", [
+          { type: "text", text: '{"kind":"artifact","id":"art_teaser"}' },
+          {
+            type: "context",
+            context: {
+              kind: "app-state",
+              id: "editor",
+              label: "Editor",
+              description: "The open editor",
+              value: { kind: "artifact", id: "art_teaser" },
+            },
+            origin: "ambient",
+          },
+        ])
+        await say("m6", "thr_a", [artifact("art_teaser")], otherProjectId)
+
+        const threadIds = (artifactId: string) =>
+          storage.messages.listThreadIdsByArtifactContext({ projectId, artifactId })
+        expect(await threadIds("art_teaser")).toEqual(["thr_a", "thr_b"])
+        expect(await threadIds("art_poster")).toEqual(["thr_a", "thr_other"])
+        expect(await threadIds("art_missing")).toEqual([])
+
+        // An edit rewinds thr_a past its only message that carried it.
+        await storage.messages.deleteFromSeq({ projectId, threadId: "thr_a", fromSeq: 1 })
+        expect(await threadIds("art_teaser")).toEqual(["thr_b"])
+      })
+    })
+
     test("rejects appends to missing threads, duplicate messages, and unknown runs", async () => {
       await withStorage(async (storage) => {
         await expectAgentError(

@@ -822,6 +822,12 @@ export interface ListAgentMessagesResult {
   readonly total: number
 }
 
+export interface ListAgentThreadIdsByArtifactContextInput {
+  readonly projectId: string
+  /** The artifact a user message carries as context, as `agentContext.artifact()` sends it. */
+  readonly artifactId: string
+}
+
 // ── agent_context_checkpoints — append-only model-context boundaries ──────────────────────────
 
 export type AgentContextCheckpointReason = "threshold" | "overflow"
@@ -984,6 +990,11 @@ export interface AgentMessageStore {
   deleteFromSeq(input: DeleteAgentMessagesFromSeqInput): Promise<number>
   getById(params: { projectId: string; id: string }): Promise<AgentMessageRecord | null>
   list(input: ListAgentMessagesInput): Promise<ListAgentMessagesResult>
+  /**
+   * The threads holding a user message that carries the artifact as context, each once, ordered by
+   * id. A message deleted, by a retry or an edit, no longer counts.
+   */
+  listThreadIdsByArtifactContext(input: ListAgentThreadIdsByArtifactContextInput): Promise<string[]>
 }
 
 export interface DeleteAgentContextCheckpointsAfterSeqInput {

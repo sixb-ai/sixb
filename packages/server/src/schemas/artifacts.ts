@@ -601,7 +601,7 @@ export const ArtifactThreadListResponseSchema = z.object({
   threads: z
     .array(AgentThreadSchema)
     .describe(
-      "The conversations the artifact is shared in, among those you read, most recently updated first"
+      "The conversations about the artifact, among those you read, most recently updated first"
     ),
 })
 
