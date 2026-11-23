@@ -106,6 +106,14 @@ export function lexShellCommand(command: string): readonly ShellSegment[] | null
       } else {
         pushWord()
       }
+      // A descriptor duplicated onto another (`2>&1`, `>&2`, `<&-`) names no file to read or write.
+      const duplicated = next === "&" ? command[index + 2] : undefined
+      if (duplicated !== undefined && /[\d-]/.test(duplicated)) {
+        commandText += `${character}&${duplicated}`
+        index += 2
+        continue
+      }
+
       const isDouble = next === character
       commandText += isDouble ? `${character}${next}` : character
       pendingRedirect = character === ">" ? "output" : "input"
