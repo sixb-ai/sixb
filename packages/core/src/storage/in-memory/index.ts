@@ -91,7 +91,7 @@ export class InMemoryStorage implements Storage {
     shareSessions: this.shareSessionStorage,
   })
   private readonly agentStorage = new InMemoryAgentStorage(this.executionStorage)
-  private readonly artifactStorage = new InMemoryArtifactStorage()
+  private readonly artifactStorage = new InMemoryArtifactStorage(this.agentStorage)
   private readonly aiUsageStorage = new InMemoryAiUsageStorage(this.executionStorage)
   private readonly aiCostStorage = new InMemoryAiCostStorage(this.aiUsageStorage, {
     resolve: (input) => this.resolveAiAccountingAttribution(input),

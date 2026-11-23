@@ -104,6 +104,12 @@ export interface AgentThreadAccessRule {
    * read together, in a few queries however many there are. A sub-agent's thread is left out.
    */
   readConversations(threadIds: readonly string[]): Promise<readonly ReadableAgentThread[]>
+  /**
+   * Whose conversations the caller reads, for a list to ask its storage for those alone: a
+   * principal's, as owner or participant; `"every"` for code without a caller; `"none"` when it
+   * reads none.
+   */
+  scope(): { readonly reader: Principal } | "every" | "none"
 }
 
 export function createAgentThreadAccessRule(
@@ -163,7 +169,12 @@ export function createAgentThreadAccessRule(
     })
   }
 
-  return { caller, read, readConversations }
+  const scope = (): ReturnType<AgentThreadAccessRule["scope"]> => {
+    if (blocked || !isRuntimeAllowed(runtime, { kind: "agent.run" })) return "none"
+    return authority.type === "principal" ? { reader: caller } : "every"
+  }
+
+  return { caller, read, readConversations, scope }
 }
 
 /** Refuse what only a conversation takes: a message, a fork, a participant, a mode, a sandbox. */

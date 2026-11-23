@@ -17,6 +17,7 @@ import {
 } from "@sixb/core/storage"
 import type { SqliteValue } from "../run-list-query"
 import { isUniqueConstraintError } from "../storage-errors"
+import { READER_CONVERSATIONS } from "./readers"
 import { type AgentMessageRow, queryAgentList, rowToMessageRecord } from "./rows"
 
 export class SqliteAgentMessageStore implements AgentMessageStore {
@@ -304,23 +305,43 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
     // The first `instr` term is idx_agent_messages_artifact_context's own condition, written as it
     // is so the index serves the query: it narrows the scan to the messages that carry an artifact.
     // The second skips, unparsed, those that never name this one; json_each then reads the rest.
+    const carries = `
+      message.project_id = ?1
+      AND message.role = 'user'
+      AND instr(message.parts, '"kind":"artifact"') > 0
+      AND instr(message.parts, json_quote(?2)) > 0
+      AND EXISTS (
+        SELECT 1 FROM json_each(message.parts) AS part
+        WHERE json_extract(part.value, '$.type') = 'context'
+          AND json_extract(part.value, '$.context.kind') = 'artifact'
+          AND json_extract(part.value, '$.context.id') = ?2
+      )
+    `
+
+    if (!input.reader) {
+      const rows = this.db
+        .query(`
+          SELECT DISTINCT message.thread_id FROM agent_messages AS message
+          WHERE ${carries}
+          ORDER BY message.thread_id
+        `)
+        .all(input.projectId, input.artifactId) as { thread_id: string }[]
+      return rows.map((row) => row.thread_id)
+    }
+
+    // A reader's: their conversations first, each looked into through the same index.
     const rows = this.db
       .query(`
-        SELECT DISTINCT message.thread_id FROM agent_messages AS message
-        WHERE message.project_id = ?1
-          AND message.role = 'user'
-          AND instr(message.parts, '"kind":"artifact"') > 0
-          AND instr(message.parts, json_quote(?2)) > 0
-          AND EXISTS (
-            SELECT 1 FROM json_each(message.parts) AS part
-            WHERE json_extract(part.value, '$.type') = 'context'
-              AND json_extract(part.value, '$.context.kind') = 'artifact'
-              AND json_extract(part.value, '$.context.id') = ?2
-          )
-        ORDER BY message.thread_id
+        SELECT readable.thread_id FROM (${READER_CONVERSATIONS}) AS readable
+        WHERE EXISTS (
+          SELECT 1 FROM agent_messages AS message
+          WHERE message.thread_id = readable.thread_id AND ${carries}
+        )
+        ORDER BY readable.thread_id
       `)
-      .all(input.projectId, input.artifactId) as { thread_id: string }[]
-
+      .all(input.projectId, input.artifactId, input.reader.type, input.reader.id) as {
+      thread_id: string
+    }[]
     return rows.map((row) => row.thread_id)
   }
 
