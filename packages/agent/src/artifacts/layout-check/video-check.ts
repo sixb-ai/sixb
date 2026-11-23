@@ -17,13 +17,16 @@ import videoScript from "./video.cjs" with { type: "text" }
 const LIBRARY = "lib/layout-check"
 /**
  * HyperFrames' Chromium start, a check of the whole video, a look at its media, and a frame of
- * each scene's start, middle and end, footage decoded for each: a minute and a half for a teaser,
- * more with footage.
+ * each scene's start, middle and end, footage decoded for each: a minute and a half for a
+ * 15-second video, more with footage.
  */
 const CHECK_TIMEOUT_MS = 240_000
 /** The most frames a check snapshots, whatever the video's length: its contact sheet stays legible. */
 const MAX_FRAMES = 24
-/** How far into a scene what it brings in has arrived: the guide eases it in over 0.4 to 0.8 s. */
+/**
+ * How far into a scene its start is sampled: past the first frames of what it brings in, so a frame
+ * shows that rather than the instant before it arrives.
+ */
 const ARRIVED_MS = 400
 /** The most a check reports of HyperFrames' findings; the contact sheet shows the rest. */
 const MAX_WARNINGS = 12
@@ -36,26 +39,6 @@ const LOOK_EVERY_MS = 1_000
 const MAX_LOOKS = 240
 
 /**
- * The craft rules of the guide a check measures, so that no model can read past them: an end card
- * holds three to four seconds, a scene stays long enough to be seen, and a teaser runs at most
- * 45 seconds. Text too small for a phone is HyperFrames' own `text_below_floor`: 2.6% of the short
- * side, 28 px at 1080p.
- */
-const CRAFT = {
-  /** The last scene, the end card, past three to four seconds and a crossfade. */
-  maxEndCardMs: 4_500,
-  /** A scene shorter than this flashes by. */
-  minSceneMs: 1_000,
-  /** The longest a teaser runs, as the guide sets it. */
-  maxTeaserMs: 45_000,
-  /**
-   * A frame is empty under this share of edges: neighbouring pixels of a 192×108 grey copy that
-   * differ by more than 24 levels. A line of 48 px text on a plain ground measures about 3%, a
-   * busy app screen 10 to 25%, a lone logo on a plain ground 0.5%.
-   */
-  minInk: 0.01,
-}
-/**
  * The frames on each contact sheet, as `hyperframes snapshot` pages them: each sheet numbers its
  * own from 1.
  */
@@ -65,6 +48,13 @@ export const VIDEO_SHEET_FRAMES = 9
  * leave the root's timeline before it ends.
  */
 const EXPECTED = new Set(["subcomposition_blanks_before_host"])
+/**
+ * The passes of `hyperframes check` that judge style rather than what breaks: WCAG contrast, and
+ * craft (type under a size, lines on screen too briefly, a first frame or a stretch with nothing
+ * new, a film with no sound). Those choices are the person's and the project's; video.cjs skips
+ * both, and a release that reports them anyway is not heard.
+ */
+const STYLE_PASSES = new Set(["contrast", "craft"])
 
 const installed = new WeakSet<Sandbox>()
 
@@ -84,19 +74,13 @@ export interface VideoFrame {
   readonly path: string
   readonly atMs: number
   readonly scene: string
-  /** How much it shows, as `CRAFT.minInk` measures it; absent when it could not be measured. */
-  readonly ink?: number
 }
 
 interface VideoReport {
   readonly layout?: "video"
   readonly findings?: readonly VideoFinding[]
   readonly sheets?: readonly string[]
-  readonly frames?: readonly {
-    readonly path: string
-    readonly time: number
-    readonly ink?: number
-  }[]
+  readonly frames?: readonly { readonly path: string; readonly time: number }[]
   readonly missing?: readonly { readonly path: string; readonly why: string }[]
   /** What each scene playing at each instant shows of its media, as `mediaProbe` sees it. */
   readonly media?: readonly MediaSample[]
@@ -107,6 +91,8 @@ interface VideoReport {
 
 /** One finding of `hyperframes check`, as its JSON writes it. */
 interface VideoFinding {
+  /** The pass of `hyperframes check` that found it, as video.cjs names it. */
+  readonly pass?: string
   readonly code: string
   readonly severity: "error" | "warning" | "info"
   readonly message: string
@@ -151,12 +137,12 @@ export interface MediaSample {
 
 /**
  * Checks a published video in the sandbox with HyperFrames, the release its export renders with,
- * on the files the export renders: `hyperframes check` for what breaks, overflows, reads poorly or
- * sounds wrong, `mediaProbe` at the snapshot's instants and every second between, in the root as
- * the app's frame plays it, for footage never seen while it plays and boxes left empty, and
- * `hyperframes snapshot` for a contact sheet of each scene's start, middle and end. A sandbox
- * without HyperFrames skips it; so does a check that fails, which never costs the Agent its
- * publish.
+ * on the files the export renders: `hyperframes check` for what breaks, overflows or plays nothing,
+ * `mediaProbe` at the snapshot's instants and every second between, in the root as the app's frame
+ * plays it, for footage never seen while it plays and boxes left empty, and `hyperframes snapshot`
+ * for a contact sheet of each scene's start, middle and end. It reports what is broken, never a
+ * choice of style, which the person and the project make. A sandbox without HyperFrames skips it;
+ * so does a check that fails, which never costs the Agent its publish.
  */
 export async function checkVideo(input: {
   readonly handle: AgentSandboxHandle
@@ -297,13 +283,7 @@ export async function checkVideo(input: {
   const taken = frames.flatMap((frame) => {
     const snapped = shot.get(frame.atMs)
     if (!snapped) return []
-    return [
-      {
-        ...frame,
-        path: named(snapped.path),
-        ...(snapped.ink === undefined ? {} : { ink: snapped.ink }),
-      },
-    ]
+    return [{ ...frame, path: named(snapped.path) }]
   })
 
   return {
@@ -311,7 +291,6 @@ export async function checkVideo(input: {
     screenshots: (report.sheets ?? []).map(named),
     frames: taken,
     warnings: [
-      ...craftWarnings(input.outline, taken),
       ...hiddenMediaWarnings(input.outline, report.media ?? []),
       ...videoWarnings(report.findings ?? [], input.outline),
       // Left out before the check ran, such as a recording whose proxy is still being made, or
@@ -341,11 +320,11 @@ export async function checkVideo(input: {
  * The instants a check snapshots: the first frame, the thumbnail, then each scene's start, once
  * what comes in has come in, its middle, and its end, before it cuts away. Past `MAX_FRAMES`, each
  * scene's middle, and past that, frames spread evenly over the video, so a long one takes as long
- * to check as a teaser.
+ * to check as a short one.
  *
- * A scene's start is sampled `ARRIVED_MS` in, as the guide brings things in, whatever its length:
- * sooner, a caption that fades in is caught half seen and reads as unreadable. Only a scene too
- * short for it is sampled a third of the way in, before its middle.
+ * A scene's start is sampled `ARRIVED_MS` in, whatever its length: sooner, a caption that fades in
+ * is caught half seen. Only a scene too short for it is sampled a third of the way in, before its
+ * middle.
  */
 export function videoInstants(outline: VideoOutline): Omit<VideoFrame, "path">[] {
   const first = { atMs: 0, scene: sceneAt(outline, 0) }
@@ -392,61 +371,6 @@ export function mediaInstants(
   const looks = new Set(frames.map((frame) => frame.atMs))
   for (let atMs = every; atMs < outline.durationMs; atMs += every) looks.add(Math.round(atMs))
   return [...looks].sort((a, b) => a - b)
-}
-
-/**
- * What the check measures of the guide's craft: a frame with nothing on it, a scene that flashes
- * by, an end card that lingers, a teaser that runs long. Each names its scene and when.
- */
-export function craftWarnings(
-  outline: VideoOutline,
-  frames: readonly Omit<VideoFrame, "path">[]
-): LayoutWarning[] {
-  const warnings: LayoutWarning[] = []
-
-  for (const frame of frames) {
-    if (frame.ink === undefined || frame.ink >= CRAFT.minInk) continue
-    const what = frame.atMs === 0 ? "The first frame, the video's thumbnail," : "The frame"
-    warnings.push({
-      code: "video_empty_frame",
-      part: frame.scene,
-      message: `At ${seconds(frame.atMs)}, in scene '${frame.scene}': ${what} is nearly empty. Show the subject from the first frame of each scene: words or the product, never a bare ground or a lone logo.`,
-    })
-  }
-
-  for (const scene of outline.scenes) {
-    if (scene.durationMs >= CRAFT.minSceneMs) continue
-    warnings.push({
-      code: "video_scene_short",
-      part: scene.id,
-      message: `At ${seconds(scene.startMs)}, scene '${scene.id}' lasts ${seconds(scene.durationMs)}, too short to be seen: give it a second or more, or fold it into the scene beside it.`,
-    })
-  }
-
-  // The scene that ends last, which a crossfade into it does not change.
-  const end = outline.scenes.reduce<VideoOutline["scenes"][number] | undefined>(
-    (latest, scene) =>
-      !latest || scene.startMs + scene.durationMs >= latest.startMs + latest.durationMs
-        ? scene
-        : latest,
-    undefined
-  )
-  if (end && outline.scenes.length > 1 && end.durationMs > CRAFT.maxEndCardMs) {
-    warnings.push({
-      code: "video_end_card_long",
-      part: end.id,
-      message: `At ${seconds(end.startMs)}, the end card, scene '${end.id}', holds ${seconds(end.durationMs)}: shorten its host's data-duration to 3 to 4 s, still for the last two.`,
-    })
-  }
-
-  if (outline.durationMs > CRAFT.maxTeaserMs) {
-    warnings.push({
-      code: "video_long",
-      message: `It runs ${seconds(outline.durationMs)}, past the 45 s a teaser holds: cut it, unless the user asked for this length or it is not a teaser.`,
-    })
-  }
-
-  return warnings
 }
 
 /** How a warning says why a video or an image cannot be seen. */
@@ -700,8 +624,8 @@ export function mediaProbe(scenes: readonly string[]): MediaSight[] {
 
       // What frames it, such as a phone or a card: its parent, when that paints a ground or a
       // border of its own within the picture. On screen while nothing it frames shows, it is an
-      // empty box. A scene's own ground is not one: a title over it before the footage comes in
-      // is a designed frame, and a bare one is the empty-frame check's.
+      // empty box. A scene's own ground is not one: a title over it before the footage comes in,
+      // or nothing on it at all, is the video's choice.
       const parent = element.parentElement
       let box: MediaSight["box"]
       if (parent && parent !== host && inset(parent) && paints(getComputedStyle(parent))) {
@@ -753,7 +677,10 @@ export function videoWarnings(
   const reported = findings
     .filter(
       (finding) =>
-        !unreachable(finding) && finding.severity !== "info" && !EXPECTED.has(finding.code)
+        !unreachable(finding) &&
+        finding.severity !== "info" &&
+        !EXPECTED.has(finding.code) &&
+        !STYLE_PASSES.has(finding.pass ?? "")
     )
     .sort(
       (a, b) =>
