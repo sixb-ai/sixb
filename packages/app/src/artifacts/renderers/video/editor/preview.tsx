@@ -22,6 +22,12 @@ const SETTLE_MS = 150
 const SETTLE_MAX_MS = 1_500
 
 /**
+ * How tall the picture is at most on a phone, where the chapters to edit follow it: under half the
+ * screen, so a tall video leaves them in sight. A wide one is shorter than this anyway.
+ */
+export const COMPACT_PREVIEW_MAX_HEIGHT = "45svh"
+
+/**
  * Plays the version in a frame the caller places with {@link PreviewScreen}: the playback is the
  * editor's, which its timeline and keys drive. It opens at `start`, in seconds, when the address
  * names an instant; at the video's poster otherwise.
@@ -140,13 +146,21 @@ export function PreviewScreen({
       ref={box}
       data-video-preview=""
       className={cn(
-        "relative isolate min-h-0 overflow-hidden bg-neutral-950",
-        compact ? "aspect-video w-full shrink-0" : "size-full rounded-xl"
+        "relative isolate min-h-0 overflow-hidden",
+        // On a phone, a picture held under its height lies on the app's ground, not in black bars.
+        compact ? "aspect-video w-full shrink-0 bg-muted/60" : "size-full rounded-xl bg-neutral-950"
       )}
-      style={compact ? { aspectRatio: String(outline.width / outline.height) } : undefined}
+      style={
+        compact
+          ? {
+              aspectRatio: String(outline.width / outline.height),
+              maxHeight: COMPACT_PREVIEW_MAX_HEIGHT,
+            }
+          : undefined
+      }
     >
       <div
-        className="absolute"
+        className="absolute bg-neutral-950"
         style={{
           width: outline.width,
           height: outline.height,

@@ -1878,6 +1878,42 @@ describe("the editor", () => {
     expect(listed).toEqual(["title", "talk"])
   })
 
+  // Guard proof: drop `maxHeight` from the compact PreviewScreen (preview.tsx); a tall video then
+  // fills a phone's width, its chapters a screen below.
+  test("a phone holds the picture under half the screen, the chapters right under it", () => {
+    const measured = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth")
+    const at = (width: number) =>
+      Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+        configurable: true,
+        get: () => width,
+      })
+
+    try {
+      at(390)
+      const phone = openEditor()
+      const preview = phone.view.container.querySelector<HTMLElement>("[data-video-preview]")
+      expect(preview?.style.maxHeight).toBe("45svh")
+      // Held shorter than it is wide, the picture lies on the app's ground, light or dark.
+      expect(preview?.className).toContain("bg-muted/60")
+      expect(preview?.className).not.toContain("bg-neutral-950")
+      // Its clock, then the chapters: nothing else between.
+      expect(preview?.nextElementSibling?.nextElementSibling?.textContent).toContain("Chapters")
+      phone.live.destroy()
+      cleanup()
+
+      // A wide editor keeps its picture as it was.
+      at(1280)
+      const desktop = openEditor()
+      const wide = desktop.view.container.querySelector<HTMLElement>("[data-video-preview]")
+      expect(wide?.style.maxHeight).toBe("")
+      expect(wide?.className).toContain("bg-neutral-950")
+      desktop.live.destroy()
+    } finally {
+      if (measured) Object.defineProperty(HTMLElement.prototype, "clientWidth", measured)
+      else Reflect.deleteProperty(HTMLElement.prototype, "clientWidth")
+    }
+  })
+
   test("a chapter's place among the chapters is its place among every scene", () => {
     const scene = (id: string) => ({ id }) as VideoScene
     const [lines, title, talk, end] = ["lines", "title", "talk", "end"].map(scene) as VideoScene[]
