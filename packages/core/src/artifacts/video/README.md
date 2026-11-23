@@ -236,6 +236,16 @@ editor touches, and `edit.ts` turns each operation into changes to the text.
   (`moveClips`, `splitClips`, `removeClips`): each is found before any changes, a move goes no
   further than the first clip to reach the video's start, and a ripple closes a file's gaps as
   one cut.
+- **Sound and files.** A clip's `data-volume` goes up to 4 times as recorded, or stays as loud as
+  the Agent made it; footage is muted and heard again as HyperFrames mixes it, `muted` or a
+  `data-has-audio` other than "true" never heard. Footage imported where a clip is already heard,
+  B-roll over a voice, comes in muted. `replaceClipMedia` plays another file of the same kind in a
+  clip's place, every part of it from the new file's start. An edit that takes the last clip
+  playing a recording or a picture takes the file too (`unplayed`), and an undo brings both back:
+  only a file an edited file named, so one the Agent stored for later stays.
+- **Chapters** (`videoChapters`): every scene but an overlay, one that holds another whole, as
+  captions laid over the whole video; a crossfade only overlaps. Placement never puts a clip in an
+  overlay nor goes on in one past a chapter's end, and an overlay's own clips stay in it.
 - **Placing** (`placeFound`): every edit that puts a scene's clip at a time of the video, a move,
   an end trim without ripple, an import, goes through it. The clip lives in the scene that plays
   where it starts: its own while that holds it, else the one on top there (the later in play
