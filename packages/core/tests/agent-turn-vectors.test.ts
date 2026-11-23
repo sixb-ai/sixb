@@ -1,6 +1,11 @@
 import { describe, expect, mock, spyOn, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { type EmbeddingModel, type EmbeddingModelResult, SixbHost } from "../src"
+import {
+  type EmbeddingModel,
+  type EmbeddingModelResult,
+  type SixbErrorContext,
+  SixbHost,
+} from "../src"
 import { AgentTurnIndexingDeferred, getAgentTurnIndexing } from "../src/agents"
 import type { AgentMessagePart } from "../src/agents/message"
 import { agentTurnVectorConfiguration } from "../src/agents/turn-vectors/configuration"
@@ -178,7 +183,16 @@ function fixture(batching: EmbeddingModel["batching"] = defaultBatching) {
     batching,
     embed,
   }
-  const host = new SixbHost({ id: "turns", ontology: [], models: { embedding: [model] }, ...deps })
+  const failures: SixbErrorContext[] = []
+  const host = new SixbHost({
+    id: "turns",
+    ontology: [],
+    models: { embedding: [model] },
+    onError: (_error, context) => {
+      failures.push(context)
+    },
+    ...deps,
+  })
   const indexing = getAgentTurnIndexing(host)!
   const agents = deps.storage.agents
   const projectId = host.id
@@ -269,6 +283,7 @@ function fixture(batching: EmbeddingModel["batching"] = defaultBatching) {
     projectId,
     configuration,
     embed,
+    failures,
     turn,
     conversation,
     index,
@@ -432,6 +447,47 @@ describe("agent turn indexing", () => {
     await f.index("thr_1")
     expect(await f.progress("thr_1")).toMatchObject({ current: true, failures: 0 })
     expect((await f.progress("thr_1"))!.deferredUntil).toBeUndefined()
+  })
+
+  test("a failure no retry fixes is reported once, and waits for the thread to change", async () => {
+    // Guard proof: back off from a non-retryable failure as from any other; it is never reported,
+    // and the job pays for the same failure again once the backoff ends.
+    const f = fixture()
+    await f.conversation("thr_1")
+    await f.turn("thr_1", 1)
+    // The model answers with three values where it declares two: every try fails the same way.
+    f.embed.mockImplementation(async (input) => ({
+      vectors: input.texts.map(() => [1, 2, 3]),
+      usage: { inputTokens: 10 },
+    }))
+
+    await f.index("thr_1")
+
+    expect(f.failures).toEqual([
+      expect.objectContaining({
+        type: "agent.turn_indexing.failed",
+        threadId: "thr_1",
+        revision: (await f.progress("thr_1"))!.revision,
+        failure: expect.objectContaining({ code: "vector.response_invalid", retryable: false }),
+      }),
+    ])
+    expect(await f.progress("thr_1")).toMatchObject({ current: false, halted: true, failures: 0 })
+
+    // Nothing asks for it again, and a job that runs anyway pays nothing.
+    await f.indexing.repair()
+    await f.indexing.request("thr_1")
+    expect(await claimAll(f)).toEqual([])
+    await f.index("thr_1")
+    expect(f.embed).toHaveBeenCalledTimes(1)
+    expect(f.failures).toHaveLength(1)
+
+    // A new turn is a new state: it is tried, and reported, again.
+    await f.turn("thr_1", 2)
+    await f.indexing.request("thr_1")
+    expect(await claimAll(f)).toHaveLength(1)
+    await f.index("thr_1")
+    expect(f.embed).toHaveBeenCalledTimes(2)
+    expect(f.failures).toHaveLength(2)
   })
 
   test("leaves a thread a turn holds, and a storage that cannot search", async () => {

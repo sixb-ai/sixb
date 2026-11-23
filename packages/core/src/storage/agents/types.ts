@@ -1758,6 +1758,11 @@ export interface AgentThreadIndexProgress {
   readonly failures: number
   /** Until when it waits: an AI limit's reset, or a failure's backoff. */
   readonly deferredUntil?: Date
+  /**
+   * Indexing failed in a way no retry fixes, at this revision and for this configuration: nothing
+   * asks for it again until a message is added or taken, or the configuration changes.
+   */
+  readonly halted: boolean
 }
 
 export interface GetAgentThreadIndexProgressInput {
@@ -1808,6 +1813,15 @@ export interface DeferAgentThreadIndexingInput {
   readonly failed: boolean
 }
 
+export interface HaltAgentThreadIndexingInput {
+  readonly projectId: string
+  readonly threadId: string
+  /** The configuration it failed for, which the thread's index state is then about. */
+  readonly configuration: string
+  /** The revision the failing turns were read at: nothing is recorded once the thread moved. */
+  readonly revision: number
+}
+
 /** A conversation whose index is behind, and the revision it is at now. */
 export interface AgentThreadToIndex {
   readonly threadId: string
@@ -1829,11 +1843,17 @@ export interface AgentTurnVectorStore {
   write(input: WriteAgentTurnVectorsInput): Promise<boolean>
   /** Indexing waits until then: the thread leaves `listThreadsToIndex` meanwhile. */
   defer(input: DeferAgentThreadIndexingInput): Promise<void>
+  /**
+   * Indexing stops at `revision` for this configuration, if the thread is still at it: answers
+   * whether it recorded. The thread is behind, but leaves `listThreadsToIndex` until it changes or
+   * the configuration does. A write lifts it.
+   */
+  halt(input: HaltAgentThreadIndexingInput): Promise<boolean>
   /** By `firstSeq`, then chunk. */
   list(input: ListAgentTurnVectorsInput): Promise<readonly AgentTurnVectorRecord[]>
   /**
-   * Conversations no turn holds and nothing defers whose index is behind for this configuration,
-   * the most recently active first. A sub-agent's thread is never indexed.
+   * Conversations no turn holds, nothing defers and nothing halted whose index is behind for this
+   * configuration, the most recently active first. A sub-agent's thread is never indexed.
    */
   listThreadsToIndex(input: ListAgentThreadsToIndexInput): Promise<readonly AgentThreadToIndex[]>
 }

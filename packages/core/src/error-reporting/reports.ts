@@ -291,6 +291,30 @@ export function reportVectorIndexingFailure(
   })
 }
 
+export interface ReportAgentTurnIndexingFailureInput {
+  readonly projectId: string
+  readonly threadId: string
+  readonly revision: number
+  /** The embedding configuration it failed for: the same state under another one is another. */
+  readonly configuration: string
+  readonly failure: SixbFailure<VectorIndexingFailureCode>
+}
+
+export function reportAgentTurnIndexingFailure(
+  reporter: ErrorReporter,
+  error: unknown,
+  input: ReportAgentTurnIndexingFailureInput
+): void {
+  const { configuration, ...context } = input
+
+  reporter.report(error, {
+    ...context,
+    type: "agent.turn_indexing.failed",
+    occurredAt: input.failure.at,
+    notificationId: `agent-turn-indexing:${input.projectId}:${input.threadId}:${input.revision}:${configuration}`,
+  })
+}
+
 export interface ReportLakeRetentionFailureInput {
   readonly projectId: string
   readonly intervalStart: string

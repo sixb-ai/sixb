@@ -65,3 +65,11 @@ defers it 1 minute, 5, 30, then every 6 hours, never giving up. The deferral is 
 thread (`deferred_until`, `failures`), so neither the repair pass nor a turn's end asks for it
 meanwhile, and the job waits until then. A call whose outcome is unknown is recorded as such and
 may be paid again on the next try. A write clears both.
+
+A failure the error catalog says no retry fixes (`retryable: false`, such as
+`vector.response_invalid` from a model answering with other dimensions than it declares) would be
+paid for again on every try. As with object vectors, it is terminal: it halts the thread at the
+revision and configuration it was read at (`halted_revision`), and is reported once through
+`onError` (`agent.turn_indexing.failed`). Nothing asks for the thread again until a message is
+added or taken, or the configuration changes (a model fixed in `models.embedding`). A write lifts
+it.

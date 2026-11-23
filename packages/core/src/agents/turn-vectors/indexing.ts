@@ -1,4 +1,5 @@
-import { createSixbError, isSixbError } from "../../errors/internal"
+import { reportAgentTurnIndexingFailure } from "../../error-reporting/capability"
+import { captureSixbFailure, createSixbError, isSixbError } from "../../errors/internal"
 import { createKernelRuntimeAuthorization } from "../../execution/authorization"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../../execution/durable"
 import type { ExecutionContext, ExecutionScope } from "../../execution/types"
@@ -15,6 +16,7 @@ import type {
   AgentTurnVectorInput,
   AgentTurnVectorStore,
 } from "../../storage/agents"
+import { VECTOR_INDEXING_FAILURE_CODES } from "../../storage/ontology/vector-indexing"
 import { agentTurnVectorConfiguration } from "./configuration"
 import { type AgentTurn, agentTurnChunks, splitAgentTurns } from "./turns"
 
@@ -22,8 +24,9 @@ import { type AgentTurn, agentTurnChunks, splitAgentTurns } from "./turns"
 const REPAIR_LIMIT = 200
 const MESSAGE_PAGE_SIZE = 200
 /**
- * A conversation that could not be indexed is tried again later and later, never given up on: a
- * provider down for hours catches up once it is back. Each try may bill a call.
+ * A conversation that could not be indexed for a reason that may pass is tried again later and
+ * later, never given up on: a provider down for hours catches up once it is back. Each try may
+ * bill a call.
  */
 export const TURN_INDEXING_BACKOFF_MS = [60_000, 5 * 60_000, 30 * 60_000, 6 * 60 * 60_000] as const
 const utf8 = new TextEncoder()
@@ -143,7 +146,7 @@ export function createAgentTurnIndexing(runtime: SixbHostContext): AgentTurnInde
         threadId,
         configuration: target.configuration,
       })
-      if (!progress || progress.current || isDeferred(progress)) return
+      if (!progress || progress.current || progress.halted || isDeferred(progress)) return
 
       await enqueue([threadId])
     },
@@ -171,7 +174,7 @@ export function createAgentTurnIndexing(runtime: SixbHostContext): AgentTurnInde
       if (thread?.kind !== "conversation" || thread.activeRunId !== null) return
 
       const progress = await store.progress({ projectId, threadId, configuration })
-      if (!progress || progress.current) return
+      if (!progress || progress.current || progress.halted) return
       if (isDeferred(progress)) {
         throw new AgentTurnIndexingDeferred(progress.deferredUntil!.toISOString())
       }
@@ -180,6 +183,13 @@ export function createAgentTurnIndexing(runtime: SixbHostContext): AgentTurnInde
         await indexFrom(target, threadId, progress, { attempt, signal })
       } catch (error) {
         if (signal.aborted) throw error
+
+        // Trying again would pay for the same failure, such as a model answering with other
+        // dimensions than it declares: it waits for the thread or the configuration to change.
+        if (isSixbError(error) && !error.retryable) {
+          await halt(target, threadId, progress, error)
+          return
+        }
 
         // Recorded on the thread, so the repair pass and a turn's end leave it alone meanwhile.
         const limited = error instanceof AgentTurnIndexingDeferred
@@ -191,6 +201,32 @@ export function createAgentTurnIndexing(runtime: SixbHostContext): AgentTurnInde
         throw limited ? error : new AgentTurnIndexingDeferred(until.toISOString(), { cause: error })
       }
     },
+  }
+
+  /** Stops indexing the thread as it was read, and reports it once through `onError`. */
+  async function halt(
+    target: IndexingTarget,
+    threadId: string,
+    progress: AgentThreadIndexProgress,
+    error: Error
+  ): Promise<void> {
+    const { store, configuration } = target
+    const revision = progress.revision
+
+    // The thread changed since: the job its change asks for tries again.
+    const halted = await store.halt({ projectId, threadId, configuration, revision })
+    if (!halted) return
+
+    reportAgentTurnIndexingFailure(runtime, error, {
+      projectId,
+      threadId,
+      revision,
+      configuration,
+      failure: captureSixbFailure(error, {
+        allowedCodes: VECTOR_INDEXING_FAILURE_CODES,
+        defaultCode: "internal.unexpected",
+      }),
+    })
   }
 
   /** Writes the thread's turns from where its index stands, until the thread changes under it. */

@@ -47,7 +47,8 @@ CREATE INDEX idx_agent_turn_vectors_search
   ON agent_turn_vectors (project_id, configuration, turn_at);
 
 -- How a conversation is indexed: for which configuration, from where a deletion sends indexing
--- back (`stale_from_seq`), and until when it waits for an AI limit's reset or a failure's backoff.
+-- back (`stale_from_seq`), until when it waits for an AI limit's reset or a failure's backoff, and
+-- the revision a failure no retry fixes stopped it at (`halted_revision`).
 CREATE TABLE agent_thread_index_state (
   project_id TEXT NOT NULL,
   thread_id TEXT NOT NULL,
@@ -55,6 +56,7 @@ CREATE TABLE agent_thread_index_state (
   stale_from_seq INTEGER CHECK (stale_from_seq >= 1),
   deferred_until TIMESTAMPTZ,
   failures INTEGER NOT NULL DEFAULT 0 CHECK (failures >= 0),
+  halted_revision BIGINT CHECK (halted_revision >= 0),
   indexed_at TIMESTAMPTZ,
   PRIMARY KEY (project_id, thread_id),
   FOREIGN KEY (project_id, thread_id) REFERENCES agent_threads (project_id, id) ON DELETE CASCADE

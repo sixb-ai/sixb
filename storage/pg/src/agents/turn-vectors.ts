@@ -10,6 +10,7 @@ import {
   type AgentTurnVectorStore,
   type DeferAgentThreadIndexingInput,
   type GetAgentThreadIndexProgressInput,
+  type HaltAgentThreadIndexingInput,
   type ListAgentThreadsToIndexInput,
   type ListAgentTurnVectorsInput,
   type WriteAgentTurnVectorsInput,
@@ -38,6 +39,7 @@ interface AgentThreadIndexProgressRow {
   stale_from_seq: number | null
   failures: number | null
   deferred_until: Date | string | null
+  halted: boolean
 }
 
 export class PgAgentTurnVectorStore implements AgentTurnVectorStore {
@@ -82,7 +84,12 @@ export class PgAgentTurnVectorStore implements AgentTurnVectorStore {
         ) AS holding_stale_seq,
         state.stale_from_seq,
         state.failures,
-        state.deferred_until
+        state.deferred_until,
+        COALESCE(
+          state.configuration = ${input.configuration}
+            AND state.halted_revision = thread.message_revision,
+          false
+        ) AS halted
       FROM agent_threads AS thread
       LEFT JOIN agent_thread_index_state AS state
         ON state.project_id = thread.project_id AND state.thread_id = thread.id
@@ -100,6 +107,7 @@ export class PgAgentTurnVectorStore implements AgentTurnVectorStore {
       fromSeq: Math.min(newest, holdingStale),
       failures: row.failures ?? 0,
       ...(row.deferred_until === null ? {} : { deferredUntil: new Date(row.deferred_until) }),
+      halted: row.halted,
     }
   }
 
@@ -169,6 +177,7 @@ export class PgAgentTurnVectorStore implements AgentTurnVectorStore {
           END,
           deferred_until = NULL,
           failures = 0,
+          halted_revision = NULL,
           indexed_at = EXCLUDED.indexed_at
       `
 
@@ -195,6 +204,42 @@ export class PgAgentTurnVectorStore implements AgentTurnVectorStore {
         `[SixbPg] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
       )
     }
+  }
+
+  async halt(input: HaltAgentThreadIndexingInput): Promise<boolean> {
+    return runPgTransaction(this.sql, async (tx) => {
+      // Held as `write` holds it: no append or deletion moves the revision until this commits.
+      const [thread] = await tx<{ message_revision: number | string }[]>`
+        SELECT message_revision FROM agent_threads
+        WHERE project_id = ${input.projectId} AND id = ${input.threadId}
+        FOR UPDATE
+      `
+      if (!thread || Number(thread.message_revision) !== input.revision) return false
+
+      // The state is about the configuration that failed now: under another, nothing is indexed.
+      await tx`
+        UPDATE agent_threads SET indexed_revision = NULL
+        WHERE project_id = ${input.projectId} AND id = ${input.threadId}
+      `
+      await tx`
+        INSERT INTO agent_thread_index_state (
+          project_id, thread_id, configuration, halted_revision
+        ) VALUES (
+          ${input.projectId}, ${input.threadId}, ${input.configuration}, ${input.revision}
+        )
+        ON CONFLICT (project_id, thread_id) DO UPDATE SET
+          configuration = EXCLUDED.configuration,
+          stale_from_seq = CASE
+            WHEN agent_thread_index_state.configuration = EXCLUDED.configuration
+            THEN agent_thread_index_state.stale_from_seq
+          END,
+          deferred_until = NULL,
+          failures = 0,
+          halted_revision = EXCLUDED.halted_revision
+      `
+
+      return true
+    })
   }
 
   async list(input: ListAgentTurnVectorsInput): Promise<readonly AgentTurnVectorRecord[]> {
@@ -234,6 +279,11 @@ export class PgAgentTurnVectorStore implements AgentTurnVectorStore {
       WHERE thread.kind = 'conversation'
         AND thread.active_run_id IS NULL
         AND (state.deferred_until IS NULL OR state.deferred_until <= ${input.now ?? new Date()})
+        AND NOT COALESCE(
+          state.configuration = ${input.configuration}
+            AND state.halted_revision = thread.message_revision,
+          false
+        )
       ORDER BY COALESCE(thread.last_message_at, thread.created_at) DESC, thread.id ASC
       LIMIT ${input.limit}
     `

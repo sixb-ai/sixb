@@ -12,6 +12,7 @@ import {
   type AgentTurnVectorStore,
   type DeferAgentThreadIndexingInput,
   type GetAgentThreadIndexProgressInput,
+  type HaltAgentThreadIndexingInput,
   type ListAgentThreadsToIndexInput,
   type ListAgentTurnVectorsInput,
   type WriteAgentTurnVectorsInput,
@@ -41,6 +42,7 @@ interface AgentThreadIndexProgressRow {
   stale_from_seq: number | null
   failures: number | null
   deferred_until: string | null
+  halted: number
 }
 
 export class SqliteAgentTurnVectorStore implements AgentTurnVectorStore {
@@ -83,7 +85,11 @@ export class SqliteAgentTurnVectorStore implements AgentTurnVectorStore {
           ) AS holding_stale_seq,
           state.stale_from_seq,
           state.failures,
-          state.deferred_until
+          state.deferred_until,
+          COALESCE(
+            state.configuration = ?3 AND state.halted_revision = thread.message_revision,
+            0
+          ) AS halted
         FROM agent_threads AS thread
         LEFT JOIN agent_thread_index_state AS state
           ON state.project_id = thread.project_id AND state.thread_id = thread.id
@@ -106,6 +112,7 @@ export class SqliteAgentTurnVectorStore implements AgentTurnVectorStore {
       fromSeq: Math.min(newest, holdingStale),
       failures: row.failures ?? 0,
       ...(row.deferred_until === null ? {} : { deferredUntil: new Date(row.deferred_until) }),
+      halted: row.halted === 1,
     }
   }
 
@@ -170,6 +177,7 @@ export class SqliteAgentTurnVectorStore implements AgentTurnVectorStore {
               END,
               deferred_until = NULL,
               failures = 0,
+              halted_revision = NULL,
               indexed_at = excluded.indexed_at
           `)
           .run(input.projectId, input.threadId, input.configuration, indexedAt, input.fromSeq)
@@ -204,6 +212,40 @@ export class SqliteAgentTurnVectorStore implements AgentTurnVectorStore {
         `[SixbSqlite] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
       )
     }
+  }
+
+  async halt(input: HaltAgentThreadIndexingInput): Promise<boolean> {
+    return this.db
+      .transaction(() => {
+        const thread = this.db
+          .query("SELECT message_revision FROM agent_threads WHERE project_id = ? AND id = ?")
+          .get(input.projectId, input.threadId) as { message_revision: number } | null
+        if (!thread || thread.message_revision !== input.revision) return false
+
+        // The state is about the configuration that failed now: under another, nothing is indexed.
+        this.db
+          .query("UPDATE agent_threads SET indexed_revision = NULL WHERE project_id = ? AND id = ?")
+          .run(input.projectId, input.threadId)
+        this.db
+          .query(`
+            INSERT INTO agent_thread_index_state (
+              project_id, thread_id, configuration, halted_revision
+            ) VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT (project_id, thread_id) DO UPDATE SET
+              configuration = excluded.configuration,
+              stale_from_seq = CASE
+                WHEN agent_thread_index_state.configuration = excluded.configuration
+                THEN agent_thread_index_state.stale_from_seq
+              END,
+              deferred_until = NULL,
+              failures = 0,
+              halted_revision = excluded.halted_revision
+          `)
+          .run(input.projectId, input.threadId, input.configuration, input.revision)
+
+        return true
+      })
+      .immediate()
   }
 
   async list(input: ListAgentTurnVectorsInput): Promise<readonly AgentTurnVectorRecord[]> {
@@ -244,6 +286,10 @@ export class SqliteAgentTurnVectorStore implements AgentTurnVectorStore {
         WHERE thread.kind = 'conversation'
           AND thread.active_run_id IS NULL
           AND (state.deferred_until IS NULL OR state.deferred_until <= ?3)
+          AND NOT COALESCE(
+            state.configuration = ?2 AND state.halted_revision = thread.message_revision,
+            0
+          )
         ORDER BY COALESCE(thread.last_message_at, thread.created_at) DESC, thread.id ASC
         LIMIT ?4
       `)

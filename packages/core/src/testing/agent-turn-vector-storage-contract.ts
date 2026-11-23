@@ -562,6 +562,65 @@ export function runAgentTurnVectorStorageContractSuite<
       })
     })
 
+    test("a halted thread leaves the list until it or the configuration changes", async () => {
+      // Guard proof: drop the halted filter from listThreadsToIndex; the halted thread is listed.
+      // Drop `indexed_revision = NULL` from halt; a thread indexed under one configuration reads
+      // as current under the one that failed.
+      await withStorage(async (storage) => {
+        await conversation(storage, "thr_1", 1)
+        const halt = async (threadId: string, config = configuration) =>
+          storage.agents.turnVectors.halt({
+            projectId,
+            threadId,
+            configuration: config,
+            revision: (await progressOf(storage, threadId, config))!.revision,
+          })
+
+        expect(await halt("thr_1")).toBe(true)
+        expect(await progressOf(storage, "thr_1")).toMatchObject({ current: false, halted: true })
+        expect(await threadsToIndex(storage, configuration, 10)).toEqual([])
+        expect(await progressOf(storage, "thr_1", otherConfiguration)).toMatchObject({
+          halted: false,
+        })
+        expect(await threadsToIndex(storage, otherConfiguration, 10)).toEqual(["thr_1"])
+
+        // Not once the thread moved: the change asks again.
+        const before = await progressOf(storage, "thr_1")
+        await ask(storage, "thr_1", 2, 20)
+        expect(await progressOf(storage, "thr_1")).toMatchObject({ halted: false })
+        expect(await threadsToIndex(storage, configuration, 10)).toEqual(["thr_1"])
+        expect(
+          await storage.agents.turnVectors.halt({
+            projectId,
+            threadId: "thr_1",
+            configuration,
+            revision: before!.revision,
+          })
+        ).toBe(false)
+
+        // A write lifts it.
+        await halt("thr_1")
+        await indexAll(storage, "thr_1", [turnVector("thr_1", 1), turnVector("thr_1", 2)])
+        expect(await progressOf(storage, "thr_1")).toMatchObject({ current: true, halted: false })
+
+        // Halting under another configuration leaves nothing current under it.
+        await halt("thr_1", otherConfiguration)
+        expect(await progressOf(storage, "thr_1", otherConfiguration)).toMatchObject({
+          current: false,
+          halted: true,
+        })
+        expect(await threadsToIndex(storage, otherConfiguration, 10)).toEqual([])
+        expect(
+          await storage.agents.turnVectors.halt({
+            projectId,
+            threadId: "thr_missing",
+            configuration,
+            revision: 0,
+          })
+        ).toBe(false)
+      })
+    })
+
     test("refuses a turn that opens before the seq it replaces from", async () => {
       await withStorage(async (storage) => {
         await conversation(storage, "thr_1", 2)

@@ -88,6 +88,7 @@ export type {
   FinishQueuedAgentRunInput,
   ForkAgentThreadInput,
   GetAgentThreadIndexProgressInput,
+  HaltAgentThreadIndexingInput,
   ListAgentApprovalsInput,
   ListAgentApprovalsResult,
   ListAgentInboxItemsInput,

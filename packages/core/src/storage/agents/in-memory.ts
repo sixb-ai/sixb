@@ -127,6 +127,7 @@ import type {
   FinishQueuedAgentRunInput,
   ForkAgentThreadInput,
   GetAgentThreadIndexProgressInput,
+  HaltAgentThreadIndexingInput,
   ListAgentApprovalsInput,
   ListAgentApprovalsResult,
   ListAgentInboxItemsInput,
@@ -268,6 +269,8 @@ interface StoredAgentThreadIndex {
   readonly staleFromSeq: number | null
   readonly deferredUntil: Date | null
   readonly failures: number
+  /** The message revision indexing failed at for good, under `configuration`. */
+  readonly haltedRevision: number | null
   /** Null until indexing first wrote. */
   readonly indexedAt: Date | null
 }
@@ -1532,6 +1535,7 @@ function copyTurnVectors(
     revision: current ? (state.messageRevisions.get(key(input.projectId, input.id)) ?? 0) : null,
     deferredUntil: null,
     failures: 0,
+    haltedRevision: null,
   })
 }
 
@@ -1563,6 +1567,7 @@ class InMemoryAgentTurnVectorStore implements AgentTurnVectorStore {
       staleFromSeq: null,
       deferredUntil: null,
       failures: 0,
+      haltedRevision: null,
       indexedAt: null,
     }
     this.state.threadIndexes.set(threadKey, {
@@ -1599,7 +1604,28 @@ class InMemoryAgentTurnVectorStore implements AgentTurnVectorStore {
       fromSeq: Math.min(newest, holdingStale),
       failures: index?.failures ?? 0,
       ...(index?.deferredUntil ? { deferredUntil: new Date(index.deferredUntil) } : {}),
+      halted: index?.configuration === input.configuration && index.haltedRevision === revision,
     }
+  }
+
+  async halt(input: HaltAgentThreadIndexingInput): Promise<boolean> {
+    const threadKey = key(input.projectId, input.threadId)
+    if (!this.state.threads.has(threadKey)) return false
+    if ((this.state.messageRevisions.get(threadKey) ?? 0) !== input.revision) return false
+
+    // The state is about the configuration that failed now: under another, nothing is indexed.
+    const index = this.state.threadIndexes.get(threadKey)
+    const same = index?.configuration === input.configuration
+    this.state.threadIndexes.set(threadKey, {
+      configuration: input.configuration,
+      revision: null,
+      staleFromSeq: same ? index.staleFromSeq : null,
+      deferredUntil: null,
+      failures: 0,
+      haltedRevision: input.revision,
+      indexedAt: index?.indexedAt ?? null,
+    })
+    return true
   }
 
   async write(input: WriteAgentTurnVectorsInput): Promise<boolean> {
@@ -1653,6 +1679,7 @@ class InMemoryAgentTurnVectorStore implements AgentTurnVectorStore {
       staleFromSeq: stale,
       deferredUntil: null,
       failures: 0,
+      haltedRevision: null,
       indexedAt,
     })
 
@@ -1679,13 +1706,14 @@ class InMemoryAgentTurnVectorStore implements AgentTurnVectorStore {
       .filter((thread) => {
         const threadKey = key(thread.projectId, thread.id)
         const index = this.state.threadIndexes.get(threadKey)
+        const revision = this.state.messageRevisions.get(threadKey) ?? 0
         if (index?.deferredUntil && index.deferredUntil.getTime() > now) return false
+        if (index?.configuration === input.configuration && index.haltedRevision === revision) {
+          return false
+        }
 
         // A deletion moves the revision too, so a stale index is behind by it.
-        return (
-          index?.configuration !== input.configuration ||
-          index.revision !== (this.state.messageRevisions.get(threadKey) ?? 0)
-        )
+        return index?.configuration !== input.configuration || index.revision !== revision
       })
       .sort((left, right) => activity(right) - activity(left) || left.id.localeCompare(right.id))
       .slice(0, input.limit)
