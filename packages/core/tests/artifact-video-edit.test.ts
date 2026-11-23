@@ -629,6 +629,49 @@ describe("editing clips", () => {
     expect(inserted(sound)).toEqual([' data-volume="0.2"', ' data-fade-in="0.5"'])
   })
 
+  // Guard proof: keep a clip's volume from 0 to 1 in setClipSound (edit.ts), as it was; the
+  // Agent's 2.4 then cannot be turned down by a step, nor the voice turned up past as recorded.
+  test("a clip's sound is as loud as four times as recorded, or as loud as it is", () => {
+    expect(inserted(setClipSound(SOURCES, "index.html", "music", { volume: 2.4 }))).toEqual([
+      ' data-volume="2.4"',
+    ])
+    const loud = setClipSound(SOURCES, "index.html", "music", { volume: 4.5 })
+    expect("error" in loud && loud.error).toBe("A clip's volume is from 0 to 4.")
+    const louder = new Map(SOURCES).set(
+      "index.html",
+      INDEX.replace('data-volume="0.4"', 'data-volume="5"')
+    )
+    expect("edit" in setClipSound(louder, "index.html", "music", { volume: 5 })).toBe(true)
+  })
+
+  // Guard proof: write no `muted` in setClipSound (edit.ts); the footage then plays its sound on.
+  test("footage is muted, or heard again, as HyperFrames mixes it", () => {
+    const muted = applied(setClipSound(SOURCES, "scenes/demo.html", "talk", { muted: true }))
+    expect(muted.get("scenes/demo.html")).toContain(
+      '<video id="talk" src="media/talk.mp4" data-start="0" data-duration="5" data-media-start="2" playsinline muted="">'
+    )
+    expect(demoClips(muted)[0]?.silent).toBe(true)
+    const heard = applied(setClipSound(muted, "scenes/demo.html", "talk", { muted: false }), muted)
+    expect(demoClips(heard)[0]?.silent).toBe(false)
+    expect(heard.get("scenes/demo.html")).toContain('data-has-audio="true"')
+    const sound = setClipSound(SOURCES, "index.html", "music", { muted: true })
+    expect("error" in sound).toBe(true)
+  })
+
+  // Guard proof: return the edit alone from run (edit.ts), without `unplayed`; the screen
+  // recording, which no clip plays any more, then stays in the version.
+  test("an edit that takes a file's last clip takes the file with it, and only then", () => {
+    const removed = (result: VideoEditResult) =>
+      "edit" in result ? result.edit.flatMap((each) => ("remove" in each ? [each.path] : [])) : []
+    expect(removed(removeClip(SOURCES, "scenes/demo.html", "screen"))).toEqual(["media/screen.mp4"])
+
+    // Played by the copy too, it stays; never played, as media/new.mp4, it stays.
+    const copied = applied(duplicateScene(SOURCES, "demo"))
+    expect(removed(removeClip(copied, "scenes/demo.html", "screen"))).toEqual([])
+    expect(removed(removeClip(SOURCES, "scenes/demo.html", "talk"))).toEqual(["media/talk.mp4"])
+    expect(applied(removeClip(SOURCES, "scenes/demo.html", "talk")).has("media/new.mp4")).toBe(true)
+  })
+
   test("a fade of 0 is no fade", () => {
     const files = applied(setClipSound(SOURCES, "index.html", "music", { fadeOutMs: 0 }))
     expect(files.get("index.html")).not.toContain("data-fade-out")
@@ -643,6 +686,35 @@ describe("editing clips", () => {
     expect(readSceneTimeline(files.get("scenes/hook.html") as string)?.texts[0]?.text).toBe(
       "Jobs & crews in one place"
     )
+  })
+
+  // Guard proof: write `data-has-audio="true"` on all footage added in clipHtml (edit.ts), as it
+  // did; B-roll added over the talk then plays its sound over the voice.
+  test("footage added where a clip is heard is added muted, and where none is, heard", () => {
+    const over = insertClip(SOURCES, "scenes/demo.html", {
+      kind: "video",
+      src: "media/new.mp4",
+      startMs: 1000,
+      durationMs: 1000,
+    })
+    expect("muted" in over && over.muted).toBe(true)
+    expect(applied(over).get("scenes/demo.html")).toContain(
+      '<video id="new" src="media/new.mp4" data-start="1" data-duration="1" data-media-start="0" muted playsinline'
+    )
+
+    // Without the music, nothing is heard in the outro: it keeps its sound.
+    const quiet = new Map(SOURCES).set(
+      "index.html",
+      INDEX.replace(/\n\s*<audio id="music"[^>]*><\/audio>/, "")
+    )
+    const alone = insertClip(quiet, "scenes/outro.html", {
+      kind: "video",
+      src: "media/new.mp4",
+      startMs: 1000,
+      durationMs: 1000,
+    })
+    expect("muted" in alone).toBe(false)
+    expect(applied(alone, quiet).get("scenes/outro.html")).toContain('data-has-audio="true"')
   })
 
   test("an imported recording joins its scene over the footage, and the scene grows to hold it", () => {

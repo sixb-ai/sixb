@@ -8,6 +8,7 @@ import {
   type VideoSourceSpan,
   type VideoStart,
   videoFilePath,
+  videoFilesPlayed,
 } from "./composition"
 import {
   type CssBlock,
@@ -97,6 +98,9 @@ export interface VideoRange {
 export interface VideoCut extends VideoRange {
   readonly room?: VideoRange
 }
+
+/** The loudest a clip's sound is made, `data-volume`, as many times as loud as recorded. */
+export const MAX_VOLUME = 4
 
 /** The shortest a scene or a clip may become: a few frames. */
 export const MIN_CLIP_MS = 100
@@ -468,17 +472,28 @@ export function setClipSound(
   sources: VideoSources,
   file: string,
   clip: VideoTarget,
-  sound: { readonly volume?: number; readonly fadeInMs?: number; readonly fadeOutMs?: number }
+  sound: {
+    readonly volume?: number
+    readonly fadeInMs?: number
+    readonly fadeOutMs?: number
+    /** Footage whose sound is not played, or played again. */
+    readonly muted?: boolean
+  }
 ): VideoEditResult {
   return run(sources, (work) => {
     const found = clipOf(work, file, clip)
     if (found.kind !== "video" && found.kind !== "audio") {
       throw new EditError(`'${found.ref}' plays no sound.`)
     }
+    if (sound.muted !== undefined && found.kind !== "video") {
+      throw new EditError(`'${found.ref}' is a sound: turn its volume down instead.`)
+    }
 
+    // As loud as 4 times as recorded, or as loud as it already is.
     const { volume, fadeInMs, fadeOutMs } = sound
-    if (volume !== undefined && !(volume >= 0 && volume <= 1)) {
-      throw new EditError("A clip's volume is from 0 to 1.")
+    const loudest = Math.max(MAX_VOLUME, found.volume ?? 1)
+    if (volume !== undefined && !(volume >= 0 && volume <= loudest)) {
+      throw new EditError(`A clip's volume is from 0 to ${loudest}.`)
     }
     for (const fade of [fadeInMs, fadeOutMs]) {
       if (fade !== undefined && !(fade >= 0)) throw new EditError("A fade lasts 0 s or more.")
@@ -498,6 +513,12 @@ export function setClipSound(
         ...(fadeOutMs === undefined || index < parts.length - 1
           ? {}
           : { "data-fade-out": fadeOutMs === 0 ? null : seconds(fadeOutMs) }),
+        // Muted, as HyperFrames mixes no sound of it; heard, its sound mixed in again.
+        ...(sound.muted === undefined
+          ? {}
+          : sound.muted
+            ? { muted: "", "data-has-audio": null }
+            : { muted: null, "data-has-audio": "true" }),
       })
     })
   })
@@ -919,7 +940,8 @@ export function cutRange(sources: VideoSources, range: VideoRange): VideoEditRes
  * Adds a clip that plays or shows a file of the video, at `startMs` in its composition, for
  * `durationMs`: footage fills the frame under what the scene shows, a sound plays under it. It is
  * placed as {@link moveClips} places a clip: past its scene's end, it goes on in the next scene,
- * or the last scene grows to hold it. Returns the clip's id with the edit.
+ * or the last scene grows to hold it. Footage added where another clip is heard is added muted,
+ * as B-roll over a voice is, which `muted` says. Returns the clip's id with the edit.
  */
 export function insertClip(
   sources: VideoSources,
@@ -931,8 +953,9 @@ export function insertClip(
     readonly durationMs: number
     readonly mediaStartMs?: number
   }
-): VideoEditResult & { readonly clip?: string } {
+): VideoEditResult & { readonly clip?: string; readonly muted?: true } {
   let added: string | undefined
+  let muted = false
   const result = run(sources, (work) => {
     if (!sources.has(clip.src))
       throw new EditError(`'${clip.src}' is not one of the video's files.`)
@@ -945,6 +968,8 @@ export function insertClip(
     const id = uniqueName(slug(stem) || clip.kind, takenNames(work))
     added = id
 
+    const startMs = (sceneOf(work, file)?.startMs ?? 0) + Math.max(0, clip.startMs)
+    muted = clip.kind === "video" && heardDuring(work, startMs, startMs + clip.durationMs)
     const html = clipHtml(clip.kind, {
       id,
       // A scene reads a path from the project's root, unless one beside it is the version's.
@@ -952,6 +977,7 @@ export function insertClip(
       start: seconds(Math.max(0, clip.startMs)),
       duration: seconds(clip.durationMs),
       mediaStart: seconds(clip.mediaStartMs ?? 0),
+      muted,
     })
 
     // A picture goes over the pictures before it and under the words; a sound beside the sounds.
@@ -963,7 +989,33 @@ export function insertClip(
       { file, clip: found, startMs: videoStartOf(work, file, found), durationMs: clip.durationMs },
     ])
   })
-  return "edit" in result && added ? { ...result, clip: added } : result
+  if (!("edit" in result) || !added) return result
+  return { ...result, clip: added, ...(muted ? { muted: true as const } : {}) }
+}
+
+/**
+ * Whether a clip of the video is heard between `fromMs` and `toMs`: a sound, or footage that is not
+ * muted, at a volume above none, the video's own or a scene's.
+ */
+function heardDuring(work: Working, fromMs: number, toMs: number): boolean {
+  const files = [
+    { file: VIDEO_ENTRY, startMs: 0, endMs: Number.POSITIVE_INFINITY },
+    ...rootOf(work).scenes.map((scene) => ({
+      file: scene.src,
+      startMs: scene.startMs,
+      endMs: scene.startMs + scene.durationMs,
+    })),
+  ]
+  return files.some(({ file, startMs, endMs }) => {
+    if (work.textOf(file) === undefined) return false
+    return (readTimeline(work, file)?.clips ?? []).some((clip) => {
+      const sounds = clip.kind === "audio" || (clip.kind === "video" && !clip.silent)
+      if (!sounds || clip.volume === 0) return false
+      const from = startMs + clip.startMs
+      const to = Math.min(endMs, clip.durationMs === undefined ? endMs : from + clip.durationMs)
+      return from < toMs && fromMs < to
+    })
+  })
 }
 
 /** The files an edit leaves: `sources` with the edit applied. */
@@ -1253,7 +1305,51 @@ function run(sources: VideoSources, operation: (work: Working) => void): VideoEd
       }
     }
   }
-  return { edit }
+  return { edit: [...edit, ...unplayed(sources, files, edit)] }
+}
+
+/**
+ * The recordings and pictures an edit took the last clip of: each leaves the version with it, and
+ * an undo of the edit brings it back. Only those a file the edit changed named, and no file names
+ * now: what nothing played before it stays, as the Agent may have put it there for later.
+ */
+function unplayed(
+  sources: VideoSources,
+  files: ReadonlyMap<string, string | null>,
+  edit: VideoEdit
+): VideoFileEdit[] {
+  const exists = (path: string) => files.has(path)
+  const named = (path: string, text: string | null | undefined) =>
+    new Set(
+      [...(text ?? "").matchAll(/\ssrc\s*=\s*(["'])([^"']+)\1/gi)].flatMap((match) => {
+        const found = videoFilePath(path, match[2] ?? "", (each) => sources.has(each))
+        return found === undefined ? [] : [found]
+      })
+    )
+
+  const gone = new Set<string>()
+  for (const change of edit) {
+    if (!/\.html?$/i.test(change.path)) continue
+    const now = named(change.path, files.get(change.path))
+    for (const path of named(change.path, sources.get(change.path))) {
+      if (!now.has(path) && sources.get(path) === null && files.has(path)) gone.add(path)
+    }
+  }
+  if (gone.size === 0) return []
+
+  const index = files.get(VIDEO_ENTRY)
+  if (typeof index !== "string") return []
+  const played = videoFilesPlayed(
+    index,
+    (path) => {
+      const text = files.get(path)
+      return typeof text === "string" ? text : undefined
+    },
+    exists
+  )
+  return [...gone]
+    .filter((path) => !played.has(path))
+    .map((path) => ({ path, remove: true as const }))
 }
 
 /** Runs an operation that places clips, and returns where it placed them with its edit. */
@@ -2427,14 +2523,17 @@ function clipHtml(
     readonly start: string
     readonly duration: string
     readonly mediaStart: string
+    /** Footage whose sound is not played. */
+    readonly muted?: boolean
   }
 ): string {
   const { id, src, start, duration, mediaStart } = values
   const fill = 'style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover"'
   const timing = `data-start="${start}" data-duration="${duration}"`
+  const sound = values.muted ? "muted" : 'data-has-audio="true"'
   switch (kind) {
     case "video":
-      return `<video id="${id}" src="${escapeAttribute(src)}" ${timing} data-media-start="${mediaStart}" data-has-audio="true" playsinline ${fill}></video>`
+      return `<video id="${id}" src="${escapeAttribute(src)}" ${timing} data-media-start="${mediaStart}" ${sound} playsinline ${fill}></video>`
     case "audio":
       return `<audio id="${id}" src="${escapeAttribute(src)}" ${timing} data-media-start="${mediaStart}" data-volume="1"></audio>`
     case "image":
