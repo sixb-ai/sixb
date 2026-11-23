@@ -3,6 +3,7 @@ import { DEFAULT_SIMPLE_FILE_UPLOAD_BYTES } from "@sixb/core/blob-storage"
 import { isSixbApiError, type SixbClient } from "./api"
 import { getClientSharedGrantId } from "./client-authority"
 import { client as sharedClient } from "./generated/client.gen"
+import { formDataBodySerializer } from "./generated/core/bodySerializer.gen"
 import {
   abortFileUpload,
   completeFileUpload,
@@ -105,10 +106,10 @@ export class SixbFileUploadError extends Error {
 
 /**
  * How far an upload is. A staged upload first reads the file for its digest (`hash`), then sends
- * it (`upload`). In a browser, a staged file the API receives itself is counted as it is sent.
- * Otherwise, what one request sends is counted once it is sent: fetch reports no progress within
- * a request, so a file sent whole goes from none of it to all of it at once, and one sent in
- * parts, part by part.
+ * it (`upload`); a file under the staged threshold is only sent. In a browser, a file the API
+ * receives itself is counted as it is sent, whatever its size. Otherwise, what one request sends
+ * is counted once it is sent: fetch reports no progress within a request, so a file sent whole
+ * goes from none of it to all of it at once, and one sent in parts, part by part.
  */
 export interface FileUploadProgress {
   readonly stage: "hash" | "upload"
@@ -161,15 +162,31 @@ export async function uploadFile(
 }
 
 async function uploadFileSimple(file: File | Blob, options: UploadFileOptions): Promise<FileRef> {
+  const progress = (loadedBytes: number) =>
+    options.onProgress?.({ stage: "upload", loadedBytes, totalBytes: file.size })
   const body = {
     file: resolveUploadFile(file, options.fileName),
     ...(options.logicalPath === undefined ? {} : { logicalPath: options.logicalPath }),
   }
 
-  const data = await runUploadStep("server-put", () =>
-    uploadFileRaw({ body, client: options.client, ...callOptions(options.signal) })
+  // The form the SDK sends, built as it builds it, so XHR sends the same fields.
+  const transport = progressTransport(
+    options.client ?? sharedClient,
+    () => formDataBodySerializer.bodySerializer(body),
+    file.size,
+    progress
   )
-  options.onProgress?.({ stage: "upload", loadedBytes: file.size, totalBytes: file.size })
+
+  progress(0)
+  const data = await runUploadStep("server-put", () =>
+    uploadFileRaw({
+      body,
+      client: options.client,
+      ...callOptions(options.signal),
+      ...(transport === undefined ? {} : { fetch: transport }),
+    })
+  )
+  progress(file.size)
   return toFileRef(data, "server-put")
 }
 
@@ -198,8 +215,11 @@ async function uploadFileStaged(file: File | Blob, options: UploadFileOptions): 
     progress("upload", 0)
     if (upload.strategy === "server") {
       const body = resolveUploadFile(file, options.fileName)
-      const transport = progressTransport(options.client ?? sharedClient, body, (sentBytes) =>
-        progress("upload", sentBytes)
+      const transport = progressTransport(
+        options.client ?? sharedClient,
+        () => body,
+        file.size,
+        (sentBytes) => progress("upload", sentBytes)
       )
 
       await runUploadStep("server-put", () =>
@@ -290,14 +310,18 @@ async function putDirectUpload(input: {
 }
 
 /**
- * A fetch for the one request that sends `file` to the API, through XHR, which says how much of it
+ * A fetch for the one request that sends a file to the API, through XHR, which says how much of it
  * is sent as fetch does not. Only in a browser, and only for a client whose transport is the
  * browser's own fetch: one that wraps it, as a shared link's or a native session's does, stamps
  * its credential there, so it keeps sending through it.
+ *
+ * `body` is what the request carries: the file itself, or the form that holds it. A form is longer
+ * than its file by its field headers, so what is sent counts as the same share of `sizeBytes`.
  */
 function progressTransport(
   client: SixbClient,
-  file: File | Blob,
+  body: () => Blob | FormData,
+  sizeBytes: number,
   onSent: (sentBytes: number) => void
 ): typeof fetch | undefined {
   if (typeof XMLHttpRequest === "undefined" || client.getConfig().fetch !== undefined) {
@@ -307,16 +331,21 @@ function progressTransport(
   const send = (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
     new Promise<Response>((resolve, reject) => {
       // The SDK hands over the request it built: its URL, its headers, its credentials and its
-      // signal are this one's. Its body is the file, sent as it is rather than read again.
+      // signal are this one's. Its body is sent as it is rather than read again; a form's own
+      // content type names the boundary XHR writes, not the one the request was given.
       const request =
         input instanceof Request && init === undefined ? input : new Request(input, init)
+      const content = body()
       const xhr = new XMLHttpRequest()
       xhr.open(request.method, request.url)
       xhr.withCredentials = request.credentials === "include"
       xhr.responseType = "blob"
-      for (const [name, value] of request.headers) xhr.setRequestHeader(name, value)
+      for (const [name, value] of request.headers) {
+        if (content instanceof FormData && name === "content-type") continue
+        xhr.setRequestHeader(name, value)
+      }
 
-      xhr.upload.onprogress = (event) => onSent(Math.min(event.loaded, file.size))
+      xhr.upload.onprogress = (event) => onSent(sentShare(event, sizeBytes))
       xhr.onload = () => resolve(xhrResponse(xhr))
       xhr.onerror = () => reject(new TypeError("[SixbClient] The file upload request failed."))
       xhr.onabort = () => reject(new DOMException("The file upload was aborted.", "AbortError"))
@@ -326,10 +355,21 @@ function progressTransport(
         return
       }
       request.signal.addEventListener("abort", () => xhr.abort(), { once: true })
-      xhr.send(file)
+      xhr.send(content)
     })
 
   return Object.assign(send, { preconnect: globalThis.fetch.preconnect })
+}
+
+/** How much of the file a progress event says is sent, never more than all of it. */
+function sentShare(
+  event: { readonly loaded: number; readonly total?: number; readonly lengthComputable?: boolean },
+  sizeBytes: number
+): number {
+  if (sizeBytes === 0) return 0
+
+  const total = event.lengthComputable && event.total ? event.total : sizeBytes
+  return Math.min(sizeBytes, Math.round((event.loaded / total) * sizeBytes))
 }
 
 /** What an XHR answered, as fetch would have: a status that takes no body gets none. */
