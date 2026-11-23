@@ -120,27 +120,31 @@ export function Viewer({
   readonly defaultEditing?: boolean
   readonly className?: string
 }) {
+  // Its own tooltips, as the app's shell gives them, for a page that has no shell around it: an
+  // app's own page, or an artifact's, whose editors would otherwise fail to open.
   return (
-    <div className={cn("flex h-full min-h-0 min-w-0 flex-col bg-background", className)}>
-      {target.type === "artifact" ? (
-        // A link to another artifact opens it here, in place of this one.
-        <ArtifactReferencesProvider open={onOpenReference}>
-          {/* An edit belongs to its artifact: another one opens without it. */}
-          <ArtifactView
-            key={target.artifactId}
-            target={target}
-            onTargetChange={onTargetChange}
-            chrome={chrome}
-            defaultEditing={defaultEditing}
-          />
-        </ArtifactReferencesProvider>
-      ) : (
-        <>
-          <FileHeader target={target} chrome={chrome} />
-          <FileRenderer source={target.source} />
-        </>
-      )}
-    </div>
+    <TooltipProvider>
+      <div className={cn("flex h-full min-h-0 min-w-0 flex-col bg-background", className)}>
+        {target.type === "artifact" ? (
+          // A link to another artifact opens it here, in place of this one.
+          <ArtifactReferencesProvider open={onOpenReference}>
+            {/* An edit belongs to its artifact: another one opens without it. */}
+            <ArtifactView
+              key={target.artifactId}
+              target={target}
+              onTargetChange={onTargetChange}
+              chrome={chrome}
+              defaultEditing={defaultEditing}
+            />
+          </ArtifactReferencesProvider>
+        ) : (
+          <>
+            <FileHeader target={target} chrome={chrome} />
+            <FileRenderer source={target.source} />
+          </>
+        )}
+      </div>
+    </TooltipProvider>
   )
 }
 

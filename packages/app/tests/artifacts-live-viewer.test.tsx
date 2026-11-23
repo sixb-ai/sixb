@@ -10,6 +10,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
 import { useLayoutEffect } from "react"
 import { MemoryRouter } from "react-router-dom"
+import * as Y from "yjs"
+import { createArtifactDocument } from "../../core/src/artifacts/live/document"
 import { ArtifactViewer, type ArtifactViewerProps } from "../src/artifacts/artifact-viewer"
 import { artifactFileSource } from "../src/artifacts/file-source"
 import { LiveHubProvider } from "../src/artifacts/live/hooks"
@@ -374,6 +376,39 @@ describe("a video held live in the viewer", () => {
     })
     expect(ui.queryByRole("button", { name: "Done" })).toBeNull()
     expect(ui.getByRole("button", { name: "Edit" })).toBeDefined()
+    ui.unmount()
+  })
+
+  // Reproduce by leaving the TooltipProvider out of Viewer (viewer.tsx): on a page with no app
+  // shell around it, the editor's first tooltip throws, and the page shows an error instead.
+  test("embedded to edit on a page of its own, opens the editor with no shell around it", async () => {
+    const server = new FakeServer(ARTIFACT_ID, CANVAS)
+    Y.applyUpdate(
+      server.doc,
+      Y.encodeStateAsUpdate(
+        createArtifactDocument(
+          "video",
+          new Map([
+            [
+              "index.html",
+              {
+                text: '<div data-composition-id="main" data-width="1920" data-height="1080" data-duration="4"><div id="intro" data-composition-id="intro" data-composition-src="scenes/intro.html" data-start="0" data-duration="4" data-label="Opening"></div></div>',
+              },
+            ],
+            [
+              "scenes/intro.html",
+              {
+                text: '<template><div data-composition-id="intro" data-width="1920" data-height="1080"><h1 data-start="0" data-duration="4">Launch</h1></div></template>',
+              },
+            ],
+          ])
+        )
+      )
+    )
+    const ui = embedded(new LiveHub(server.open), { defaultEditing: true })
+    await act(settle)
+
+    expect(await ui.findByText("Opening")).toBeDefined()
     ui.unmount()
   })
 
