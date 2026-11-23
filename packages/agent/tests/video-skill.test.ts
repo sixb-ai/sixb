@@ -98,6 +98,18 @@ describe("the video guide", () => {
     expect(guide).toContain("`spawn_agent` a reviewer")
   })
 
+  // Guard proof: put back video.md's "Make it premium" section; its LUFS target, type sizes and
+  // teaser lengths are then the framework's style, which belongs to the project.
+  test("leaves style, pacing and formats to the person and the project", () => {
+    const guide = oneLine(videoGuide())
+    expect(guide).toContain(
+      "comes from the person, their brief and the project's own instructions and skills"
+    )
+    for (const taste of ["premium", "LUFS", "power3.out", "end card of", "nothing under", " px"]) {
+      expect(guide).not.toContain(taste)
+    }
+  })
+
   test("shows the root of the example it points at", () => {
     const root = /<div data-composition-id="main"[\s\S]*?\n<\/div>/.exec(videoGuide())?.[0]
     expect(root).toBeDefined()

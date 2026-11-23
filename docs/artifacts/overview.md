@@ -840,10 +840,13 @@ footage and sound you give it, and what your models make:
 - Its copy of a video holds the scenes, not the recordings: it edits footage from the transcript,
   the cuts and a proxy. The clips you attach go in as you sent them, never copied into its
   sandbox, and an update keeps every recording its scenes still play without uploading it again.
-- Each publish is checked with HyperFrames on the files the export renders, and the Agent looks
-  at a contact sheet of every scene's start, middle and end before it says the video is ready. A
-  sandbox whose network leaves out the font and script CDNs checks without them, and says so.
+- Each publish is checked with HyperFrames on the files the export renders, for what breaks, and
+  the Agent looks at a contact sheet of every scene's start, middle and end before it says the
+  video is ready. A sandbox whose network leaves out the font and script CDNs checks without them,
+  and says so.
 - It acts on comments left at an instant, then resolves or answers them.
+- Style, pacing and formats belong in your project's instructions or skills: the framework sets
+  none.
 
 ### Export a video
 

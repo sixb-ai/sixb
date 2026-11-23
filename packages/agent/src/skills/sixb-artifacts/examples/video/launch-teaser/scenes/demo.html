@@ -1,7 +1,7 @@
 <template>
   <div data-composition-id="demo" data-width="1920" data-height="1080" class="scene">
     <div class="demo-window">
-      <!-- A 1920×1080 Playwright recording of the dispatch board, zoomed 1.75 times, from 4.2 s. -->
+      <!-- A 1920×1080 Playwright recording of the dispatch board, played from 4.2 s into it. -->
       <video id="dispatch" src="media/dispatch.mp4" data-start="0" data-duration="8.4"
              data-media-start="4.2" muted playsinline data-layout-allow-overflow></video>
     </div>
@@ -31,8 +31,8 @@
       const demo = gsap.timeline({ paused: true })
       const scene = '[data-composition-id="demo"]'
 
-      // It comes in over the hook's last 0.4 s, then pushes in on the cards being assigned, so the
-      // interface reads on a phone; the callout names the one thing to see, then leaves first.
+      // Its host starts 0.4 s before the hook ends, so the window fades in over it. The video
+      // scales past its window, which data-layout-allow-overflow tells the check is meant.
       demo.from(`${scene} .demo-window`, { opacity: 0, y: 40, duration: 0.6, ease: "power2.out" }, 0)
       demo.to(`${scene} video`, { scale: 1.45, duration: 2.2, ease: "power2.inOut" }, 1.4)
       demo.from(`${scene} .callout`, { y: 24, opacity: 0, duration: 0.5, ease: "power3.out" }, 2.2)
