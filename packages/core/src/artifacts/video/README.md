@@ -98,9 +98,12 @@ so a change stays one small text edit, in the live document and in the Agent's d
   shows in none of its frames, and is not in its key;
 - the scene's start in the video, only when the root shows something that moves of its own: a
   timed element, a video, a script that may build a timeline, or CSS that moves;
-- every other file, but three kinds: the other scenes' HTML, the videos neither the root nor a
-  scene on screen during the segment plays, the heavy files a version mostly changes, and every
-  sound.
+- every other file, but four kinds: the other scenes' HTML, the videos neither the root nor a
+  scene on screen during the segment plays, the heavy files a version mostly changes, every
+  sound, and HyperFrames' own project state in `.hyperframes/`, its edit history, which no frame
+  loads. A version published from a folder HyperFrames worked in holds it, and the Agent's next
+  publish, which leaves out every dot folder, drops it: kept in the keys, that would render every
+  scene again.
 
 A segment is pictures alone. The export mixes the whole video's sound once, apart, so a soundtrack
 changed, trimmed or moved renders no scene again (see Export below).

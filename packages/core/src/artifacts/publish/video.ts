@@ -26,6 +26,12 @@ const HOST_TIMES = ["data-start", "data-duration", "data-label"]
 const HOST_PLACE = "<!-- scene -->"
 
 /**
+ * Where HyperFrames' CLI keeps a project's own state, its edit history among it. No frame loads
+ * it, and a version that drops it, as the Agent's publishing always does, shows the same frames.
+ */
+const HYPERFRAMES_STATE = ".hyperframes/"
+
+/**
  * Each scene's render key, by its id: a SHA-256 of what its frames are made of. That is
  *
  * - the frame's kit and runtime;
@@ -39,7 +45,8 @@ const HOST_PLACE = "<!-- scene -->"
  *   (`rootTimeline`): only then does what the scene shows depend on when it plays. A scene's own
  *   CSS animations and GSAP timeline run from its start, wherever it plays (measured: README);
  * - every other file of the version, with what it holds, but the other scenes' HTML, the videos
- *   neither the root nor a scene on screen during the segment plays, and every sound.
+ *   neither the root nor a scene on screen during the segment plays, every sound, and
+ *   HyperFrames' own state in `.hyperframes/`.
  *
  * A segment is pictures alone: the export mixes the whole video's sound once, apart, so a sound is
  * in no key, and a soundtrack changed or moved renders no scene again.
@@ -127,9 +134,9 @@ export function sceneRenderKeys(input: {
 
 /**
  * The files the frames of `scenes`, shown together, are made of: `index.html`, what the root and
- * those scenes play, and every other file of the version but the other scenes' HTML and the
- * videos nothing among them plays. A sound shows in no frame and is left out, unless `sounds`:
- * HyperFrames still loads every sound of what it renders.
+ * those scenes play, and every other file of the version but the other scenes' HTML, the videos
+ * nothing among them plays, and HyperFrames' own state. A sound shows in no frame and is left out,
+ * unless `sounds`: HyperFrames still loads every sound of what it renders.
  */
 export function videoSceneFiles(input: {
   readonly files: readonly ArtifactFile[]
@@ -148,6 +155,7 @@ export function videoSceneFiles(input: {
     if (path === VIDEO_ENTRY) return true
     if (type.startsWith("audio/") && !input.sounds) return false
     if (own.has(path)) return true
+    if (path.startsWith(HYPERFRAMES_STATE)) return false
     return !sceneFiles.has(path) && !/^(video|audio)\//.test(type)
   })
 }
