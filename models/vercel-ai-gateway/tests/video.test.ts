@@ -256,6 +256,60 @@ test("a status check reports a running, failed or cancelled job", async () => {
   expect(await check()).toMatchObject({ status: "failed", error: "The generation was cancelled." })
 })
 
+/** Synthetic clip bytes, `megabytes` long. */
+function clipOf(megabytes: number): Uint8Array {
+  const bytes = new Uint8Array(megabytes * 1024 * 1024)
+  for (let index = 0; index < bytes.length; index++) bytes[index] = (index * 31) % 251
+  return bytes
+}
+
+const inline = (clip: Uint8Array) => ({
+  status: "completed",
+  videos: [{ type: "base64", data: base64(clip), mediaType: "video/mp4" }],
+})
+
+// Guard proof: read the status reply with MAX_REPLY_BYTES in status(), as before; Veo's reply,
+// its clip inline, is refused as oversized after the provider billed it.
+test("a status reply carrying its clip inline is read past an ordinary reply's cap", async () => {
+  const clip = clipOf(1.5)
+  const { provider } = gateway(() => Response.json(inline(clip)))
+  const model = await provider.video("google/veo-3.1-fast-generate-001").resolve!()
+
+  const status = await model.status({ operation: "op" })
+
+  expect(JSON.stringify(inline(clip)).length).toBeGreaterThan(1024 * 1024)
+  expect(status).toMatchObject({ status: "completed" })
+  const [video] = status.status === "completed" ? status.output.videos : []
+  expect(video?.mediaType).toBe("video/mp4")
+  expect(Buffer.from(video!.data).equals(Buffer.from(clip))).toBe(true)
+})
+
+// Guard proof: drop assertOrdinaryRest() from status(); the padded pending reply is read as
+// pending.
+test("a status reply over its bound is refused, inline clip or not", async () => {
+  const replies: unknown[] = [
+    inline(clipOf(2)),
+    { status: "pending", padding: "x".repeat(1.5 * 1024 * 1024) },
+  ]
+  const { provider } = gateway(() => Response.json(replies.shift()))
+  const model = provider.video("google/veo-3.1-fast-generate-001", {
+    maxVideoBytes: 1024 * 1024,
+  })
+  const resolved = await model.resolve!()
+  const check = () => resolved.status({ operation: "op" }).catch((error) => error)
+
+  expect(await check()).toMatchObject({
+    code: "invalid_response",
+    retryable: false,
+    message:
+      "[SixbVercelGateway] Video generation status returned more than 2446680 bytes. A status reply may carry at most maxVideoBytes (1048576) of clips inline.",
+  })
+  expect(await check()).toMatchObject({
+    code: "invalid_response",
+    message: expect.stringContaining("bytes beside its clips, more than 1048576."),
+  })
+})
+
 test("a refused start says what the Gateway said", async () => {
   const { provider } = gateway(() =>
     Response.json(

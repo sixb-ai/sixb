@@ -2,6 +2,8 @@ import { assertJsonObject, type JsonObject, ModelProviderError } from "@sixb/cor
 
 const PROVIDER_ID = "vercel-ai-gateway"
 
+class OversizedResponse extends Error {}
+
 /** Read one bounded JSON reply from a billed, non-retried Gateway call. */
 export async function readGatewayJson(
   response: Response,
@@ -10,6 +12,8 @@ export async function readGatewayJson(
     /** Names the call in errors, such as `Transcription`. */
     readonly operation: string
     readonly maxBytes: number
+    /** Says why a reply over `maxBytes` is refused, such as the option that sets the bound. */
+    readonly oversized?: string
     readonly signal: AbortSignal
   }
 ): Promise<JsonObject> {
@@ -32,10 +36,14 @@ export async function readGatewayJson(
     )
     assertJsonObject(payload, `${input.operation.toLowerCase()} response`)
     return payload
-  } catch {
+  } catch (error) {
     input.signal.throwIfAborted()
+    const message =
+      error instanceof OversizedResponse && input.oversized
+        ? `returned more than ${input.maxBytes} bytes. ${input.oversized}`
+        : "returned an invalid or oversized response."
     throw new ModelProviderError(
-      `[SixbVercelGateway] ${input.operation} returned an invalid or oversized response.`,
+      `[SixbVercelGateway] ${input.operation} ${message}`,
       PROVIDER_ID,
       input.modelId,
       { requestId, retryable: false, code: "invalid_response" }
@@ -50,7 +58,7 @@ async function readResponseBody(
 ): Promise<string> {
   if (Number(response.headers.get("content-length")) > maxBytes) {
     void response.body?.cancel().catch(() => undefined)
-    throw new Error("Oversized response")
+    throw new OversizedResponse("Oversized response")
   }
   if (!response.body) throw new Error("Empty response")
 
@@ -70,7 +78,7 @@ async function readResponseBody(
       // Do not discard a complete billable body if cancellation raced with its last chunk.
       if (done) break
       sizeBytes += value.byteLength
-      if (sizeBytes > maxBytes) throw new Error("Oversized response")
+      if (sizeBytes > maxBytes) throw new OversizedResponse("Oversized response")
       chunks.push(value)
     }
 

@@ -318,7 +318,9 @@ const { files, usage, cost } = await sixb.models.video.generate({ prompt, durati
 Video runs as a Gateway job: `/v4/ai/video-model/start` returns an operation as soon as the
 Gateway accepts it, with the call ID as its idempotency key, and `/v4/ai/video-model/status`
 looks at it once. A finished clip is downloaded at once, without the Gateway's credentials,
-since its hosted URL expires. A first frame alone goes as `image`; with a last frame, both go as
+since its hosted URL expires. Some providers, Veo among them, put the clip in the status reply as
+base64 instead: that reply may carry up to `maxVideoBytes` of clips beside the 1 MiB any other
+reply is held to. A first frame alone goes as `image`; with a last frame, both go as
 role-tagged `frameImages`; reference images go as `inputReferences`. Input images go as the URLs
 Sixb hands out when it can, inline otherwise.
 
@@ -327,8 +329,8 @@ of clips per job and the input images a model takes. The binding accepts a `desc
 `providerOptions`, `timeoutMs` for each start and status request (default 60,000),
 `maxVideoBytes` (default 512 MiB) and `inputImages`. A clip downloads under its own bound:
 `timeoutMs` until it starts, then a second per MiB of its announced length, or of
-`maxVideoBytes`. Proxies without the `/v1` layout set the
-full `videoUrl`, which `/start` and `/status` follow.
+`maxVideoBytes`; a status reply carrying its clips inline gets the same time for its size.
+Proxies without the `/v1` layout set the full `videoUrl`, which `/start` and `/status` follow.
 
 Pricing is the catalog's `video_duration_pricing`, per second by resolution tier and sound. A
 request's frame size names its tier by its shorter side (`1280x720` is `720p`, `3840x2160` is

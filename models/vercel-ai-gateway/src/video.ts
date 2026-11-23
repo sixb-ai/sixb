@@ -4,7 +4,7 @@ import {
   type JsonObject,
   type JsonValue,
   type ModelPricingDimensions,
-  type ModelProviderError,
+  ModelProviderError,
   type ModelRateCard,
   type ReadonlyJsonValue,
   type VideoCostEstimator,
@@ -22,6 +22,7 @@ const PROVIDER_ID = "vercel-ai-gateway"
 // Starting a job and checking on it are short requests; the generation itself runs on the Gateway.
 const DEFAULT_TIMEOUT_MS = 60_000
 const DEFAULT_MAX_VIDEO_BYTES = 512 * 1024 * 1024
+/** An ordinary reply: a job's operation, its status and metadata, a hosted clip's URL. */
 const MAX_REPLY_BYTES = 1024 * 1024
 const DEFAULT_INPUT_IMAGES = { maxCount: 1, maxBytes: 20 * 1024 * 1024 }
 /** The slowest a clip may download: its deadline grows with its size, at this rate. */
@@ -34,10 +35,14 @@ export interface VercelGatewayVideoOptions {
   readonly providerOptions?: JsonObject
   /**
    * Bounds each start and status request, and a clip's download until its first byte; the rest of
-   * the download gets a second per MiB on top. Defaults to 60 seconds.
+   * the download, or of a status reply carrying its clips inline, gets a second per MiB on top.
+   * Defaults to 60 seconds.
    */
   readonly timeoutMs?: number
-  /** Client memory guard for each downloaded video. Defaults to 512 MiB. */
+  /**
+   * Client memory guard for each downloaded video, and for the clips a status reply carries inline.
+   * Defaults to 512 MiB.
+   */
   readonly maxVideoBytes?: number
   /** Client guard for input images, not a promise of upstream support. Defaults to the catalog's. */
   readonly inputImages?: VideoModelDefinition["inputImages"]
@@ -96,6 +101,9 @@ export function createGatewayVideo(
   const providerOptions =
     options.providerOptions === undefined ? undefined : structuredClone(options.providerOptions)
   if (providerOptions) assertJsonObject(providerOptions, "video providerOptions")
+  // A finished job's reply may carry its clips inline as base64, as Veo's does: up to the most
+  // Sixb keeps of a clip, beside what an ordinary reply may hold.
+  const maxStatusReplyBytes = base64Length(maxVideoBytes) + MAX_REPLY_BYTES
   const description = options.description ?? resolution?.description
   const inputImages = options.inputImages ?? resolution?.inputImages ?? DEFAULT_INPUT_IMAGES
 
@@ -125,13 +133,19 @@ export function createGatewayVideo(
       await transport.resolution()
     )
 
-  /** POST one short request to the Gateway's video protocol and read its JSON reply. */
+  /** POST one request to the Gateway's video protocol and read its JSON reply. */
   async function post(
     url: string,
     body: JsonObject,
     operation: string,
     signal: AbortSignal,
-    headers: Readonly<Record<string, string>> = {}
+    reply: {
+      readonly headers?: Readonly<Record<string, string>>
+      readonly maxBytes?: number
+      readonly oversized?: string
+      /** Called once the reply starts, with its announced length. */
+      readonly started?: (length: number | undefined) => void
+    } = {}
   ): Promise<{ readonly payload: JsonObject; readonly requestId?: string }> {
     const response = await transport.fetch(url, {
       method: "POST",
@@ -142,17 +156,19 @@ export function createGatewayVideo(
         "ai-gateway-protocol-version": "0.0.1",
         "ai-video-model-specification-version": "4",
         "ai-model-id": modelId,
-        ...headers,
+        ...reply.headers,
       },
       body: JSON.stringify(body),
     })
     if (!response.ok) throw await transport.httpError(response, modelId)
 
+    reply.started?.(Number(response.headers.get("content-length")) || undefined)
     const requestId = response.headers.get("x-request-id") ?? undefined
     const payload = await readGatewayJson(response, {
       modelId,
       operation,
-      maxBytes: MAX_REPLY_BYTES,
+      maxBytes: reply.maxBytes ?? MAX_REPLY_BYTES,
+      ...(reply.oversized ? { oversized: reply.oversized } : {}),
       signal,
     })
     return { payload, ...(requestId === undefined ? {} : { requestId }) }
@@ -177,7 +193,7 @@ export function createGatewayVideo(
         startBody(request, providerOptions),
         "Video generation start",
         signal,
-        { "idempotency-key": request.callId }
+        { headers: { "idempotency-key": request.callId } }
       )
       if (payload.operation === undefined) {
         throw new Error("[SixbVercelGateway] Video generation start returned no operation.")
@@ -195,19 +211,32 @@ export function createGatewayVideo(
     async status(input: { readonly operation: ReadonlyJsonValue; readonly signal?: AbortSignal }) {
       if (!resolution) return (await resolve()).status(input)
 
-      const { payload, requestId } = await post(
-        transport.statusUrl,
-        // The Gateway takes back the operation it handed out, as it was.
-        { operation: input.operation as JsonValue },
-        "Video generation status",
-        requestSignal(input.signal, timeoutMs)
-      )
-      // A clip can take far longer to download than the status request: each has its own bound.
-      return statusReply(payload, requestId, transport, {
-        ...(input.signal ? { signal: input.signal } : {}),
-        timeoutMs,
-        maxVideoBytes,
-      })
+      input.signal?.throwIfAborted()
+      const limits = { ...(input.signal ? { signal: input.signal } : {}), timeoutMs, maxVideoBytes }
+      // A reply carrying its clips inline gets the time a download of their size would.
+      const deadline = downloadDeadline(limits)
+      let reply: Awaited<ReturnType<typeof post>>
+      try {
+        reply = await post(
+          transport.statusUrl,
+          // The Gateway takes back the operation it handed out, as it was.
+          { operation: input.operation as JsonValue },
+          "Video generation status",
+          deadline.signal,
+          {
+            maxBytes: maxStatusReplyBytes,
+            oversized: `A status reply may carry at most maxVideoBytes (${maxVideoBytes}) of clips inline.`,
+            started: (length) => deadline.extend(length ?? maxStatusReplyBytes),
+          }
+        )
+      } finally {
+        deadline.clear()
+      }
+      assertOrdinaryRest(reply.payload, reply.requestId, modelId)
+
+      // A hosted clip can take far longer to download than the status request: each has its own
+      // bound.
+      return statusReply(reply.payload, reply.requestId, transport, limits)
     },
   })
   return binding
@@ -333,7 +362,10 @@ async function videoData(
   if (!/^video\/[a-z0-9.+-]+$/.test(mediaType)) return undefined
 
   if (entry.type === "base64" && typeof entry.data === "string" && entry.data) {
-    const data = new Uint8Array(Buffer.from(entry.data, "base64"))
+    if (entry.data.length > base64Length(maxVideoBytes)) return undefined
+    // Decoded once, into the bytes the runtime stores: no second copy of the clip.
+    const decoded = Buffer.from(entry.data, "base64")
+    const data = new Uint8Array(decoded.buffer, decoded.byteOffset, decoded.byteLength)
     return data.byteLength > maxVideoBytes ? undefined : { data, mediaType }
   }
   if (entry.type !== "url" || typeof entry.url !== "string" || !URL.canParse(entry.url)) {
@@ -358,6 +390,35 @@ async function videoData(
   } finally {
     deadline.clear()
   }
+}
+
+/** The length of `bytes` bytes written as padded base64. */
+function base64Length(bytes: number): number {
+  return Math.ceil(bytes / 3) * 4
+}
+
+/**
+ * A status reply may be large only for the clips it carries inline: the rest of it, its status and
+ * metadata, keeps an ordinary reply's cap.
+ */
+function assertOrdinaryRest(payload: JsonObject, requestId: string | undefined, modelId: string) {
+  const videos = Array.isArray(payload.videos)
+    ? payload.videos.map((entry) => {
+        if (!isJsonObject(entry) || entry.type !== "base64" || typeof entry.data !== "string") {
+          return entry
+        }
+        return { ...entry, data: "" }
+      })
+    : payload.videos
+  const rest = Buffer.byteLength(JSON.stringify({ ...payload, videos }))
+  if (rest <= MAX_REPLY_BYTES) return
+
+  throw new ModelProviderError(
+    `[SixbVercelGateway] Video generation status returned ${rest} bytes beside its clips, more than ${MAX_REPLY_BYTES}.`,
+    PROVIDER_ID,
+    modelId,
+    { requestId, retryable: false, code: "invalid_response" }
+  )
 }
 
 /**
