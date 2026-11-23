@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { VideoOutline } from "@sixb/core/artifacts"
 import {
-  craftWarnings,
   hiddenMediaWarnings,
   type MediaSight,
   mediaInstants,
@@ -30,7 +29,7 @@ function outline(lengths: readonly number[]): VideoOutline {
 
 describe("a video's check", () => {
   // Guard proof: sample a scene's start at 15% of its length again; the 1.4 s scene is then
-  // snapshotted 0.21 s in, while its caption still fades in, and reads as unreadable.
+  // snapshotted 0.21 s in, while its caption is still half faded in.
   test("snapshots the first frame, then each scene once what comes in has come in, at its middle, and before it cuts", () => {
     expect(videoInstants(outline([4_000, 1_400, 900]))).toEqual([
       { atMs: 0, scene: "s1" },
@@ -68,19 +67,18 @@ describe("a video's check", () => {
           message: '<div id="s1"> sub-composition ends at 4s.',
         },
         {
-          code: "text_below_floor",
+          code: "canvas_overflow",
           severity: "warning",
-          message: "Type floor is 28 px.",
+          message: "Text extends outside the composition canvas.",
           text: "fine print",
           time: 0.5,
         },
         {
-          code: "contrast_aa_failure",
+          code: "media_proxy_failed",
           severity: "error",
-          message: "Contrast is 1.49:1; WCAG AA requires 4.5:1.",
-          text: "Ship faster",
+          message: "media/demo.mp4 could not be decoded.",
           time: 4.2,
-          fixHint: "Use rgb(124,124,124).",
+          fixHint: "Re-export it as H.264.",
         },
         {
           code: "missing_timeline_registry",
@@ -98,15 +96,16 @@ describe("a video's check", () => {
         message: "In scenes/s2.html: Missing `window.__timelines` registration.",
       },
       {
-        code: "video_contrast_aa_failure",
+        code: "video_media_proxy_failed",
         part: "s2",
         message:
-          "At 4.2 s, in scene 's2': Contrast is 1.49:1; WCAG AA requires 4.5:1. (“Ship faster”) Use rgb(124,124,124).",
+          "At 4.2 s, in scene 's2': media/demo.mp4 could not be decoded. Re-export it as H.264.",
       },
       {
-        code: "video_text_below_floor",
+        code: "video_canvas_overflow",
         part: "s1",
-        message: "At 0.5 s, in scene 's1': Type floor is 28 px. (“fine print”)",
+        message:
+          "At 0.5 s, in scene 's1': Text extends outside the composition canvas. (“fine print”)",
       },
     ])
   })
@@ -160,51 +159,49 @@ describe("a video's check", () => {
     })
   })
 
-  // Guard proof: return [] from craftWarnings; a cheap model then reads past an end card that
-  // lingers, a blank frame and a scene that flashes by, as the validation teasers did.
-  test("measures the guide's craft: blank frames, flashing scenes, a lingering end card, a long teaser", () => {
-    const film = outline([3_000, 600, 20_000, 22_000, 6_000])
-    const frames = [
-      { atMs: 0, scene: "s1", ink: 0.004 },
-      { atMs: 1_500, scene: "s1", ink: 0.08 },
-      { atMs: 45_800, scene: "s5", ink: 0.006 },
-      { atMs: 49_000, scene: "s5" },
+  // Guard proof: drop STYLE_PASSES from videoWarnings; the Agent is then told to enlarge small
+  // type and recolor low-contrast text, a style the person and the project choose.
+  test("reports no style: neither HyperFrames' contrast nor its craft", () => {
+    const style = [
+      {
+        pass: "craft",
+        code: "text_below_floor",
+        severity: "warning" as const,
+        message: "Type floor is 28 px.",
+        text: "fine print",
+        time: 0.5,
+      },
+      {
+        pass: "craft",
+        code: "first_frame_empty",
+        severity: "warning" as const,
+        message: "Frame 0 paints nothing but the background.",
+        time: 0,
+      },
+      {
+        pass: "contrast",
+        code: "contrast_aa_failure",
+        severity: "error" as const,
+        message: "Contrast is 1.49:1; WCAG AA requires 4.5:1.",
+        text: "Ship faster",
+        time: 4.2,
+      },
     ]
+    const broken = {
+      pass: "runtime",
+      code: "page_error",
+      severity: "error" as const,
+      message: "gsap is not defined",
+      time: 0,
+    }
 
-    expect(craftWarnings(film, frames)).toEqual([
+    expect(videoWarnings([...style, broken], outline([4_000, 1_000]))).toEqual([
       {
-        code: "video_empty_frame",
+        code: "video_page_error",
         part: "s1",
-        message:
-          "At 0 s, in scene 's1': The first frame, the video's thumbnail, is nearly empty. Show the subject from the first frame of each scene: words or the product, never a bare ground or a lone logo.",
-      },
-      {
-        code: "video_empty_frame",
-        part: "s5",
-        message:
-          "At 45.8 s, in scene 's5': The frame is nearly empty. Show the subject from the first frame of each scene: words or the product, never a bare ground or a lone logo.",
-      },
-      {
-        code: "video_scene_short",
-        part: "s2",
-        message:
-          "At 3 s, scene 's2' lasts 0.6 s, too short to be seen: give it a second or more, or fold it into the scene beside it.",
-      },
-      {
-        code: "video_end_card_long",
-        part: "s5",
-        message:
-          "At 45.6 s, the end card, scene 's5', holds 6 s: shorten its host's data-duration to 3 to 4 s, still for the last two.",
-      },
-      {
-        code: "video_long",
-        message:
-          "It runs 51.6 s, past the 45 s a teaser holds: cut it, unless the user asked for this length or it is not a teaser.",
+        message: "At 0 s, in scene 's1': gsap is not defined",
       },
     ])
-    expect(craftWarnings(outline([3_000, 4_000]), [{ atMs: 0, scene: "s1", ink: 0.03 }])).toEqual(
-      []
-    )
   })
 
   // Guard proof: return [] from hiddenMediaWarnings; the footage of a scene whose fade-in never

@@ -2620,6 +2620,33 @@ describe("a video", () => {
     expect(text).not.toContain("slide")
   })
 
+  // Guard proof: put back craftWarnings in checkVideo's warnings (video-check.ts at 6f2cceabc); it
+  // then tells the Agent to cut a minute-long film, lengthen its flash, shorten its end card, and
+  // fill a frame left dark, all of them the person's and the project's choices.
+  test("reports no choice of length, pacing or emptiness as a warning", async () => {
+    write(
+      "film/index.html",
+      `<div data-composition-id="main" data-width="1280" data-height="720">
+        <div data-composition-id="intro" data-composition-src="scenes/intro.html" data-start="0" data-duration="0.6"></div>
+        <div data-composition-id="demo" data-composition-src="scenes/demo.html" data-start="intro" data-duration="53.4"></div>
+        <div data-composition-id="outro" data-composition-src="scenes/outro.html" data-start="demo" data-duration="6"></div>
+      </div>`
+    )
+    for (const id of ["intro", "demo", "outro"]) write(`film/scenes/${id}.html`, scene(id))
+
+    // What the check measured before: a frame with next to nothing on it.
+    const dark: Check = (output) => {
+      const report = videoCheck(output) as { frames: Record<string, unknown>[] }
+      return { ...report, frames: report.frames.map((frame) => ({ ...frame, ink: 0.001 })) }
+    }
+    const published = (await publish(
+      { path: "film", kind: "video", title: "Long film" },
+      { check: dark }
+    )) as { warnings: { code: string }[] }
+
+    expect(published.warnings.map((warning) => warning.code)).toEqual(["video_canvas_overflow"])
+  })
+
   // Guard proof: number the frames across sheets in videoShots (publish-tool.ts), as before; the
   // second sheet's legend then names frames 10 to 13, which no sheet shows.
   test("names the scenes of each contact sheet, as each numbers its frames from 1", async () => {

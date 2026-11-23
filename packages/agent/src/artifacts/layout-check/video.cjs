@@ -4,10 +4,12 @@
 // worker, and every other file linked there from where the Agent published it. A recording the
 // version keeps in the API is fetched there first: its proxy, or a sound as it is.
 //
-// Then `hyperframes check` (lint, runtime, layout, motion, contrast, craft, sound); a look at the
-// media of the scenes playing at each instant the worker chose, in the root as the app's frame
-// plays it, sought there with Playwright; and `hyperframes snapshot` at the instants it chose for
-// frames, which writes them and a contact sheet. It writes one line of JSON:
+// Then `hyperframes check` (lint, runtime, layout, motion, sound), for what breaks: without its
+// contrast and craft passes, which judge a style the project chooses and which the worker leaves
+// out of its warnings anyway; a look at the media of the scenes playing at each instant the worker
+// chose, in the root as the app's frame plays it, sought there with Playwright; and
+// `hyperframes snapshot` at the instants it chose for frames, which writes them and a contact
+// sheet. It writes one line of JSON:
 // { layout: "video", findings, sheets, frames, missing, media?, stopped? } or { skipped }.
 //
 //   node video.cjs <output directory> <deadline in ms>
@@ -124,39 +126,6 @@ function hyperframesCache() {
     process.env.HYPERFRAMES_CACHE_DIR = path.join(__dirname, ".hyperframes-cache")
     fs.mkdirSync(process.env.HYPERFRAMES_CACHE_DIR, { recursive: true })
   }
-}
-
-/** The grey copy a frame's ink is measured on: small enough to read in a moment, text still sharp. */
-const INK = { width: 192, height: 108, step: 24 }
-
-/**
- * How much a frame shows: the share of its neighbouring pixels, on a small grey copy, that differ
- * by more than a step, which text, a product and footage make and a bare ground or a gradient do
- * not. Undefined when FFmpeg cannot read it.
- */
-async function inkOf(frame) {
-  const { width, height, step } = INK
-  const copy = `${frame}.grey`
-  const scale = `scale=${width}:${height},format=gray`
-  const grey = await run(
-    "ffmpeg",
-    ["-v", "error", "-y", "-i", frame, "-vf", scale, "-f", "rawvideo", copy],
-    10_000
-  )
-  const pixels = grey.code === 0 && fs.existsSync(copy) ? fs.readFileSync(copy) : undefined
-  fs.rmSync(copy, { force: true })
-  if (pixels?.length !== width * height) return undefined
-
-  let edges = 0
-  for (let y = 0; y < height - 1; y++) {
-    for (let x = 0; x < width - 1; x++) {
-      const at = pixels[y * width + x]
-      const right = pixels[y * width + x + 1]
-      const below = pixels[(y + 1) * width + x]
-      if (Math.abs(at - right) > step || Math.abs(at - below) > step) edges++
-    }
-  }
-  return edges / ((width - 1) * (height - 1))
 }
 
 /** What the look at the media serves, by extension; anything else is served as bytes. */
@@ -394,7 +363,14 @@ async function main() {
   const budget = Math.max(CHECK_BUDGET_MS.min, Math.min(CHECK_BUDGET_MS.max, left() / 2, spare))
   const checked = await run(
     "hyperframes",
-    ["check", "--json", `--budget=${Math.floor(budget / 1000)}s`, project],
+    [
+      "check",
+      "--json",
+      "--no-contrast",
+      "--no-craft",
+      `--budget=${Math.floor(budget / 1000)}s`,
+      project,
+    ],
     budget + CHECK_GRACE_MS
   )
   const check = json(checked.stdout)
@@ -437,18 +413,11 @@ async function main() {
       : `hyperframes snapshot took no frame: ${tail(snapshot.stderr) || "it gave no reason"}`
   }
 
-  // How much each frame shows, while there is time: a frame left unmeasured is not judged.
-  const measured = []
-  for (const frame of snapped?.frames ?? []) {
-    const ink = left() > 5_000 ? await inkOf(frame.path) : undefined
-    measured.push({ path: frame.path, time: frame.time, ...(ink === undefined ? {} : { ink }) })
-  }
-
   report({
     layout: "video",
     findings,
     sheets: snapped?.contactSheets ?? [],
-    frames: measured,
+    frames: (snapped?.frames ?? []).map((frame) => ({ path: frame.path, time: frame.time })),
     missing,
     ...(media ? { media } : {}),
     ...(stopped ? { stopped } : {}),
