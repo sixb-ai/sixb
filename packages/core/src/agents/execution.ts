@@ -169,9 +169,10 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
     /** The caller's own threads, or with `sharedWithMe` the ones other users added it to. */
     list(input?: ListExecutionAgentThreadsInput): Promise<ListAgentThreadViewsResult>
     /**
-     * The conversations an artifact is shared in, among those the caller reads, theirs or another's
-     * they take part in, most recently updated first: each one the Agent wrote it from, and the
-     * fork it was copied for. `null` when the caller cannot read the artifact.
+     * The conversations about an artifact, among those the caller reads, theirs or another's they
+     * take part in, most recently updated first: each one the Agent wrote it from, the fork it was
+     * copied for, and each one a message brought it to with `agentContext.artifact()`, though the
+     * Agent has not written it yet. `null` when the caller cannot read the artifact.
      */
     listForArtifact(artifactId: string): Promise<readonly AgentThreadView[] | null>
     /**
@@ -1171,17 +1172,26 @@ export function createAgentRuntime<
       listForArtifact: async (artifactId) => {
         if (!(await getCallerArtifacts(runtime).get(artifactId))) return null
 
-        const threadIds =
-          (await runtime.storage.artifacts?.listThreadIds({
-            projectId: runtime.projectId,
-            id: artifactId,
-          })) ?? []
-        // Each as the caller reads it: a sub-agent's is read through its conversation, so only a
-        // conversation of theirs, or one they take part in, is listed.
-        const readable = await Promise.all(threadIds.map((threadId) => rule.read(threadId)))
+        const projectId = runtime.projectId
+        // The conversations the artifact is shared in, and those a message brought it to as
+        // context, before the Agent wrote it or without it ever doing so.
+        const [shared, carried] = await Promise.all([
+          runtime.storage.artifacts?.listThreadIds({ projectId, id: artifactId }) ?? [],
+          runtime.storage.agents?.messages.listThreadIdsByArtifactContext({
+            projectId,
+            artifactId,
+          }) ?? [],
+        ])
+
+        // Each as the caller reads it, so only a conversation of theirs, or one they take part in,
+        // is listed: an artifact they read opens no conversation they do not.
+        const readable = await rule.readConversations([...shared, ...carried])
         const threads = readable
-          .flatMap((read) => (read && read.thread.kind === "conversation" ? [read.thread] : []))
-          .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
+          .map(({ thread }) => thread)
+          .sort(
+            (left, right) =>
+              right.updatedAt.getTime() - left.updatedAt.getTime() || (left.id < right.id ? 1 : -1)
+          )
         return withThreadState(threads, readViewer())
       },
       participants: {

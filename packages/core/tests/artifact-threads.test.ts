@@ -57,13 +57,18 @@ async function setup() {
     files: [{ path: "document.md", file }],
   })
 
-  /** A conversation of Alice's the artifact is written from, last updated at `updatedAt`. */
-  const conversation = async (id: string, updatedAt: string, participants: string[] = []) => {
-    const alice = { type: "user", id: "usr_alice" } as const
+  /** A conversation of `owner`'s, last updated at `updatedAt`, that Bob or Dave may take part in. */
+  const thread = async (
+    id: string,
+    updatedAt: string,
+    participants: string[] = [],
+    owner = "usr_alice"
+  ) => {
+    const ownerPrincipal = { type: "user", id: owner } as const
     await deps.storage.agents.threads.create({
       projectId: PROJECT,
       id,
-      ownerPrincipal: alice,
+      ownerPrincipal,
       createdAt: new Date("2026-11-21T08:00:00.000Z"),
       updatedAt: new Date(updatedAt),
     })
@@ -72,10 +77,15 @@ async function setup() {
         projectId: PROJECT,
         threadId: id,
         principals: participants.map((each) => ({ type: "user", id: each })),
-        addedBy: alice,
+        addedBy: ownerPrincipal,
         maxParticipants: 50,
       })
     }
+  }
+
+  /** A conversation of Alice's the artifact is written from, last updated at `updatedAt`. */
+  const conversation = async (id: string, updatedAt: string, participants: string[] = []) => {
+    await thread(id, updatedAt, participants)
     const stored = await deps.storage.artifacts.getVersion({
       projectId: PROJECT,
       artifactId: artifact.id,
@@ -90,7 +100,25 @@ async function setup() {
     })
   }
 
-  return { as, artifactId: artifact.id, conversation }
+  /**
+   * A message that brings the artifact to a conversation as context, sent at `sentAt`, as a page
+   * beside it sends one with `agentContext.artifact()`: the Agent has not written it there.
+   */
+  const bringUp = (threadId: string, sentAt: string) =>
+    deps.storage.agents.messages.append({
+      projectId: PROJECT,
+      id: `msg_${threadId}_${sentAt}`,
+      threadId,
+      runId: null,
+      role: "user",
+      parts: [
+        { type: "context", context: { kind: "artifact", id: artifact.id }, origin: "ambient" },
+        { type: "text", text: "Tighten the intro" },
+      ],
+      createdAt: new Date(sentAt),
+    })
+
+  return { as, artifactId: artifact.id, conversation, thread, bringUp }
 }
 
 describe("sixb.agent.threads.listForArtifact()", () => {
@@ -107,6 +135,37 @@ describe("sixb.agent.threads.listForArtifact()", () => {
     expect(await ids("usr_alice")).toEqual(["thr_alone", "thr_team"])
     expect(await ids("usr_bob")).toEqual(["thr_team"])
     // Dave reads neither the artifact nor its conversations.
+    expect(await as("usr_dave").agent.threads.listForArtifact(artifactId)).toBeNull()
+  })
+
+  // Reproduce by listing only `listThreadIds` in listForArtifact (agents/execution.ts): the
+  // conversations started beside the artifact, which the Agent has not written it from, are gone.
+  test("lists the conversations a message brought the artifact to, each once", async () => {
+    const { as, artifactId, conversation, thread, bringUp } = await setup()
+    // Bob reads the artifact through the conversation it was written from.
+    await conversation("thr_written", "2026-11-21T09:00:00.000Z", ["usr_bob"])
+
+    // Started beside the artifact, the Agent not having written it yet: Bob takes part in one.
+    await thread("thr_beside", "2026-11-21T08:00:00.000Z")
+    await bringUp("thr_beside", "2026-11-21T11:00:00.000Z")
+    await thread("thr_team", "2026-11-21T08:00:00.000Z", ["usr_bob"])
+    await bringUp("thr_team", "2026-11-21T10:00:00.000Z")
+
+    // Written from, and brought up twice since: listed once, as last updated.
+    await conversation("thr_both", "2026-11-21T08:00:00.000Z")
+    await bringUp("thr_both", "2026-11-21T08:30:00.000Z")
+    await bringUp("thr_both", "2026-11-21T12:00:00.000Z")
+
+    // Dave's, which Alice does not read, though it brings up her artifact.
+    await thread("thr_dave", "2026-11-21T08:00:00.000Z", [], "usr_dave")
+    await bringUp("thr_dave", "2026-11-21T13:00:00.000Z")
+
+    const ids = async (id: string) =>
+      (await as(id).agent.threads.listForArtifact(artifactId))?.map((each) => each.id)
+
+    expect(await ids("usr_alice")).toEqual(["thr_both", "thr_beside", "thr_team", "thr_written"])
+    expect(await ids("usr_bob")).toEqual(["thr_team", "thr_written"])
+    // Bringing it up shares nothing: Dave still does not read the artifact.
     expect(await as("usr_dave").agent.threads.listForArtifact(artifactId)).toBeNull()
   })
 })

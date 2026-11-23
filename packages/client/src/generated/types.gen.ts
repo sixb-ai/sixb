@@ -22474,7 +22474,7 @@ export type ListArtifactThreadsResponses = {
    */
   200: {
     /**
-     * The conversations the artifact is shared in, among those you read, most recently updated first
+     * The conversations about the artifact, among those you read, most recently updated first
      */
     threads: Array<{
       sandboxState?: {

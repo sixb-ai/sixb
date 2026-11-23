@@ -1100,14 +1100,17 @@ reads the conversation reads the artifact, at its latest version, whatever publi
   artifacts, and those an object it reads holds.
 - `sixb.artifacts.access(id)` says what the caller may do: `owner`, `update`, `read`, or `none`.
 
-To reopen the conversation about an artifact, on any device, list those that share it:
+To reopen the conversation about an artifact, on any device, list those about it:
 
 ```ts
 const threads = await sixb.agent.threads.listForArtifact(artifactId)
 ```
 
-- It lists the conversations you own or take part in, most recently updated first, each one the
-  agent wrote the artifact from. One you do not read is left out, though it shares the artifact.
+- It lists the conversations you own or take part in, most recently updated first: each one the
+  agent wrote the artifact from, and each one a message sent it to with `agentContext.artifact(id)`,
+  even before the agent changed it. One you do not read is left out.
+- Sending an artifact as context shares nothing: someone in the conversation who does not read the
+  artifact still does not.
 - It answers `null` for an artifact you cannot read. Over HTTP,
   `GET /api/artifacts/{artifactId}/threads` answers `{ threads }`, or 403 `not_shared` and 404.
 - In a React app, `listArtifactThreadsOptions` from `@sixb/client/hooks` reads it with

@@ -1055,7 +1055,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "List the conversations about an artifact",
           description:
-            "The Agent conversations the artifact is shared in, among those you own or take part in, most recently updated first: each one the Agent wrote it from, and the fork it was copied for. A conversation you do not read is left out, though it shares the artifact.",
+            "The Agent conversations about the artifact, among those you own or take part in, most recently updated first: each one the Agent wrote it from, the fork it was copied for, and each one a message brought it to as context. A conversation you do not read is left out, though it is about the artifact.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "listArtifactThreads",
         },

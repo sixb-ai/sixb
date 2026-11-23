@@ -170,6 +170,7 @@ export type {
   ListAgentRunsInput,
   ListAgentRunsResult,
   ListAgentThreadChildrenInput,
+  ListAgentThreadIdsByArtifactContextInput,
   ListAgentThreadParticipantsInput,
   ListAgentThreadReadsInput,
   ListAgentThreadsInput,
