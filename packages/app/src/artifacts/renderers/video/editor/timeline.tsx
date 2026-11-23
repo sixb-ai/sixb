@@ -73,6 +73,9 @@ const KNOB_PX = 11
 /** A trim handle's width, and the narrowest block that has both at that width. */
 const HANDLE_PX = 8
 const HANDLES_FROM_PX = 24
+/** A block narrower than 16 px trims by a slim edge of its own, down to 10. */
+const SLIM_PX = 3
+const SLIM_FROM_PX = 10
 /** The least a clip's block is drawn wide, however short the clip. */
 const MIN_BLOCK_PX = 6
 
@@ -162,6 +165,8 @@ interface ClipHandlers {
   readonly press: (event: ReactPointerEvent, laid: LaidClip) => void
   readonly trim: (event: ReactPointerEvent, laid: LaidClip, edge: "start" | "end") => void
   readonly select: (laid: LaidClip) => void
+  /** The pointer over a clip's block, or off it: every part of a clip that goes on shows. */
+  readonly hover: (laid: LaidClip | null) => void
   readonly onPointerMove: (event: ReactPointerEvent) => void
   readonly onPointerUp: (event: ReactPointerEvent) => void
   readonly onPointerCancel: () => void
@@ -238,6 +243,8 @@ export function Timeline({
   const [width, setWidth] = useState(0)
   const [pxPerSecond, setPxPerSecond] = useState<number | null>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
+  // The clip that goes on under the pointer, by its key: all its parts outlined, its end in sight.
+  const [hovered, setHovered] = useState<string | null>(null)
   const dragRef = useRef<Drag | null>(null)
   dragRef.current = drag
 
@@ -524,6 +531,25 @@ export function Timeline({
         startSelecting(event, laid)
         return
       }
+      // With Alt, a press trims the clip at the edge nearer it, however narrow its block: the
+      // start of its first part, the end of its last.
+      if (event.altKey) {
+        // Nearer its block's middle as drawn, a narrow one wider than its time.
+        const { width } = placedBlock(laid)
+        const middle = laid.startMs + (width / 2 / zoom) * 1000
+        const near = msAt(event.clientX) < middle ? "start" : "end"
+        const edge = near === "end" && laid.open ? "start" : near
+        const parts = partsOf(laid)
+        const part = (edge === "start" ? parts[0] : parts.at(-1)) ?? laid
+        startDrag(event, {
+          type: "trim",
+          clip: part,
+          edge,
+          x: event.clientX,
+          atMs: edge === "start" ? part.startMs : part.endMs,
+        })
+        return
+      }
       // A clip goes with the clips selected with it, and as a whole: every part of it.
       const together = chosen.length > 1 && chosenKeys.has(chainKey(laid))
       const group = together ? chosen.flatMap(partsOf) : partsOf(laid)
@@ -551,6 +577,7 @@ export function Timeline({
       })
     },
     select: (laid) => edits.select(selectionOfClip(headOf(laid))),
+    hover: (laid) => setHovered(laid?.chain ? laid.chain.key : null),
     ...dragHandlers,
   }
   const clipHandlers = useMemo<ClipHandlers>(
@@ -558,6 +585,7 @@ export function Timeline({
       press: (event, laid) => latest.current?.press(event, laid),
       trim: (event, laid, edge) => latest.current?.trim(event, laid, edge),
       select: (laid) => latest.current?.select(laid),
+      hover: (laid) => latest.current?.hover(laid),
       onPointerMove: (event) => latest.current?.onPointerMove(event),
       onPointerUp: (event) => latest.current?.onPointerUp(event),
       onPointerCancel: () => latest.current?.onPointerCancel(),
@@ -977,6 +1005,7 @@ export function Timeline({
                         key={key}
                         laid={laid}
                         selected={chosenKeys.has(chainKey(laid))}
+                        linked={hovered !== null && laid.chain?.key === hovered}
                         dragging={!!moving || !!trimming}
                         hidden={hidden}
                         left={left}
@@ -1324,6 +1353,7 @@ function EdgeHandle({
 const ClipBlock = memo(function ClipBlock({
   laid,
   selected,
+  linked = false,
   dragging,
   left,
   width,
@@ -1339,6 +1369,8 @@ const ClipBlock = memo(function ClipBlock({
 }: {
   readonly laid: LaidClip
   readonly selected: boolean
+  /** Whether it is a part of the clip that goes on under the pointer. */
+  readonly linked?: boolean
   readonly dragging: boolean
   readonly left: number
   readonly width: number
@@ -1378,9 +1410,18 @@ const ClipBlock = memo(function ClipBlock({
       : undefined
   const runsOut = fileEndPx !== undefined && fileEndPx < width - 2
   // Its edges trim it where the clip, as a whole, starts and ends, and only with room left to hold
-  // it by the middle: a quarter of a narrow block each, none for one under 16 pixels.
+  // it by the middle: a quarter of a narrow block each, and under 16 pixels, a slim edge seen once
+  // the pointer is over it, none under 10. Alt trims any block at its nearer edge.
   // A block being dragged keeps its handles, whatever the drag makes of it: one is held.
-  const handle = width >= HANDLES_FROM_PX || dragging ? HANDLE_PX : width >= 16 ? width / 4 : 0
+  const handle =
+    width >= HANDLES_FROM_PX || dragging
+      ? HANDLE_PX
+      : width >= 16
+        ? width / 4
+        : width >= SLIM_FROM_PX
+          ? SLIM_PX
+          : 0
+  const slim = handle === SLIM_PX && !dragging
   // A handle starts past what covers its edge, and is left out when the block has no room for it.
   const roomFor = (covered: number) => dragging || covered + handle <= width - handle
   const trimsStart = handle > 0 && (!laid.chain || laid.chain.first) && roomFor(coveredStart)
@@ -1412,6 +1453,8 @@ const ClipBlock = memo(function ClipBlock({
             ? "ring-1 ring-destructive/45"
             : "ring-1 ring-black/10 dark:ring-white/10",
         narrow && !selected && !dragging && "z-[11]",
+        // Each part of the clip under the pointer outlined: where it really ends is in sight.
+        linked && !selected && "ring-foreground/55 dark:ring-foreground/55",
         dragging && "z-20 shadow-lg opacity-90",
         hidden && "opacity-0",
         "cursor-grab active:cursor-grabbing"
@@ -1435,6 +1478,8 @@ const ClipBlock = memo(function ClipBlock({
           : {}),
       }}
       onPointerDown={(event) => handlers.press(event, laid)}
+      onPointerEnter={() => handlers.hover(laid)}
+      onPointerLeave={() => handlers.hover(null)}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault()
@@ -1510,11 +1555,16 @@ const ClipBlock = memo(function ClipBlock({
           className="pointer-events-none absolute inset-y-1.5 left-0 w-px bg-current opacity-30"
         />
       ) : null}
+      {/* Where it goes on in the next chapter: no edge to trim nor hold, but the link it is. */}
+      {laid.chain && !laid.chain.last ? (
+        <Seam width={Math.min(HANDLE_PX, width / 4)} onPress={() => handlers.select(laid)} />
+      ) : null}
 
       {trimsStart ? (
         <TrimHandle
           edge="start"
           width={handle}
+          slim={slim}
           inset={coveredStart}
           onPointerDown={(event) => handlers.trim(event, laid, "start")}
           {...dragHandlers}
@@ -1524,6 +1574,7 @@ const ClipBlock = memo(function ClipBlock({
         <TrimHandle
           edge="end"
           width={handle}
+          slim={slim}
           inset={coveredEnd}
           onPointerDown={(event) => handlers.trim(event, laid, "end")}
           {...dragHandlers}
@@ -1559,15 +1610,44 @@ function FileEnd({ left, label }: { readonly left: number; readonly label: strin
   )
 }
 
+/**
+ * The end of a part where its clip goes on in the next chapter: a press there selects the clip,
+ * never moves it, and its tooltip says where the clip goes on.
+ */
+function Seam({ width, onPress }: { readonly width: number; readonly onPress: () => void }) {
+  const messages = useArtifactMessages().videoEditor
+  return (
+    <span
+      data-seam-end=""
+      title={messages.continues}
+      className="absolute inset-y-0 right-0 z-10 cursor-default"
+      style={{ width }}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return
+        event.stopPropagation()
+        onPress()
+      }}
+    >
+      <span
+        aria-hidden="true"
+        className="absolute inset-y-1.5 right-0 w-px border-r border-dashed border-current opacity-40"
+      />
+    </span>
+  )
+}
+
 function TrimHandle({
   edge,
   width,
+  slim = false,
   inset,
   onPointerDown,
   ...handlers
 }: {
   readonly edge: "start" | "end"
   readonly width: number
+  /** A block's slim edge, seen only while the pointer is over the block. */
+  readonly slim?: boolean
   /** How far from its edge it starts, past the block that covers it. */
   readonly inset: number
   readonly onPointerDown: (event: ReactPointerEvent) => void
@@ -1578,8 +1658,10 @@ function TrimHandle({
   return (
     <span
       aria-hidden="true"
+      data-trim-edge={edge}
       className={cn(
         "absolute inset-y-0 z-10 cursor-ew-resize touch-none bg-white/0 transition-colors hover:bg-white/35 group-aria-pressed/clip:bg-white/25",
+        slim && "group-hover/clip:bg-white/45",
         edge === "start" ? "left-0 rounded-l-md" : "right-0 rounded-r-md"
       )}
       style={{ width, ...(edge === "start" ? { left: inset } : { right: inset }) }}

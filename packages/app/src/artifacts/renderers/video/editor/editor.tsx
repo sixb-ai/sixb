@@ -1415,6 +1415,7 @@ function shortcuts(
     [`${command}A`, help.selectAll],
     [messages.escape, help.deselect],
     [messages.shiftDragging, help.free],
+    [messages.altDragging(apple ? "⌥" : "Alt"), help.trimEdge],
   ]
 }
 
