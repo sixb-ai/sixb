@@ -1,8 +1,8 @@
 import { PAGE_MARK_TAGS } from "@sixb/core/artifacts/live"
-import type { Editor } from "@tiptap/core"
-import type { Fragment, Node as ProseMirrorNode, ResolvedPos, Schema } from "@tiptap/pm/model"
-import { NodeSelection, Selection, TextSelection, type Transaction } from "@tiptap/pm/state"
-import type { EditorView } from "@tiptap/pm/view"
+import type { Editor } from "../editor/core/editor"
+import type { Fragment, Node as ProseMirrorNode, ResolvedPos, Schema } from "../editor/core/model"
+import { NodeSelection, Selection, TextSelection, type Transaction } from "../editor/core/state"
+import type { EditorView } from "../editor/core/view"
 import type { EditorRect, PageBlockId } from "./protocol"
 import { startTag, tagAttributes } from "./schema"
 
@@ -206,8 +206,8 @@ export function insertBlock(
   const made = makeBlock(editor.schema, tr.doc, at.pos, id)
   if (!made) return false
   caretInto(tr, placeBlock(tr, at.pos, made))
-  editor.view.dispatch(tr.scrollIntoView())
-  editor.view.focus()
+  editor.dispatch(tr.scrollIntoView())
+  editor.focus()
   return true
 }
 
@@ -261,8 +261,8 @@ export function turnInto(editor: Editor, id: PageBlockId, pos?: number): boolean
     }
   }
   tr.setSelection(TextSelection.create(tr.doc, at + 1 + offset))
-  editor.view.dispatch(tr.scrollIntoView())
-  editor.view.focus()
+  editor.dispatch(tr.scrollIntoView())
+  editor.focus()
   return true
 }
 
@@ -336,8 +336,8 @@ export function duplicate(editor: Editor, pos: number): boolean {
       ? NodeSelection.create(tr.doc, at)
       : Selection.near(tr.doc.resolve(at + copy.nodeSize - 1), -1)
   )
-  editor.view.dispatch(tr.scrollIntoView())
-  editor.view.focus()
+  editor.dispatch(tr.scrollIntoView())
+  editor.focus()
   return true
 }
 
@@ -361,8 +361,8 @@ export function remove(editor: Editor, pos: number): boolean {
     tr.delete(from, from + node.nodeSize)
   }
   tr.setSelection(Selection.near(tr.doc.resolve(Math.min(from, tr.doc.content.size)), -1))
-  editor.view.dispatch(tr.scrollIntoView())
-  editor.view.focus()
+  editor.dispatch(tr.scrollIntoView())
+  editor.focus()
   return true
 }
 
@@ -381,8 +381,8 @@ export function move(editor: Editor, pos: number, by: -1 | 1): number | null {
   tr.setSelection(
     node.isAtom ? NodeSelection.create(tr.doc, target) : Selection.near(tr.doc.resolve(inside))
   )
-  editor.view.dispatch(tr.scrollIntoView())
-  editor.view.focus()
+  editor.dispatch(tr.scrollIntoView())
+  editor.focus()
   return target
 }
 
@@ -542,8 +542,8 @@ export function moveTo(editor: Editor, dragged: number, at: number): boolean {
       ? NodeSelection.create(tr.doc, target)
       : Selection.near(tr.doc.resolve(target + node.nodeSize - 1), -1)
   )
-  editor.view.dispatch(tr.scrollIntoView())
-  editor.view.focus()
+  editor.dispatch(tr.scrollIntoView())
+  editor.focus()
   return true
 }
 

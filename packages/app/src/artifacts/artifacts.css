@@ -448,7 +448,7 @@
   pointer-events: none;
 }
 
-.sixb-editor .ProseMirror-selectednode {
+.sixb-editor .is-picked {
   border-radius: calc(var(--radius) - 2px);
   outline: 2px solid color-mix(in oklab, var(--primary) 55%, transparent);
   outline-offset: 2px;
@@ -641,8 +641,8 @@
 }
 
 /* A picked figure is ringed once, around its image: not again around it and its caption, which
-   ProseMirror marks picked on the view's own wrapper. */
-.sixb-editor .ProseMirror-selectednode:has(> .sixb-editor-figure) {
+   the editor marks picked on the figure's own wrapper. */
+.sixb-editor .is-picked:has(> .sixb-editor-figure) {
   outline: none;
 }
 
@@ -779,4 +779,75 @@
   .sixb-editor-popover {
     animation: none;
   }
+}
+
+/*
+ * What every editor needs, last so it takes precedence over the rules above: typed spaces and line
+ * breaks stay as typed, and what takes no typing reads as it would on the page.
+ */
+.sixb-editor {
+  position: relative;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  white-space: break-spaces;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0;
+}
+
+.sixb-editor [contenteditable="false"] {
+  white-space: normal;
+}
+
+.sixb-editor [contenteditable="false"] [contenteditable="true"] {
+  white-space: pre-wrap;
+}
+
+.sixb-editor pre {
+  white-space: pre-wrap;
+}
+
+/* What the editor adds for the browser to draw the caret right: no size of its own. */
+.sixb-editor img.sixb-separator {
+  display: inline !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+}
+
+/* The caret between two blocks where no text can be: a short line, blinking. */
+.sixb-editor .sixb-gapcursor {
+  display: none;
+  position: absolute;
+  margin: 0;
+  pointer-events: none;
+}
+
+.sixb-editor .sixb-gapcursor::after {
+  content: "";
+  display: block;
+  position: absolute;
+  top: -2px;
+  width: 20px;
+  border-top: 1px solid black;
+  animation: sixb-gapcursor-blink 1.1s steps(2, start) infinite;
+}
+
+@keyframes sixb-gapcursor-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.sixb-editor.is-focused .sixb-gapcursor {
+  display: block;
+}
+
+/* A block picked whole shows no text selection of its own. */
+.sixb-editor.sixb-hide-selection *::selection {
+  background: transparent;
+}
+
+.sixb-editor.sixb-hide-selection * {
+  caret-color: transparent;
 }

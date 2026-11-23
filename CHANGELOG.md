@@ -2,6 +2,25 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## Unreleased
+
+### Highlights
+
+- The document editors run on an editor of Sixb's own instead of TipTap, and `@sixb/app` drops its
+  16 `@tiptap` packages. Documents, keys, menus, tables, pasting and collaboration work as they
+  did. A large document opens about four times faster, a key typed costs about a third less, and
+  someone else's edits show about four times faster. The designed document's editor script is half
+  its size.
+- ⌘K's link field keeps the focus, so the address typed next goes into it rather than over the
+  selected words.
+
+### Upgrade notes
+
+- A project that pinned `@tiptap/*` or `prosemirror-*` packages to match the document editor can
+  remove them: `@sixb/app` loads neither.
+- A node or mark the document editor does not know stays in the live document, unshown, where the
+  editor used to delete it for everyone.
+
 ## 2026-11-22 — Sixb 0.2.7
 
 0.2.7 lets a sub-agent work in its conversation's checkout or folder, connects Azure AI Foundry

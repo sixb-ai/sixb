@@ -10,8 +10,8 @@
 //       ◀─ selection, slash, hover, drop   what the app draws over the frame, in its coordinates
 //       ◀─ upload ───          pictures the reader pasted or dropped, for the app to store
 //
-// The frame keeps a copy of the live document and edits it with TipTap, as a Markdown document is
-// edited, so the two stay in step by Yjs updates alone. Everything the reader sees around the
+// The frame keeps a copy of the live document and edits it with the editor a Markdown document is
+// edited with, so the two stay in step by Yjs updates alone. Everything the reader sees around the
 // page, menus and toolbars and the block handle, the app draws, in its own design.
 
 /** The kinds of block the editor makes, as the `/` menu and "Turn into" offer them. */

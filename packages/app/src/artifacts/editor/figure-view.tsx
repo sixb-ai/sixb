@@ -1,9 +1,9 @@
 import { isArtifactAddress } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
-import { type NodeViewProps, NodeViewWrapper } from "@tiptap/react"
 import { ImageOff } from "lucide-react"
 import { createContext, useContext, useEffect, useState } from "react"
 import { ArtifactEmbed } from "../references/references"
+import { type NodeViewProps, NodeViewWrapper } from "./node-views"
 
 /** Where a document's image path is served from, and what an empty caption says. */
 export const FigureContext = createContext<{
@@ -15,7 +15,13 @@ export const FigureContext = createContext<{
  * A figure as it reads: the image, and its caption, which is typed into in place. The caption is
  * the image's title, as Markdown keeps it.
  */
-export function FigureView({ node, updateAttributes, selected, editor }: NodeViewProps) {
+export function FigureView({
+  node,
+  updateAttributes,
+  selected,
+  editable,
+  focusEditor,
+}: NodeViewProps) {
   const { source: resolve, caption: captionPlaceholder } = useContext(FigureContext)
   const src = String(node.attrs.src ?? "")
   const embedded = isArtifactAddress(src)
@@ -40,12 +46,12 @@ export function FigureView({ node, updateAttributes, selected, editor }: NodeVie
           </div>
         )}
       </div>
-      {!embedded && (editor.isEditable || caption) ? (
+      {!embedded && (editable || caption) ? (
         <input
           className="sixb-editor-caption"
           value={caption}
           placeholder={captionPlaceholder}
-          readOnly={!editor.isEditable}
+          readOnly={!editable}
           aria-label={String(node.attrs.alt ?? "")}
           onChange={(event) => setCaption(event.target.value)}
           onBlur={() => {
@@ -56,7 +62,7 @@ export function FigureView({ node, updateAttributes, selected, editor }: NodeVie
             if (event.key === "Enter") {
               event.preventDefault()
               event.currentTarget.blur()
-              editor.commands.focus()
+              focusEditor()
             }
           }}
         />

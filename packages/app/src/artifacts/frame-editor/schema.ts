@@ -1,6 +1,5 @@
 import { PAGE_MARK_TAGS, PAGE_TEXT_TAGS } from "@sixb/core/artifacts/live"
-import { type AnyExtension, Mark, Node } from "@tiptap/core"
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
+import { type Attrs, type MarkSpec, type Node, type NodeSpec, Schema } from "../editor/core/model"
 
 // A designed document's page as the editor's schema: the nodes and marks core's
 // `artifacts/live/page.ts` reads the page's body into, with the same names and attributes, so the
@@ -9,10 +8,25 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
 // page; what the editor does not model is drawn from its source, and takes no typing.
 
 /** A node's attributes: none the editor gives a value the server did not, so none is rewritten. */
-function attributes(names: readonly string[], defaults: Readonly<Record<string, string>> = {}) {
-  return Object.fromEntries(
-    names.map((name) => [name, { default: defaults[name] ?? null, rendered: false }])
-  )
+function attributes(
+  names: readonly string[],
+  defaults: Readonly<Record<string, string>> = {}
+): Record<string, unknown> {
+  return Object.fromEntries(names.map((name) => [name, defaults[name] ?? null]))
+}
+
+/** What an element pasted gives its node: what the rule reads, and nothing else it carries. */
+function parsed(
+  read: Record<string, unknown>,
+  names: readonly string[],
+  element: HTMLElement
+): Attrs {
+  const attrs: Record<string, unknown> = { ...read }
+  for (const name of names) {
+    const value = element.getAttribute(name)
+    if (value !== null && !(name in attrs)) attrs[name] = value
+  }
+  return attrs
 }
 
 /** The attributes the source wrote in a start tag, read once for each tag written the same. */
@@ -136,158 +150,163 @@ function holdsBlocks(element: HTMLElement): boolean {
   })
 }
 
-/** The page's body: its blocks. */
-const PageDocument = Node.create({ name: "doc", topNode: true, content: "block+" })
-
-const PageText = Node.create({ name: "text", group: "inline" })
+const BOX_ATTRS = ["tag", "open", "close", "before", "end"]
+const TEXT_ATTRS = ["tag", "open", "close", "before", "inner"]
 
 /** An element holding blocks: a section, a list, a table and its rows. */
-export const Box = Node.create({
-  name: "box",
+const box: NodeSpec = {
   group: "block",
   content: "block+",
   defining: true,
-  addAttributes: () => attributes(["tag", "open", "close", "before", "end"], { tag: "div" }),
-  parseHTML: () => [
+  attrs: attributes(BOX_ATTRS, { tag: "div" }),
+  parseDOM: [
     {
       // What is pasted: a container, or an element of words that holds blocks, a list item
       // holding paragraphs. Anything else gives its content alone.
       tag: "*",
       priority: 10,
-      getAttrs: (element) => {
+      getAttrs: (dom) => {
+        const element = dom as HTMLElement
         const tag = tagOf(element)
-        const box = CONTAINER_TAGS.has(tag) || (PAGE_TEXT_TAGS.has(tag) && holdsBlocks(element))
-        return box ? { tag, open: openOf(element) } : false
+        const isBox = CONTAINER_TAGS.has(tag) || (PAGE_TEXT_TAGS.has(tag) && holdsBlocks(element))
+        return isBox ? parsed({ tag, open: openOf(element) }, BOX_ATTRS, element) : false
       },
     },
   ],
-  renderHTML: ({ node }) => [
+  toDOM: (node) => [
     drawnTag(node.attrs.tag),
     { ...tagAttributes(node.attrs.open as string | null) },
     0,
   ],
-})
+}
 
 /** An element holding words: a paragraph, a heading, a list item, a table's cell. */
-export const TextBlock = Node.create({
-  name: "textBlock",
+const textBlock: NodeSpec = {
   group: "block",
   content: "inline*",
   defining: true,
-  addAttributes: () => attributes(["tag", "open", "close", "before", "inner"], { tag: "p" }),
-  parseHTML: () => [
+  attrs: attributes(TEXT_ATTRS, { tag: "p" }),
+  parseDOM: [
     {
       tag: [...PAGE_TEXT_TAGS].join(","),
-      getAttrs: (element) =>
-        holdsBlocks(element) ? false : { tag: tagOf(element), open: openOf(element) },
+      getAttrs: (dom) => {
+        const element = dom as HTMLElement
+        return holdsBlocks(element)
+          ? false
+          : parsed({ tag: tagOf(element), open: openOf(element) }, TEXT_ATTRS, element)
+      },
     },
   ],
-  renderHTML: ({ node }) => [
+  toDOM: (node) => [
     drawnTag(node.attrs.tag),
     { ...tagAttributes(node.attrs.open as string | null) },
     0,
   ],
-})
+}
 
 /** A picture among blocks. */
-export const PageImage = Node.create({
-  name: "image",
+const image: NodeSpec = {
   group: "block",
   atom: true,
   draggable: true,
   selectable: true,
-  addAttributes: () => attributes(["source", "before"]),
-  parseHTML: () => [{ tag: "img[src]", getAttrs: (element) => ({ source: element.outerHTML }) }],
-  renderHTML: ({ node }) => ["img", { ...tagAttributes(node.attrs.source as string | null) }],
-})
+  attrs: attributes(["source", "before"]),
+  parseDOM: [
+    {
+      tag: "img[src]",
+      getAttrs: (dom) =>
+        parsed({ source: (dom as HTMLElement).outerHTML }, ["before"], dom as HTMLElement),
+    },
+  ],
+  toDOM: (node) => ["img", { ...tagAttributes(node.attrs.source as string | null) }],
+}
 
 /** Anything else among blocks, kept as its source wrote it. */
-export const RawBlock = Node.create({
-  name: "raw",
+const raw: NodeSpec = {
   group: "block",
   atom: true,
   draggable: true,
   selectable: true,
-  addAttributes: () => attributes(["source", "before"]),
-  parseHTML: () => [
+  attrs: attributes(["source", "before"]),
+  parseDOM: [
     // As the clipboard writes it: its source as words. Before the rules for the tags it is drawn as.
     {
       tag: "[data-sixb-raw]",
       priority: 60,
-      getAttrs: (element) => ({ source: element.textContent ?? "" }),
+      getAttrs: (dom) =>
+        parsed({ source: (dom as HTMLElement).textContent ?? "" }, ["before"], dom as HTMLElement),
     },
     // A rule pasted from elsewhere, as it was written.
-    { tag: "hr", getAttrs: (element) => ({ source: openOf(element) }) },
+    {
+      tag: "hr",
+      getAttrs: (dom) =>
+        parsed({ source: openOf(dom as HTMLElement) }, ["before"], dom as HTMLElement),
+    },
   ],
-  renderHTML: ({ node }) => ["div", { "data-sixb-raw": "" }, String(node.attrs.source ?? "")],
-})
+  toDOM: (node) => ["div", { "data-sixb-raw": "" }, String(node.attrs.source ?? "")],
+}
 
 /** Anything inline that is not words: a field of live data, an inline picture or icon. */
-export const RawInline = Node.create({
-  name: "rawInline",
+const rawInline: NodeSpec = {
   group: "inline",
   inline: true,
   atom: true,
   selectable: true,
-  addAttributes: () => attributes(["source"]),
-  parseHTML: () => [
+  attrs: attributes(["source"]),
+  parseDOM: [
     {
       tag: "[data-sixb-raw-inline]",
       priority: 60,
-      getAttrs: (element) => ({ source: element.textContent ?? "" }),
+      getAttrs: (dom) => ({ source: (dom as HTMLElement).textContent ?? "" }),
     },
   ],
-  renderHTML: ({ node }) => [
-    "span",
-    { "data-sixb-raw-inline": "" },
-    String(node.attrs.source ?? ""),
-  ],
-})
+  toDOM: (node) => ["span", { "data-sixb-raw-inline": "" }, String(node.attrs.source ?? "")],
+}
 
 /** A line break among words. */
-export const HardBreak = Node.create({
-  name: "hardBreak",
+const hardBreak: NodeSpec = {
   group: "inline",
   inline: true,
   selectable: false,
-  linebreakReplacement: true,
-  addAttributes: () => attributes(["source"]),
-  parseHTML: () => [{ tag: "br" }],
-  renderHTML: () => ["br"],
-  renderText: () => "\n",
-})
-
-/** A mark for each inline tag, drawn as that tag with its source's attributes. */
-export const PAGE_MARKS = PAGE_MARK_TAGS.map((tag) =>
-  Mark.create({
-    name: tag,
-    // A link does not grow as the reader types after it.
-    inclusive: tag !== "a",
-    addAttributes: () => attributes(["open", "close"]),
-    parseHTML: () => [
-      { tag, getAttrs: (element) => ({ open: openOf(element), close: `</${tag}>` }) },
-    ],
-    renderHTML: ({ mark }) => [tag, { ...tagAttributes(mark.attrs.open as string | null) }, 0],
-  })
-)
-
-/** The page's schema: what core's page reads its body into. */
-export function pageSchemaExtensions(): AnyExtension[] {
-  // A block of words first: what ProseMirror makes where a block is missing.
-  return [
-    PageDocument,
-    PageText,
-    TextBlock,
-    Box,
-    PageImage,
-    RawBlock,
-    RawInline,
-    HardBreak,
-    ...PAGE_MARKS,
-  ]
+  attrs: attributes(["source"]),
+  parseDOM: [{ tag: "br", getAttrs: (dom) => parsed({}, ["source"], dom as HTMLElement) }],
+  toDOM: () => ["br"],
+  leafText: () => "\n",
 }
 
+/** A mark for each inline tag, drawn as that tag with its source's attributes. */
+function pageMark(tag: string): MarkSpec {
+  return {
+    // A link does not grow as the reader types after it.
+    inclusive: tag !== "a",
+    attrs: attributes(["open", "close"]),
+    parseDOM: [
+      {
+        tag,
+        getAttrs: (dom) =>
+          parsed({ open: openOf(dom as HTMLElement), close: `</${tag}>` }, [], dom as HTMLElement),
+      },
+    ],
+    toDOM: (mark) => [tag, { ...tagAttributes(mark.attrs.open as string | null) }, 0],
+  }
+}
+
+/** The page's schema: what core's page reads its body into. A block of words first: what is made where a block is missing. */
+export const pageSchema = new Schema({
+  nodes: [
+    ["doc", { content: "block+" }],
+    ["text", { group: "inline" }],
+    ["textBlock", textBlock],
+    ["box", box],
+    ["image", image],
+    ["raw", raw],
+    ["rawInline", rawInline],
+    ["hardBreak", hardBreak],
+  ],
+  marks: PAGE_MARK_TAGS.map((tag) => [tag, pageMark(tag)] as const),
+})
+
 /** Whether a node is a block of words that takes typing. */
-export function isWords(node: ProseMirrorNode | null | undefined): boolean {
+export function isWords(node: Node | null | undefined): boolean {
   return node?.type.name === "textBlock"
 }

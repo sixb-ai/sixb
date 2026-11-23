@@ -1,9 +1,4 @@
 import { cn } from "@sixb/ui/lib/utils"
-import type { Editor } from "@tiptap/core"
-import { TextSelection, type Transaction } from "@tiptap/pm/state"
-import { useEditorState } from "@tiptap/react"
-import { BubbleMenu } from "@tiptap/react/menus"
-import { ySyncPluginKey } from "@tiptap/y-tiptap"
 import {
   Bold,
   Check,
@@ -15,13 +10,42 @@ import {
   Strikethrough,
   Unlink,
 } from "lucide-react"
-import { type ReactNode, useEffect, useRef, useState } from "react"
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import type { BlockChoice, BlockType } from "./blocks"
+import {
+  extendMarkRange,
+  getMarkAttributes,
+  isMarkActive,
+  isNodeActive,
+  setMark,
+  unsetMark,
+} from "./core/commands"
+import type { Editor } from "./core/editor"
+import type { MarkType, NodeType } from "./core/model"
+import { type EditorState, NodeSelection, TextSelection } from "./core/state"
+import { type FloatingRect, floatingPosition } from "./floating"
 import type { EditorMessages } from "./messages"
+import { documentSchema } from "./schema"
 
 // The toolbar over selected words: what block they are in, the marks they carry, and a link. It
 // shows for a range of text, never for a block picked whole or for code, where marks do not
 // apply; ⌘K opens its link field from the keyboard.
+
+const marks = documentSchema.marks as Record<string, MarkType>
+const nodes = documentSchema.nodes as Record<string, NodeType>
+
+/** How long a new selection waits before the toolbar follows it, so a drag does not chase it. */
+const UPDATE_DELAY = 80
+/** How long the page rests, resized or scrolled, before the toolbar is placed again. */
+const RESIZE_DELAY = 60
 
 export function SelectionToolbar({
   editor,
@@ -36,45 +60,176 @@ export function SelectionToolbar({
   readonly linkRequest: number
 }) {
   const [mode, setMode] = useState<ToolbarMode>("marks")
-  const marks = useEditorState({
-    editor,
-    selector: ({ editor }) => ({
-      bold: editor.isActive("bold"),
-      italic: editor.isActive("italic"),
-      strike: editor.isActive("strike"),
-      code: editor.isActive("code"),
-      link: editor.isActive("link") ? String(editor.getAttributes("link").href ?? "") : null,
-      block: types.find((type) => type.turnsInto && type.isActive(editor)) ?? types[0],
-    }),
-  })
+  const modeRef = useRef(mode)
+  modeRef.current = mode
+  const element = useRef<HTMLDivElement | null>(null)
+  /** Shows the toolbar now if it should show and is still waiting to. */
+  const reveal = useRef<(() => void) | null>(null)
+  const state = useToolbarState(editor, types)
 
-  // Each new selection this reader makes opens on its marks; another editor's typing, which
-  // moves it, leaves the link field open.
-  useEffect(() => {
-    const reset = ({ transaction }: { readonly transaction: Transaction }) => {
-      if (transaction.selectionSet && !transaction.getMeta(ySyncPluginKey)) setMode("marks")
+  const shouldShow = useCallback(
+    (current: EditorState) => {
+      const { from, to } = current.selection
+      if (!editor.isEditable || from === to) return false
+      const tr = current.tr
+      if (
+        isNodeActive(tr, nodes.codeBlock as NodeType) ||
+        isNodeActive(tr, nodes.image as NodeType)
+      )
+        return false
+      // A block picked whole (a rule, a figure, a table's cells) has no words to mark.
+      return current.selection instanceof TextSelection || modeRef.current === "link"
+    },
+    [editor]
+  )
+
+  const place = useCallback(() => {
+    const floating = element.current
+    if (!floating) return
+    const { selection } = editor.state
+    let rect: FloatingRect
+    const node =
+      selection instanceof NodeSelection
+        ? (editor.view.nodeDOM(selection.from) as HTMLElement | null)
+        : null
+    if (node) {
+      rect = node.getBoundingClientRect()
+    } else {
+      const size = editor.state.doc.content.size
+      const start = editor.view.coordsAtPos(Math.min(Math.max(selection.from, 0), size))
+      const end = editor.view.coordsAtPos(Math.min(Math.max(selection.to, 0), size), -1)
+      const top = Math.min(start.top, end.top)
+      const left = Math.min(start.left, end.left)
+      rect = {
+        left,
+        top,
+        width: Math.max(start.right, end.right) - left,
+        height: Math.max(start.bottom, end.bottom) - top,
+      }
     }
-    editor.on("transaction", reset)
-    return () => {
-      editor.off("transaction", reset)
-    }
+    const { x, y } = floatingPosition(rect, floating, {
+      placement: "top",
+      offset: 10,
+      flip: true,
+      shift: 12,
+    })
+    floating.style.left = `${x}px`
+    floating.style.top = `${y}px`
   }, [editor])
+
+  // The toolbar follows the selection: a new range waits a moment, so a drag does not chase it,
+  // and a caret hides it at once. It is placed as it shows and stays there while it is used, its
+  // link field or its kinds of block growing from where it stands.
+  useEffect(() => {
+    const floating = element.current
+    if (!floating) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined
+    let shown = false
+    let preventHide = false
+    const show = () => {
+      if (shown) return
+      floating.style.display = ""
+      floating.style.visibility = "visible"
+      shown = true
+    }
+    const hide = () => {
+      if (!shown) return
+      floating.style.display = "none"
+      floating.style.visibility = "hidden"
+      shown = false
+    }
+    const follow = (changed: boolean) => {
+      if (editor.view.composing || !changed) return
+      if (!shouldShow(editor.state)) return hide()
+      show()
+      place()
+    }
+    const update = (previous?: EditorState) => {
+      const current = editor.state
+      const changed = !previous?.selection.eq(current.selection) || !previous.doc.eq(current.doc)
+      if (current.selection.from === current.selection.to) return follow(changed)
+      if (!changed) return
+      clearTimeout(timer)
+      timer = setTimeout(() => follow(true), UPDATE_DELAY)
+    }
+
+    let last: EditorState = editor.state
+    const offTransaction = editor.on("transaction", ({ transaction }) => {
+      // Each new selection this reader makes opens on its marks; another editor's typing, which
+      // moves it, leaves the link field open.
+      if (transaction?.selectionSet && !transaction.getMeta("remote")) setMode("marks")
+      const previous = last
+      last = editor.state
+      update(previous)
+    })
+    const offFocus = editor.on("focus", () => setTimeout(() => update()))
+    const offBlur = editor.on("blur", ({ event }) => {
+      if (preventHide) {
+        preventHide = false
+        return
+      }
+      // Focus moving into the toolbar's own field, or back to the text, keeps it.
+      const related = (event?.relatedTarget ?? null) as globalThis.Node | null
+      if (
+        related &&
+        (floating.contains(related) || editor.view.dom.parentElement?.contains(related))
+      )
+        return
+      hide()
+    })
+    const down = () => {
+      preventHide = true
+    }
+    const composed = () => setTimeout(() => update())
+    const moved = () => {
+      clearTimeout(resizeTimer)
+      resizeTimer = setTimeout(() => shown && place(), RESIZE_DELAY)
+    }
+    floating.addEventListener("mousedown", down, { capture: true })
+    editor.view.dom.addEventListener("dragstart", hide)
+    editor.view.dom.addEventListener("compositionend", composed)
+    window.addEventListener("resize", moved)
+    window.addEventListener("scroll", moved)
+    reveal.current = () => {
+      if (shown || !shouldShow(editor.state)) return
+      clearTimeout(timer)
+      show()
+      place()
+    }
+    if (shouldShow(editor.state)) {
+      show()
+      place()
+    }
+    return () => {
+      reveal.current = null
+      clearTimeout(timer)
+      clearTimeout(resizeTimer)
+      offTransaction()
+      offFocus()
+      offBlur()
+      floating.removeEventListener("mousedown", down, { capture: true })
+      editor.view.dom.removeEventListener("dragstart", hide)
+      editor.view.dom.removeEventListener("compositionend", composed)
+      window.removeEventListener("resize", moved)
+      window.removeEventListener("scroll", moved)
+      hide()
+    }
+  }, [editor, shouldShow, place])
+
   useEffect(() => {
     if (linkRequest > 0) setMode("link")
   }, [linkRequest])
+  // ⌘K opens the link field at once rather than after the selection's delay, so the field can
+  // take the focus and what is typed next goes into it.
+  useLayoutEffect(() => {
+    if (mode === "link") reveal.current?.()
+  }, [mode])
 
   return (
-    <BubbleMenu
-      editor={editor}
-      pluginKey="sixb-selection-toolbar"
-      updateDelay={80}
-      options={{ placement: "top", offset: 10, flip: true, shift: { padding: 12 } }}
-      shouldShow={({ editor, state, from, to }) => {
-        if (!editor.isEditable || from === to) return false
-        if (editor.isActive("codeBlock") || editor.isActive("image")) return false
-        // A block picked whole (a rule, a figure, a table's cells) has no words to mark.
-        return state.selection instanceof TextSelection || mode === "link"
-      }}
+    <div
+      ref={element}
+      style={{ position: "absolute", width: "max-content", visibility: "hidden", display: "none" }}
     >
       <div
         className="sixb-editor-popover flex items-center gap-0.5 p-1"
@@ -86,34 +241,76 @@ export function SelectionToolbar({
         <SelectionToolbarBody
           mode={mode}
           onMode={setMode}
-          marks={{
-            bold: !!marks?.bold,
-            italic: !!marks?.italic,
-            strike: !!marks?.strike,
-            code: !!marks?.code,
-            link: marks?.link ?? null,
-            block: marks?.block?.id ?? null,
-          }}
+          marks={state}
           types={types}
           messages={messages}
           onMark={(mark) => {
-            const chain = editor.chain().focus()
-            if (mark === "bold") chain.toggleBold().run()
-            else if (mark === "italic") chain.toggleItalic().run()
-            else if (mark === "strike") chain.toggleStrike().run()
-            else chain.toggleCode().run()
+            editor.run(toggleMarkCommand(marks[mark] as MarkType))
+            editor.focus()
           }}
           onTurnInto={(id) => types.find((type) => type.id === id)?.make(editor)}
           onLink={(href) => {
-            const chain = editor.chain().focus().extendMarkRange("link")
-            if (href) chain.setLink({ href }).run()
-            else chain.unsetLink().run()
+            editor.run((tr) => {
+              extendMarkRange(marks.link as MarkType)(tr)
+              if (href) setMark(marks.link as MarkType, { href })(tr)
+              else unsetMark(marks.link as MarkType, { extendEmptyMarkRange: true })(tr)
+              tr.setMeta("preventAutolink", true)
+              return true
+            })
+            editor.focus()
           }}
-          onCancelLink={() => editor.commands.focus()}
+          onCancelLink={() => editor.focus()}
         />
       </div>
-    </BubbleMenu>
+    </div>
   )
+}
+
+function toggleMarkCommand(type: MarkType) {
+  return (tr: import("./core/state").Transaction) =>
+    isMarkActive(tr, type) ? unsetMark(type)(tr) : setMark(type)(tr)
+}
+
+/** What the toolbar shows for the selection, read again after each transaction. */
+function useToolbarState(editor: Editor, types: readonly BlockType[]): ToolbarState {
+  const snapshot = useRef<ToolbarState | null>(null)
+  const subscribe = useCallback(
+    (changed: () => void) =>
+      editor.on("transaction", () => {
+        const next = toolbarState(editor, types)
+        const current = snapshot.current
+        if (
+          current &&
+          (Object.keys(next) as (keyof ToolbarState)[]).every((key) => current[key] === next[key])
+        )
+          return
+        snapshot.current = next
+        changed()
+      }),
+    [editor, types]
+  )
+  return useSyncExternalStore(subscribe, () => {
+    snapshot.current ??= toolbarState(editor, types)
+    return snapshot.current
+  })
+}
+
+type ToolbarState = ReturnType<typeof toolbarState>
+
+/** What the toolbar shows for the selection now. */
+function toolbarState(editor: Editor, types: readonly BlockType[]) {
+  const tr = editor.state.tr
+  const link = isMarkActive(tr, marks.link as MarkType)
+    ? String(getMarkAttributes(tr, marks.link as MarkType).href ?? "")
+    : null
+  return {
+    bold: isMarkActive(tr, marks.bold as MarkType),
+    italic: isMarkActive(tr, marks.italic as MarkType),
+    strike: isMarkActive(tr, marks.strike as MarkType),
+    code: isMarkActive(tr, marks.code as MarkType),
+    link,
+    block: (types.find((type) => type.turnsInto && type.isActive(editor)) ?? types[0])?.id ?? null,
+  }
 }
 
 export type ToolbarMode = "marks" | "link" | "turnInto"

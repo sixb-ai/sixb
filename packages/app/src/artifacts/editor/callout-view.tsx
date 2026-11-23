@@ -1,12 +1,12 @@
-import { NodeViewContent, type NodeViewProps, NodeViewWrapper } from "@tiptap/react"
 import { CALLOUT_KINDS } from "../renderers/document-tree"
 import { calloutIcon } from "./blocks"
+import { NodeViewContent, type NodeViewProps, NodeViewWrapper } from "./node-views"
 
 /**
  * A callout as it reads, its kind's icon beside its blocks. A click on the icon takes it to the
  * next kind: note, tip, important, warning, caution.
  */
-export function CalloutView({ node, updateAttributes, editor }: NodeViewProps) {
+export function CalloutView({ node, updateAttributes, editable }: NodeViewProps) {
   const kind = String(node.attrs.kind)
   const Icon = calloutIcon(kind)
   const next = () => {
@@ -18,7 +18,7 @@ export function CalloutView({ node, updateAttributes, editor }: NodeViewProps) {
       <button
         type="button"
         contentEditable={false}
-        disabled={!editor.isEditable}
+        disabled={!editable}
         className="sixb-callout-kind"
         aria-label={kind}
         onClick={next}

@@ -1,6 +1,7 @@
-import { type Editor, Extension } from "@tiptap/core"
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
-import { NodeSelection, Selection, TextSelection } from "@tiptap/pm/state"
+import { insertContentAt } from "../editor/core/commands"
+import type { Editor, EditorPlugin } from "../editor/core/editor"
+import type { Node as ProseMirrorNode } from "../editor/core/model"
+import { NodeSelection, Selection, TextSelection } from "../editor/core/state"
 import {
   duplicate,
   LIST_TAGS,
@@ -37,66 +38,61 @@ export interface PageKeysOptions {
   readonly onLink: () => void
 }
 
-export const PageKeys = Extension.create<PageKeysOptions>({
-  name: "pageKeys",
-  addOptions: () => ({ toggleMark: () => {}, onLink: () => {} }),
-  addKeyboardShortcuts() {
-    const editor = this.editor
-    const mark = (name: PageMark) => () => {
-      this.options.toggleMark(editor, name)
-      return true
-    }
-    const current = () => {
-      const at = wordsAt(editor.state.selection)
-      if (at) return at
-      const { selection } = editor.state
-      return selection instanceof NodeSelection
-        ? { node: selection.node, pos: selection.from }
-        : null
-    }
-    return {
-      Enter: () => enter(editor),
-      "Shift-Enter": () => lineBreak(editor),
-      Backspace: () => backspace(editor),
-      Delete: () => forwardDelete(editor),
+export function pageKeys(editor: () => Editor, options: PageKeysOptions): EditorPlugin {
+  const mark = (name: PageMark) => () => {
+    options.toggleMark(editor(), name)
+    return true
+  }
+  const current = () => {
+    const at = wordsAt(editor().state.selection)
+    if (at) return at
+    const { selection } = editor().state
+    return selection instanceof NodeSelection ? { node: selection.node, pos: selection.from } : null
+  }
+  return {
+    keys: {
+      Enter: () => enter(editor()),
+      "Shift-Enter": () => lineBreak(editor()),
+      Backspace: () => backspace(editor()),
+      Delete: () => forwardDelete(editor()),
       // The body is the editor, so the browser would scroll the whole page to its end as well.
-      Home: () => toLineEdge(editor, "backward", false),
-      End: () => toLineEdge(editor, "forward", false),
-      "Shift-Home": () => toLineEdge(editor, "backward", true),
-      "Shift-End": () => toLineEdge(editor, "forward", true),
-      Tab: () => nextCell(editor, 1),
-      "Shift-Tab": () => nextCell(editor, -1),
+      Home: () => toLineEdge(editor(), "backward", false),
+      End: () => toLineEdge(editor(), "forward", false),
+      "Shift-Home": () => toLineEdge(editor(), "backward", true),
+      "Shift-End": () => toLineEdge(editor(), "forward", true),
+      Tab: () => nextCell(editor(), 1),
+      "Shift-Tab": () => nextCell(editor(), -1),
       "Mod-b": mark("bold"),
       "Mod-i": mark("italic"),
       "Mod-u": mark("underline"),
       "Mod-Shift-s": mark("strike"),
       "Mod-e": mark("code"),
       "Mod-k": () => {
-        if (editor.state.selection.empty) return false
-        this.options.onLink()
+        if (editor().state.selection.empty) return false
+        options.onLink()
         return true
       },
       "Mod-d": () => {
         const at = current()
-        return at ? duplicate(editor, at.pos) : false
+        return at ? duplicate(editor(), at.pos) : false
       },
       "Alt-Shift-ArrowUp": () => {
         const at = current()
-        if (at) move(editor, at.pos, -1)
+        if (at) move(editor(), at.pos, -1)
         return true
       },
       "Alt-Shift-ArrowDown": () => {
         const at = current()
-        if (at) move(editor, at.pos, 1)
+        if (at) move(editor(), at.pos, 1)
         return true
       },
-    }
-  },
-})
+    },
+  }
+}
 
 /** Moves the caret, or extends the selection, to the start or end of the line it is on. */
 function toLineEdge(editor: Editor, direction: "forward" | "backward", extend: boolean): boolean {
-  const selection = editor.view.dom.ownerDocument.getSelection()
+  const selection = editor.view.document.getSelection()
   if (!selection || typeof selection.modify !== "function") return false
   selection.modify(extend ? "extend" : "move", direction, "lineboundary")
   return true
@@ -105,8 +101,9 @@ function toLineEdge(editor: Editor, direction: "forward" | "backward", extend: b
 function lineBreak(editor: Editor): boolean {
   const at = wordsAt(editor.state.selection)
   if (!at) return false
-  if (tagOf(at.node) === "pre") return editor.commands.insertContent("\n")
-  return editor.commands.insertContent({ type: "hardBreak" })
+  const { from, to } = editor.state.selection
+  if (tagOf(at.node) === "pre") return editor.run(insertContentAt({ from, to }, "\n"))
+  return editor.run(insertContentAt({ from, to }, editor.schema.nodeType("hardBreak").create()))
 }
 
 /**
@@ -118,7 +115,10 @@ function enter(editor: Editor): boolean {
   const first = wordsAt(editor.state.selection)
   if (!first) return false
   const tag = tagOf(first.node)
-  if (tag === "pre") return editor.commands.insertContent("\n")
+  if (tag === "pre")
+    return editor.run(
+      insertContentAt({ from: editor.state.selection.from, to: editor.state.selection.to }, "\n")
+    )
   if (SINGLE_BLOCK_TAGS.has(tag)) return lineBreak(editor)
 
   const tr = editor.state.tr
@@ -133,7 +133,7 @@ function enter(editor: Editor): boolean {
     // An empty item ends its list, and an empty description its list of terms.
     if (inList || ((tag === "dd" || tag === "dt") && tagOf($pos.parent) === "dl")) {
       liftOut(tr, pos, words(editor.schema, "p"))
-      editor.view.dispatch(tr.scrollIntoView())
+      editor.dispatch(tr.scrollIntoView())
       return true
     }
     // The last, empty, paragraph of an item that holds paragraphs: the next item, or, alone in
@@ -160,7 +160,7 @@ function enter(editor: Editor): boolean {
         )
         tr.setSelection(TextSelection.create(tr.doc, after + 2))
       }
-      editor.view.dispatch(tr.scrollIntoView())
+      editor.dispatch(tr.scrollIntoView())
       return true
     }
   }
@@ -183,7 +183,7 @@ function enter(editor: Editor): boolean {
       { type: item.type, attrs: { ...item.attrs, open: itemOpen, before: null, end: null } },
       { type: node.type, attrs: { ...node.attrs, open, before: null, inner: null } },
     ])
-    editor.view.dispatch(tr.scrollIntoView())
+    editor.dispatch(tr.scrollIntoView())
     return true
   }
   const next =
@@ -203,7 +203,7 @@ function enter(editor: Editor): boolean {
       { type: node.type, attrs: { ...node.attrs, open, before: null, inner: null } },
     ])
   }
-  editor.view.dispatch(tr.scrollIntoView())
+  editor.dispatch(tr.scrollIntoView())
   return true
 }
 
@@ -230,13 +230,13 @@ function backspace(editor: Editor): boolean {
 
   if (ENDS_IN_PARAGRAPH.has(tag) && node.content.size > 0) {
     tr.setNodeMarkup(pos, undefined, { ...node.attrs, tag: "p", open: "<p>", close: "</p>" })
-    editor.view.dispatch(tr)
+    editor.dispatch(tr)
     return true
   }
   if (tag === "li" && LIST_TAGS.has(tagOf($pos.parent))) {
     if (index > 0) return false
     liftOut(tr, pos, words(editor.schema, "p", undefined, node.content))
-    editor.view.dispatch(tr.scrollIntoView())
+    editor.dispatch(tr.scrollIntoView())
     return true
   }
   if (SINGLE_BLOCK_TAGS.has(tag)) return true
@@ -247,7 +247,7 @@ function backspace(editor: Editor): boolean {
     if (node.content.size > 0 || $pos.depth === 0 || $pos.parent.childCount === 1) return true
     tr.delete(pos, pos + node.nodeSize)
     tr.setSelection(Selection.near(tr.doc.resolve(pos), -1))
-    editor.view.dispatch(tr.scrollIntoView())
+    editor.dispatch(tr.scrollIntoView())
     return true
   }
   if (previous.type.name === "textBlock") return false
@@ -265,7 +265,7 @@ function backspace(editor: Editor): boolean {
   } else {
     tr.setSelection(Selection.near(tr.doc.resolve(pos), -1))
   }
-  editor.view.dispatch(tr.scrollIntoView())
+  editor.dispatch(tr.scrollIntoView())
   return true
 }
 
@@ -285,7 +285,7 @@ function forwardDelete(editor: Editor): boolean {
     const tr = editor.state.tr
     if (at.node.content.size === 0) tr.delete(at.pos, after)
     else if (next.isAtom) tr.setSelection(NodeSelection.create(tr.doc, after))
-    editor.view.dispatch(tr.scrollIntoView())
+    editor.dispatch(tr.scrollIntoView())
     return true
   }
   return false
@@ -318,6 +318,6 @@ function nextCell(editor: Editor, by: -1 | 1): boolean {
   const tr = editor.state.tr.setSelection(
     TextSelection.create(editor.state.doc, target + 1, target + 1 + cell.content.size)
   )
-  editor.view.dispatch(tr.scrollIntoView())
+  editor.dispatch(tr.scrollIntoView())
   return true
 }

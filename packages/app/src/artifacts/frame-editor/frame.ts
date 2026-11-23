@@ -1,16 +1,26 @@
 import { isArtifactAddress } from "@sixb/core/artifacts"
 import { isPageEntry, LIVE_FILES, PAGE_BODY } from "@sixb/core/artifacts/live"
-import { Editor, Extension } from "@tiptap/core"
-import { Collaboration } from "@tiptap/extension-collaboration"
-import { CollaborationCaret } from "@tiptap/extension-collaboration-caret"
-import { Placeholder } from "@tiptap/extensions"
-import { Fragment, type Node as ProseMirrorNode, Slice } from "@tiptap/pm/model"
-import { NodeSelection, Plugin, PluginKey, Selection, TextSelection } from "@tiptap/pm/state"
-import type { Mappable } from "@tiptap/pm/transform"
-import { Decoration, DecorationSet, type EditorView, type NodeView } from "@tiptap/pm/view"
-import { exitSuggestion, Suggestion, type SuggestionProps } from "@tiptap/suggestion"
 import { Awareness, applyAwarenessUpdate } from "y-protocols/awareness"
 import * as Y from "yjs"
+import {
+  extendMarkRange,
+  getMarkAttributes,
+  isMarkActive,
+  setMark,
+  unsetMark,
+} from "../editor/core/commands"
+import { Editor, type EditorPlugin } from "../editor/core/editor"
+import { Fragment, type MarkType, type Node as ProseMirrorNode, Slice } from "../editor/core/model"
+import {
+  baseKeymap,
+  caretsPlugin,
+  historyPlugin,
+  placeholderPlugin,
+  Suggestion,
+} from "../editor/core/plugins"
+import { NodeSelection, Selection, TextSelection } from "../editor/core/state"
+import type { Mappable } from "../editor/core/transform"
+import type { Decoration, EditorView, NodeView } from "../editor/core/view"
 import { findBlockTypes } from "../editor/find-blocks"
 import {
   blockAt,
@@ -33,7 +43,7 @@ import {
   words,
   wordsAt,
 } from "./commands"
-import { PageKeys } from "./keys"
+import { pageKeys } from "./keys"
 import type {
   AppToEditor,
   EditorCommand,
@@ -46,15 +56,7 @@ import type {
   SelectionState,
   SlashState,
 } from "./protocol"
-import {
-  PageImage,
-  pageSchemaExtensions,
-  RawBlock,
-  RawInline,
-  sanitize,
-  startTag,
-  tagAttributes,
-} from "./schema"
+import { pageSchema, sanitize, startTag, tagAttributes } from "./schema"
 import { PAGE_EDITOR_CSS } from "./style"
 
 // A designed document's editor, running in its frame on the page itself: the body is the editor,
@@ -65,9 +67,6 @@ import { PAGE_EDITOR_CSS } from "./style"
 
 /** The origin of what the app sends, which is never sent back. */
 const FROM_APP = Symbol("app")
-
-const slashKey = new PluginKey("sixb-page-slash")
-const breaksKey = new PluginKey<DecorationSet>("sixb-page-breaks")
 
 /** The tags of each mark the toolbar shows, the first the one it adds. */
 const MARK_TAGS: Readonly<Record<PageMark, readonly string[]>> = {
@@ -183,13 +182,9 @@ export function startFrameEditor({
 
   // ── The `/` menu ──────────────────────────────────────────────────────
 
-  const openMenu = (props: SuggestionProps<PageBlockChoice>) => {
-    const keep = slash !== null && slash.items.length === props.items.length
-    slash = {
-      items: props.items,
-      index: keep && slash ? Math.min(slash.index, Math.max(0, props.items.length - 1)) : 0,
-      range: props.range,
-    }
+  // Each key typed filters the kinds again and picks the first.
+  const openMenu = (range: { from: number; to: number }, query: string) => {
+    slash = { items: findBlockTypes(blocks, query), index: 0, range }
     schedule()
   }
 
@@ -200,140 +195,133 @@ export function startFrameEditor({
     if (!current || !item || !range) return
     slash = null
     if (item.id === "image") {
-      current.chain().focus().deleteRange(range).run()
+      current.run((tr) => !!tr.delete(range.from, range.to))
+      current.focus()
       post({ type: "pickImage", at: tell(wordsAt(current.state.selection)?.pos ?? null) })
       return
     }
     insertBlock(current, item.id, range)
   }
 
-  const SlashMenu = Extension.create({
-    name: "pageSlash",
-    addProseMirrorPlugins() {
-      return [
-        Suggestion<PageBlockChoice>({
-          editor: this.editor,
-          pluginKey: slashKey,
-          char: "/",
-          // Not in `<pre>`, where `/` is a character like any other.
-          allow: ({ state, range }) => {
-            const parent = state.doc.resolve(range.from).parent
-            return parent.type.name === "textBlock" && tagOf(parent) !== "pre"
-          },
-          items: ({ query }) => findBlockTypes(blocks, query),
-          command: () => {},
-          render: () => ({
-            onStart: openMenu,
-            onUpdate: openMenu,
-            onKeyDown: ({ event }) => {
-              if (!slash) return false
-              const count = slash.items.length
-              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                if (count > 0) {
-                  const by = event.key === "ArrowDown" ? 1 : -1
-                  slash.index = (slash.index + by + count) % count
-                  schedule()
-                }
-                return true
-              }
-              if (event.key === "Enter" || event.key === "Tab") {
-                if (count === 0) return false
-                choose(slash.index)
-                return true
-              }
-              return false
-            },
-            onExit: () => {
-              slash = null
-              schedule()
-            },
-          }),
-        }),
-      ]
+  const suggestion = new Suggestion("/", {
+    // Not in `<pre>`, where `/` is a character like any other.
+    allow: (state, range) => {
+      const parent = state.doc.resolve(range.from).parent
+      return parent.type.name === "textBlock" && tagOf(parent) !== "pre"
+    },
+    onStart: (state) => openMenu(state.range, state.query ?? ""),
+    onUpdate: (state) => openMenu(state.range, state.query ?? ""),
+    onKeyDown: (event) => {
+      if (!slash) return false
+      const count = slash.items.length
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        if (count > 0) {
+          const by = event.key === "ArrowDown" ? 1 : -1
+          slash.index = (slash.index + by + count) % count
+          schedule()
+        }
+        return true
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        if (count === 0) return false
+        choose(slash.index)
+        return true
+      }
+      return false
+    },
+    onExit: () => {
+      slash = null
+      schedule()
     },
   })
 
   // ── Page breaks, as the sheet shows them ──────────────────────────────
 
   let pageBreakLabel = ""
-  const PageBreaks = Extension.create({
-    name: "pageBreaks",
-    addProseMirrorPlugins() {
-      return [
-        new Plugin<DecorationSet>({
-          key: breaksKey,
-          state: {
-            init: () => DecorationSet.empty,
-            apply: (tr, set) =>
-              (tr.getMeta(breaksKey) as DecorationSet | undefined) ?? set.map(tr.mapping, tr.doc),
-          },
-          props: { decorations: (state) => breaksKey.getState(state) },
-          view: (view) => {
-            let timer: ReturnType<typeof setTimeout> | undefined
-            let shown = ""
-            const measure = () => {
-              const at = pageBreaks(view)
-              const key = at.join(",")
-              if (key === shown) return
-              shown = key
-              const set = DecorationSet.create(
-                view.state.doc,
-                at.map((pos) =>
-                  Decoration.widget(pos, () => pageBreak(pageBreakLabel), {
-                    side: -1,
-                    ignoreSelection: true,
-                    key: `break-${pos}`,
-                  })
-                )
-              )
-              view.dispatch(view.state.tr.setMeta(breaksKey, set).setMeta("addToHistory", false))
-            }
-            const later = () => {
-              clearTimeout(timer)
-              timer = setTimeout(measure, 120)
-            }
-            later()
-            document.fonts?.ready.then(later)
-            // Where the page breaks moves with its blocks and its width, never with the caret.
-            window.addEventListener("resize", later)
-            return {
-              update: (_view, previous) => {
-                if (view.state.doc !== previous.doc) later()
-              },
-              destroy: () => {
-                clearTimeout(timer)
-                window.removeEventListener("resize", later)
-              },
-            }
-          },
-        }),
-      ]
+  /**
+   * Where the page breaks, as last measured, carried through what changed since; a break whose
+   * place a change took out goes until the next measure.
+   */
+  let breaks: { readonly pos: number; readonly key: string }[] = []
+  const pageBreaksPlugin: EditorPlugin = {
+    apply: (tr) => {
+      if (!tr.docChanged) return
+      breaks = breaks.flatMap((each) => {
+        const mapped = tr.mapping.mapResult(each.pos, -1)
+        return mapped.deleted ? [] : [{ pos: mapped.pos, key: each.key }]
+      })
     },
-  })
+    decorations: () =>
+      breaks.map(
+        ({ pos, key }): Decoration => ({
+          kind: "widget",
+          pos,
+          side: -1,
+          key,
+          ignoreSelection: true,
+          toDOM: () => pageBreak(pageBreakLabel),
+        })
+      ),
+    view: (current) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let shown = ""
+      const measure = () => {
+        const at = pageBreaks(current.view)
+        const key = at.join(",")
+        if (key === shown) return
+        shown = key
+        breaks = at.map((pos) => ({ pos, key: `break-${pos}` }))
+        current.view.updateState(current.state)
+      }
+      const later = () => {
+        clearTimeout(timer)
+        timer = setTimeout(measure, 120)
+      }
+      later()
+      document.fonts?.ready.then(later)
+      // Where the page breaks moves with its blocks and its width, never with the caret.
+      window.addEventListener("resize", later)
+      return {
+        update: (_editor, previous) => {
+          if (current.state.doc !== previous.doc) later()
+        },
+        destroy: () => {
+          clearTimeout(timer)
+          window.removeEventListener("resize", later)
+        },
+      }
+    },
+  }
 
   // ── Marks and links ───────────────────────────────────────────────────
 
+  const markType = (tag: string) => pageSchema.marks[tag] as MarkType
   const toggleMark = (current: Editor, mark: PageMark) => {
     const tags = MARK_TAGS[mark]
-    const chain = current.chain().focus()
-    if (tags.some((tag) => current.isActive(tag))) {
-      for (const tag of tags) chain.unsetMark(tag)
-    } else {
-      const tag = tags[0] as string
-      chain.setMark(tag, { open: `<${tag}>`, close: `</${tag}>` })
-    }
-    chain.run()
+    current.run((tr) => {
+      if (tags.some((tag) => isMarkActive(tr, markType(tag)))) {
+        for (const tag of tags) unsetMark(markType(tag))(tr)
+      } else {
+        const tag = tags[0] as string
+        setMark(markType(tag), { open: `<${tag}>`, close: `</${tag}>` })(tr)
+      }
+      return true
+    })
+    current.focus()
   }
 
   const setLink = (current: Editor, href: string | null) => {
-    const chain = current.chain().focus().extendMarkRange("a")
-    if (href === null) {
-      chain.unsetMark("a").run()
-      return
-    }
-    // A link keeps whatever else its tag says, its class among them.
-    const attrs = { ...tagAttributes(current.getAttributes("a").open as string | undefined), href }
-    chain.setMark("a", { open: startTag("a", attrs), close: "</a>" }).run()
+    current.run((tr) => {
+      extendMarkRange(markType("a"))(tr)
+      if (href === null) return unsetMark(markType("a"))(tr)
+      // A link keeps whatever else its tag says, its class among them.
+      const attrs = {
+        ...tagAttributes(getMarkAttributes(tr, markType("a")).open as string | undefined),
+        href,
+      }
+      return setMark(markType("a"), { open: startTag("a", attrs), close: "</a>" })(tr)
+    })
+    current.focus()
   }
 
   // ── What the app asks ─────────────────────────────────────────────────
@@ -368,7 +356,7 @@ export function startFrameEditor({
         if (slash) slash.index = command.index
         return schedule()
       case "closeMenu":
-        return exitSuggestion(current.view, slashKey)
+        return suggestion.exit(current.view)
       case "addBelow": {
         const node = state.doc.nodeAt(command.pos)
         if (!node) return
@@ -388,8 +376,8 @@ export function startFrameEditor({
           tr.insert(at, words(current.schema, "p"))
         }
         tr.setSelection(TextSelection.create(tr.doc, at + 1)).insertText("/")
-        current.view.dispatch(tr.scrollIntoView())
-        current.view.focus()
+        current.dispatch(tr.scrollIntoView())
+        current.focus()
         return
       }
       case "duplicate":
@@ -401,7 +389,7 @@ export function startFrameEditor({
       case "pick": {
         if (!state.doc.nodeAt(command.pos)) return
         // Not focused: the app's menu for it keeps the focus while it is open.
-        current.view.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, command.pos)))
+        current.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, command.pos)))
         return
       }
       case "drag": {
@@ -429,7 +417,7 @@ export function startFrameEditor({
         return schedule()
       case "image": {
         if (command.preview) previews.set(command.src, URL.createObjectURL(command.preview))
-        const image = current.schema.nodes.image.create({
+        const image = pageSchema.nodeType("image").create({
           source: startTag("img", { src: command.src, alt: command.alt }),
         })
         const tr = state.tr
@@ -441,12 +429,12 @@ export function startFrameEditor({
           placed = placeBlock(tr, target, image)
         }
         caretInto(tr, placed)
-        current.view.dispatch(tr.scrollIntoView())
-        current.view.focus()
+        current.dispatch(tr.scrollIntoView())
+        current.focus()
         return
       }
       case "focus":
-        current.commands.focus()
+        current.focus()
         return
     }
   }
@@ -463,128 +451,105 @@ export function startFrameEditor({
     // The page the frame loaded gives way to the live one, which the editor draws.
     const bodyClass = body.getAttribute("class")
     body.replaceChildren()
-    const extensions = pageSchemaExtensions().map((extension) => {
-      if (extension.name === RawBlock.name) {
-        return RawBlock.extend({
-          addNodeView:
-            () =>
-            ({ node }) =>
-              rawView(node, false),
-        })
-      }
-      if (extension.name === RawInline.name) {
-        return RawInline.extend({
-          addNodeView:
-            () =>
-            ({ node }) =>
-              rawView(node, true),
-        })
-      }
-      if (extension.name === PageImage.name) {
-        return PageImage.extend({
-          addNodeView:
-            () =>
-            ({ node }) =>
-              imageView(node, previews),
-        })
-      }
-      return extension
-    })
-
-    const current = new Editor({
-      element: { mount: body },
-      injectCSS: false,
+    body.classList.add("sixb-page-editor")
+    let made: Editor | null = null
+    const current = () => made as Editor
+    // What the editor's own props do before any plugin: links are for reading, and pictures
+    // pasted or dropped go to the app to store.
+    const props: EditorPlugin = {
+      handleDOMEvents: {
+        // A link is for reading: in the editor, a click puts the caret in its words.
+        click: (_view, event) => {
+          if ((event.target as Element | null)?.closest?.("a[href]")) event.preventDefault()
+          return false
+        },
+      },
+      handlePaste: (view, event) => {
+        const files = imagesOf(event.clipboardData)
+        if (files.length === 0) return false
+        post({ type: "upload", files, at: tell(wordsAt(view.state.selection)?.pos ?? null) })
+        return true
+      },
+      handleDrop: (view, event, _slice, moved) => {
+        const files = imagesOf(event.dataTransfer)
+        if (moved || files.length === 0) return false
+        event.preventDefault()
+        const at = blockAt(view, event.clientX, event.clientY)
+        post({ type: "upload", files, at: tell(at?.pos ?? null) })
+        return true
+      },
+      // What is pasted from elsewhere brings its words and structure, not its styles.
+      transformPastedHTML: (html) => (html.includes("data-pm-slice") ? html : plainHtml(html)),
+      // And of its pictures, only the artifact's own: the page could not be saved with any
+      // other.
+      transformPasted: (slice) => {
+        const files = doc.getMap<unknown>(LIVE_FILES)
+        const content = withOwnImages(slice.content, (src) => isOwnImage(src, files))
+        if (content === slice.content) return slice
+        const open = Slice.maxOpen(content)
+        return new Slice(
+          content,
+          Math.min(slice.openStart, open.openStart),
+          Math.min(slice.openEnd, open.openEnd)
+        )
+      },
+      clipboardTextSerializer: () => textBetween(current().state.doc, current().state.selection),
+    }
+    made = new Editor({
+      mount: body,
+      fragment,
+      schema: pageSchema,
       editable,
-      extensions: [
-        ...extensions,
-        Collaboration.configure({ fragment }),
-        CollaborationCaret.configure({
-          provider: { awareness },
-          // Who someone is, the server says: what this reader says of itself is replaced.
-          user: {},
+      awareness,
+      attributes: { role: "textbox", ...(bodyClass ? { class: bodyClass } : {}) },
+      nodeViews: {
+        raw: (node) => rawView(node, false),
+        rawInline: (node) => rawView(node, true),
+        image: (node) => imageView(node, previews),
+      },
+      plugins: [
+        props,
+        historyPlugin(current),
+        pageBreaksPlugin,
+        suggestion.plugin(() => made?.isEditable ?? false),
+        pageKeys(current, { toggleMark, onLink: () => post({ type: "linkRequest" }) }),
+        placeholderPlugin(
+          (node) => placeholder(node, text),
+          () => made?.isEditable ?? false
+        ),
+        caretsPlugin(awareness, {
           render: caret,
-          selectionRender: (user: { readonly color?: string }) => ({
+          selection: (user) => ({
             nodeName: "span",
             class: "sixb-caret-selection",
             style: `--caret: ${user.color ?? "#888"}`,
           }),
         }),
-        Placeholder.configure({
-          includeChildren: true,
-          showOnlyCurrent: true,
-          placeholder: ({ node }) => placeholder(node, text),
-        }),
-        PageKeys.configure({ toggleMark, onLink: () => post({ type: "linkRequest" }) }),
-        SlashMenu,
-        PageBreaks,
+        baseKeymap(null),
       ],
-      editorProps: {
-        attributes: bodyClass ? { class: bodyClass } : {},
-        // A link is for reading: in the editor, a click puts the caret in its words.
-        handleDOMEvents: {
-          click: (_view, event) => {
-            if ((event.target as Element | null)?.closest?.("a[href]")) event.preventDefault()
-            return false
-          },
-        },
-        handlePaste: (view, event) => {
-          const files = imagesOf(event.clipboardData)
-          if (files.length === 0) return false
-          post({ type: "upload", files, at: tell(wordsAt(view.state.selection)?.pos ?? null) })
-          return true
-        },
-        handleDrop: (view, event, _slice, moved) => {
-          const files = imagesOf(event.dataTransfer)
-          if (moved || files.length === 0) return false
-          event.preventDefault()
-          const at = blockAt(view, event.clientX, event.clientY)
-          post({ type: "upload", files, at: tell(at?.pos ?? null) })
-          return true
-        },
-        // What is pasted from elsewhere brings its words and structure, not its styles.
-        transformPastedHTML: (html) => (html.includes("data-pm-slice") ? html : plainHtml(html)),
-        // And of its pictures, only the artifact's own: the page could not be saved with any
-        // other.
-        transformPasted: (slice) => {
-          const files = doc.getMap<unknown>(LIVE_FILES)
-          const content = withOwnImages(slice.content, (src) => isOwnImage(src, files))
-          if (content === slice.content) return slice
-          const open = Slice.maxOpen(content)
-          return new Slice(
-            content,
-            Math.min(slice.openStart, open.openStart),
-            Math.min(slice.openEnd, open.openEnd)
-          )
-        },
-      },
-      // The live blocks replace the empty page the editor starts with, and the caret it had there
-      // lands in a box: it starts at the first words instead.
-      onCreate: ({ editor: created }) => {
-        // A page with no blocks yet gets one to type in.
-        if (created.isEditable && fragment.length === 0) {
-          created.view.dispatch(
-            created.state.tr.replaceWith(
-              0,
-              created.state.doc.content.size,
-              words(created.schema, "p")
-            )
-          )
-        }
-        const start = Selection.atStart(created.state.doc)
-        created.view.dispatch(created.state.tr.setSelection(start).setMeta("addToHistory", false))
-      },
-      onTransaction: ({ transaction }) => {
-        if (transaction.docChanged) mapTold(transaction.mapping)
-        schedule()
-      },
-      onSelectionUpdate: schedule,
-      onFocus: () => {
-        post({ type: "focus", focused: true })
-        schedule()
-      },
-      onBlur: () => post({ type: "focus", focused: false }),
     })
-    editor = current
+    // A page with no blocks yet gets one to type in, which opening it adds without undo.
+    if (made.isEditable && fragment.length === 0) {
+      made.dispatch(
+        made.state.tr
+          .replaceWith(0, made.state.doc.content.size, words(pageSchema, "p"))
+          .setMeta("addToHistory", false)
+      )
+    }
+    // The caret starts at the first words.
+    made.dispatch(
+      made.state.tr.setSelection(Selection.atStart(made.state.doc)).setMeta("addToHistory", false)
+    )
+    made.on("transaction", ({ transaction }) => {
+      if (transaction?.docChanged) mapTold(transaction.mapping)
+      schedule()
+    })
+    made.on("focus", () => {
+      post({ type: "focus", focused: true })
+      schedule()
+    })
+    made.on("blur", () => post({ type: "focus", focused: false }))
+    editor = made
     schedule()
   }
 
@@ -650,9 +615,11 @@ function selectionState(editor: Editor): SelectionState | null {
     top: Math.min(start.top, end.top),
     bottom: Math.max(start.bottom, end.bottom),
   }
-  const active = (tags: readonly string[]) => tags.some((tag) => editor.isActive(tag))
-  const link = editor.isActive("a")
-    ? (tagAttributes(editor.getAttributes("a").open as string | undefined).href ?? "")
+  const tr = editor.state.tr
+  const markType = (tag: string) => pageSchema.marks[tag] as MarkType
+  const active = (tags: readonly string[]) => tags.some((tag) => isMarkActive(tr, markType(tag)))
+  const link = isMarkActive(tr, markType("a"))
+    ? (tagAttributes(getMarkAttributes(tr, markType("a")).open as string | undefined).href ?? "")
     : null
   return {
     rect,
@@ -709,6 +676,22 @@ function pageBreak(label: string): HTMLElement {
   return element
 }
 
+/** The selection's words, each block a blank line after what came before, line breaks as new lines. */
+function textBetween(doc: ProseMirrorNode, selection: Selection): string {
+  const { from, to } = selection
+  let text = ""
+  doc.nodesBetween(from, to, (node, pos, parent) => {
+    if (node.isBlock && pos > from) text += "\n\n"
+    if (node.type.name === "hardBreak") {
+      if (parent) text += "\n"
+      return false
+    }
+    if (node.isText) text += (node.text ?? "").slice(Math.max(from, pos) - pos, to - pos)
+    return true
+  })
+  return text
+}
+
 /** Markup kept as it was written, drawn from its source; nothing in it takes typing. */
 function rawView(node: ProseMirrorNode, inline: boolean): NodeView {
   const template = document.createElement("template")
@@ -725,7 +708,6 @@ function rawView(node: ProseMirrorNode, inline: boolean): NodeView {
   dom.contentEditable = "false"
   return {
     dom,
-    ignoreMutation: () => true,
     update: (next) => next.type === node.type && next.attrs.source === node.attrs.source,
   }
 }
@@ -744,7 +726,6 @@ function imageView(node: ProseMirrorNode, previews: ReadonlyMap<string, string>)
   image.draggable = false
   return {
     dom: image,
-    ignoreMutation: () => true,
     update: (next) => {
       if (next.type !== node.type) return false
       show(next)

@@ -2,25 +2,30 @@ import { createHeadingSlugger, isArtifactAddress } from "@sixb/core/artifacts"
 import { blocksToMarkdown, LIVE_FILES, markdownToBlocks } from "@sixb/core/artifacts/live"
 import { toast } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { type Editor, Extension } from "@tiptap/core"
-import { Collaboration } from "@tiptap/extension-collaboration"
-import { CollaborationCaret } from "@tiptap/extension-collaboration-caret"
-import { Placeholder } from "@tiptap/extensions"
-import { Fragment, type Node as ProseMirrorNode, Slice } from "@tiptap/pm/model"
-import { Plugin, type Transaction } from "@tiptap/pm/state"
-import { Decoration, DecorationSet } from "@tiptap/pm/view"
-import { EditorContent, ReactNodeViewRenderer, useEditor } from "@tiptap/react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { Awareness } from "y-protocols/awareness"
 import type * as Y from "yjs"
 import { BlockHandle } from "./block-handle"
 import { blockTypes } from "./blocks"
 import { CalloutView } from "./callout-view"
+import { insertContentAt } from "./core/commands"
+import { Editor, type EditorPlugin } from "./core/editor"
+import { Fragment, type Node, Slice } from "./core/model"
+import { baseKeymap, caretsPlugin, historyPlugin, placeholderPlugin } from "./core/plugins"
+import { type EditorState, TextSelection as import_TextSelection } from "./core/state"
+import { documentPlugins, softBreaks } from "./document-plugins"
 import { FigureContext, FigureView } from "./figure-view"
 import type { EditorMessages } from "./messages"
-import { CalloutNode, documentSchemaExtensions, Figure } from "./schema"
+import {
+  NodeViewPortals,
+  NodeViewPortalsHost,
+  reactNodeView,
+  tableView,
+  taskItemView,
+} from "./node-views"
+import { documentSchema } from "./schema"
 import { SelectionToolbar } from "./selection-toolbar"
-import { SlashCommand, SlashMenu, SlashMenuStore } from "./slash-menu"
+import { SlashMenu, SlashMenuStore, slashCommand } from "./slash-menu"
 
 // A Markdown document edited as a page of notes: click anywhere and type. It edits the live
 // document's blocks, so everyone editing it at once sees each other's words and carets, and the
@@ -58,34 +63,37 @@ export function DocumentEditor({
   part,
 }: DocumentEditorProps) {
   const picker = useRef<HTMLInputElement | null>(null)
+  const host = useRef<HTMLDivElement | null>(null)
+  const [editor, setEditor] = useState<Editor | null>(null)
   const editorRef = useRef<Editor | null>(null)
   const types = useMemo(
     () =>
       blockTypes(messages.blocks, uploadImage ? { pickImage: () => picker.current?.click() } : {}),
     [messages.blocks, uploadImage]
   )
+  const slash = useMemo(() => new SlashMenuStore(), [])
+  const portals = useMemo(() => new NodeViewPortals(), [])
+  const [linkRequest, setLinkRequest] = useState(0)
+  const editableRef = useRef(editable)
+  editableRef.current = editable
 
   /** Adds images where `at` is, else where the selection is, each as a figure of its own. */
   const addImages = async (files: readonly File[], at?: number) => {
-    const editor = editorRef.current
-    if (!editor || !uploadImage) return
+    const current = editorRef.current
+    if (!current || !uploadImage) return
     // Where they go moves with what anyone changes while they upload.
-    let pos = at ?? editor.state.selection.to
-    const follow = ({ transaction }: { readonly transaction: Transaction }) => {
-      pos = transaction.mapping.map(pos)
-    }
-    editor.on("transaction", follow)
+    let pos = at ?? current.state.selection.to
+    const off = current.on("transaction", ({ transaction }) => {
+      if (transaction) pos = transaction.mapping.map(pos)
+    })
     try {
       for (const file of files) {
         try {
           const { src, alt } = await uploadImage(file)
-          const figure = { type: "image", attrs: { src, alt, title: null } }
-          editor
-            .chain()
-            .insertContentAt(Math.min(pos, editor.state.doc.content.size), figure)
-            .focus()
-            .run()
-          pos = editor.state.selection.to
+          const figure = documentSchema.nodeType("image").create({ src, alt, title: null })
+          current.run(insertContentAt(Math.min(pos, current.state.doc.content.size), figure))
+          current.focus()
+          pos = current.state.selection.to
         } catch (error) {
           toast.error(
             error instanceof Error && error.message ? error.message : messages.imageFailed
@@ -93,11 +101,11 @@ export function DocumentEditor({
         }
       }
     } finally {
-      editor.off("transaction", follow)
+      off()
     }
   }
-  const slash = useMemo(() => new SlashMenuStore(), [])
-  const [linkRequest, setLinkRequest] = useState(0)
+  const addImagesRef = useRef(addImages)
+  addImagesRef.current = addImages
 
   // A picture publishing takes: another artifact's, or one of this artifact's files.
   const isOwnImage = (src: string) => {
@@ -106,120 +114,140 @@ export function DocumentEditor({
     const path = artifactPath(src)
     return path !== null && files?.has(path) === true
   }
+  const isOwnImageRef = useRef(isOwnImage)
+  isOwnImageRef.current = isOwnImage
+  const uploads = !!uploadImage
 
-  const editor = useEditor(
-    {
-      editable,
-      extensions: [
-        ...documentSchemaExtensions({
-          callout: CalloutNode.extend({
-            addNodeView: () => ReactNodeViewRenderer(CalloutView),
-          }),
-        }).map((extension) =>
-          extension.name === "image"
-            ? Figure.extend({ addNodeView: () => ReactNodeViewRenderer(FigureView) })
-            : extension
-        ),
-        Collaboration.configure({ fragment }),
-        CollaborationCaret.configure({
-          provider: { awareness },
-          // Who someone is, the server says: what this reader says of itself is replaced.
-          user: {},
-          render: caret,
-          selectionRender: (user: { readonly color?: string }) => ({
-            nodeName: "span",
-            class: "sixb-caret-selection",
-            style: `--caret: ${user.color ?? "#888"}`,
-          }),
-        }),
-        Placeholder.configure({
-          includeChildren: true,
-          showOnlyCurrent: true,
-          placeholder: ({ editor, node, pos }) => placeholder(editor, node, pos, messages),
-        }),
-        SlashCommand(slash, () => types),
-        BlockShortcuts.configure({ onLink: () => setLinkRequest((count) => count + 1) }),
-        SoftBreaks,
-      ],
-      editorProps: {
-        attributes: {
-          class: "prose sixb-document sixb-editor",
-          spellcheck: "true",
-          "aria-multiline": "true",
-          role: "textbox",
-        },
-        // An image dropped or pasted is added where it lands.
-        handleDrop: (view, event, _slice, moved) => {
-          const files = imagesOf(event.dataTransfer)
-          if (moved || files.length === 0 || !uploadImage) return false
-          event.preventDefault()
-          const at = view.posAtCoords({ left: event.clientX, top: event.clientY })
-          void addImages(files, at?.pos)
-          return true
-        },
-        // What is pasted or dropped from elsewhere keeps only the artifact's own pictures: the
-        // document could not be saved with any other.
-        transformPasted: (slice) => {
-          const content = withOwnImages(slice.content, isOwnImage)
-          if (content === slice.content) return slice
-          const open = Slice.maxOpen(content)
-          return new Slice(
-            content,
-            Math.min(slice.openStart, open.openStart),
-            Math.min(slice.openEnd, open.openEnd)
-          )
-        },
-        // Markdown pasted as text becomes its blocks; copied, blocks are Markdown again.
-        handlePaste: (view, event) => {
-          const files = imagesOf(event.clipboardData)
-          if (files.length > 0 && uploadImage) {
-            void addImages(files)
-            return true
-          }
-          const text = event.clipboardData?.getData("text/plain") ?? ""
-          if (event.clipboardData?.getData("text/html") || !looksLikeMarkdown(text)) return false
-          // Code is pasted as it is.
-          if (view.state.selection.$from.parent.type.spec.code) return false
-          const content = markdownToBlocks(text).content ?? []
-          // Words alone go into the line they are pasted in; blocks, as blocks.
-          const [only] = content
-          const inline = content.length === 1 && only?.type === "paragraph"
-          // Markdown trims a paragraph's spaces; words pasted into a line keep theirs.
-          const space = (match: RegExpMatchArray | null) =>
-            match ? [{ type: "text", text: match[0] }] : []
-          const nodes = inline
-            ? [
-                ...space(text.match(/^[ \t]+/)),
-                ...(only.content ?? []),
-                ...space(text.match(/[ \t]+$/)),
-              ]
-            : content
-          try {
-            const fragment = withOwnImages(Fragment.fromJSON(view.state.schema, nodes), isOwnImage)
-            view.dispatch(view.state.tr.replaceSelection(Slice.maxOpen(fragment)).scrollIntoView())
-            return true
-          } catch {
-            return false
-          }
-        },
-        clipboardTextSerializer: (slice) => {
-          const plain = () => slice.content.textBetween(0, slice.content.size, "\n\n", "\n")
-          const json = slice.content.toJSON() as { readonly type: string }[] | null
-          if (!json?.length) return ""
-          const inline = slice.content.firstChild?.isInline === true
-          const blocks = inline ? [{ type: "paragraph", content: json }] : json
-          try {
-            // A slice of list items or cells writes nothing as Markdown alone: its words, then.
-            return blocksToMarkdown({ type: "doc", content: blocks as never }).trimEnd() || plain()
-          } catch {
-            return plain()
-          }
-        },
+  useLayoutEffect(() => {
+    const mount = document.createElement("div")
+    host.current?.append(mount)
+    let made: Editor | null = null
+    const current = () => made
+    // What the editor's own props did before any plugin: pictures dropped and pasted, Markdown
+    // pasted as text, and copying as Markdown.
+    const props: EditorPlugin = {
+      handleDrop: (view, event, _slice, moved) => {
+        const files = imagesOf(event.dataTransfer)
+        if (moved || files.length === 0 || !uploads) return false
+        event.preventDefault()
+        const at = view.posAtCoords({ left: event.clientX, top: event.clientY })
+        void addImagesRef.current(files, at?.pos)
+        return true
       },
-    },
-    [fragment, awareness, types]
-  )
-  editorRef.current = editor
+      // What is pasted or dropped from elsewhere keeps only the artifact's own pictures: the
+      // document could not be saved with any other.
+      transformPasted: (slice) => {
+        const content = withOwnImages(slice.content, isOwnImageRef.current)
+        if (content === slice.content) return slice
+        const open = Slice.maxOpen(content)
+        return new Slice(
+          content,
+          Math.min(slice.openStart, open.openStart),
+          Math.min(slice.openEnd, open.openEnd)
+        )
+      },
+      // Markdown pasted as text becomes its blocks; copied, blocks are Markdown again.
+      handlePaste: (view, event) => {
+        const files = imagesOf(event.clipboardData)
+        if (files.length > 0 && uploads) {
+          void addImagesRef.current(files)
+          return true
+        }
+        const text = event.clipboardData?.getData("text/plain") ?? ""
+        if (event.clipboardData?.getData("text/html") || !looksLikeMarkdown(text)) return false
+        // Code is pasted as it is.
+        if (view.state.selection.$from.parent.type.spec.code) return false
+        const content = markdownToBlocks(text).content ?? []
+        // Words alone go into the line they are pasted in; blocks, as blocks.
+        const [only] = content
+        const inline = content.length === 1 && only?.type === "paragraph"
+        // Markdown trims a paragraph's spaces; words pasted into a line keep theirs.
+        const space = (match: RegExpMatchArray | null) =>
+          match ? [{ type: "text", text: match[0] }] : []
+        const nodes = inline
+          ? [
+              ...space(text.match(/^[ \t]+/)),
+              ...(only.content ?? []),
+              ...space(text.match(/[ \t]+$/)),
+            ]
+          : content
+        try {
+          const parsed = Fragment.fromArray(
+            nodes.map((node) => documentSchema.nodeFromJSON(node as never))
+          )
+          const fragmentOwn = withOwnImages(parsed, isOwnImageRef.current)
+          view.dispatch(view.state.tr.replaceSelection(Slice.maxOpen(fragmentOwn)).scrollIntoView())
+          return true
+        } catch {
+          return false
+        }
+      },
+      clipboardTextSerializer: (slice) => {
+        const plain = () => slice.content.textBetween(0, slice.content.size, "\n\n", "\n")
+        const json = slice.content.toJSON()
+        if (!json.length) return ""
+        const inline = slice.content.firstChild?.isInline === true
+        const blocks = inline ? [{ type: "paragraph", content: json }] : json
+        try {
+          // A slice of list items or cells writes nothing as Markdown alone: its words, then.
+          return blocksToMarkdown({ type: "doc", content: blocks as never }).trimEnd() || plain()
+        } catch {
+          return plain()
+        }
+      },
+    }
+    made = new Editor({
+      mount,
+      fragment,
+      schema: documentSchema,
+      editable: editableRef.current,
+      awareness,
+      attributes: {
+        class: "prose sixb-document sixb-editor",
+        spellcheck: "true",
+        "aria-multiline": "true",
+        role: "textbox",
+      },
+      nodeViews: {
+        callout: reactNodeView(portals, CalloutView),
+        image: reactNodeView(portals, FigureView),
+        taskItem: taskItemView,
+        table: tableView,
+      },
+      plugins: [
+        props,
+        ...documentPlugins({
+          history: historyPlugin(() => current() as Editor),
+          before: [
+            softBreaks,
+            blockShortcuts(() => setLinkRequest((count) => count + 1)),
+            slashCommand(slash, () => types, current),
+            placeholderPlugin(
+              (node, pos, state) => placeholder(state, node, pos, messages),
+              () => current()?.isEditable ?? false
+            ),
+            caretsPlugin(awareness, {
+              render: caret,
+              selection: (user) => ({
+                nodeName: "span",
+                class: "sixb-caret-selection",
+                style: `--caret: ${user.color ?? "#888"}`,
+              }),
+            }),
+          ],
+          base: (rules) => baseKeymap(rules),
+        }),
+      ],
+    })
+    editorRef.current = made
+    setEditor(made)
+    return () => {
+      made?.destroy()
+      mount.remove()
+      editorRef.current = null
+      setEditor(null)
+    }
+  }, [fragment, awareness, types, portals, slash, messages, uploads])
 
   useEffect(() => {
     if (editor && editor.isEditable !== editable) editor.setEditable(editable)
@@ -251,7 +279,7 @@ export function DocumentEditor({
       >
         <div className="sixb-document-page">
           <article className="relative">
-            <EditorContent editor={editor} />
+            <div ref={host} />
             {editor && editable ? (
               <>
                 <BlockHandle editor={editor} types={types} messages={messages} />
@@ -267,6 +295,7 @@ export function DocumentEditor({
         </div>
       </div>
       <SlashMenu store={slash} messages={messages} />
+      <NodeViewPortalsHost portals={portals} />
       {uploadImage ? (
         <input
           ref={picker}
@@ -297,7 +326,7 @@ function imagesOf(data: DataTransfer | null | undefined): File[] {
  */
 function withOwnImages(content: Fragment, own: (src: string) => boolean): Fragment {
   let changed = false
-  const kept: ProseMirrorNode[] = []
+  const kept: Node[] = []
   content.forEach((node) => {
     const shown =
       node.type.name === "image"
@@ -366,8 +395,8 @@ function caret(user: { readonly name?: string; readonly color?: string }): HTMLE
 
 /** What an empty block says it is for, while the caret is in it. */
 function placeholder(
-  editor: Editor,
-  node: ProseMirrorNode,
+  state: EditorState,
+  node: Node,
   pos: number,
   messages: EditorMessages
 ): string {
@@ -375,10 +404,10 @@ function placeholder(
     return pos === 0 ? messages.titlePlaceholder : messages.heading(Number(node.attrs.level))
   }
   if (node.type.name !== "paragraph") return ""
-  const parent = editor.state.doc.resolve(pos).parent.type.name
+  const parent = state.doc.resolve(pos).parent.type.name
   if (parent === "listItem") return messages.listItem
   if (parent === "taskItem") return messages.taskItem
-  if (pos === 0 && editor.state.doc.childCount === 1) return messages.titlePlaceholder
+  if (pos === 0 && state.doc.childCount === 1) return messages.titlePlaceholder
   return messages.placeholder
 }
 
@@ -391,94 +420,50 @@ function looksLikeMarkdown(text: string): boolean {
 }
 
 /**
- * A line break within a paragraph's Markdown, as the Agent writes them: the document page reads
- * it as a space, and so does the editor, while the text keeps it, so the Markdown written back
- * is the same. Code keeps its lines.
- */
-const SoftBreaks = Extension.create({
-  name: "softBreaks",
-  addProseMirrorPlugins() {
-    return [
-      new Plugin<DecorationSet>({
-        state: {
-          init: (_, state) => softBreaks(state.doc),
-          apply: (transaction, set) => (transaction.docChanged ? softBreaks(transaction.doc) : set),
-        },
-        props: {
-          decorations(state) {
-            return this.getState(state)
-          },
-        },
-      }),
-    ]
-  },
-})
-
-function softBreaks(doc: ProseMirrorNode): DecorationSet {
-  const breaks: Decoration[] = []
-  doc.descendants((node, pos) => {
-    if (node.type.spec.code) return false
-    if (!node.isText) return true
-
-    for (const match of (node.text ?? "").matchAll(/\r?\n|\r/g)) {
-      const at = pos + match.index
-      breaks.push(Decoration.inline(at, at + match[0].length, { class: "sixb-soft-break" }))
-    }
-    return false
-  })
-  return DecorationSet.create(doc, breaks)
-}
-
-/**
  * Keys for whole blocks: ⌘D duplicates the one the caret is in, ⌥⇧↑ and ⌥⇧↓ move it, ⌘K opens
  * the link field over the selection.
  */
-const BlockShortcuts = Extension.create<{ readonly onLink: () => void }>({
-  name: "blockShortcuts",
-  addOptions: () => ({ onLink: () => {} }),
-  addKeyboardShortcuts() {
-    const current = () => {
-      const { $from } = this.editor.state.selection
-      if ($from.depth < 1) return null
-      const pos = $from.before(1)
-      const node = this.editor.state.doc.nodeAt(pos)
-      return node ? { node, pos } : null
-    }
-    const move = (by: -1 | 1) => {
-      const at = current()
-      if (!at) return false
-      const index = this.editor.state.doc.resolve(at.pos).index()
-      const sibling = this.editor.state.doc.maybeChild(index + by)
-      if (!sibling) return true
-      const offset = this.editor.state.selection.from - at.pos
-      const target = by === 1 ? at.pos + sibling.nodeSize : at.pos - sibling.nodeSize
-      return this.editor
-        .chain()
-        .command(({ tr }) => {
-          tr.delete(at.pos, at.pos + at.node.nodeSize)
-          tr.insert(target, at.node)
-          return true
-        })
-        .setTextSelection(target + offset)
-        .scrollIntoView()
-        .run()
-    }
-    return {
-      "Mod-d": () => {
-        const at = current()
+function blockShortcuts(onLink: () => void): EditorPlugin {
+  const current = (state: EditorState) => {
+    const { $from } = state.selection
+    if ($from.depth < 1) return null
+    const pos = $from.before(1)
+    const node = state.doc.nodeAt(pos)
+    return node ? { node, pos } : null
+  }
+  const move = (view: import("./core/view").EditorView, by: -1 | 1) => {
+    const at = current(view.state)
+    if (!at) return false
+    const index = view.state.doc.resolve(at.pos).index()
+    const sibling = view.state.doc.maybeChild(index + by)
+    if (!sibling) return true
+    const offset = view.state.selection.from - at.pos
+    const target = by === 1 ? at.pos + sibling.nodeSize : at.pos - sibling.nodeSize
+    const tr = view.state.tr
+    tr.delete(at.pos, at.pos + at.node.nodeSize)
+    tr.insert(target, at.node)
+    const caretAt = Math.min(Math.max(target + offset, 0), tr.doc.content.size)
+    tr.setSelection(import_TextSelection.between(tr.doc.resolve(caretAt), tr.doc.resolve(caretAt)))
+    view.dispatch(tr.scrollIntoView())
+    return true
+  }
+  return {
+    keys: {
+      "Mod-d": (view) => {
+        const at = current(view.state)
         if (!at) return false
-        return this.editor
-          .chain()
-          .insertContentAt(at.pos + at.node.nodeSize, at.node.toJSON())
-          .run()
-      },
-      "Alt-Shift-ArrowUp": () => move(-1),
-      "Alt-Shift-ArrowDown": () => move(1),
-      "Mod-k": () => {
-        if (this.editor.state.selection.empty) return false
-        this.options.onLink()
+        const tr = view.state.tr
+        insertContentAt(at.pos + at.node.nodeSize, at.node)(tr)
+        view.dispatch(tr)
         return true
       },
-    }
-  },
-})
+      "Alt-Shift-ArrowUp": (view) => move(view, -1),
+      "Alt-Shift-ArrowDown": (view) => move(view, 1),
+      "Mod-k": (view) => {
+        if (view.state.selection.empty) return false
+        onLink()
+        return true
+      },
+    },
+  }
+}
