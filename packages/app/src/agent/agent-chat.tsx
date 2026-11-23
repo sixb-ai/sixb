@@ -1,12 +1,10 @@
-import { getAuthSessionOptions, getProjectInfoOptions } from "@sixb/client/hooks"
 import { Button, EmptyState, Toaster } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQueryClient } from "@tanstack/react-query"
 import { MessagesSquare } from "lucide-react"
-import { type ReactNode, useCallback, useEffect, useId, useMemo } from "react"
+import { type ReactNode, useCallback, useId, useMemo } from "react"
 import { ArtifactPeopleContext } from "../artifacts/people"
 import type { ArtifactTarget } from "../artifacts/target"
-import { takeAgentDraft } from "../artifacts/view-context"
 import { ArtifactPanelRoot } from "./artifact-panel"
 import { ComputerOfflineNotice, ThreadPlaceControl } from "./components/computer-place"
 import { ConversationPanel } from "./components/conversation-panel"
@@ -14,7 +12,6 @@ import { SandboxRecovery } from "./components/sandbox-recovery"
 import { SharedThreadNotice } from "./components/shared-thread-notice"
 import { ThreadArtifactsMenu } from "./components/thread-artifacts-menu"
 import { ThreadPeople } from "./components/thread-people"
-import { useComposerInsertion } from "./composer-insertion"
 import {
   type UseAgentConversationInput,
   useAgentConversation,
@@ -92,29 +89,8 @@ export function AgentChat({
     onThreadCreated: onNavigateThread,
     newThreadSandbox,
   })
-  // Words an artifact puts in the input, as comments it asks the Agent to act on.
-  const { insertion, insert, inserted } = useComposerInsertion()
-
-  // What an artifact on its own page asked the Agent before coming here starts the input, when
-  // it was this person, in this project, a moment ago.
   const queries = useQueryClient()
   const threadState = useMemo(() => threadStateStoreFor(queries), [queries])
-  useEffect(() => {
-    let current = true
-    Promise.all([
-      queries.fetchQuery({ ...getProjectInfoOptions(), staleTime: Number.POSITIVE_INFINITY }),
-      queries.fetchQuery({ ...getAuthSessionOptions(), staleTime: Number.POSITIVE_INFINITY }),
-    ])
-      .then(([project, session]) => {
-        const userId = session.authenticated ? session.user.id : null
-        const pending = current ? takeAgentDraft({ userId, projectId: project.id }) : null
-        if (pending) insert(pending)
-      })
-      .catch(() => {})
-    return () => {
-      current = false
-    }
-  }, [insert, queries])
 
   // Each chat has its own toaster, so a toast shows once however many chats are mounted.
   const toasterId = useId()
@@ -162,10 +138,8 @@ export function AgentChat({
       ...conversation.composerProps,
       ...(dictation ? {} : { dictation: undefined }),
       ...(showNewThreadControls ? { newThreadControls: showNewThreadControls } : {}),
-      ...(insertion ? { insertion } : {}),
-      onInserted: inserted,
     }),
-    [conversation.composerProps, dictation, showNewThreadControls, insertion, inserted]
+    [conversation.composerProps, dictation, showNewThreadControls]
   )
 
   let content: ReactNode
@@ -257,7 +231,7 @@ export function AgentChat({
           scopeKey={threadId ?? "draft"}
           routeTarget={artifactTarget}
           onRouteTargetChange={onArtifactTargetChange}
-          {...(readOnly ? {} : { onAgentDraft: insert })}
+          {...(readOnly ? {} : { onAgentDraft: conversation.insertDraft })}
         >
           <div
             data-agent-panel={compact ? "" : undefined}

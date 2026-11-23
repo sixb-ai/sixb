@@ -555,13 +555,17 @@ the answer reads a message, it appears in the transcript where it was read. `onS
 the message goes as its fourth argument; a wrapper that leaves it out still sends it where Enter
 would.
 
+Comments a reader sends to the agent from an artifact's own page open the app's Home, where they
+wait in the composer's input as a chip, ready to send: Home's composer spreads `composerProps`
+from `useAgentConversation`, whether it is the built-in chat or your own.
+
 Before showing the conversation, handle `conversation.agentLoading`, `conversation.agentError`, no
 `conversation.currentAgent` once loaded (the project has no agent), and
 `conversation.threadUnavailable` (the thread was deleted or is not theirs).
 
 | Part | Use it for |
 | --- | --- |
-| `useAgentConversation` | One conversation: messages, the turn, models with `modelChoice`, `selectModel` and `resetModelSelection`, `send`, `stop`, `retry` and `continue`; held calls with `approvals`, `canDecide` and `decide`, and the mode with `approvalMode` and `setApprovalMode` |
+| `useAgentConversation` | One conversation: messages, the turn, models with `modelChoice`, `selectModel` and `resetModelSelection`, `send`, `stop`, `retry` and `continue`; held calls with `approvals`, `canDecide` and `decide`, and the mode with `approvalMode` and `setApprovalMode`; `insertDraft` to add words and context to the input |
 | `Transcript` | The messages, the streaming reply, retry or continue after a run stops early, a card for each call waiting for approval, and a line for the sub-agents of each reply |
 | `AgentMessageBody` | An agent reply's content, drawn as the built-in chat draws it |
 | `AgentToolPart` | One tool call: your `toolViews`, else Sixb's view, else a row to inspect it |
