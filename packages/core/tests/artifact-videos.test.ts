@@ -588,6 +588,33 @@ describe("publishing a video", () => {
     expect(await after({ "media/music.m4a": "other music" })).toEqual(before)
   })
 
+  // Guard proof: drop the `.hyperframes/` line from videoSceneFiles (publish/video.ts); the
+  // republish without HyperFrames' state then renders the intro and the outro again too.
+  test("renders only the changed scene again when a republish drops HyperFrames' own state", async () => {
+    const { publish } = setup()
+    // As a folder HyperFrames worked in holds it, published with the video.
+    const state = {
+      ".hyperframes/history-id": "5f8c5b00-9b01-445a-960a-51c47c14b5ba",
+      ".hyperframes/video-state.json": '{ "version": 1, "pendingChanges": false }',
+    }
+    const before = keysOf((await publish({ ...LAUNCH, ...state })).version.outline)
+
+    // The demo's words changed, then published again by the Agent, which leaves dot folders out.
+    const after = keysOf(
+      (
+        await publish({
+          ...LAUNCH,
+          "scenes/demo.html": scene(
+            "demo",
+            '<video src="media/clip.mp4" muted playsinline></video><p>A calmer demo</p>'
+          ),
+        })
+      ).version.outline
+    )
+
+    expect(after).toEqual({ ...before, demo: expect.not.stringMatching(before.demo ?? "") })
+  })
+
   // Removal proof: drop `data-poster` from what sceneRenderKeys cuts from the root, and moving the
   // poster renders every scene again.
   test("outlines its poster's instant, which renders no scene again", async () => {
