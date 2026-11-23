@@ -478,9 +478,13 @@ describe("fileDigest", () => {
   })
 })
 
-/** A browser's XHR, sending at once and saying it sent the body in three steps. */
+type XhrProgress = { loaded: number; total?: number; lengthComputable?: boolean }
+
+/** A browser's XHR, sending at once and saying it sent the body in the steps it is given. */
 class SendingXhr {
   static sent: SendingXhr[] = []
+  static steps: XhrProgress[] = [{ loaded: 4 }, { loaded: 8 }, { loaded: 12 }]
+  static answer: unknown = { success: true }
   method = ""
   url = ""
   withCredentials = false
@@ -490,7 +494,7 @@ class SendingXhr {
   status = 0
   statusText = ""
   response: Blob | null = null
-  readonly upload: { onprogress: ((event: { loaded: number }) => void) | null } = {
+  readonly upload: { onprogress: ((event: XhrProgress) => void) | null } = {
     onprogress: null,
   }
   onload: (() => void) | null = null
@@ -517,10 +521,10 @@ class SendingXhr {
   send(body: unknown) {
     SendingXhr.sent.push(this)
     this.body = body
-    for (const loaded of [4, 8, 12]) this.upload.onprogress?.({ loaded })
+    for (const step of SendingXhr.steps) this.upload.onprogress?.(step)
     this.status = 200
     this.statusText = "OK"
-    this.response = new Blob([JSON.stringify({ success: true })], { type: "application/json" })
+    this.response = new Blob([JSON.stringify(SendingXhr.answer)], { type: "application/json" })
     this.onload?.()
   }
 }
@@ -530,6 +534,8 @@ async function inBrowser<T>(work: () => Promise<T>): Promise<T> {
   const xhr = Object.getOwnPropertyDescriptor(globalThis, "XMLHttpRequest")
   const originalFetch = globalThis.fetch
   SendingXhr.sent = []
+  SendingXhr.steps = [{ loaded: 4 }, { loaded: 8 }, { loaded: 12 }]
+  SendingXhr.answer = { success: true }
   Object.defineProperty(globalThis, "XMLHttpRequest", {
     configurable: true,
     writable: true,
@@ -609,5 +615,75 @@ describe("uploadFile in a browser", () => {
     )
 
     expect(SendingXhr.sent).toEqual([])
+  })
+
+  // Guard proof: drop `fetch: transport` from the uploadFileRaw call in uploadFileSimple
+  // (`src/file.ts`); the form goes through fetch, and its progress jumps from none to all of it.
+  // Copy the request's content type onto the XHR as well, and the form names a boundary it lacks.
+  test("counts a file sent whole as it is sent, the form's headers in proportion", async () => {
+    const client = createSixbClient({
+      baseUrl: "http://sixb.test/api",
+      auth: { kind: "cookie", csrfToken: () => "csrf_file_1" },
+    })
+    const progress: FileUploadProgress[] = []
+    const file = new Blob(["hello simple"], { type: "text/plain" })
+
+    const fileRef = await inBrowser(() => {
+      // The form is 200 bytes for a 12-byte file: its field headers are sent too.
+      SendingXhr.steps = [
+        { loaded: 50, total: 200, lengthComputable: true },
+        { loaded: 150, total: 200, lengthComputable: true },
+        { loaded: 200, total: 200, lengthComputable: true },
+      ]
+      SendingXhr.answer = {
+        blobId: "blob_simple",
+        digest: "sha256:simple",
+        sizeBytes: 12,
+        fileName: "notes.txt",
+        mediaType: "text/plain",
+        logicalPath: "notes/notes.txt",
+      }
+
+      return uploadFile(file, {
+        client,
+        fileName: "notes.txt",
+        logicalPath: "notes/notes.txt",
+        onProgress: (step) => progress.push(step),
+      })
+    })
+
+    expect(fileRef.blobId).toBe("blob_simple")
+    expect(progress.map((step) => [step.stage, step.loadedBytes, step.totalBytes])).toEqual([
+      ["upload", 0, 12],
+      ["upload", 3, 12],
+      ["upload", 9, 12],
+      ["upload", 12, 12],
+      ["upload", 12, 12],
+    ])
+
+    const [sent] = SendingXhr.sent
+    expect(sent?.method).toBe("POST")
+    expect(sent?.url).toBe("http://sixb.test/api/files")
+    expect(sent?.withCredentials).toBe(true)
+    expect(sent?.headers.get("x-sixb-csrf")).toBe("csrf_file_1")
+
+    // XHR writes the form's boundary itself: the request's would name another one.
+    expect(sent?.headers.has("content-type")).toBe(false)
+    expect(sent?.body).toBeInstanceOf(FormData)
+    const form = sent?.body as FormData
+    expect((form.get("file") as File).name).toBe("notes.txt")
+    expect(await (form.get("file") as File).text()).toBe("hello simple")
+    expect(form.get("logicalPath")).toBe("notes/notes.txt")
+  })
+
+  // Guard proof: drop the configured-fetch check from progressTransport; a shared link's client
+  // sends the form without the grant its fetch stamps.
+  test("keeps a client's own fetch for a file sent whole", async () => {
+    const { client, requests } = createFileUploadClient()
+
+    await inBrowser(() => uploadFile(new Blob(["hello world"]), { client }))
+
+    expect(SendingXhr.sent).toEqual([])
+    expect(requests.map((request) => request.url)).toEqual(["http://sixb.test/api/files"])
   })
 })
