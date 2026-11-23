@@ -889,7 +889,9 @@ const mp4 = await sixb.artifacts.video(artifactId) // { status: "rendering", pro
 - The first ask renders it: ask again every few seconds until it is `ready`. `progress` says how
   many of its segments are done, one per scene and one for the sound, then that they are being
   joined. `{ render: false }` (`?render=false`) reads where it stands without asking:
-  `{ status: "idle" }` until someone asks for it. Over HTTP, `POST /api/artifacts/{id}/versions/{version}/video` answers the same, and
+  `{ status: "idle" }` until someone asks for it. If an export's job was lost, it can say
+  `rendering` until someone asks again: `{ render: true }`, or the app watching the export, does.
+  Over HTTP, `POST /api/artifacts/{id}/versions/{version}/video` answers the same, and
   `GET` on the same path downloads it. From a terminal:
   `sixb artifacts export <id> --output film.mp4`.
 - An [action](../actions/overview.md#use-an-artifact) takes the MP4's `file` from
