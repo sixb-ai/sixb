@@ -2,10 +2,37 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
-## Unreleased
+## 2026-11-24 — Sixb 0.2.8
+
+0.2.8 adds video artifacts: timed HTML scenes over footage, edited in the app on a timeline or by
+their words, and exported to MP4. Every video and sound gets a proxy, a poster and a transcript,
+files reach 2 GiB, and video models generate clips.
 
 ### Highlights
 
+- Make a `video` artifact: a HyperFrames project whose `index.html` hosts timed HTML scenes over
+  the footage, sound and images they play. It plays in the app on its poster, takes comments at an
+  instant, and the Agent makes and checks one with the project's clips.
+- Edit a video live in the app: a timeline of every clip across chapters, an Inspector, the
+  recording's transcript to cut words, silences and filler words, words retyped where they show,
+  several clips moved, split or deleted at once, and edits kept offline.
+- Export a video to MP4 from its header, `sixb artifacts export <id> --output film.mp4` or
+  `sixb.artifacts.video(id)`. The render worker renders again only the scenes that changed.
+- Every video and sound published in an artifact gets a probe, a proxy, a poster, a filmstrip, a
+  waveform, its cuts and a transcript, derived once by the render worker with FFmpeg and read with
+  `sixb.artifacts.media(id, { path })`. Video and audio play in place wherever a file shows.
+- Upload files up to 2 GiB, staged to blob storage with progress, through
+  `/api/files/uploads`, `sixb files upload` and `uploadFile`. A `file` artifact's file may reach 2 GiB, a video's files
+  8 GiB in all.
+- Generate clips with `models.video` and `sixb.models.video.generate()`, or `start()` and `get()`
+  for one that outlives its request; Sixb keeps each clip as soon as it is ready. Transcripts carry
+  the `segments` a model timed and the language it heard.
+- Reach artifacts from an Action's `.writeback()` and `.effects()` with `sixb.artifacts`, as the
+  requester, and refuse a request from them with `ActionValidationError`. `ArtifactViewer` takes
+  `defaultEditing`, `withoutTitle` and `inlineOnPhone`, and the Agent sees the artifact the person
+  has open.
+- A model call whose connection drops, or whose response its provider breaks off, is made again.
+  Anthropic turns thinking off the way each model accepts.
 - The agent's `edit` no longer needs the file read first in the same turn: `old_string` must match
   the file as it is, and the result says when the file holds changes the agent has not seen.
   Several edits of one file in one step all land, where one was lost or the file left torn. `write`
@@ -20,11 +47,29 @@ Sixb packages are versioned independently. Each release entry names the packages
   it `needs_reauthorization` in time instead of failing syncs.
 - The agent runs a step's tool calls in the order the model gave them, so a test it runs after an
   edit in the same step sees the edit. Reads, searches and web lookups still run together.
+- Update a dataset's description, and import `defineMarking` from the browser-safe
+  `@sixb/core/security`.
 
 ### Upgrade notes
 
+- Run the migrations: PostgreSQL `110-video-artifacts` to `115-agent-message-artifact-context`,
+  SQLite `107-video-artifacts` to `112-agent-message-artifact-context`.
+- A render worker now refuses to start without `SIXB_API_PUBLIC_ORIGIN` (or
+  `--api-public-origin`): its sandboxes fetch their files from the API. Set it wherever `render`
+  runs, `sixb worker-group` included.
+- Deriving media and exporting videos needs FFmpeg and HyperFrames in the project's sandboxes, as
+  the Sixb agent image has them. Without them, parts wait with `lacks: ["sandbox_tools"]`.
 - A step's commands and project tools now run one after another: only `read`, `glob`, `grep`,
   `web_search` and `web_fetch` run together.
+
+### Package versions
+
+- `0.2.8`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/app`, `@sixb/ui`, `@sixb/cli`,
+  `@sixb/cli-core`, `@sixb/agent`, `@sixb/orchestrator`, `@sixb/pg`, `@sixb/sqlite`,
+  `@sixb/lake-worker`, `@sixb/agent-worker`, `@sixb/render-worker`, `@sixb/pipeline-worker`,
+  `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`,
+  `@sixb/sandboxes-local`, `@sixb/model-protocols`, `@sixb/anthropic`, `@sixb/azure-ai-foundry`,
+  `@sixb/vercel-ai-gateway`, `@sixb/typesafe`, `@sixb/connector-meta`.
 
 ## 2026-11-22 — Sixb 0.2.7
 
