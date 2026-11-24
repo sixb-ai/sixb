@@ -146,6 +146,7 @@ describe("a command's script", () => {
     )
     cleanups.push(async () => {
       await background.stopAll()
+      await sandbox.destroy()
       rmSync(root, { recursive: true, force: true })
     })
     return async (input: Record<string, unknown>) => {
