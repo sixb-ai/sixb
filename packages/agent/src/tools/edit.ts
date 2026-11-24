@@ -56,48 +56,46 @@ export function createEditTool(
   return {
     ...EDIT_TOOL_SPEC,
     parseInput: parseEditInput,
-    async execute(input, { signal }): Promise<JsonValue> {
+    async execute(input, { signal, callId }): Promise<JsonValue> {
       const handle = await resolveSandbox()
-      return seenFiles.change(async () => {
-        const loaded = await loadSandboxFile(handle, { path: input.path, tool: "edit", signal })
-        if (loaded.kind === "missing") {
-          throw publicError("edit", `'${input.path}' does not exist. Create it with write.`)
-        }
-        const seen = seenFiles.get(loaded.realPath)
-        const stale = seen !== undefined && seen.fingerprint !== loaded.fingerprint
+      const loaded = await loadSandboxFile(handle, { path: input.path, tool: "edit", signal })
+      if (loaded.kind === "missing") {
+        throw publicError("edit", `'${input.path}' does not exist. Create it with write.`)
+      }
+      const seen = seenFiles.get(loaded.realPath, callId)
+      const stale = seen !== undefined && seen.fingerprint !== loaded.fingerprint
 
-        let text: string
-        try {
-          text = new TextDecoder("utf-8", { fatal: true }).decode(loaded.bytes)
-        } catch {
-          throw publicError("edit", `'${input.path}' is not UTF-8 text.`)
-        }
-        const edited = editText(text, {
-          old: input.old_string,
-          new: input.new_string,
-          all: input.replace_all === true,
-        })
-        if (!edited.ok) throw publicError("edit", edited.reason)
-
-        const written = await commitSandboxFile(handle, {
-          path: input.path,
-          loaded,
-          bytes: new TextEncoder().encode(edited.text),
-          tool: "edit",
-          signal,
-        })
-        // The model now knows the file as it saw it plus this diff: all of it only when it saw
-        // it whole, as it was.
-        seenFiles.recordWrite(written.realPath, written.fingerprint, seen?.whole === true && !stale)
-        return {
-          path: input.path,
-          replaced: edited.replaced,
-          diff: edited.diff,
-          added: edited.added,
-          removed: edited.removed,
-          ...(stale ? { note: staleNote(input.path) } : {}),
-        } satisfies EditToolOutput
+      let text: string
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(loaded.bytes)
+      } catch {
+        throw publicError("edit", `'${input.path}' is not UTF-8 text.`)
+      }
+      const edited = editText(text, {
+        old: input.old_string,
+        new: input.new_string,
+        all: input.replace_all === true,
       })
+      if (!edited.ok) throw publicError("edit", edited.reason)
+
+      const written = await commitSandboxFile(handle, {
+        path: input.path,
+        loaded,
+        bytes: new TextEncoder().encode(edited.text),
+        tool: "edit",
+        signal,
+      })
+      // The model now knows the file as it saw it plus this diff: all of it only when it saw
+      // it whole, as it was.
+      seenFiles.recordWrite(written.realPath, written.fingerprint, seen?.whole === true && !stale)
+      return {
+        path: input.path,
+        replaced: edited.replaced,
+        diff: edited.diff,
+        added: edited.added,
+        removed: edited.removed,
+        ...(stale ? { note: staleNote(input.path) } : {}),
+      } satisfies EditToolOutput
     },
     errorText: agentToolErrorText,
   }

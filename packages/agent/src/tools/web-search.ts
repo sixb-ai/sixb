@@ -53,6 +53,7 @@ export function createWebSearchTool(input: {
 
   return {
     ...WEB_SEARCH_TOOL_SPEC,
+    readOnly: true,
     parseInput: parseWebSearchInput,
     async execute({ query }, { signal }): Promise<JsonValue> {
       let found: readonly WebSearchHit[]

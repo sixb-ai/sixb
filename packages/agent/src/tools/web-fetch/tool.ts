@@ -145,6 +145,7 @@ export function createWebFetchTool(options: WebFetchToolOptions): ModelTool<WebF
 
   return {
     ...WEB_FETCH_TOOL_SPEC,
+    readOnly: true,
     parseInput: parseWebFetchInput,
     async execute({ url, question }, context): Promise<JsonValue> {
       const requested = new URL(url)

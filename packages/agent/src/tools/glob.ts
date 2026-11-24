@@ -54,6 +54,7 @@ export function createGlobTool(
 ): ModelTool<GlobToolInput> {
   return {
     ...GLOB_TOOL_SPEC,
+    readOnly: true,
     parseInput: parseGlobInput,
     async execute(input, { signal }): Promise<JsonValue> {
       const handle = await resolveSandbox()

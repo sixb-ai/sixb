@@ -18,6 +18,13 @@ Sixb packages are versioned independently. Each release entry names the packages
   reads included) with the person's user token, and `account` names the ad account, its business,
   currency and time zone. The connection carries the user token's ~60-day expiry, so Sixb marks
   it `needs_reauthorization` in time instead of failing syncs.
+- The agent runs a step's tool calls in the order the model gave them, so a test it runs after an
+  edit in the same step sees the edit. Reads, searches and web lookups still run together.
+
+### Upgrade notes
+
+- A step's commands and project tools now run one after another: only `read`, `glob`, `grep`,
+  `web_search` and `web_fetch` run together.
 
 ## 2026-11-22 — Sixb 0.2.7
 

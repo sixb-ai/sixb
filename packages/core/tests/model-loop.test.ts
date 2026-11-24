@@ -925,12 +925,13 @@ describe("runModelLoop", () => {
     expect(calls).toBe(0)
   })
 
-  test("executes parallel tools but preserves model call order", async () => {
+  test("executes parallel read-only tools but preserves model call order", async () => {
     const releases = new Map<string, () => void>()
     const bothStarted = Promise.withResolvers<void>()
     const completion: string[] = []
     const parallelTool: ModelTool<{ value: string }> = {
       ...echo,
+      readOnly: true,
       async execute(input) {
         await new Promise<void>((resolve) => {
           releases.set(input.value, resolve)
@@ -981,6 +982,107 @@ describe("runModelLoop", () => {
       expect.objectContaining({ toolCallId: "first" }),
       expect.objectContaining({ toolCallId: "second" }),
     ])
+  })
+
+  // Reproduce: run every call of the step at once (Promise.all over localCalls); the change then
+  // starts beside the reads, and the read after it starts before it ends.
+  test("runs a step's calls in order, its read-only ones together", async () => {
+    const log: string[] = []
+    const bothRead = Promise.withResolvers<void>()
+    let reading = 0
+    const tool = (name: string, readOnly: boolean): ModelTool<{ value: string }> => ({
+      ...echo,
+      name,
+      readOnly,
+      async execute(input) {
+        log.push(`start ${input.value}`)
+        // The first two reads end only once both started: they run together.
+        if (readOnly && ++reading <= 2) {
+          if (reading === 2) bothRead.resolve()
+          await bothRead.promise
+        }
+        log.push(`end ${input.value}`)
+        return { echoed: input.value }
+      },
+    })
+    const call = (toolName: string, value: string): LanguageModelStreamEvent => ({
+      type: "tool-call",
+      toolCallId: value,
+      toolName,
+      input: JSON.stringify({ value }),
+    })
+
+    const result = await runModelLoop({
+      model: modelFromCalls([
+        [
+          { type: "stream-start" },
+          call("look", "a"),
+          call("look", "b"),
+          call("change", "c"),
+          call("look", "d"),
+          finish("tool-calls"),
+        ],
+        [{ type: "stream-start" }, finish()],
+      ]),
+      messages: [{ role: "user", content: [{ type: "text", text: "Go" }] }],
+      tools: [tool("look", true), tool("change", false)],
+      maxSteps: 3,
+      signal: new AbortController().signal,
+    })
+
+    expect(log).toEqual([
+      "start a",
+      "start b",
+      "end a",
+      "end b",
+      "start c",
+      "end c",
+      "start d",
+      "end d",
+    ])
+    expect(
+      result.steps[0]?.content.flatMap((part) =>
+        part.type === "tool-result" ? [part.toolCallId] : []
+      )
+    ).toEqual(["a", "b", "c", "d"])
+  })
+
+  // Reproduce: drop the `signal.aborted` check at the top of executeToolCall; the second change
+  // then runs after the run stopped.
+  test("starts no call once the run has stopped", async () => {
+    const controller = new AbortController()
+    const ran: string[] = []
+    const change: ModelTool<{ value: string }> = {
+      ...echo,
+      async execute(input) {
+        ran.push(input.value)
+        controller.abort()
+        return { echoed: input.value }
+      },
+    }
+
+    const result = await runModelLoop({
+      model: modelFromCalls([
+        [
+          { type: "stream-start" },
+          { type: "tool-call", toolCallId: "a", toolName: "echo", input: '{"value":"a"}' },
+          { type: "tool-call", toolCallId: "b", toolName: "echo", input: '{"value":"b"}' },
+          finish("tool-calls"),
+        ],
+      ]),
+      messages: [{ role: "user", content: [{ type: "text", text: "Go" }] }],
+      tools: [change],
+      maxSteps: 3,
+      signal: controller.signal,
+    })
+
+    expect(ran).toEqual(["a"])
+    expect(result.status).toBe("aborted")
+    expect(result.steps[0]?.content.at(-1)).toMatchObject({
+      type: "tool-result",
+      toolCallId: "b",
+      output: { type: "error-text", value: "The run stopped before this call started." },
+    })
   })
 
   // Guard proof: drop the `pauseAfterStep` check from the tool branch of `runModelLoop`; the

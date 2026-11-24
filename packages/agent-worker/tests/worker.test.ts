@@ -5072,6 +5072,46 @@ describe("AgentWorker", () => {
     }
   })
 
+  // Removal proof: drop `readOnly: true` from one of these tools, or `...tool` from a wrapper of
+  // the turn's tools; the list then lacks it.
+  test("runs only read, glob, grep, web_search and web_fetch beside other calls", async () => {
+    const search: WebSearchModel = {
+      providerId: "search",
+      modelId: "engine",
+      definition: { kind: "web-search", providerId: "search", modelId: "engine" },
+      search: async () => ({ results: [] }),
+    }
+    const model = toolThenAnswerModel()
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [model], webSearch: [search] },
+    })
+    const run = await reserveRequestedRun(sixb, await requestAgent(sixb, { text: "Hello" }))
+    const environment = await createConversationAgentEnvironment(
+      await withConversationSandbox({
+        session: await runSessionOf(sixb, run),
+        context: await buildAgentWorkerContext(sixb),
+        plan: executionPlanFor(sixb),
+        run,
+      })
+    )
+
+    try {
+      const { tools } = environment.turnContext
+      expect(tools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining(["edit", "write", "bash", "wait", "stop"])
+      )
+      expect(tools.filter((tool) => tool.readOnly).map((tool) => tool.name)).toEqual([
+        "read",
+        "glob",
+        "grep",
+        "web_search",
+        "web_fetch",
+      ])
+    } finally {
+      await environment.dispose()
+    }
+  })
+
   // Regression proof: drop the web_fetch tool from startAgentEnvironment; the model's call is
   // then refused as unknown. Leave web_fetch out of UNSAVED_TOOLS and store no file in its
   // execute; the part then names no file, and the next turn's sandbox lacks the page. Pass the
@@ -10856,9 +10896,8 @@ describe("AgentWorker", () => {
     },
   ])("stores nothing for a spawn refused $name", async ({ spawns, refusal }) => {
     // Removal proofs: drop admissionOf from SubagentCoordinator.spawn, and the refused spawn's file
-    // is stored though no child gets it; admit outside admitInTurn, and two spawns of one step both
-    // pass the check before either is admitted; read the files before admitInTurn, and the
-    // refused spawn reads its file.
+    // is stored though no child gets it; read the files before admissionOf, and the refused spawn
+    // reads its file.
     const parentCalls: LanguageModelRequest[] = []
     const childModel = new WorkerTestModel({
       providerId: "child-provider",

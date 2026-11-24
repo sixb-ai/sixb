@@ -13,6 +13,11 @@ export interface ModelTool<TInput = unknown, TOutput extends JsonValue = JsonVal
   readonly inputSchema: JsonObject
   /** Hold the model's arguments to `inputSchema` where the provider can (`ModelToolSpecification`). */
   readonly strict?: boolean
+  /**
+   * Its calls change nothing another call of the step reads, so they run together with the
+   * read-only calls next to them. Every other call runs alone, in the order the model gave it.
+   */
+  readonly readOnly?: boolean
   parseInput(value: unknown): TInput
   execute(input: TInput, context: ModelToolExecutionContext): Promise<TOutput>
   /** Project a durable output into provider-safe model content without changing the stored result. */
