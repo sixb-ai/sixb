@@ -1,6 +1,6 @@
 {
   "name": "@sixb/render-worker",
-  "version": "0.2.8",
+  "version": "0.2.10",
   "description": "Worker that renders Sixb artifacts in a browser, in a sandbox",
   "keywords": [
     "sixb",

@@ -1,6 +1,6 @@
 {
   "name": "@sixb/sqlite",
-  "version": "0.2.8",
+  "version": "0.2.10",
   "description": "SQLite storage provider for Sixb",
   "keywords": [
     "sixb",

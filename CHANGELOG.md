@@ -2,12 +2,18 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
-## 2026-11-24 — Sixb 0.2.9
+## 2026-11-25 — Sixb 0.2.10
 
-0.2.9 fixes a command the Agent runs stopping itself when it stops processes by name.
+0.2.10 creates a sync's dataset on its first run even when there is nothing to read, and fixes a
+command the Agent runs stopping itself when it stops processes by name.
 
 ### Highlights
 
+- A sync's first run creates its dataset even when the source returns no rows, so pipelines that
+  read it find an empty dataset instead of failing with `has no committed version`. While no
+  account is connected to an OAuth connector, a schedule or `sixb.syncs.request()` starts one run
+  that reads nothing, so the dataset exists before anyone connects. Later runs with no rows still
+  commit nothing.
 - A command the agent runs no longer stops itself when it stops processes by name. On Linux,
   `pkill -f "sixb dev"` matched the agent's own shell, whose arguments held the command; the
   command now reaches its shell in the environment. Stopping a background command also stops a
@@ -16,10 +22,15 @@ Sixb packages are versioned independently. Each release entry names the packages
 ### Upgrade notes
 
 - No migration. Upgrade the packages below together.
+- `@sixb/agent` and `@sixb/agent-worker` `0.2.9` were published to `next` only and never
+  promoted: skip them for `0.2.10`.
 
 ### Package versions
 
-- `0.2.9`: `@sixb/agent`, `@sixb/agent-worker`, `@sixb/cli`.
+- `0.2.10`: `@sixb/core`, `@sixb/server`, `@sixb/cli`, `@sixb/agent`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/sqlite`, `@sixb/lake-worker`, `@sixb/agent-worker`, `@sixb/render-worker`,
+  `@sixb/pipeline-worker`, `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`,
+  `@sixb/workflow-worker`.
 
 ## 2026-11-24 — Sixb 0.2.8
 
