@@ -4,9 +4,10 @@ import {
   type ConnectorOAuth2Authentication,
   type ConnectorOAuthCredentials,
   ConnectorOAuthError,
+  type OAuthConnectorAuthorizationContext,
 } from "@sixb/core"
 import { assertNonEmpty, isThrottlingError, parseMetaBody, parseMetaGraphError } from "./http"
-import type { MetaOAuthConnectorOptions } from "./types/options"
+import type { MetaAdAccountOAuthConnectorOptions, MetaOAuthConnectorOptions } from "./types/options"
 
 const FACEBOOK_DIALOG_HOST = "https://www.facebook.com"
 const PAGE_FIELDS = "id,name,access_token"
@@ -26,6 +27,9 @@ type MetaGrantPage = {
   readonly instagramUsername?: string
 }
 
+/** Facebook Login options shared by Pages and ad accounts: the app and its login dialog. */
+type FacebookLoginOptions = MetaOAuthConnectorOptions | MetaAdAccountOAuthConnectorOptions
+
 export type OAuthOperation =
   | "code exchange"
   | "token exchange"
@@ -33,6 +37,7 @@ export type OAuthOperation =
   | "permissions read"
   | "Pages read"
   | "Instagram accounts read"
+  | "ad accounts read"
   | "token refresh"
   | "revoke"
 
@@ -44,7 +49,7 @@ export interface MetaOAuthEndpoints {
 }
 
 export function createMetaAuthentication(
-  options: MetaOAuthConnectorOptions,
+  options: FacebookLoginOptions,
   endpoints: MetaOAuthEndpoints
 ): ConnectorOAuth2Authentication {
   assertNonEmpty(options.appId, "appId")
@@ -67,40 +72,12 @@ export function createMetaAuthentication(
     },
 
     async exchangeCode(context, input) {
-      const exchanged = await graphRequest(context, options, endpoints, "code exchange", {
-        method: "POST",
-        path: "oauth/access_token",
-        form: {
-          client_id: options.appId,
-          client_secret: options.appSecret,
-          redirect_uri: context.redirectUri,
-          code: input.code,
-        },
-      })
-      const longLived = await graphRequest(context, options, endpoints, "token exchange", {
-        method: "POST",
-        path: "oauth/access_token",
-        form: {
-          grant_type: "fb_exchange_token",
-          client_id: options.appId,
-          client_secret: options.appSecret,
-          fb_exchange_token: accessTokenOf(exchanged, "code exchange"),
-        },
-      })
-      const accessToken = accessTokenOf(longLived, "token exchange")
-      const user = await graphRequest(context, options, endpoints, "user read", {
-        method: "GET",
-        path: "me",
-        query: { fields: "id" },
-        accessToken,
-      })
-      if (!nonEmptyString(user.id)) {
-        throw new ConnectorOAuthError(
-          "ambiguous",
-          "[SixbMeta] Facebook returned no user id for the signed-in account."
-        )
-      }
-
+      const { accessToken, userId } = await exchangeFacebookLoginCode(
+        context,
+        options,
+        endpoints,
+        input.code
+      )
       const scopes = await readGrantedScopes(context, options, endpoints, accessToken)
       const pages = await readGrantedPages(context, options, endpoints, {
         accessToken,
@@ -119,7 +96,7 @@ export function createMetaAuthentication(
         accessToken,
         tokenType: "Bearer",
         ...(scopes === undefined ? {} : { scopes }),
-        authorizationContext: { userId: user.id, pages },
+        authorizationContext: { userId, pages },
       }
     },
 
@@ -171,7 +148,58 @@ export function discoverMetaPages(
   }))
 }
 
-function loginParameter(options: MetaOAuthConnectorOptions): {
+/**
+ * Exchange a Facebook Login code for the long-lived (~60-day) user token and the user it belongs
+ * to. `expiresIn` is the token's remaining life in seconds, when Facebook states one.
+ */
+export async function exchangeFacebookLoginCode(
+  context: OAuthConnectorAuthorizationContext,
+  options: FacebookLoginOptions,
+  endpoints: MetaOAuthEndpoints,
+  code: string
+): Promise<{ readonly accessToken: string; readonly userId: string; readonly expiresIn?: number }> {
+  const exchanged = await graphRequest(context, options, endpoints, "code exchange", {
+    method: "POST",
+    path: "oauth/access_token",
+    form: {
+      client_id: options.appId,
+      client_secret: options.appSecret,
+      redirect_uri: context.redirectUri,
+      code,
+    },
+  })
+  const longLived = await graphRequest(context, options, endpoints, "token exchange", {
+    method: "POST",
+    path: "oauth/access_token",
+    form: {
+      grant_type: "fb_exchange_token",
+      client_id: options.appId,
+      client_secret: options.appSecret,
+      fb_exchange_token: accessTokenOf(exchanged, "code exchange"),
+    },
+  })
+  const accessToken = accessTokenOf(longLived, "token exchange")
+  const user = await graphRequest(context, options, endpoints, "user read", {
+    method: "GET",
+    path: "me",
+    query: { fields: "id" },
+    accessToken,
+  })
+  if (!nonEmptyString(user.id)) {
+    throw new ConnectorOAuthError(
+      "ambiguous",
+      "[SixbMeta] Facebook returned no user id for the signed-in account."
+    )
+  }
+  const expiresIn = Number(longLived.expires_in)
+  return {
+    accessToken,
+    userId: user.id,
+    ...(Number.isFinite(expiresIn) && expiresIn > 0 ? { expiresIn } : {}),
+  }
+}
+
+function loginParameter(options: FacebookLoginOptions): {
   readonly name: "config_id" | "scope"
   readonly value: string
 } {
@@ -197,7 +225,7 @@ function loginParameter(options: MetaOAuthConnectorOptions): {
 
 async function readGrantedPages(
   context: ConnectorContext,
-  options: MetaOAuthConnectorOptions,
+  options: FacebookLoginOptions,
   endpoints: MetaOAuthEndpoints,
   grant: { readonly accessToken: string; readonly instagram: boolean }
 ): Promise<Record<string, MetaGrantPage>> {
@@ -230,9 +258,9 @@ async function readGrantedPages(
   )
 }
 
-async function readGrantedScopes(
+export async function readGrantedScopes(
   context: ConnectorContext,
-  options: MetaOAuthConnectorOptions,
+  options: FacebookLoginOptions,
   endpoints: MetaOAuthEndpoints,
   accessToken: string
 ): Promise<readonly string[] | undefined> {
@@ -386,6 +414,12 @@ export async function graphRequest(
     )
   }
   return body
+}
+
+/** Whether Graph refused a sign-in request for a missing permission (10, or 200–299). */
+export function isGraphPermissionError(error: unknown): boolean {
+  const code = error instanceof MetaOAuthRequestError ? error.graphCode : undefined
+  return code === 10 || (code !== undefined && code >= 200 && code < 300)
 }
 
 export function accessTokenOf(body: Record<string, unknown>, operation: OAuthOperation): string {

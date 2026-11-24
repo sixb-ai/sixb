@@ -29,7 +29,9 @@ export type {
   MetaBatchSuccess,
 } from "./batch"
 export type {
+  MetaAdAccountClient,
   MetaClient,
+  MetaConnectedAdAccount,
   MetaConnectedInstagramAccount,
   MetaConnectedPage,
   MetaInstagramAccountClient,
@@ -68,6 +70,7 @@ export type {
   StoriesListOptions,
 } from "./instagram"
 export type {
+  MetaAdAccountOAuthConnectorOptions,
   MetaConnectorOptions,
   MetaInstagramOAuthConnectorOptions,
   MetaOAuthConnectorOptions,

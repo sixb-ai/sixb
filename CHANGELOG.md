@@ -11,6 +11,13 @@ Sixb packages are versioned independently. Each release entry names the packages
   Several edits of one file in one step all land, where one was lost or the file left torn. `write`
   replaces an existing file only once the agent has read every line of it as it is now, not just
   its first lines.
+- Connect Meta ad accounts through Facebook Login with `@sixb/connector-meta`'s
+  `meta({ appId, appSecret, configId, accounts: "ads" })`: a person's own ad accounts, and those of
+  other business portfolios the person can advertise on, which the agency's portfolio cannot
+  reach. One connection per ad account; its client keeps `ads.account()` and `batch` (Lead Ads
+  reads included) with the person's user token, and `account` names the ad account, its business,
+  currency and time zone. The connection carries the user token's ~60-day expiry, so Sixb marks
+  it `needs_reauthorization` in time instead of failing syncs.
 
 ## 2026-11-22 — Sixb 0.2.7
 
