@@ -12,31 +12,39 @@ const COMMAND_TIMEOUT_MS = 30_000
  */
 const CHUNK_CHARACTERS = 96 * 1024
 
-/** What the model last saw of a file: one version of it, all of it or the start of it. */
+/** What the model knows of a file: the version it last saw, and whether it saw every line. */
 export interface SeenFile {
   readonly fingerprint: string
-  /** It saw every line: in one read, or in reads that follow on from line 1 to the last. */
   readonly whole: boolean
-  /** While not whole, the last line it saw with no gap from line 1. */
-  readonly through: number
 }
 
 /**
- * What a run's model has seen of each file, by real path, as `read` showed it or `edit` and
- * `write` left it; and the queue those two take turns in.
+ * What a run's model has seen of each file, by real path: the pages `read` showed it, and the
+ * versions `edit` and `write` left.
  *
  * `write` replaces an existing file only when the model saw all of it as it is now, so it never
  * drops lines the model was not shown. `edit` needs no read, since `old_string` must match the
  * file as it is, but says so when the file is not the version the model last saw.
+ *
+ * The model reads a step's results at its next step, so a call never counts the reads of its own.
  */
 export class SeenFiles {
-  readonly #files = new Map<string, SeenFile>()
-  /** Each read by its tool call, for the context guard to say when it cut one. */
-  readonly #reads = new Map<string, SeenRead>()
-  #queue: Promise<unknown> = Promise.resolve()
+  /** By real path, oldest first: the last `edit` or `write`, then the reads since. */
+  readonly #files = new Map<string, Seen[]>()
+  /** Each read's page by its tool call, for the context guard to say when it cut one. */
+  readonly #pages = new Map<string, SeenPage>()
 
-  get(realPath: string): SeenFile | undefined {
-    return this.#files.get(realPath)
+  /** What the model knew of the file when it made the calls of `step`. */
+  get(realPath: string, step: string): SeenFile | undefined {
+    const known = (this.#files.get(realPath) ?? []).filter(
+      (seen) => seen.kind === "write" || seen.step !== step
+    )
+    const latest = known.at(-1)
+    if (latest === undefined) return undefined
+
+    const version = known.filter((seen) => seen.fingerprint === latest.fingerprint)
+    const written = version.some((seen) => seen.kind === "write" && seen.whole)
+    return { fingerprint: latest.fingerprint, whole: written || readWhole(version) }
   }
 
   /** `read` showed lines `from` to `to` of this version, the file's last line among them if `end`. */
@@ -44,74 +52,57 @@ export class SeenFiles {
     realPath: string,
     fingerprint: string,
     page: { readonly from: number; readonly to: number; readonly end: boolean },
-    toolCallId?: string
+    call: { readonly step: string; readonly toolCallId: string }
   ): void {
-    const seen = this.#files.get(realPath)
-    const before = seen?.fingerprint === fingerprint ? seen : undefined
-    if (toolCallId !== undefined) {
-      this.#reads.set(toolCallId, { realPath, fingerprint, from: page.from, before })
-    }
-    if (before?.whole) return
-
-    this.#files.set(realPath, followOn(fingerprint, before, page))
+    const seen: SeenPage = { kind: "read", fingerprint, step: call.step, ...page }
+    this.#pages.set(call.toolCallId, seen)
+    this.#files.set(realPath, [...(this.#files.get(realPath) ?? []), seen])
   }
 
-  /**
-   * The context guard cut what a read returned before the model read it: it is shown the file
-   * only up to `shownThrough`. What that read recorded becomes what the model really saw, so a
-   * `write` still needs the rest read first.
-   */
+  /** The context guard cut a read's page before the model read it, after `shownThrough`. */
   recordCut(toolCallId: string, shownThrough: number): void {
-    const read = this.#reads.get(toolCallId)
-    if (read === undefined) return
+    const page = this.#pages.get(toolCallId)
+    if (page === undefined) return
 
-    // Seen whole before this read, or since replaced by another version: nothing to take back.
-    if (read.before?.whole) return
-    if (this.#files.get(read.realPath)?.fingerprint !== read.fingerprint) return
-
-    const page = { from: read.from, to: shownThrough, end: false }
-    this.#files.set(read.realPath, followOn(read.fingerprint, read.before, page))
+    page.to = Math.min(page.to, shownThrough)
+    page.end = false
   }
 
   /** `edit` or `write` left this version: the model knows all of it when `whole`. */
   recordWrite(realPath: string, fingerprint: string, whole: boolean): void {
-    this.#files.set(realPath, { fingerprint, whole, through: 0 })
-  }
-
-  /**
-   * Run a change once those queued before it have settled. A step's tool calls run at once, and
-   * the commit's check that a file is unchanged is not atomic: two edits of one file both passed
-   * it, and the second write lost the first edit or left the file torn. The queue is the run's:
-   * a sub-agent working in its parent's workspace has its own.
-   */
-  change<T>(task: () => Promise<T>): Promise<T> {
-    const result = this.#queue.then(task)
-    this.#queue = result.catch(() => {})
-    return result
+    this.#files.set(realPath, [{ kind: "write", fingerprint, whole }])
   }
 }
 
-/** A read as `SeenFiles` recorded it, with what the model had seen of that version before it. */
-interface SeenRead {
-  readonly realPath: string
+type Seen =
+  | { readonly kind: "write"; readonly fingerprint: string; readonly whole: boolean }
+  | SeenPage
+
+/** A page `read` showed: lines `from` to `to`, the file's last line among them if `end`. */
+interface SeenPage {
+  readonly kind: "read"
   readonly fingerprint: string
+  /** The model call whose step made the read. */
+  readonly step: string
   readonly from: number
-  readonly before: SeenFile | undefined
+  to: number
+  end: boolean
 }
 
-/** What the model has seen of a version once a page of it follows what it saw `before`. */
-function followOn(
-  fingerprint: string,
-  before: SeenFile | undefined,
-  page: { readonly from: number; readonly to: number; readonly end: boolean }
-): SeenFile {
-  const through = before?.through ?? 0
-  const follows = page.from <= through + 1
-  return {
-    fingerprint,
-    whole: follows && page.end,
-    through: follows ? Math.max(through, page.to) : through,
+/** Whether the pages, in any order, cover a version from line 1 to its last line. */
+function readWhole(seen: readonly Seen[]): boolean {
+  const pages = seen
+    .filter((page): page is SeenPage => page.kind === "read")
+    .sort((a, b) => a.from - b.from)
+  const last = pages.find((page) => page.end)?.to
+  if (last === undefined) return false
+
+  let through = 0
+  for (const page of pages) {
+    if (page.from > through + 1) break
+    through = Math.max(through, page.to)
   }
+  return through >= last
 }
 
 export type LoadedSandboxFile =

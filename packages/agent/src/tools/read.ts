@@ -75,7 +75,7 @@ export function createReadTool(
     ...READ_TOOL_SPEC,
     readOnly: true,
     parseInput: parseReadToolInput,
-    async execute(input, { signal, toolCallId }): Promise<JsonValue> {
+    async execute(input, { signal, callId, toolCallId }): Promise<JsonValue> {
       const path = normalizePath(input.path)
       const offset = positiveInteger(input.offset, 1, "offset")
       const limit = Math.min(positiveInteger(input.limit, DEFAULT_LIMIT, "limit"), DEFAULT_LIMIT)
@@ -130,7 +130,7 @@ export function createReadTool(
       const endLine = offset + page.lineCount - 1
       if (isFingerprint(first) && second) {
         const seenPage = { from: offset, to: endLine, end: !page.truncated }
-        seenFiles?.recordRead(second, first, seenPage, toolCallId)
+        seenFiles?.recordRead(second, first, seenPage, { step: callId, toolCallId })
       }
       return {
         path,

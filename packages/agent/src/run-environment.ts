@@ -980,7 +980,7 @@ async function startAgentEnvironment(
       console.error("[SixbAgent] Could not stop the run's background commands:", error)
     })
   }
-  // One per run: what its model saw of each file, and the queue `edit` and `write` take turns in.
+  // One per run: what its model saw of each file.
   const seenFiles = new SeenFiles()
   appendBuiltInTool(tools, createReadTool(resolveSandbox, seenFiles, fileViewer))
   // As agentModelToolSpecs advertises them.

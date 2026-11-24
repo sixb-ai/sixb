@@ -51,7 +51,7 @@ export function createWriteTool(
   return {
     ...WRITE_TOOL_SPEC,
     parseInput: parseWriteInput,
-    async execute(input, { signal }): Promise<JsonValue> {
+    async execute(input, { signal, callId }): Promise<JsonValue> {
       const bytes = new TextEncoder().encode(input.content)
       if (bytes.byteLength > MAX_EDITED_FILE_BYTES) {
         throw publicError(
@@ -60,27 +60,25 @@ export function createWriteTool(
         )
       }
       const handle = await resolveSandbox()
-      return seenFiles.change(async () => {
-        const loaded = await loadSandboxFile(handle, { path: input.path, tool: "write", signal })
-        if (loaded.kind === "file") {
-          assertSeenWhole(seenFiles.get(loaded.realPath), loaded.fingerprint, input.path)
-        }
+      const loaded = await loadSandboxFile(handle, { path: input.path, tool: "write", signal })
+      if (loaded.kind === "file") {
+        assertSeenWhole(seenFiles.get(loaded.realPath, callId), loaded.fingerprint, input.path)
+      }
 
-        const written = await commitSandboxFile(handle, {
-          path: input.path,
-          loaded,
-          bytes,
-          tool: "write",
-          signal,
-        })
-        seenFiles.recordWrite(written.realPath, written.fingerprint, true)
-        return {
-          path: input.path,
-          created: loaded.kind === "missing",
-          lines: lineCount(input.content),
-          bytes: bytes.byteLength,
-        } satisfies WriteToolOutput
+      const written = await commitSandboxFile(handle, {
+        path: input.path,
+        loaded,
+        bytes,
+        tool: "write",
+        signal,
       })
+      seenFiles.recordWrite(written.realPath, written.fingerprint, true)
+      return {
+        path: input.path,
+        created: loaded.kind === "missing",
+        lines: lineCount(input.content),
+        bytes: bytes.byteLength,
+      } satisfies WriteToolOutput
     },
     errorText: agentToolErrorText,
   }

@@ -56,21 +56,18 @@ describe("edit", () => {
     expect(await failure(write({ path: "app.ts", content: "lost\n" }))).toBe(notSeenWhole("app.ts"))
   })
 
-  // Reproduce: run edit's body outside seenFiles.change. Both edits then pass the commit's check,
-  // and one is lost or the file left torn: on this sandbox, every time.
-  test("two edits of one file in one step both land", async () => {
-    const { root, sandbox, read, edit } = await harness()
-    await writeFile(join(root, "pr.ts"), 'prop("state")\nprop("headRef")\n')
-    await read({ path: "pr.ts" })
+  // Reproduce: let SeenFiles.get count the reads of the step asking. The edit made in the same
+  // step as a read of the changed file then says nothing of changes the model has not seen.
+  test("says so after a read the model has not read yet", async () => {
+    const { root, read, edit } = await harness()
+    await writeFile(join(root, "app.ts"), "const retries = 3\nconst delay = 1\n")
+    await read({ path: "app.ts" })
+    await writeFile(join(root, "app.ts"), "const retries = 3\nconst delay = 2\n")
 
-    const results = await Promise.all([
-      edit({ path: "pr.ts", old_string: '"state"', new_string: '"status"' }),
-      edit({ path: "pr.ts", old_string: '"headRef"', new_string: '"headBranch"' }),
-    ])
-
-    expect(await readFile(join(root, "pr.ts"), "utf8")).toBe('prop("status")\nprop("headBranch")\n')
-    expect(sandbox.mostRunning).toBe(1)
-    for (const result of results) expect(result).not.toHaveProperty("note")
+    await read({ path: "app.ts" }, { step: "step" })
+    expect(
+      await edit({ path: "app.ts", old_string: "= 3", new_string: "= 5" }, { step: "step" })
+    ).toHaveProperty("note")
   })
 
   // Reproduce: drop the expected fingerprint from the commit, and the edit writes over the change;
@@ -152,20 +149,19 @@ describe("write", () => {
     )
   })
 
-  // Reproduce: run write's body outside seenFiles.change. It then loads the file beside the edit,
-  // and the two commits race.
-  test("takes its turn after an edit of the same step", async () => {
-    const { root, sandbox, read, edit, write } = await harness()
-    await writeFile(join(root, "app.ts"), "const retries = 3\n")
-    await read({ path: "app.ts" })
+  // Reproduce: let SeenFiles.get count the reads of the step asking. A write made beside a read of
+  // the file, so before the model saw it, then replaces all 148 lines.
+  test("never counts a read of the same step", async () => {
+    const { root, read, write } = await harness()
+    const page = Array.from({ length: 148 }, (_, index) => `line ${index + 1}`).join("\n")
+    await writeFile(join(root, "page.tsx"), `${page}\n`)
 
-    await Promise.all([
-      edit({ path: "app.ts", old_string: "3", new_string: "5" }),
-      write({ path: "app.ts", content: "const attempts = 5\n" }),
-    ])
-
-    expect(await readFile(join(root, "app.ts"), "utf8")).toBe("const attempts = 5\n")
-    expect(sandbox.mostRunning).toBe(1)
+    await read({ path: "page.tsx" }, { step: "step" })
+    expect(await failure(write({ path: "page.tsx", content: "new\n" }, { step: "step" }))).toBe(
+      notSeenWhole("page.tsx")
+    )
+    // At the next step the model has read it.
+    expect(await write({ path: "page.tsx", content: "new\n" })).toMatchObject({ created: false })
   })
 
   // Reproduce: record every read as whole in read.ts. A 20-line read then lets write replace all
@@ -186,8 +182,8 @@ describe("write", () => {
     expect(await failure(write({ path: "page.tsx", content: "new\n" }))).toBe(refused)
   })
 
-  // Reproduce: let recordRead keep `through` or `whole` across versions; a look at part of a file
-  // that changed then counts the whole of the old version as seen.
+  // Reproduce: count the pages of every version in readWhole; a look at part of a file that
+  // changed then counts the whole of the old version as seen.
   test("counts reads that follow on from line 1 to the last, of one version", async () => {
     const { root, read, write } = await harness()
     const lines = (count: number) =>
@@ -207,13 +203,24 @@ describe("write", () => {
     expect(await failure(write({ path: "big.ts", content: "new\n" }))).toBe(notSeenWhole("big.ts"))
   })
 
+  // Reproduce: count only the pages that follow on in the order they were read. Two pages read
+  // together, the later one done first, then leave the file seen in part.
+  test("counts the pages of one version in any order", async () => {
+    const { root, read, write } = await harness()
+    await writeFile(join(root, "big.ts"), `${Array.from({ length: 30 }, (_, i) => i).join("\n")}\n`)
+
+    await read({ path: "big.ts", offset: 21 })
+    await read({ path: "big.ts", limit: 20 })
+    expect(await write({ path: "big.ts", content: "new\n" })).toMatchObject({ created: false })
+  })
+
   // Reproduce: drop the onReadCut call in ContextGuard.reduce, or return at once from
   // SeenFiles.recordCut. A read the guard cut to its first lines then lets write replace all 1,640.
   test("never replaces a file whose read the context guard cut", async () => {
     const { root, seenFiles, read, write } = await harness()
     const lines = Array.from({ length: 1_640 }, (_, index) => `doc line ${index + 1}`)
     await writeFile(join(root, "doc.txt"), `${lines.join("\n")}\n`)
-    const page = await read({ path: "doc.txt" }, "call_1")
+    const page = await read({ path: "doc.txt" }, { toolCallId: "call_1" })
 
     let shownThrough = 0
     const guard = createAgentContextGuard({
@@ -247,7 +254,7 @@ describe("write", () => {
     )
 
     // The read the cut names shows the rest: the model has then seen all of it.
-    await read({ path: "doc.txt", offset: shownThrough + 1 }, "call_2")
+    await read({ path: "doc.txt", offset: shownThrough + 1 })
     expect(await write({ path: "doc.txt", content: "new\n" })).toMatchObject({ created: false })
   })
 
@@ -287,11 +294,8 @@ class TestSandbox implements Sandbox {
   readonly id = "test"
   readonly provider = "test"
   readonly status = "running" as const
-  /** The most commands that ran at once. */
-  mostRunning = 0
   /** Runs after a command, before its caller sees the result. */
   afterCommand: (() => Promise<void>) | undefined
-  #running = 0
 
   constructor(readonly workingDirectory: string) {}
 
@@ -300,20 +304,15 @@ class TestSandbox implements Sandbox {
     args: readonly string[] = [],
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
-    this.mostRunning = Math.max(this.mostRunning, ++this.#running)
-    try {
-      const result = await exec({
-        argv: [command, ...args],
-        cwd: options.cwd ?? this.workingDirectory,
-        env: { ...hostEnv(), ...(options.env ?? {}) },
-        timeoutMs: options.timeout,
-        signal: options.signal,
-      })
-      await this.afterCommand?.()
-      return result
-    } finally {
-      this.#running -= 1
-    }
+    const result = await exec({
+      argv: [command, ...args],
+      cwd: options.cwd ?? this.workingDirectory,
+      env: { ...hostEnv(), ...(options.env ?? {}) },
+      timeoutMs: options.timeout,
+      signal: options.signal,
+    })
+    await this.afterCommand?.()
+    return result
   }
 
   async writeFiles(_files: readonly SandboxFileRecord[]): Promise<void> {}
@@ -341,13 +340,18 @@ function notSeenWhole(path: string): string {
   return `[SixbAgent] write: you have not seen all of '${path}', and write replaces it whole: read the whole file first, or change part of it with edit.`
 }
 
+let calls = 0
+
+/** A tool called as the model calls it: each call its own step unless it names one. */
 function executable<TInput>(tool: ModelTool<TInput>) {
-  return (input: unknown, toolCallId = "tool-call") =>
-    tool.execute(tool.parseInput(input), {
+  return (input: unknown, call: { readonly step?: string; readonly toolCallId?: string } = {}) => {
+    calls += 1
+    return tool.execute(tool.parseInput(input), {
       signal: new AbortController().signal,
-      callId: "call",
-      toolCallId,
+      callId: call.step ?? `step-${calls}`,
+      toolCallId: call.toolCallId ?? `tool-call-${calls}`,
     })
+  }
 }
 
 /** A step whose one call read `path`, its result not yet read by the model. */

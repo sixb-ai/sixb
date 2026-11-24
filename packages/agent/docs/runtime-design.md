@@ -320,8 +320,8 @@ it, and `ChildRunner` opens the child's environment from it instead of `openSand
 works on the parent's files, dependencies and Git state; its prompt describes the parent's
 workspace, with the repository's instruction files, and its rules say it changes the files there.
 
-- **What stays its own.** Its run, session, model loop, background commands, read-before-edit
-  ledger and context directory: by its thread, so each of its runs names the same paths,
+- **What stays its own.** Its run, session, model loop, background commands, record of the files
+  it saw and context directory: by its thread, so each of its runs names the same paths,
   `.sixb/agent/threads/<threadId>` in a persistent workspace, which the checkout already excludes
   and each opening of the workspace clears, or its thread's files directory on a computer. A run
   of such a thread that continues in a sandbox of its own keeps that directory there
