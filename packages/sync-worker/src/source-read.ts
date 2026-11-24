@@ -20,7 +20,10 @@ export interface SyncSourceValue {
   readonly connection?: SyncConnectorConnection
 }
 
-/** What one run reads: a static connector's client, or one connection of an OAuth connector. */
+/**
+ * What one run reads: a static connector's client, or one connection of an OAuth connector. An
+ * OAuth connector with no account to read still runs once, reading nothing, so its dataset exists.
+ */
 export type SyncRunSource =
   | { readonly kind: "static"; readonly source: SyncConnectorSource }
   | {
@@ -28,6 +31,7 @@ export type SyncRunSource =
       readonly source: SyncConnectorSource
       readonly connection: SyncConnectorConnection
     }
+  | { readonly kind: "none" }
 
 /** The run has nothing left to read, so it ends `cancelled` without reading. */
 export class SyncRunSourceGoneError extends Error {
@@ -57,11 +61,7 @@ export async function resolveSyncRunSource(
     return { kind: "static", source }
   }
 
-  if (run.connectionId === undefined) {
-    throw new SyncRunSourceGoneError(
-      `[SixbSyncWorker] Sync run '${run.id}' was queued before a sync of an OAuth connector ran once per connection. The sync's next trigger runs each connection.`
-    )
-  }
+  if (run.connectionId === undefined) return { kind: "none" }
 
   const source = sources.find((candidate) => candidate.connection?.id === run.connectionId)
   if (!source?.connection) {
@@ -96,10 +96,18 @@ export async function readSyncValues(
   options: ReadSyncValuesInput
 ): Promise<AsyncIterable<SyncSourceValue>> {
   const { source } = options
-  return source.kind === "static"
-    ? readStaticSource(options, source.source)
-    : readConnectionSource(options, source.source, source.connection)
+
+  switch (source.kind) {
+    case "static":
+      return readStaticSource(options, source.source)
+    case "connection":
+      return readConnectionSource(options, source.source, source.connection)
+    case "none":
+      return readNothing()
+  }
 }
+
+async function* readNothing(): AsyncIterable<SyncSourceValue> {}
 
 async function readStaticSource(
   options: ReadSyncValuesInput,

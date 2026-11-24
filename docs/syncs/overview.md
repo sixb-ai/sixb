@@ -49,6 +49,9 @@ Set `mode` in `defineSync("import-invoices", { mode: "append" })` to control how
 | `"append"` | Adds returned rows to the dataset. |
 | `"merge"` | Inserts, updates, or deletes rows by primary key. |
 
+A sync's first run creates its dataset even when the source returns no rows, so pipelines that read
+it find an empty dataset rather than a missing one.
+
 For datasets with [`sequenceBy`](../datasets/source-ordering.md), snapshots keep the newest source
 rows and retain records omitted from the response. Removal requires an explicit sequenced delete.
 
@@ -84,7 +87,8 @@ export const importVideos = defineSync("import-videos", { mode: "merge" })
 
 If record IDs can repeat across accounts, include the account ID in the dataset's primary key.
 
-A schedule starts a run for every connected account. A schedule on
+A schedule starts a run for every connected account. While no account is connected, it starts one
+run that reads nothing, so the dataset exists before anyone connects. A schedule on
 `events.connector(social).connected()` starts one for the account that just connected, so its first
 read doesn't wait for the next run:
 
@@ -106,8 +110,9 @@ await sixb.syncs.request({ syncId: importVideos.id, connectionId: connection.id 
 ```
 
 Without `connectionId`, a request runs every account you may run: the project's and your own, or
-everyone's with `can.manage` on the connector. `request()` returns one entry in `runs` for each. A
-request for an account whose run hasn't started yet joins that run.
+everyone's with `can.manage` on the connector. `request()` returns one entry in `runs` for each, or
+the one run that reads nothing while no account is connected. A request for an account whose run
+hasn't started yet joins that run.
 
 [Personal connections](../connectors/authentication.md#let-people-connect-their-own-accounts) are
 read too. `connection.owner` is `{ type: "user", id }` for one and `{ type: "project" }`

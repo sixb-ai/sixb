@@ -667,12 +667,22 @@ describe("sync runs people request", () => {
   const members = defineGroup("members")
   const managers = defineGroup("managers")
 
-  async function syncHost(options: { readonly projectConnection?: boolean } = {}) {
+  async function syncHost(
+    options: { readonly projectConnection?: boolean; readonly noAccount?: boolean } = {}
+  ) {
     const harness = createHarness({
       owners: options.projectConnection ? ["project", "user"] : ["user"],
     })
     const dependencies = createTestRuntimeDeps()
-    await connectAdaAndBen(harness, dependencies, projectId)
+    if (options.noAccount) {
+      await seedConnectorActors(
+        dependencies.storage,
+        projectId,
+        new Date("2026-08-19T12:00:00.000Z")
+      )
+    } else {
+      await connectAdaAndBen(harness, dependencies, projectId)
+    }
     if (options.projectConnection) await connectProjectAccount(harness, dependencies, projectId)
     const inbox = defineSync("inbox", { mode: "append" })
       .from(harness.connector)
@@ -775,6 +785,17 @@ describe("sync runs people request", () => {
     expect(
       runConnections(await ada.request({ syncId: inbox.id, connectionId: connectionOf("user-a") }))
     ).toEqual([connectionOf("user-a")])
+  })
+
+  // Removal proof: drop the no-account branch from requestSyncRun; the request queues nothing,
+  // and the dataset pipelines read is never created.
+  test("with no account connected, a request runs once, reading none", async () => {
+    const { inbox, as } = await syncHost({ noAccount: true })
+
+    const { runs } = await as("user-a", members).request({ syncId: inbox.id })
+
+    expect(runs).toMatchObject([{ syncId: inbox.id, created: true }])
+    expect(runs[0]?.connectionId).toBeUndefined()
   })
 
   // Removal proof: drop `joinQueuedRun` from requestSyncRun; each request queues its own run.

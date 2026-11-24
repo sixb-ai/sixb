@@ -1,5 +1,5 @@
-import { describe, expect, spyOn, test } from "bun:test"
-import { defineSync } from "@sixb/core"
+import { describe, expect, setSystemTime, spyOn, test } from "bun:test"
+import { col, defineDataset, defineSync } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { SyncConnectorSource } from "@sixb/core/internal/syncs"
 import {
@@ -14,6 +14,11 @@ import {
 
 const ada = { type: "user", id: "usr_ada" } as const
 const grace = { type: "user", id: "usr_grace" } as const
+
+const keyedSocialRows = defineDataset("raw.social.keyed-rows", {
+  schema: [col("id", "string")],
+  primaryKey: "id",
+})
 
 describe("a sync of an OAuth connector runs once per connection", () => {
   test("a run reads only its own connection", async () => {
@@ -224,10 +229,7 @@ describe("a sync of an OAuth connector runs once per connection", () => {
     })
   })
 
-  test.each([
-    ["is no longer connected", "connection-gone", "is no longer connected"],
-    ["was queued before syncs ran once per connection", undefined, "queued before"],
-  ] as const)("a run whose connection %s ends cancelled without reading", async (_case, connectionId, message) => {
+  test("a run whose connection is no longer connected ends cancelled without reading", async () => {
     let reads = 0
     const sync = defineSync("sync-social-gone", { mode: "append" })
       .from(social)
@@ -239,10 +241,10 @@ describe("a sync of an OAuth connector runs once per connection", () => {
     const fixture = createFixture(sync, () => [source("connection-a", "account-a", "default")])
 
     const ended = await run(fixture, sync.id, "run-gone", {
-      ...(connectionId === undefined ? {} : { connectionId }),
+      connectionId: "connection-gone",
     }).catch((error) => error)
 
-    expect(String(ended)).toContain(message)
+    expect(String(ended)).toContain("is no longer connected")
     expect(reads).toBe(0)
     expect(
       await fixture.runtime.syncRunsStorage.getById({
@@ -250,5 +252,88 @@ describe("a sync of an OAuth connector runs once per connection", () => {
         id: "run-gone",
       })
     ).toMatchObject({ status: "cancelled", error: { code: "runtime.cancelled" } })
+  })
+
+  // Pipelines reading the dataset fail while it has no version. To watch this fail, have
+  // `resolveSyncRunSource` throw `SyncRunSourceGoneError` again for a run without a connection.
+  test("a run with no connection reads nothing and creates the dataset, empty", async () => {
+    let reads = 0
+    const sync = defineSync("sync-social-none", { mode: "merge" })
+      .from(social)
+      .read(() => {
+        reads += 1
+        return []
+      })
+      .intoDataset(keyedSocialRows)
+    const fixture = createFixture(sync, () => [])
+
+    const result = await run(fixture, sync.id, "run-none")
+
+    expect(reads).toBe(0)
+    expect(result).toMatchObject({ rowsRead: 0, versionCreated: true })
+    expect(await fixture.lakeStorage.listVersions(keyedSocialRows.id)).toHaveLength(1)
+    expect(await rows(fixture.lakeStorage, keyedSocialRows.id)).toEqual([])
+    expect(
+      await fixture.runtime.syncRunsStorage.getById({
+        projectId: fixture.runtime.id,
+        id: "run-none",
+      })
+    ).toMatchObject({ status: "succeeded", rowsRead: 0, output: { datasetId: keyedSocialRows.id } })
+  })
+
+  test("a run with no connection keeps the checkpoint a connection's first run starts from", async () => {
+    const seen: (string | undefined)[] = []
+    const sync = defineSync("sync-social-carry", { mode: "append" })
+      .checkpoint<{ cursor: string }>()
+      .from(social)
+      .read((_client, context) => {
+        seen.push(context.checkpoint?.cursor)
+        return []
+      })
+      .intoDataset(socialRows)
+    let connected: readonly SyncConnectorSource[] = []
+    const fixture = createFixture(sync, () => connected)
+
+    try {
+      setSystemTime(new Date("2026-11-24T10:00:00.000Z"))
+      await seedSuccessfulCheckpoint(fixture, sync.id, "run-every-connection", {
+        kind: "sync_checkpoint",
+        version: 1,
+        connectorId: social.id,
+        strategy: "connections",
+        value: {
+          entries: [
+            { connectionId: "connection-n", accountId: "account-n", checkpoint: { cursor: "n-4" } },
+          ],
+        },
+      })
+
+      // Another connection's own checkpoint is newer, and is not the one carried forward.
+      setSystemTime(new Date("2026-11-24T10:01:00.000Z"))
+      await seedSuccessfulCheckpoint(
+        fixture,
+        sync.id,
+        "run-a",
+        {
+          kind: "sync_checkpoint",
+          version: 1,
+          connectorId: social.id,
+          strategy: "connection",
+          value: { accountId: "account-a", checkpoint: { cursor: "a-9" } },
+        },
+        "connection-a"
+      )
+
+      setSystemTime(new Date("2026-11-24T10:02:00.000Z"))
+      await run(fixture, sync.id, "run-none")
+
+      connected = [source("connection-n", "account-n", "default", grace)]
+      setSystemTime(new Date("2026-11-24T10:03:00.000Z"))
+      await run(fixture, sync.id, "run-n", { connectionId: "connection-n" })
+    } finally {
+      setSystemTime()
+    }
+
+    expect(seen).toEqual(["n-4"])
   })
 })

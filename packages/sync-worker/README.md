@@ -34,11 +34,14 @@ read. Its checkpoint is the last succeeded run of the same sync and connection, 
 it read, so a replaced account starts over. A connection's first run of its own starts from its
 entry in the last run that read every connection, from before runs were per connection.
 
+With no connection to read, dispatch queues one run without a `connectionId`. It reads nothing and
+commits the dataset's first version, empty, so pipelines reading it find it. It carries forward the
+checkpoint of the last run that read no single connection, which connections fall back to.
+
 | What happens | The run |
 | --- | --- |
 | The connection's grant can no longer give a token | Fails with `connector.authorization_required`. A person's own connection isn't reported to `onError` |
 | The connection is gone, or its owner suspended, since it was queued | Ends `cancelled` without reading |
-| It was queued before runs were per connection | Ends `cancelled` without reading; the next trigger runs each connection |
 | Any other failure | Fails that run alone |
 
 ## Recovery
