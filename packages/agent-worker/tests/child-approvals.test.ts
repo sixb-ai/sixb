@@ -37,6 +37,7 @@ import { createTestSixb } from "@sixb/core/testing"
 import { renderCurrentTime } from "../../agent/src/agent-prompt"
 import { FamilyMailbox } from "../../agent/src/family-mailbox"
 import { CHILD_WAIT_RECHECK_MS, OTHER_TURN_RECHECK_MS } from "../../agent/src/subagent-tools"
+import { commandScript } from "../../agent/tests/command-script"
 import { testStream, WorkerTestModel } from "../../agent/tests/worker-model-fixture"
 import { AgentWorker } from "../src"
 
@@ -169,7 +170,7 @@ class GatewaySandbox implements Sandbox {
     args: readonly string[] = [],
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
-    const script = args.at(-1) ?? ""
+    const script = commandScript(args, options) ?? ""
     if (command !== "bash") return ok("")
 
     if (script.includes("SIXB_BASH_ENV_READY")) return ok("node\t22.0.0\tsixb CLI 1\n")

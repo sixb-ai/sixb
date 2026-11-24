@@ -1,5 +1,10 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
+import { randomUUID } from "node:crypto"
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { CommandResult, RunCommandOptions, Sandbox } from "@sixb/core"
+import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { BackgroundCommands } from "../src/background-commands"
 import {
   BASH_TOOL_SPEC,
@@ -7,6 +12,7 @@ import {
   compressStdout,
   createBashTool,
 } from "../src/tools/bash"
+import { waitFor } from "./helpers"
 
 const CAP = 200
 
@@ -113,6 +119,96 @@ describe("bash tool timeout", () => {
 
     const finished = harness({ exitCode: 1, stdout: "", stderr: "error" })
     expect((await finished.bash({ command: "false" })).stderr).toBe("error")
+  })
+})
+
+describe("a command's script", () => {
+  const cleanups: (() => Promise<void>)[] = []
+  afterEach(async () => {
+    for (const cleanup of cleanups.splice(0)) await cleanup()
+  })
+
+  /** The bash tool on a local sandbox, in a folder of its own; one that drops the environment. */
+  async function localBash(options: { readonly dropsEnvironment?: boolean } = {}) {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "sixb-bash-")))
+    const sandbox = await new LocalSandboxFactory({ isolation: "none" }).create({
+      workingDirectory: root,
+    })
+    if (options.dropsEnvironment) {
+      const run = sandbox.runCommand.bind(sandbox)
+      sandbox.runCommand = (command, args, commandOptions) =>
+        run(command, args, { ...commandOptions, env: {} })
+    }
+    const background = new BackgroundCommands()
+    const tool = createBashTool(
+      async () => ({ sandbox, contextDirectory: ".sixb/agent" }),
+      background
+    )
+    cleanups.push(async () => {
+      await background.stopAll()
+      await sandbox.destroy()
+      rmSync(root, { recursive: true, force: true })
+    })
+    return async (input: Record<string, unknown>) => {
+      const context = { signal: new AbortController().signal, callId: "call", toolCallId: "call" }
+      return (await tool.execute(tool.parseInput(input), context)) as unknown as BashToolOutput
+    }
+  }
+
+  // Reproduce: pass the script to bash as an argument again in login-shell.ts. The shell's
+  // arguments then hold it, and on Linux `pkill -f "sixb dev"; …` matched its own shell and
+  // stopped itself with exit 143.
+  test("is not in its shell's arguments", async () => {
+    const bash = await localBash()
+
+    const marker = `marker-${randomUUID()}`
+
+    // `true` last, so that bash keeps its shell rather than running `ps` in its place.
+    const output = await bash({ command: `echo ${marker} > /dev/null; ps -o args= -p $$; true` })
+
+    expect(output.exitCode).toBe(0)
+    expect(output.stdout).toContain("bash")
+    expect(output.stdout).not.toContain(marker)
+  })
+
+  // Reproduce: pass the background command to START_SCRIPT as an argument again; its wrapper
+  // shells then hold it, and pgrep finds them.
+  test("in the background, is in no process's arguments", async () => {
+    const bash = await localBash()
+
+    const marker = `marker-${randomUUID()}`
+
+    const started = await bash({
+      command: `echo started; sleep 30 # ${marker}`,
+      run_in_background: true,
+    })
+    const output = (started as unknown as { readonly outputPath: string }).outputPath
+    await waitFor(() => readFileSync(output, "utf8").includes("started"))
+    const found = await bash({ command: `pgrep -f ${marker} || echo none` })
+
+    expect(found.stdout).toBe("none\n")
+  })
+
+  // Reproduce: drop the `?` check from RUN_SCRIPT in login-shell.ts; the command then runs
+  // nothing and succeeds.
+  test("fails the command when the sandbox drops it", async () => {
+    const bash = await localBash({ dropsEnvironment: true })
+
+    const output = await bash({ command: "echo ran" })
+
+    expect(output.exitCode).toBe(127)
+    expect(output.stdout).toBe("")
+    expect(output.stderr).toContain("SIXB_SCRIPT")
+  })
+
+  // Reproduce: drop `export -n` from RUN_SCRIPT in login-shell.ts; every command the script starts
+  // then carries it in its environment.
+  test("is not passed on to the commands it starts", async () => {
+    const bash = await localBash()
+
+    const output = await bash({ command: "env | grep -c '^SIXB_SCRIPT=' || true" })
+
+    expect(output.stdout).toBe("0\n")
   })
 })
 

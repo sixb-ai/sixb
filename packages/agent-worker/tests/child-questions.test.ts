@@ -29,6 +29,7 @@ import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { LanguageModelRequest, LanguageModelStream } from "@sixb/core/models"
 import type { AgentRunRecord, AgentStorage, SubagentRunRecord } from "@sixb/core/storage"
 import { SubagentInbox } from "../../agent/src/subagent-inbox"
+import { commandScript } from "../../agent/tests/command-script"
 import { testStream, WorkerTestModel } from "../../agent/tests/worker-model-fixture"
 import { AgentWorker } from "../src"
 
@@ -128,7 +129,7 @@ class TestSandbox implements Sandbox {
     args: readonly string[] = [],
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
-    const script = args.at(-1) ?? ""
+    const script = commandScript(args, options) ?? ""
     if (options.env?.SIXB_LIST_DIR?.endsWith("/out")) await this.onListOut?.()
     if (command !== "bash") return ok("")
 

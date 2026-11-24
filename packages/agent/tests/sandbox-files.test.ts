@@ -138,7 +138,7 @@ describe("listSandboxFiles", () => {
   test("lists a missing directory as missing in a login shell whose logout file fails", async () => {
     // A login shell runs ~/.bash_logout when `exit` ends it, under the script's `set -e`: Debian's
     // and Ubuntu's runs `clear_console`, which fails without a terminal. Reproduce by passing
-    // ["-lc", script] in place of loginShellArgs(script) in sandbox-files.ts: the listing fails
+    // ["-lc", script] in place of loginShell(script).args in sandbox-files.ts: the listing fails
     // with "exit 1".
     const home = join(outside, "home")
     mkdirSync(home)

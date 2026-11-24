@@ -11,7 +11,7 @@ import {
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
 import { type ArtifactQueryAnswer, artifactThemeModes } from "@sixb/core/internal/artifacts/publish"
-import { loginShellArgs } from "../../login-shell"
+import { loginShell } from "../../login-shell"
 import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"
 import checkScript from "./check.cjs" with { type: "text" }
 import { canvasOverviewHtml, OVERVIEW_VIEWPORT } from "./overview"
@@ -207,11 +207,8 @@ export async function checkLayout(
   // The check stops itself first, so it reports what it found and closes its browser, which a
   // node killed at the timeout leaves running.
   const deadlineMs = Math.floor((timeoutMs * 5) / 6)
-  const result = await sandbox.runCommand(
-    "bash",
-    loginShellArgs(
-      'command -v node >/dev/null 2>&1 || { echo \'{"skipped":"no_node"}\'; exit 0; }; exec node "$SIXB_CHECK/check.cjs" "$SIXB_CHECK_DECK" "$SIXB_CHECK_OUT" "$SIXB_CHECK" "$SIXB_CHECK_DEADLINE_MS" "$SIXB_CHECK_LAYOUT"'
-    ),
+  const shell = loginShell(
+    'command -v node >/dev/null 2>&1 || { echo \'{"skipped":"no_node"}\'; exit 0; }; exec node "$SIXB_CHECK/check.cjs" "$SIXB_CHECK_DECK" "$SIXB_CHECK_OUT" "$SIXB_CHECK" "$SIXB_CHECK_DEADLINE_MS" "$SIXB_CHECK_LAYOUT"',
     {
       env: {
         ...input.handle.env,
@@ -221,10 +218,13 @@ export async function checkLayout(
         SIXB_CHECK_DEADLINE_MS: String(deadlineMs),
         SIXB_CHECK_LAYOUT: input.layout,
       },
-      timeout: timeoutMs,
-      signal: input.signal,
     }
   )
+  const result = await sandbox.runCommand("bash", shell.args, {
+    env: shell.env,
+    timeout: timeoutMs,
+    signal: input.signal,
+  })
   input.signal.throwIfAborted()
   // A report counts however the command ended: a check that printed one and then hung on its way
   // out still found what it found.

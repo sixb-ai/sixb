@@ -160,7 +160,7 @@ import * as conversationPreparation from "../../agent/src/context-compaction"
 import { clearedToolResultText } from "../../agent/src/context-guard"
 import { resolveRunPlan } from "../../agent/src/execution-plan"
 import { FamilyMailbox } from "../../agent/src/family-mailbox"
-import { loginShellArgs } from "../../agent/src/login-shell"
+import { loginShell } from "../../agent/src/login-shell"
 import { conversationPromptCaching } from "../../agent/src/prompt-cache"
 import { stoppedByWorker } from "../../agent/src/run-agent-turn"
 import { runConversationTurn } from "../../agent/src/run-conversation-turn"
@@ -180,6 +180,7 @@ import { AgentFileBudget } from "../../agent/src/tools/tool-files"
 import { TOOL_OUTPUTS_DIRECTORY } from "../../agent/src/tools/tool-outputs"
 import { createAgentTurnRuntime } from "../../agent/src/turn-runtime"
 import type { AgentRunFiles } from "../../agent/src/types"
+import { commandScript, commandText } from "../../agent/tests/command-script"
 import { waitFor as pollFor, runTurnInSession } from "../../agent/tests/helpers"
 import {
   testStream,
@@ -1340,7 +1341,7 @@ class RecordingSandbox implements Sandbox {
 
   async runCommand(command: string, args: readonly string[] = [], options: RunCommandOptions = {}) {
     this.commands.push({ command, args, options })
-    const script = args.at(-1)
+    const script = commandScript(args, options)
     if (
       command === "bash" &&
       typeof script === "string" &&
@@ -1543,7 +1544,7 @@ class FolderReadingSandbox extends RecordingSandbox {
     args: readonly string[] = [],
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
-    if (!readsInstructions(command, args) || !options.cwd) {
+    if (!readsInstructions(command, args, options) || !options.cwd) {
       return super.runCommand(command, args, options)
     }
 
@@ -1578,7 +1579,7 @@ class SharedWorkspaceSandbox extends RecordingSandbox {
     args: readonly string[] = [],
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
-    const script = args.at(-1) ?? ""
+    const script = commandScript(args, options) ?? ""
     const [verb, path = "", ...text] = script.split(" ")
     if (command !== "bash" || (verb !== "cat" && verb !== "write")) {
       return super.runCommand(command, args, options)
@@ -1628,8 +1629,15 @@ function toolResultText(request: LanguageModelRequest | undefined, toolCallId: s
   return JSON.stringify(part?.output ?? null)
 }
 
-function readsInstructions(command: string, args: readonly string[]): boolean {
-  return command === "bash" && (args.at(-1) ?? "").includes("sixb-read-workspace-instructions")
+function readsInstructions(
+  command: string,
+  args: readonly string[],
+  options?: RunCommandOptions
+): boolean {
+  return (
+    command === "bash" &&
+    (commandScript(args, options) ?? "").includes("sixb-read-workspace-instructions")
+  )
 }
 
 /** Run the instruction files' script for real, in a folder on this machine. */
@@ -1653,6 +1661,8 @@ function readInstructionsIn(
  */
 class BackgroundSandbox extends RecordingSandbox {
   #endHeld: (code: number) => void = () => {}
+  /** Its group runs as long as the held call does. */
+  #running = false
 
   constructor(
     id: string,
@@ -1672,19 +1682,20 @@ class BackgroundSandbox extends RecordingSandbox {
     // The held call that runs it.
     if (args.length === 9) {
       this.events.push("started")
+      this.#running = true
       return new Promise((resolve) => {
-        let ended = false
         this.#endHeld = (code) => {
-          if (ended) return
-          ended = true
+          if (!this.#running) return
+          this.#running = false
           this.events.push(`ended ${code}`)
           resolve({ ...done, exitCode: code })
         }
         options.signal?.addEventListener("abort", () => this.#endHeld(137))
       })
     }
-    // Its process group, then a signal to it.
+    // Its process group, then a signal to it, or a watch on what of it is left, which names it.
     if (args[3]?.endsWith(".pid")) return { ...done, exitCode: 0, stdout: "4242\n" }
+    if (args[3] === "4242") return { ...done, exitCode: this.#running ? 0 : 1 }
     this.events.push(String(args[3]))
     this.#endHeld(args[3] === "TERM" ? 143 : 137)
     return { ...done, exitCode: 0 }
@@ -1730,14 +1741,14 @@ class LoggedSandbox extends RecordingSandbox {
     args: readonly string[] = [],
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
-    const script = args.at(-1) ?? ""
+    const script = commandScript(args, options) ?? ""
     if (command === "git" && args[0] === "clone") this.events.push("clone")
     if (script.includes("/.sixb/agent/")) this.events.push("exclude-run-files")
     if (script === this.failingCommand) {
       this.commands.push({ command, args, options })
       return { exitCode: 1, stdout: "", stderr: "setup failed", durationMs: 1 }
     }
-    if (this.checkout && readsInstructions(command, args)) {
+    if (this.checkout && readsInstructions(command, args, options)) {
       this.commands.push({ command, args, options })
       return readInstructionsIn(this.checkout, args, options)
     }
@@ -3982,7 +3993,7 @@ describe("AgentWorker", () => {
     const sandbox = new RecordingSandbox("stopped-mid-turn")
     const runCommand = sandbox.runCommand.bind(sandbox)
     sandbox.runCommand = async (command, args = [], options) => {
-      if (args.some((arg) => arg.includes(sent))) {
+      if (commandText(args, options).includes(sent)) {
         sandbox.status = "stopped"
         throw new SandboxNotRunningError("[Sandbox] sandbox stopped-mid-turn stopped.")
       }
@@ -4068,7 +4079,7 @@ describe("AgentWorker", () => {
     })
     const runCommand = sandbox.runCommand.bind(sandbox)
     sandbox.runCommand = async (command, args = [], options) => {
-      if (sandbox.status === "stopped" || args.some((arg) => arg.includes("npm test"))) {
+      if (sandbox.status === "stopped" || commandText(args, options).includes("npm test")) {
         sandbox.status = "stopped"
         throw new SandboxNotRunningError("[Sandbox] sandbox kept-stopped stopped.")
       }
@@ -4315,7 +4326,9 @@ describe("AgentWorker", () => {
       }
     }
 
-    const commands = sandbox.commands.filter((call) => call.args.at(-1) === "print-guest-env")
+    const commands = sandbox.commands.filter(
+      (call) => commandScript(call.args, call.options) === "print-guest-env"
+    )
     expect(sessions).toEqual([expected, expected])
     expect(commands).toHaveLength(2)
     for (const call of commands) expect(call.options.env).toMatchObject(expected)
@@ -4428,9 +4441,11 @@ describe("AgentWorker", () => {
       const { run } = await runPwd(sandbox, mode, "packages/api")
 
       expect(run).toMatchObject({ status: "succeeded" })
-      const call = sandbox.commands.find((record) => record.args.at(-1) === "pwd")
-      // Both shell scripts take the directory just before the command.
-      expect(call?.args.at(-2)).toBe(join(sandbox.workingDirectory, "repository", "packages/api"))
+      const call = sandbox.commands.find(
+        (record) => commandScript(record.args, record.options) === "pwd"
+      )
+      // Both shell scripts take the directory last.
+      expect(call?.args.at(-1)).toBe(join(sandbox.workingDirectory, "repository", "packages/api"))
     })
   })
 
@@ -4542,8 +4557,8 @@ describe("AgentWorker", () => {
     // save refuses the workspace and blocks it.
     test("saves the workspace after a foreground command is refused", async () => {
       const reason = "env value too large"
-      const sandbox = refusingSandbox((args) =>
-        args.some((arg) => arg.includes("npm test")) ? reason : undefined
+      const sandbox = refusingSandbox((args, options) =>
+        commandText(args, options).includes("npm test") ? reason : undefined
       )
 
       const { run, workspace, toolOutput } = await runTurn(sandbox, { command: "npm test" })
@@ -7587,7 +7602,7 @@ describe("AgentWorker", () => {
 
       // The checkout's own instructions, read in its working directory.
       const reads = step.sandboxes[0]?.commands.filter((call) =>
-        readsInstructions(call.command, call.args)
+        readsInstructions(call.command, call.args, call.options)
       )
       expect(reads?.map((call) => call.options.cwd)).toEqual([
         "/tmp/sixb-recording-sandbox/step-sandbox-1/repository",
@@ -13028,13 +13043,15 @@ describe("AgentWorker", () => {
       })
       const command = sandbox?.commands.find(
         (record) =>
-          record.command === "bash" && record.args.at(-1) === "echo 'Hello, world!' | grep Hello"
+          record.command === "bash" &&
+          commandScript(record.args, record.options) === "echo 'Hello, world!' | grep Hello"
       )
       expect(command?.command).toBe("bash")
       // The shell changes to the directory: given to the sandbox, a missing one is refused.
       expect(command?.args).toEqual(
-        loginShellArgs("echo 'Hello, world!' | grep Hello", "/workspace")
+        loginShell("echo 'Hello, world!' | grep Hello", { directory: "/workspace" }).args
       )
+      expect(command?.options.env?.SIXB_SCRIPT).toBe("echo 'Hello, world!' | grep Hello")
       expect(command?.options.cwd).toBeUndefined()
       expect(command?.options.env?.SIXB_API_BASE_URL).toBe("http://localhost:3002")
       expect(command?.options.env).not.toHaveProperty("SIXB_TOKEN")
@@ -13059,7 +13076,7 @@ describe("AgentWorker", () => {
         },
         output: {
           exitCode: 0,
-          stdout: `ran bash ${loginShellArgs("echo 'Hello, world!' | grep Hello", "/workspace").join(" ")}`,
+          stdout: `ran bash ${loginShell("echo 'Hello, world!' | grep Hello", { directory: "/workspace" }).args.join(" ")}`,
           stderr: "",
           durationMs: 1,
           stdoutTruncated: false,
@@ -13659,7 +13676,7 @@ describe("AgentWorker", () => {
       )
 
       const command = sandboxes.sandboxes[0]?.commands.find(
-        (candidate) => candidate.args.at(-1) === "print-sixb-env"
+        (candidate) => commandScript(candidate.args, candidate.options) === "print-sixb-env"
       )
       const skillsDir = command?.options.env?.SIXB_SKILLS_DIR
       if (!skillsDir) {
@@ -14063,10 +14080,10 @@ describe("AgentWorker", () => {
       expect(createOptions.network.allow[0]?.origin).toBe("http://localhost:3002")
 
       const command = sandboxes.sandboxes[0]?.commands.find(
-        (candidate) => candidate.args.at(-1) === "print-sixb-env"
+        (candidate) => commandScript(candidate.args, candidate.options) === "print-sixb-env"
       )
       expect(command?.command).toBe("bash")
-      expect(command?.args).toEqual(loginShellArgs("print-sixb-env"))
+      expect(command?.args).toEqual(loginShell("print-sixb-env").args)
       const env = command?.options.env
       expect(env?.SIXB_API_BASE_URL).toBe("http://localhost:3002")
       expect(env).not.toHaveProperty("SIXB_TOKEN")
@@ -18401,7 +18418,7 @@ class LargeOutputSandboxFactory extends RecordingSandboxFactory {
     const sandbox = (await super.create(options)) as RecordingSandbox
     const runCommand = sandbox.runCommand.bind(sandbox)
     sandbox.runCommand = async (command, args = [], commandOptions = {}) =>
-      command === "bash" && args.at(-1) === "print-report"
+      command === "bash" && commandScript(args, commandOptions) === "print-report"
         ? { exitCode: 0, stdout: LargeOutputSandboxFactory.REPORT, stderr: "", durationMs: 1 }
         : runCommand(command, args, commandOptions)
     return sandbox
@@ -18469,7 +18486,9 @@ describe("tool outputs too large for the context", () => {
       const [turnSandbox, nextSandbox] = sandboxes.sandboxes
       expect(turnSandbox?.readFileContents(savedOutputPath(turnSandbox, "report"))).toBe(report)
       expect(nextSandbox?.readFileContents(savedOutputPath(nextSandbox, "report"))).toBe(report)
-      const again = nextSandbox?.commands.find((command) => command.args.at(-1) === "echo again")
+      const again = nextSandbox?.commands.find(
+        (command) => commandScript(command.args, command.options) === "echo again"
+      )
       expect(again?.options.env?.SIXB_TOOL_OUTPUTS_DIR).toBe(
         dirname(savedOutputPath(nextSandbox, "report"))
       )

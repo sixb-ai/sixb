@@ -1,7 +1,7 @@
 import type { CommandResult } from "@sixb/core"
 import type { JsonObject, JsonValue, ModelTool } from "@sixb/core/models"
 import type { BackgroundCommandState, BackgroundCommands } from "../background-commands"
-import { commandDirectory, loginShellArgs } from "../login-shell"
+import { commandDirectory, loginShell } from "../login-shell"
 import { agentToolErrorText } from "../model-adapters"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 
@@ -85,11 +85,15 @@ export function createBashTool(
 
       const { sandbox, env } = await resolveSandbox()
       const timeout = normalizeTimeout(input.timeoutMs)
-      const result = await sandbox.runCommand(
-        "bash",
-        loginShellArgs(input.command, commandDirectory(sandbox.workingDirectory, input.cwd)),
-        { env, timeout, signal }
-      )
+      const shell = loginShell(input.command, {
+        directory: commandDirectory(sandbox.workingDirectory, input.cwd),
+        env,
+      })
+      const result = await sandbox.runCommand("bash", shell.args, {
+        env: shell.env,
+        timeout,
+        signal,
+      })
 
       const output: BashToolOutput = {
         ...result,

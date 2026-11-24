@@ -29,6 +29,7 @@ import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { LanguageModelRequest } from "@sixb/core/models"
 import type { AgentRunRecord, AgentStorage } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
+import { commandScript } from "../../agent/tests/command-script"
 import { waitFor as pollFor } from "../../agent/tests/helpers"
 import { testStream, WorkerTestModel } from "../../agent/tests/worker-model-fixture"
 import { AgentWorker } from "../src"
@@ -104,7 +105,7 @@ class GatewaySandbox implements Sandbox {
     args: readonly string[] = [],
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
-    const script = args.at(-1) ?? ""
+    const script = commandScript(args, options) ?? ""
     if (command === "bash" && script.includes("SIXB_BASH_ENV_READY")) {
       return ok("node\t22.0.0\tsixb CLI 1\n")
     }
