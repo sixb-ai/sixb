@@ -185,8 +185,10 @@ describe("Anthropic provider", () => {
     "claude-fable-5",
     "claude-mythos-5",
     "claude-mythos-preview-20260407",
+    "claude-opus-5-5",
   ])("keeps always-on thinking enabled on %s, including summary requests", async (modelId) => {
     // Regression proof: restore unconditional canDisable:true and remove the always-on request guard.
+    // Opus 5.5 rejects `disabled` at every effort level and takes no `between_tools` either.
     const warn = spyOn(console, "warn").mockImplementation(() => {})
     try {
       const bodies: Record<string, unknown>[] = []
@@ -560,6 +562,97 @@ describe("Anthropic provider", () => {
     const model = await provider(modelId).resolve!({ offline: true })
     await model.stream(request({ reasoning }))
     expect(bodies[0]?.thinking).toEqual(thinking)
+  })
+
+  test.each([
+    ["claude-sonnet-5-5", { type: "between_tools" }],
+    ["claude-sonnet-5-5-20261101", { type: "between_tools" }],
+    ["claude-sonnet-5", { type: "disabled" }],
+    ["claude-opus-5", { type: "disabled" }],
+    ["claude-haiku-5-5", { type: "disabled" }],
+    ["claude-opus-4-8", { type: "disabled" }],
+  ] as const)("turns thinking off on %s the way the model accepts", async (modelId, thinking) => {
+    // Regression proof: send { type: "disabled" } for every model; Sonnet 5.5 answers that with a
+    // 400 that asks for between_tools, and between_tools 400s on every other model.
+    const bodies: Record<string, unknown>[] = []
+    const provider = createAnthropic({
+      models: [
+        {
+          kind: "language",
+          providerId: "anthropic",
+          modelId,
+          capabilities: { reasoning: { canDisable: true, efforts: ["low", "medium", "high"] } },
+        },
+      ],
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return sseResponse([])
+      },
+    })
+    const model = await provider(modelId).resolve!({ offline: true })
+    await model.stream(request({ reasoning: "none" }))
+    // between_tools takes no other field and only effort high or below, so neither is sent.
+    expect(bodies[0]?.thinking).toEqual(thinking)
+    expect(bodies[0]?.output_config).toBeUndefined()
+  })
+
+  test("turns thinking off the way the catalog lists, for models it names first", async () => {
+    // Regression proof: ignore the catalog's thinking types in anthropicThinkingOff. Neither model
+    // is one the fallback knows, so it would send `disabled` to both.
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    const thinking = (types: Record<string, boolean>) => ({
+      supported: true,
+      types: Object.fromEntries(
+        Object.entries(types).map(([type, supported]) => [type, { supported }])
+      ),
+    })
+    const bodies: Record<string, unknown>[] = []
+    const provider = createAnthropic({
+      fetch: async (url, init) => {
+        if (String(url).includes("/models")) {
+          return Response.json({
+            data: [
+              {
+                id: "claude-sonnet-6",
+                type: "model",
+                capabilities: {
+                  thinking: thinking({ adaptive: true, disabled: false, between_tools: true }),
+                },
+              },
+              {
+                id: "claude-opus-6",
+                type: "model",
+                capabilities: {
+                  thinking: thinking({ adaptive: true, disabled: false, between_tools: false }),
+                },
+              },
+            ],
+            has_more: false,
+          })
+        }
+        bodies.push(JSON.parse(String(init?.body)))
+        return sseResponse([])
+      },
+    })
+    try {
+      const sonnet = await provider("claude-sonnet-6").resolve!()
+      const opus = await provider("claude-opus-6").resolve!()
+      expect(sonnet.definition.capabilities.reasoning).toMatchObject({ canDisable: true })
+      expect(opus.definition.capabilities.reasoning).toMatchObject({ canDisable: false })
+
+      // A direct binding reads the catalog once it has loaded.
+      for (const model of [sonnet, provider("claude-sonnet-6"), opus]) {
+        await model.stream(request({ reasoning: "none" }))
+      }
+      expect(bodies.map((body) => body.thinking)).toEqual([
+        { type: "between_tools" },
+        { type: "between_tools" },
+        { type: "adaptive", display: "summarized" },
+      ])
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   test("selects the workspace for keys that can act on several", async () => {
