@@ -214,8 +214,6 @@ export class SubagentCoordinator {
   #runFiles: AgentRunFiles | undefined
   /** Children whose files are in the parent's sandbox, and in the result that first listed them. */
   readonly #installed = new Map<string, readonly InstalledChildFile[]>()
-  /** The spawn being admitted: only this turn adds children to it. */
-  #admissions: Promise<unknown> = Promise.resolve()
   /** What this turn sent each child, by its run id, in order. */
   readonly #sent = new Map<string, SentMessage[]>()
   /** What the turn and its children say to each other, in their runner. */
@@ -299,14 +297,12 @@ export class SubagentCoordinator {
       await this.clearDeadAttempts(child, signal)
       const workspace = await this.continuationWorkspace(child)
       const { spec, continuation } = this.continuationOf(child, outcomes, workspace)
-      await this.admitInTurn(() =>
-        this.admit(
-          createSubagentRunId(this.parentRun.id, child.spawnKey),
-          child.spawnKey,
-          spec,
-          signal,
-          { ...continuation, lends: continuesInParentWorkspace(workspace) }
-        )
+      await this.admit(
+        createSubagentRunId(this.parentRun.id, child.spawnKey),
+        child.spawnKey,
+        spec,
+        signal,
+        { ...continuation, lends: continuesInParentWorkspace(workspace) }
       )
     }
   }
@@ -574,11 +570,6 @@ export class SubagentCoordinator {
     return trigger?.parts.some((part) => part.type === "mail" && part.kind === "answer") ?? false
   }
 
-  private async subagentRun(id: string): Promise<SubagentRunRecord | undefined> {
-    const run = await this.session.children.get(id)
-    return run?.kind === "subagent" ? run : undefined
-  }
-
   /**
    * The children of this conversation still paused on their question, each with it: one indexed
    * read, which finds none in a conversation that has none, then one per key that has some.
@@ -596,8 +587,7 @@ export class SubagentCoordinator {
 
   /**
    * Continue a child paused on its question, as a child of this turn under the same key, with this
-   * message as the answer it reads first. A key that already names a child of this turn is
-   * refused: the answer would continue it twice.
+   * message as the answer it reads first.
    */
   private async answerPaused(
     paused: SubagentRunRecord,
@@ -619,21 +609,19 @@ export class SubagentCoordinator {
       inReplyTo: question.id,
       text: sent.text,
     }
-    const runId = createSubagentRunId(this.parentRun.id, key)
-    const admitted = await this.admitInTurn(async () => {
-      if (await this.subagentRun(runId)) {
-        throw new AgentToolPublicError(
-          `[SixbAgent] '${key}' already continues with the answer you sent it this turn. Message it again once it is at work, or wait for it with wait.`
-        )
-      }
-      await this.clearDeadAttempts(paused, signal)
-      const workspace = await this.continuationWorkspace(paused)
-      const { spec, continuation } = this.continuationOf(paused, [answer], workspace)
-      return this.admit(runId, key, spec, signal, {
+    await this.clearDeadAttempts(paused, signal)
+    const workspace = await this.continuationWorkspace(paused)
+    const { spec, continuation } = this.continuationOf(paused, [answer], workspace)
+    const admitted = await this.admit(
+      createSubagentRunId(this.parentRun.id, key),
+      key,
+      spec,
+      signal,
+      {
         ...continuation,
         lends: continuesInParentWorkspace(workspace),
-      })
-    })
+      }
+    )
 
     const output: MessageSubagentOutput = {
       runId: admitted.runId,
@@ -807,38 +795,29 @@ export class SubagentCoordinator {
         inParentWorkspace,
       })
 
-    // One admission at a time: only this turn adds children to it, so admission's answer is known
-    // before any file is read, and a refused spawn reads and stores none.
-    return this.admitInTurn(async () => {
-      const existing = await this.admissionOf(runId, key)
-      if (existing) {
-        // The same child only if everything is the same, the files' bytes too.
-        const files =
-          sources && sameSpecBesidesFiles(existing.spec, specWith(undefined), sources)
-            ? await handedFileRefs({ files: this.runFiles(), sources, signal })
-            : undefined
-        const spec = specWith(files)
-        if (!isDeepStrictEqual(existing.spec, spec)) throw duplicateKey(key)
-        return this.admit(runId, key, spec, signal)
-      }
+    // Admission's answer is known before any file is read: a refused spawn reads and stores none.
+    const existing = await this.admissionOf(runId, key)
+    if (existing) {
+      // The same child only if everything is the same, the files' bytes too.
+      const files =
+        sources && sameSpecBesidesFiles(existing.spec, specWith(undefined), sources)
+          ? await handedFileRefs({ files: this.runFiles(), sources, signal })
+          : undefined
+      const spec = specWith(files)
+      if (!isDeepStrictEqual(existing.spec, spec)) throw duplicateKey(key)
+      return this.admit(runId, key, spec, signal)
+    }
 
-      const stored = sources
-        ? await storeHandedFiles({ files: this.runFiles(), sources, signal })
-        : undefined
-      try {
-        return await this.admit(runId, key, specWith(stored?.files), signal)
-      } catch (error) {
-        // Nothing was admitted, so the files do not count against the run.
-        stored?.release()
-        throw error
-      }
-    })
-  }
-
-  private admitInTurn<T>(admission: () => Promise<T>): Promise<T> {
-    const admitted = this.#admissions.then(admission)
-    this.#admissions = admitted.catch(() => {})
-    return admitted
+    const stored = sources
+      ? await storeHandedFiles({ files: this.runFiles(), sources, signal })
+      : undefined
+    try {
+      return await this.admit(runId, key, specWith(stored?.files), signal)
+    } catch (error) {
+      // Nothing was admitted, so the files do not count against the run.
+      stored?.release()
+      throw error
+    }
   }
 
   /**

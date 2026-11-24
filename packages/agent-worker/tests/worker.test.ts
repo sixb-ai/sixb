@@ -10896,7 +10896,7 @@ describe("AgentWorker", () => {
     },
   ])("stores nothing for a spawn refused $name", async ({ spawns, refusal }) => {
     // Removal proofs: drop admissionOf from SubagentCoordinator.spawn, and the refused spawn's file
-    // is stored though no child gets it; read the files before admitInTurn, and the refused spawn
+    // is stored though no child gets it; read the files before admissionOf, and the refused spawn
     // reads its file.
     const parentCalls: LanguageModelRequest[] = []
     const childModel = new WorkerTestModel({
