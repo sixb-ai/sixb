@@ -5,7 +5,7 @@ import type { JsonObject, JsonValue, ModelTool } from "@sixb/core/models"
 import { AgentToolExecutionError } from "../errors"
 import { agentToolErrorText } from "../model-adapters"
 import { type AgentSandboxHandle, contextPath } from "../sandbox-handle"
-import { FINGERPRINT_FUNCTIONS, type FileReadLedger, isFingerprint } from "./file-writes"
+import { FINGERPRINT_FUNCTIONS, isFingerprint, type SeenFiles } from "./file-writes"
 import { isKnownSandboxFile, type SandboxFileViewer, viewSandboxFile } from "./view-file"
 
 const DEFAULT_LIMIT = 2_000
@@ -66,8 +66,8 @@ export interface ReadToolOutput {
 /** Build the reader from the run's lazy sandbox resolver. */
 export function createReadTool(
   resolveSandbox: () => Promise<AgentSandboxHandle>,
-  /** Where each read is recorded, so `edit` and `write` change only a file the run has read. */
-  ledger?: FileReadLedger,
+  /** Where each read is recorded: what the model saw of each file, for `edit` and `write`. */
+  seenFiles?: SeenFiles,
   /** Shows images, PDFs and other files that are not text; without it, they are refused. */
   viewer?: SandboxFileViewer
 ): ModelTool<ReadToolInput> {
@@ -119,7 +119,6 @@ export function createReadTool(
       const [first = "", second = "", ...rest] = result.stdout.split("\n")
       if (first === "directory") return directoryListing(path, [second, ...rest])
 
-      if (isFingerprint(first) && second) ledger?.record(second, first)
       let page: ReturnType<typeof paginate>
       try {
         page = paginate(decodeBase64(rest.join("\n")), path, offset, limit)
@@ -128,6 +127,10 @@ export function createReadTool(
         return viewSandboxFile(viewer, handle, { path, toolCallId, signal })
       }
       const endLine = offset + page.lineCount - 1
+      if (isFingerprint(first) && second) {
+        const seenPage = { from: offset, to: endLine, end: !page.truncated }
+        seenFiles?.recordRead(second, first, seenPage, toolCallId)
+      }
       return {
         path,
         content: page.content,

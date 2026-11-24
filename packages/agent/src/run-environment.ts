@@ -92,7 +92,7 @@ import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./t
 import { createStopTool, createWaitTool, type WaitableChildren } from "./tools/background"
 import { createBashTool } from "./tools/bash"
 import { createEditTool } from "./tools/edit"
-import { FileReadLedger } from "./tools/file-writes"
+import { SeenFiles } from "./tools/file-writes"
 import { createGlobTool } from "./tools/glob"
 import { createGrepTool } from "./tools/grep"
 import { agentModelToolSpecs, fetchesWeb } from "./tools/model-spec"
@@ -980,13 +980,13 @@ async function startAgentEnvironment(
       console.error("[SixbAgent] Could not stop the run's background commands:", error)
     })
   }
-  // One per run: `edit` and `write` change only files this run read, as it read them.
-  const fileReads = new FileReadLedger()
-  appendBuiltInTool(tools, createReadTool(resolveSandbox, fileReads, fileViewer))
+  // One per run: what its model saw of each file, and the queue `edit` and `write` take turns in.
+  const seenFiles = new SeenFiles()
+  appendBuiltInTool(tools, createReadTool(resolveSandbox, seenFiles, fileViewer))
   // As agentModelToolSpecs advertises them.
   if (!input.readOnly) {
-    appendBuiltInTool(tools, createEditTool(resolveSandbox, fileReads))
-    appendBuiltInTool(tools, createWriteTool(resolveSandbox, fileReads))
+    appendBuiltInTool(tools, createEditTool(resolveSandbox, seenFiles))
+    appendBuiltInTool(tools, createWriteTool(resolveSandbox, seenFiles))
   }
   appendBuiltInTool(tools, createGlobTool(resolveSandbox))
   appendBuiltInTool(tools, createGrepTool(resolveSandbox))
@@ -1141,6 +1141,7 @@ async function startAgentEnvironment(
         endedWith: sandbox.background ? "the sixb that ran it" : "the run that started it",
       }).wrap(toolOutputFiles.wrap(tools)),
       outputFileOf: (toolCallId) => toolOutputFiles.fileOf(toolCallId),
+      onReadCut: (toolCallId, shownThrough) => seenFiles.recordCut(toolCallId, shownThrough),
       prepareStep: mediaBridge.prepareStep,
       systemPrompt: systemPrompt.text,
       systemPromptSize: systemPrompt,

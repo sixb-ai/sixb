@@ -12,20 +12,105 @@ const COMMAND_TIMEOUT_MS = 30_000
  */
 const CHUNK_CHARACTERS = 96 * 1024
 
-/**
- * What a run has read, by real path: the file's fingerprint (`cksum`: CRC and size) when it read
- * it. `edit` and `write` change an existing file only when it is the file the run read, so a change
- * made since, by the user, another process or the run's own `bash`, is never overwritten blind.
- */
-export class FileReadLedger {
-  readonly #fingerprints = new Map<string, string>()
+/** What the model last saw of a file: one version of it, all of it or the start of it. */
+export interface SeenFile {
+  readonly fingerprint: string
+  /** It saw every line: in one read, or in reads that follow on from line 1 to the last. */
+  readonly whole: boolean
+  /** While not whole, the last line it saw with no gap from line 1. */
+  readonly through: number
+}
 
-  record(realPath: string, fingerprint: string): void {
-    this.#fingerprints.set(realPath, fingerprint)
+/**
+ * What a run's model has seen of each file, by real path, as `read` showed it or `edit` and
+ * `write` left it; and the queue those two take turns in.
+ *
+ * `write` replaces an existing file only when the model saw all of it as it is now, so it never
+ * drops lines the model was not shown. `edit` needs no read, since `old_string` must match the
+ * file as it is, but says so when the file is not the version the model last saw.
+ */
+export class SeenFiles {
+  readonly #files = new Map<string, SeenFile>()
+  /** Each read by its tool call, for the context guard to say when it cut one. */
+  readonly #reads = new Map<string, SeenRead>()
+  #queue: Promise<unknown> = Promise.resolve()
+
+  get(realPath: string): SeenFile | undefined {
+    return this.#files.get(realPath)
   }
 
-  get(realPath: string): string | undefined {
-    return this.#fingerprints.get(realPath)
+  /** `read` showed lines `from` to `to` of this version, the file's last line among them if `end`. */
+  recordRead(
+    realPath: string,
+    fingerprint: string,
+    page: { readonly from: number; readonly to: number; readonly end: boolean },
+    toolCallId?: string
+  ): void {
+    const seen = this.#files.get(realPath)
+    const before = seen?.fingerprint === fingerprint ? seen : undefined
+    if (toolCallId !== undefined) {
+      this.#reads.set(toolCallId, { realPath, fingerprint, from: page.from, before })
+    }
+    if (before?.whole) return
+
+    this.#files.set(realPath, followOn(fingerprint, before, page))
+  }
+
+  /**
+   * The context guard cut what a read returned before the model read it: it is shown the file
+   * only up to `shownThrough`. What that read recorded becomes what the model really saw, so a
+   * `write` still needs the rest read first.
+   */
+  recordCut(toolCallId: string, shownThrough: number): void {
+    const read = this.#reads.get(toolCallId)
+    if (read === undefined) return
+
+    // Seen whole before this read, or since replaced by another version: nothing to take back.
+    if (read.before?.whole) return
+    if (this.#files.get(read.realPath)?.fingerprint !== read.fingerprint) return
+
+    const page = { from: read.from, to: shownThrough, end: false }
+    this.#files.set(read.realPath, followOn(read.fingerprint, read.before, page))
+  }
+
+  /** `edit` or `write` left this version: the model knows all of it when `whole`. */
+  recordWrite(realPath: string, fingerprint: string, whole: boolean): void {
+    this.#files.set(realPath, { fingerprint, whole, through: 0 })
+  }
+
+  /**
+   * Run a change once those queued before it have settled. A step's tool calls run at once, and
+   * the commit's check that a file is unchanged is not atomic: two edits of one file both passed
+   * it, and the second write lost the first edit or left the file torn. The queue is the run's:
+   * a sub-agent working in its parent's workspace has its own.
+   */
+  change<T>(task: () => Promise<T>): Promise<T> {
+    const result = this.#queue.then(task)
+    this.#queue = result.catch(() => {})
+    return result
+  }
+}
+
+/** A read as `SeenFiles` recorded it, with what the model had seen of that version before it. */
+interface SeenRead {
+  readonly realPath: string
+  readonly fingerprint: string
+  readonly from: number
+  readonly before: SeenFile | undefined
+}
+
+/** What the model has seen of a version once a page of it follows what it saw `before`. */
+function followOn(
+  fingerprint: string,
+  before: SeenFile | undefined,
+  page: { readonly from: number; readonly to: number; readonly end: boolean }
+): SeenFile {
+  const through = before?.through ?? 0
+  const follows = page.from <= through + 1
+  return {
+    fingerprint,
+    whole: follows && page.end,
+    through: follows ? Math.max(through, page.to) : through,
   }
 }
 
@@ -65,20 +150,24 @@ export async function loadSandboxFile(
 }
 
 /**
- * Write `bytes` to `path` when the file there is still `expected` (a fingerprint, or `missing`
- * for a file to create), keeping an existing file's mode. Missing parent directories are created
- * inside the run's roots. Returns where the file is and its new fingerprint.
+ * Write `bytes` over the file `loaded` found when it is still that file (or create it when it was
+ * missing), keeping an existing file's mode. Missing parent directories are created inside the
+ * run's roots. Errors name `path`, as the model wrote it. Returns where the file is and its new
+ * fingerprint.
  */
 export async function commitSandboxFile(
   handle: AgentSandboxHandle,
   input: {
     readonly path: string
-    readonly expected: string
+    readonly loaded: LoadedSandboxFile
     readonly bytes: Uint8Array
     readonly tool: string
     readonly signal: AbortSignal
   }
 ): Promise<{ readonly realPath: string; readonly fingerprint: string }> {
+  const { loaded } = input
+  const target = loaded.kind === "file" ? loaded.realPath : input.path
+  const expected = loaded.kind === "file" ? loaded.fingerprint : "missing"
   const encoded = Buffer.from(input.bytes).toString("base64")
   let stage = ""
   let offset = 0
@@ -104,15 +193,22 @@ export async function commitSandboxFile(
     input.tool,
     input.signal,
     COMMIT_SCRIPT,
-    [input.path, contextPath(handle), input.expected, stage],
+    [target, contextPath(handle), expected, stage],
     encoded.slice(offset)
   )
   if (result.exitCode === 15) {
+    const now =
+      result.stdout.trim() === "missing"
+        ? "was deleted"
+        : loaded.kind === "missing"
+          ? "was created"
+          : "changed"
+    // A write replaces what is there now, so the model has to see it first.
+    const next =
+      input.tool === "write" && now !== "was deleted" ? "Read all of it first." : "Try again."
     throw publicError(
       input.tool,
-      result.stdout.trim() === "missing"
-        ? `'${input.path}' was deleted after you read it.`
-        : `'${input.path}' changed after you read it. Read it again, then make your change.`
+      `'${input.path}' ${now} while your ${input.tool} was being saved, so nothing was written. ${next}`
     )
   }
   if (result.exitCode !== 0) throw pathError(input.tool, input.path, result)

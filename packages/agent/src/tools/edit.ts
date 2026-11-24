@@ -3,19 +3,13 @@ import type { JsonObject, JsonValue, ModelTool } from "@sixb/core/models"
 import { agentToolErrorText } from "../model-adapters"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 import { editText } from "./edit-text"
-import {
-  commitSandboxFile,
-  type FileReadLedger,
-  type LoadedSandboxFile,
-  loadSandboxFile,
-  publicError,
-} from "./file-writes"
+import { commitSandboxFile, loadSandboxFile, publicError, type SeenFiles } from "./file-writes"
 
 export const EDIT_TOOL_SPEC = {
   name: "edit",
   strict: true,
   description:
-    "Replace text in a file. old_string must match the file exactly, once, unless replace_all is true. Read the file first: an edit refuses a file that changed since you read it. Returns the change as a diff, so there is no need to read the file again to check it.",
+    "Replace text in a file. old_string must match the file as it is now, exactly and once, unless replace_all is true. Returns the change as a diff, so there is no need to read the file again to check it.",
   inputSchema: {
     type: "object",
     properties: {
@@ -51,73 +45,66 @@ export interface EditToolOutput {
   /** Lines the change adds and removes, all of them, however short the diff was cut. */
   readonly added: number
   readonly removed: number
+  /** Set when the file was not the version the model last saw: it holds changes it has not seen. */
+  readonly note?: string
 }
 
 export function createEditTool(
   resolveSandbox: () => Promise<AgentSandboxHandle>,
-  ledger: FileReadLedger
+  seenFiles: SeenFiles
 ): ModelTool<EditToolInput> {
   return {
     ...EDIT_TOOL_SPEC,
     parseInput: parseEditInput,
     async execute(input, { signal }): Promise<JsonValue> {
       const handle = await resolveSandbox()
-      const loaded = await loadSandboxFile(handle, { path: input.path, tool: "edit", signal })
-      if (loaded.kind === "missing") {
-        throw publicError("edit", `'${input.path}' does not exist. Create it with write.`)
-      }
-      assertReadAsIs(ledger, loaded, input.path, "edit")
+      return seenFiles.change(async () => {
+        const loaded = await loadSandboxFile(handle, { path: input.path, tool: "edit", signal })
+        if (loaded.kind === "missing") {
+          throw publicError("edit", `'${input.path}' does not exist. Create it with write.`)
+        }
+        const seen = seenFiles.get(loaded.realPath)
+        const stale = seen !== undefined && seen.fingerprint !== loaded.fingerprint
 
-      let text: string
-      try {
-        text = new TextDecoder("utf-8", { fatal: true }).decode(loaded.bytes)
-      } catch {
-        throw publicError("edit", `'${input.path}' is not UTF-8 text.`)
-      }
-      const edited = editText(text, {
-        old: input.old_string,
-        new: input.new_string,
-        all: input.replace_all === true,
-      })
-      if (!edited.ok) throw publicError("edit", edited.reason)
+        let text: string
+        try {
+          text = new TextDecoder("utf-8", { fatal: true }).decode(loaded.bytes)
+        } catch {
+          throw publicError("edit", `'${input.path}' is not UTF-8 text.`)
+        }
+        const edited = editText(text, {
+          old: input.old_string,
+          new: input.new_string,
+          all: input.replace_all === true,
+        })
+        if (!edited.ok) throw publicError("edit", edited.reason)
 
-      const written = await commitSandboxFile(handle, {
-        path: loaded.realPath,
-        expected: loaded.fingerprint,
-        bytes: new TextEncoder().encode(edited.text),
-        tool: "edit",
-        signal,
+        const written = await commitSandboxFile(handle, {
+          path: input.path,
+          loaded,
+          bytes: new TextEncoder().encode(edited.text),
+          tool: "edit",
+          signal,
+        })
+        // The model now knows the file as it saw it plus this diff: all of it only when it saw
+        // it whole, as it was.
+        seenFiles.recordWrite(written.realPath, written.fingerprint, seen?.whole === true && !stale)
+        return {
+          path: input.path,
+          replaced: edited.replaced,
+          diff: edited.diff,
+          added: edited.added,
+          removed: edited.removed,
+          ...(stale ? { note: staleNote(input.path) } : {}),
+        } satisfies EditToolOutput
       })
-      ledger.record(written.realPath, written.fingerprint)
-      return {
-        path: input.path,
-        replaced: edited.replaced,
-        diff: edited.diff,
-        added: edited.added,
-        removed: edited.removed,
-      } satisfies EditToolOutput
     },
     errorText: agentToolErrorText,
   }
 }
 
-/** An existing file is changed only as the run last read or wrote it. */
-export function assertReadAsIs(
-  ledger: FileReadLedger,
-  loaded: Extract<LoadedSandboxFile, { kind: "file" }>,
-  path: string,
-  tool: string
-): void {
-  const seen = ledger.get(loaded.realPath)
-  if (seen === undefined) {
-    throw publicError(tool, `read '${path}' with the read tool before changing it.`)
-  }
-  if (seen !== loaded.fingerprint) {
-    throw publicError(
-      tool,
-      `'${path}' changed since you read it. Read it again, then make your change.`
-    )
-  }
+function staleNote(path: string): string {
+  return `The edit was applied, but '${path}' had changed since you last read or changed it, so it holds changes you have not seen. Read it before an edit that depends on what is around this one.`
 }
 
 function parseEditInput(value: unknown): EditToolInput {

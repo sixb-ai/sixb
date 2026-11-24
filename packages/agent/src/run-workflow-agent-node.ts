@@ -142,6 +142,7 @@ export async function runWorkflowAgentNode(
       ...(input.measuredBytesPerToken === undefined
         ? {}
         : { measuredBytesPerToken: input.measuredBytesPerToken }),
+      ...(input.context.onReadCut === undefined ? {} : { onReadCut: input.context.onReadCut }),
     })
     const { prepareStep } = input.context
     const research = await runModelLoop({
