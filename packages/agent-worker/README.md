@@ -21,7 +21,8 @@ await worker.start()
 ```
 
 For agent execution, `sixb` must provide `storage.agents`, `storage.aiUsage`, `storage.aiCosts`, `storage.auth`,
-`queues.agents`, `definitions.models` (or workflow agent steps), `broker`, and `sandboxes`.
+`queues.agents`, `queues.turnIndexing`, `definitions.models` (or workflow agent steps), `broker`,
+and `sandboxes`.
 
 Embedding-only projects can start `new AgentWorker(sixb, {})` for accounting recovery without a
 sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#recovery-only-operation).
@@ -56,6 +57,10 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   the reserve, since files have no byte-to-token rate.
 - The queue lease is the sole authority for liveness and redelivery; the worker renews it during
   turns.
+- Each conversation's turn vectors, which the Agent searches earlier conversations by, are kept
+  current on their own lane, `queues.turnIndexing`: the worker consumes it beside its own, two jobs
+  at a time, so indexing never takes a turn's slot. See
+  [turn vectors](../core/src/agents/turn-vectors/README.md).
 - Every completed provider call from Sixb's owned model loop is appended to `storage.aiUsage` with
   an immutable valuation in `storage.aiCosts`; API conversation and workflow-agent summaries are
   derived from that ledger. A conversation turn's usage and cost cover everything below its

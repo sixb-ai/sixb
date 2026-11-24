@@ -728,6 +728,7 @@ function assertSandboxCredentials<TParams extends ParamsConfig>(
 
 const QUEUE_LANES = [
   "vectorIndexing",
+  "turnIndexing",
   "lake",
   "syncRuns",
   "pipelines",

@@ -11,10 +11,10 @@ import {
 } from "@sixb/core"
 import { getAgentTurnIndexing } from "@sixb/core/internal/agents"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import { AgentWorker } from "../src"
+import { TurnIndexingWorker } from "../src/turn-indexing-worker"
 
 const alice = { type: "user", id: "usr_alice" } as const
-const workers: AgentWorker[] = []
+const workers: TurnIndexingWorker[] = []
 
 afterEach(async () => {
   await Promise.all(workers.splice(0).map((worker) => worker.stop()))
@@ -49,14 +49,15 @@ function fixture() {
   /** Each delivery's outcome, as the worker settles it with the queue. */
   const settled: { readonly outcome: "completed" | "retried"; readonly availableAt?: string }[] = []
   let next: (() => void) | undefined
-  const complete = queues.agents.complete.bind(queues.agents)
-  const retry = queues.agents.retry.bind(queues.agents)
-  queues.agents.complete = async (params) => {
+  const lane = queues.turnIndexing
+  const complete = lane.complete.bind(lane)
+  const retry = lane.retry.bind(lane)
+  lane.complete = async (params) => {
     await complete(params)
     settled.push({ outcome: "completed" })
     next?.()
   }
-  queues.agents.retry = async (params) => {
+  lane.retry = async (params) => {
     await retry(params)
     settled.push({
       outcome: "retried",
@@ -116,7 +117,7 @@ function fixture() {
   }
 
   const start = async () => {
-    const worker = new AgentWorker(host, {})
+    const worker = new TurnIndexingWorker(host, getAgentTurnIndexing(host)!)
     workers.push(worker)
     await worker.start()
   }
@@ -124,7 +125,7 @@ function fixture() {
   return { host, storage, embed, settled, settlement, conversation, start }
 }
 
-describe("AgentWorker turn indexing", () => {
+describe("TurnIndexingWorker", () => {
   test("indexes the conversation a job names", async () => {
     const f = fixture()
     await f.conversation()
@@ -144,7 +145,7 @@ describe("AgentWorker turn indexing", () => {
     ])
   })
 
-  test("comes back when the requester's AI limit resets, not before", async () => {
+  test("comes back when the project's AI limit resets, not before", async () => {
     // Guard proof: drop the AgentTurnIndexingDeferred branch from onExecutionError; the job comes
     // back after the first backoff, a minute from now, instead of at the limit's reset.
     const f = fixture()

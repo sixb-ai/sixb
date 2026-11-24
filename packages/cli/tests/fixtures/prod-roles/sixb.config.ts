@@ -92,6 +92,9 @@ class SharedQueues implements Queues {
   get vectorIndexing() {
     return this.inner.vectorIndexing
   }
+  get turnIndexing() {
+    return this.inner.turnIndexing
+  }
   get lake() {
     return this.inner.lake
   }

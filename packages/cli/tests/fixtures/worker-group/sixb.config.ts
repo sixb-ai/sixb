@@ -124,6 +124,7 @@ class SharedQueues implements Queues {
   }
 
   readonly vectorIndexing = this.inner.vectorIndexing
+  readonly turnIndexing = this.inner.turnIndexing
   readonly lake = this.inner.lake
   readonly renders = this.inner.renders
   readonly syncRuns = claimLoggingQueue(this.inner.syncRuns, "sync")

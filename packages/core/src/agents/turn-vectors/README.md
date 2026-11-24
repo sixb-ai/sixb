@@ -41,11 +41,13 @@ opening with the request. Sub-agents' threads are never indexed.
 
 ## Jobs
 
-`agent.thread.index.requested` runs in the agent worker. There is one job id per thread, always
-asked for with `replace`: a waiting job takes the newest ask, and a claimed one keeps its delivery
-while the ask waits behind it. So two workers never index one thread at once, and never pay twice
-for the same turns. A lease on the index state would do the same with one more write per job; the
-queue already holds the id.
+`agent.thread.index.requested` runs on its own lane, `queues.turnIndexing`, which the agent worker
+consumes beside its own, at most two at a time (`agent-worker/src/turn-indexing-worker.ts`). An
+embedding model's latency or a back-fill of every conversation never takes the slot a turn waits
+for. There is one job id per thread, always asked for with `replace`: a waiting job takes the newest
+ask, and a claimed one keeps its delivery while the ask waits behind it. So two workers never index
+one thread at once, and never pay twice for the same turns. A lease on the index state would do the
+same with one more write per job; the queue already holds the id.
 
 A turn's end asks for its thread (`afterAgentRunFinished`, after the next turn has started). The
 worker's 30-second repair pass asks for up to 200 idle conversations behind, most recently active
@@ -53,18 +55,18 @@ first: ends a crash lost, a model change, and every conversation from before ind
 reads two indexes, threads behind their revision and threads of another configuration, never all
 threads.
 
-Indexing is the project's work, not a person's: it runs as the kernel operation
-`agents.indexTurns`, on one execution per thread (`exec_turns_<threadId>`) that each job records
-its calls under. Only the project's AI limits admit its calls, and Settings › Usage shows them with
-no requester, as it shows object vectors and media transcription. No one's own usage or limit ever
-counts them, whoever wrote the turns, in a shared conversation or a fork. One call embeds several
-turns, up to the model's batch limits.
+Indexing is the project's work, not a person's: it runs as the kernel operation `agents.indexTurns`,
+on one execution per thread (`exec_turns_<threadId>`) that each job records its calls under. Only
+the project's AI limits admit its calls, and Settings › Usage shows them with no requester, as it
+shows object vectors and media transcription. No one's own usage or limit ever counts them, whoever
+wrote the turns, in a shared conversation or a fork. One call embeds several turns, up to the
+model's batch limits.
 
-The project's limit refusing a call defers the thread to its reset (at least a minute); any other failure
-defers it 1 minute, 5, 30, then every 6 hours, never giving up. The deferral is recorded on the
-thread (`deferred_until`, `failures`), so neither the repair pass nor a turn's end asks for it
-meanwhile, and the job waits until then. A call whose outcome is unknown is recorded as such and
-may be paid again on the next try. A write clears both.
+The project's limit refusing a call defers the thread to its reset (at least a minute); any other
+failure defers it 1 minute, 5, 30, then every 6 hours, never giving up. The deferral is recorded on
+the thread (`deferred_until`, `failures`), so neither the repair pass nor a turn's end asks for it
+meanwhile, and the job waits until then. A call whose outcome is unknown is recorded as such and may
+be paid again on the next try. A write clears both.
 
 A failure the error catalog says no retry fixes (`retryable: false`, such as
 `vector.response_invalid` from a model answering with other dimensions than it declares) would be

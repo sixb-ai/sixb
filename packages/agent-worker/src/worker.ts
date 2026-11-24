@@ -10,7 +10,6 @@ import {
   AgentFinalizationError,
   type AgentRunSessionHost,
   type AgentTurnIndexing,
-  AgentTurnIndexingDeferred,
   afterAgentRunFinished,
   claimAgentRun,
   createBrokerStreamSink,
@@ -58,6 +57,7 @@ import {
   waitForAbort,
 } from "./run-fate"
 import { conversationSandbox } from "./run-sandboxes"
+import { TurnIndexingWorker } from "./turn-indexing-worker"
 import type {
   AgentWorkerContext,
   AgentWorkerHost,
@@ -76,8 +76,6 @@ const AGENT_DISPATCH_REPAIR_MS = 30_000
 const FINALIZE_RETRY_BACKOFF_MS = 5_000
 const AI_USAGE_RECOVERY_INITIAL_BACKOFF_MS = 5_000
 const AI_USAGE_RECOVERY_MAX_BACKOFF_MS = 5 * 60_000
-/** Before indexing a conversation again after storage failed to record why it stopped. */
-const TURN_INDEXING_RETRY_MS = 60_000
 
 /** What a conversation turn resolves before its first model call. */
 /**
@@ -98,6 +96,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   private readonly leaseMs: number
   /** Keeps each conversation's turn vectors current, when the host has search by meaning. */
   private readonly turnIndexing: AgentTurnIndexing | undefined
+  /** Consumes the `turnIndexing` lane beside this worker's own, for projects with agent work. */
+  private readonly turnIndexingWorker: TurnIndexingWorker | undefined
   /**
    * Sandbox teardowns that outlived their run's dispose() (boot still in flight when the turn
    * ended). stop() drains these so a graceful shutdown does not leave machines mid-teardown.
@@ -124,6 +124,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         .list()
         .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))
     this.context = hasAgentWork ? buildAgentContext(host, options) : null
+    this.turnIndexingWorker =
+      hasAgentWork && this.turnIndexing
+        ? new TurnIndexingWorker(host, this.turnIndexing)
+        : undefined
     const context = this.context
     this.children = context
       ? workerChildren({
@@ -164,13 +168,29 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     }
   }
 
+  override async start(): Promise<void> {
+    await Promise.all([super.start(), this.turnIndexingWorker?.start()])
+  }
+
+  override async drain(timeoutMs?: number): Promise<boolean> {
+    const [turns, indexing] = await Promise.all([
+      super.drain(timeoutMs),
+      this.turnIndexingWorker ? this.turnIndexingWorker.drain(timeoutMs) : Promise.resolve(true),
+    ])
+    return turns && indexing
+  }
+
   override async stop(): Promise<void> {
     // super.stop() awaits every in-flight execute() (and thus its dispose()); draining afterwards
     // catches the detached teardowns dispose() left running so we never report stopped while a
     // sandbox machine is still being reaped.
-    await super.stop()
+    await Promise.all([super.stop(), this.turnIndexingWorker?.stop()])
     await this.children?.drain()
     await Promise.allSettled([...this.pendingTeardowns])
+  }
+
+  override async wait(): Promise<void> {
+    await Promise.all([super.wait(), this.turnIndexingWorker?.wait()])
   }
 
   /** Register a detached sandbox teardown so stop() can drain it; self-removes when it settles. */
@@ -201,10 +221,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         job.payload.callId,
         signal
       )
-      return
-    }
-    if (job.type === "agent.thread.index.requested") {
-      await this.turnIndexing?.index(job.payload.threadId, job.attempt, signal)
       return
     }
     const context = this.requireContext()
@@ -346,24 +362,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
             availableAt: backoff(aiUsageRecoveryBackoffMs(claimed.job.attempt)),
           }
     }
-    if (claimed.job.type === "agent.thread.index.requested") {
-      const threadId = claimed.job.payload.threadId
-      // The thread records how long it waits: an AI limit's reset, or a failure's backoff.
-      if (error instanceof AgentTurnIndexingDeferred) {
-        if (error.cause !== undefined) {
-          console.warn(
-            `[SixbAgentWorker] Could not index Agent thread '${threadId}'; retrying later.`,
-            error.cause
-          )
-        }
-        return { kind: "retry", availableAt: error.availableAt }
-      }
-      console.warn(
-        `[SixbAgentWorker] Could not index Agent thread '${threadId}'; retrying later.`,
-        error
-      )
-      return { kind: "retry", availableAt: backoff(TURN_INDEXING_RETRY_MS) }
-    }
     if (error instanceof RunOwnedElsewhereError) return retryOnceReleased(error)
     // The node's result is durable; only its workflow resume is unpublished. Redeliver until it is.
     if (error instanceof WorkflowResumeDispatchError) {
@@ -426,10 +424,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         availableAt: backoff(aiUsageRecoveryBackoffMs(claimed.job.attempt)),
       }
     }
-    if (
-      claimed.job.type === "agent.workflow-node.requested" ||
-      claimed.job.type === "agent.thread.index.requested"
-    ) {
+    if (claimed.job.type === "agent.workflow-node.requested") {
       return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
     }
     // A deferred duplicate stays deferred during shutdown: failing it would orphan a live run.

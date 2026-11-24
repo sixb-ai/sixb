@@ -20,7 +20,10 @@ import { VECTOR_INDEXING_FAILURE_CODES } from "../../storage/ontology/vector-ind
 import { agentTurnVectorConfiguration } from "./configuration"
 import { type AgentTurn, agentTurnChunks, splitAgentTurns } from "./turns"
 
-/** How many conversations behind one repair pass asks to index. */
+/**
+ * How many conversations behind one repair pass asks to index. A job already waiting takes the
+ * next ask of its id, so passes never pile batches up on the lane.
+ */
 const REPAIR_LIMIT = 200
 const MESSAGE_PAGE_SIZE = 200
 /**
@@ -59,8 +62,8 @@ export interface AgentTurnIndexing {
    */
   repair(): Promise<void>
   /**
-   * Index what changed in a thread since its index was written, as the job's `attempt`. The agent
-   * worker's turn indexing lane runs it.
+   * Index what changed in a thread since its index was written, as the job's `attempt`. The
+   * `turnIndexing` lane's job runs it.
    */
   index(threadId: string, attempt: number, signal: AbortSignal): Promise<void>
 }
@@ -124,7 +127,7 @@ export function createAgentTurnIndexing(runtime: SixbHostContext): AgentTurnInde
 
   const enqueue = async (threadIds: readonly string[]): Promise<void> => {
     if (threadIds.length === 0) return
-    await runtime.queues.agents.enqueue({
+    await runtime.queues.turnIndexing.enqueue({
       projectId,
       jobs: threadIds.map((threadId) => ({
         id: agentTurnIndexJobId(threadId),

@@ -548,7 +548,7 @@ describe("agent turn indexing", () => {
       type: "agent.thread.index.requested",
       payload: { threadId: "thr_1" },
     })
-    await f.queues.agents.complete({
+    await f.queues.turnIndexing.complete({
       projectId: f.projectId,
       jobId: first!.id,
       leaseId: first!.leaseId,
@@ -602,7 +602,7 @@ describe("agent turn indexing", () => {
     await f.indexing.repair()
     expect(await claimAll(f, "other-worker")).toEqual([])
 
-    await f.queues.agents.complete({
+    await f.queues.turnIndexing.complete({
       projectId: f.projectId,
       jobId: first!.id,
       leaseId: first!.leaseId,
@@ -612,7 +612,7 @@ describe("agent turn indexing", () => {
 })
 
 async function claimAll(f: ReturnType<typeof fixture>, workerId = "test") {
-  const claimed = await f.queues.agents.claim({
+  const claimed = await f.queues.turnIndexing.claim({
     projectId: f.projectId,
     workerId,
     limit: 100,
