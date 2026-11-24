@@ -48,6 +48,28 @@ export type MetaOAuthConnectorOptions = MetaOAuthBaseOptions & { readonly accoun
       }
   )
 
+/**
+ * Sign in with Facebook and connect the ad accounts the person grants: their own ad accounts and
+ * those of other business portfolios they can advertise on. Each connection is one ad account.
+ * Pass `configId` for a Facebook Login for Business configuration of the "User access token" type
+ * with Ad accounts among its assets, or `scopes` for Facebook Login.
+ */
+export type MetaAdAccountOAuthConnectorOptions = MetaOAuthBaseOptions & {
+  readonly accounts: "ads"
+  readonly login?: never
+} & (
+    | {
+        /** Facebook Login for Business configuration, of the "User access token" type. */
+        readonly configId: string
+        readonly scopes?: never
+      }
+    | {
+        /** Facebook Login permissions, e.g. `ads_read` or `ads_management`. */
+        readonly scopes: readonly string[]
+        readonly configId?: never
+      }
+  )
+
 interface MetaInstagramBaseOptions extends MetaOAuthBaseOptions {
   readonly accounts: "instagram"
 }

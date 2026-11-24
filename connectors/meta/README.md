@@ -185,6 +185,60 @@ uploads, hashtag search, product tags or ads.
 days. A connection unused for 60 days, or removed by the account (Instagram → Settings → Apps and
 websites), has to connect again.
 
+## Connect ad accounts with Facebook Login
+
+Pass `accounts: "ads"` to connect ad accounts the agency's business portfolio cannot reach: a
+person's own ad accounts, and those of other business portfolios the person can advertise on. The
+person signs in with Facebook and ticks the ad accounts to share:
+
+```ts
+export const metaAds = defineConnector(
+  "meta-ads",
+  meta({
+    appId: process.env.META_APP_ID!,
+    appSecret: process.env.META_APP_SECRET!,
+    configId: process.env.META_ADS_LOGIN_CONFIG_ID!,
+    accounts: "ads",
+  })
+)
+```
+
+`configId` is a Facebook Login for Business configuration of the "User access token" type, with
+Ad accounts among its assets (and Pages, to read Lead Ads). Apps on Facebook Login pass `scopes`
+instead; the sign-in then lists every ad account the person can use. `appId`, `appSecret` and the
+redirect URI are those of [Sign in with Facebook](#sign-in-with-facebook).
+
+The permissions to grant are the ones the project uses: `ads_read` (or `ads_management`) to read
+ad accounts and their delivery. Reading Lead Ads leads (`/{ad-id}/leads` or `/{form-id}/leads`)
+needs `ads_management`, `leads_retrieval`, `pages_show_list`, `pages_read_engagement` and
+`pages_manage_ads`, and the person must be able to advertise on both the ad account and the Page
+that owns the form.
+
+**One connection per ad account.** The client keeps `ads.account()` and `batch`, with `account`;
+Pages, Instagram, publishing and business-portfolio listings belong to other connections:
+
+```ts
+const ads = await sixb.connector(metaAds, { owner: { type: "project" }, slot: "brewery" })
+
+ads.account // { adAccountId, name, businessName?, currency?, timeZone? }
+await ads.ads.account(ads.account.adAccountId).insights.list({
+  level: "ad",
+  timeRange: { since: "2026-10-01", until: "2026-10-31" },
+})
+await ads.batch.execute([ads.batch.get(`${adId}/leads?fields=id,created_time,field_data`)])
+```
+
+`adAccountId` is the bare numeric id, without `act_`. Requests use the signed-in person's user
+token: it reaches what the person can reach, so a person who loses access to an ad account loses
+it for the connection too.
+
+**Token lifetime.** Meta derives no lasting token for an ad account: the long-lived user token,
+about 60 days, does the work, and Meta issues no refresh token. The connection carries its expiry,
+so Sixb marks the sign-in `needs_reauthorization` as it nears, with every ad account connected
+from it, and requests fail with `connector.authorization_required` until the person signs in
+again. A token Meta rejects earlier (password changed, app removed) is handled the same way.
+Revoking a connection revokes the app for that Facebook user, as for Pages.
+
 ## Client API
 
 ```ts
@@ -356,7 +410,8 @@ are exported to extend.
 - Insights are read synchronously. Very large reports (many ads, long daily ranges) are read in
   shorter date windows rather than as one asynchronous report job.
 - Page clients (`MetaPageClient`) and Instagram clients have no `ads`: their tokens read no ad
-  account.
+  account. [Ad account connections](#connect-ad-accounts-with-facebook-login) keep
+  `ads.account()`.
 - Marketing API limits (codes 80000–80014) are retried like Graph throttling. An app in Meta's
   development access tier is heavily limited; request the Marketing API Access Tier's full access
   before reading many accounts.

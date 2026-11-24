@@ -1,5 +1,6 @@
 import { rest } from "@sixb/connector-rest"
 import type { ConnectorAdapter, ConnectorContext, OAuthConnectorAdapter } from "@sixb/core"
+import { createMetaAdAccountAuthentication, discoverMetaAdAccounts } from "./ad-account-login"
 import { type MetaAccessTokenSource, withAccessToken } from "./auth"
 import { createMetaClient } from "./client"
 import {
@@ -14,9 +15,12 @@ import {
 } from "./http"
 import { createMetaInstagramLoginAuthentication } from "./instagram-business-login"
 import { createMetaInstagramAuthentication, discoverMetaInstagramAccounts } from "./instagram-login"
-import { createMetaAuthentication, discoverMetaPages } from "./oauth"
+import { createMetaAuthentication, discoverMetaPages, nonEmptyString } from "./oauth"
+import type { MetaAdAccount } from "./types/ads"
 import type {
+  MetaAdAccountClient,
   MetaClient,
+  MetaConnectedAdAccount,
   MetaConnectedInstagramAccount,
   MetaConnectedPage,
   MetaInstagramAccountClient,
@@ -24,6 +28,7 @@ import type {
 } from "./types/client"
 import type { MetaRetryContext } from "./types/common"
 import type {
+  MetaAdAccountOAuthConnectorOptions,
   MetaConnectorOptions,
   MetaInstagramOAuthConnectorOptions,
   MetaOAuthConnectorOptions,
@@ -38,6 +43,7 @@ const DEFAULT_GRAPH_VERSION = "v23.0"
 export type MetaConnector = ConnectorAdapter<"meta", MetaClient>
 export type MetaOAuthConnector = OAuthConnectorAdapter<"meta", MetaPageClient>
 export type MetaInstagramOAuthConnector = OAuthConnectorAdapter<"meta", MetaInstagramAccountClient>
+export type MetaAdAccountOAuthConnector = OAuthConnectorAdapter<"meta", MetaAdAccountClient>
 
 /**
  * Meta connector built on `@sixb/connector-rest`.
@@ -51,7 +57,8 @@ export type MetaInstagramOAuthConnector = OAuthConnectorAdapter<"meta", MetaInst
  * each connection is then one Page, and its client defaults to that Page's token. Add
  * `accounts: "instagram"` with a Unified Login `configId`, or with `login: "instagram"` and the
  * Instagram app's ID and secret for Instagram Login, to connect Instagram professional accounts
- * without a Page: each connection is then one Instagram account.
+ * without a Page: each connection is then one Instagram account. Add `accounts: "ads"` to connect
+ * the ad accounts the person can advertise on: each connection is then one ad account.
  *
  * Register it from a project's `connectors/` directory:
  *
@@ -64,12 +71,22 @@ export type MetaInstagramOAuthConnector = OAuthConnectorAdapter<"meta", MetaInst
 export function meta(options: MetaConnectorOptions): MetaConnector
 export function meta(options: MetaOAuthConnectorOptions): MetaOAuthConnector
 export function meta(options: MetaInstagramOAuthConnectorOptions): MetaInstagramOAuthConnector
+export function meta(options: MetaAdAccountOAuthConnectorOptions): MetaAdAccountOAuthConnector
 export function meta(
-  options: MetaConnectorOptions | MetaOAuthConnectorOptions | MetaInstagramOAuthConnectorOptions
-): MetaConnector | MetaOAuthConnector | MetaInstagramOAuthConnector
+  options:
+    | MetaConnectorOptions
+    | MetaOAuthConnectorOptions
+    | MetaInstagramOAuthConnectorOptions
+    | MetaAdAccountOAuthConnectorOptions
+): MetaConnector | MetaOAuthConnector | MetaInstagramOAuthConnector | MetaAdAccountOAuthConnector
 export function meta(
-  options: MetaConnectorOptions | MetaOAuthConnectorOptions | MetaInstagramOAuthConnectorOptions
-): MetaConnector | MetaOAuthConnector | MetaInstagramOAuthConnector {
+  options:
+    | MetaConnectorOptions
+    | MetaOAuthConnectorOptions
+    | MetaInstagramOAuthConnectorOptions
+    | MetaAdAccountOAuthConnectorOptions
+): MetaConnector | MetaOAuthConnector | MetaInstagramOAuthConnector | MetaAdAccountOAuthConnector {
+  if (options.appId !== undefined && options.accounts === "ads") return metaAdAccountOAuth(options)
   if (options.appId !== undefined && options.accounts === "instagram")
     return options.login === "instagram"
       ? metaInstagramLoginOAuth(options)
@@ -107,6 +124,59 @@ function metaOAuth(options: MetaOAuthConnectorOptions): MetaOAuthConnector {
         account: await readConnectedPage(http, context.account.id, context.account.label),
       }
     },
+  }
+}
+
+function metaAdAccountOAuth(
+  options: MetaAdAccountOAuthConnectorOptions
+): MetaAdAccountOAuthConnector {
+  const transport = createMetaTransport(options)
+  const authentication = createMetaAdAccountAuthentication(options, {
+    graphBaseUrl: transport.baseUrl,
+    graphVersion: transport.version,
+  })
+
+  return {
+    type: "meta",
+    authentication,
+    discoverAccounts: (_context, credentials) => discoverMetaAdAccounts(credentials),
+    async connect(context) {
+      const http = await transport.connect(context, context.tokenSource)
+      const { ads, batch } = createMetaClient(http)
+      return {
+        ads: { account: ads.account },
+        batch,
+        account: await readConnectedAdAccount(ads, context.account.id, context.account.label),
+      }
+    },
+  }
+}
+
+const CONNECTED_AD_ACCOUNT_FIELDS = ["name", "currency", "timezone_name"]
+
+/** Read the ad account's name, business, currency and time zone when the client connects. */
+async function readConnectedAdAccount(
+  ads: MetaClient["ads"],
+  adAccountId: string,
+  label: string
+): Promise<MetaConnectedAdAccount> {
+  const read = (fields: readonly string[]) => ads.account(adAccountId).get({ fields })
+
+  let account: MetaAdAccount
+  try {
+    account = await read([...CONNECTED_AD_ACCOUNT_FIELDS, "business{name}"])
+  } catch (error) {
+    // A token refused the business field still reads the account, without its portfolio's name.
+    if (!isPermissionError(error)) throw error
+    account = await read(CONNECTED_AD_ACCOUNT_FIELDS)
+  }
+  const businessName = account.business?.name
+  return {
+    adAccountId,
+    name: nonEmptyString(account.name) ? account.name : label,
+    ...(nonEmptyString(businessName) ? { businessName } : {}),
+    ...(nonEmptyString(account.currency) ? { currency: account.currency } : {}),
+    ...(nonEmptyString(account.timezone_name) ? { timeZone: account.timezone_name } : {}),
   }
 }
 

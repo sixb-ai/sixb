@@ -14,6 +14,11 @@ export {
   DEFAULT_PENDING_AD_ACCOUNT_FIELDS,
 } from "./fields"
 export { MetaApiError } from "./http"
-export type { MetaConnector, MetaInstagramOAuthConnector, MetaOAuthConnector } from "./meta"
+export type {
+  MetaAdAccountOAuthConnector,
+  MetaConnector,
+  MetaInstagramOAuthConnector,
+  MetaOAuthConnector,
+} from "./meta"
 export { meta } from "./meta"
 export type * from "./types/index"

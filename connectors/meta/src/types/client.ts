@@ -65,3 +65,26 @@ export interface MetaInstagramAccountClient
 export interface MetaPageClient extends Omit<MetaClient, "ads" | "pages"> {
   readonly account: MetaConnectedPage
 }
+
+/** The ad account a Facebook Login connection was granted for, read when the client connects. */
+export interface MetaConnectedAdAccount {
+  /** The bare numeric id, without `act_`. */
+  readonly adAccountId: string
+  readonly name: string
+  /** The business portfolio that owns the account, when it has one and Meta shares its name. */
+  readonly businessName?: string
+  /** ISO 4217 code of the account's currency, which its spend is reported in. */
+  readonly currency?: string
+  /** IANA time zone of the account, which Ads Insights dates are in. */
+  readonly timeZone?: string
+}
+
+/**
+ * Client for one ad account connected through Facebook Login. Every request defaults to the
+ * signed-in person's user token. Only `ads.account()` and `batch` remain: the token is a person's,
+ * so Pages, Instagram, publishing and business-portfolio listings belong to other connections.
+ */
+export interface MetaAdAccountClient extends Pick<MetaClient, "batch"> {
+  readonly ads: Pick<MetaAdsApi, "account">
+  readonly account: MetaConnectedAdAccount
+}
