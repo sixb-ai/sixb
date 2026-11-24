@@ -117,6 +117,7 @@ export async function runSubagent(input: {
     })),
     ...(bytesPerToken === undefined ? {} : { bytesPerToken }),
     ...(measuredBytesPerToken === undefined ? {} : { measuredBytesPerToken }),
+    ...(context.onReadCut === undefined ? {} : { onReadCut: context.onReadCut }),
     ...(compactInRun
       ? {
           compact: async (compacting) => {

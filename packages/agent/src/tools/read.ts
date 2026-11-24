@@ -128,7 +128,8 @@ export function createReadTool(
       }
       const endLine = offset + page.lineCount - 1
       if (isFingerprint(first) && second) {
-        seenFiles?.recordRead(second, first, { from: offset, to: endLine, end: !page.truncated })
+        const seenPage = { from: offset, to: endLine, end: !page.truncated }
+        seenFiles?.recordRead(second, first, seenPage, toolCallId)
       }
       return {
         path,

@@ -3,8 +3,9 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "n
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { CommandResult, RunCommandOptions, Sandbox, SandboxFileRecord } from "@sixb/core"
-import type { ModelTool } from "@sixb/core/models"
+import type { JsonValue, ModelMessage, ModelTool } from "@sixb/core/models"
 import { exec } from "@sixb/core/sandboxes"
+import { createAgentContextGuard } from "../src/context-guard"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { createEditTool } from "../src/tools/edit"
 import { SeenFiles } from "../src/tools/file-writes"
@@ -206,6 +207,50 @@ describe("write", () => {
     expect(await failure(write({ path: "big.ts", content: "new\n" }))).toBe(notSeenWhole("big.ts"))
   })
 
+  // Reproduce: drop the onReadCut call in ContextGuard.reduce, or return at once from
+  // SeenFiles.recordCut. A read the guard cut to its first lines then lets write replace all 1,640.
+  test("never replaces a file whose read the context guard cut", async () => {
+    const { root, seenFiles, read, write } = await harness()
+    const lines = Array.from({ length: 1_640 }, (_, index) => `doc line ${index + 1}`)
+    await writeFile(join(root, "doc.txt"), `${lines.join("\n")}\n`)
+    const page = await read({ path: "doc.txt" }, "call_1")
+
+    let shownThrough = 0
+    const guard = createAgentContextGuard({
+      // The page is about 8,000 tokens at 3 bytes a token: past this 5,000-token limit.
+      budget: {
+        windowTokens: 21_384,
+        inputBudgetTokens: 5_000,
+        reserveTokens: 16_384,
+        keepRecentTokens: 2_000,
+        source: "model",
+        bytesPerToken: 3,
+      },
+      tools: [],
+      onReadCut: (toolCallId, line) => {
+        shownThrough = line
+        seenFiles.recordCut(toolCallId, line)
+      },
+    })
+    await guard.prepareStep({
+      stepIndex: 0,
+      messages: readStep("doc.txt", "call_1", page),
+      steps: [],
+      model: { providerId: "mock", modelId: "model" } as never,
+      signal: new AbortController().signal,
+    })
+
+    expect(shownThrough).toBeGreaterThan(0)
+    expect(shownThrough).toBeLessThan(1_640)
+    expect(await failure(write({ path: "doc.txt", content: "new\n" }))).toBe(
+      notSeenWhole("doc.txt")
+    )
+
+    // The read the cut names shows the rest: the model has then seen all of it.
+    await read({ path: "doc.txt", offset: shownThrough + 1 }, "call_2")
+    expect(await write({ path: "doc.txt", content: "new\n" })).toMatchObject({ created: false })
+  })
+
   test("never writes outside the working directory and the context directory", async () => {
     const { root, write } = await harness()
     const outside = await tempRoot()
@@ -285,6 +330,7 @@ async function harness() {
   return {
     root,
     sandbox,
+    seenFiles,
     read: executable(createReadTool(handle, seenFiles)),
     edit: executable(createEditTool(handle, seenFiles)),
     write: executable(createWriteTool(handle, seenFiles)),
@@ -296,12 +342,35 @@ function notSeenWhole(path: string): string {
 }
 
 function executable<TInput>(tool: ModelTool<TInput>) {
-  return (input: unknown) =>
+  return (input: unknown, toolCallId = "tool-call") =>
     tool.execute(tool.parseInput(input), {
       signal: new AbortController().signal,
       callId: "call",
-      toolCallId: "tool-call",
+      toolCallId,
     })
+}
+
+/** A step whose one call read `path`, its result not yet read by the model. */
+function readStep(path: string, toolCallId: string, page: JsonValue): ModelMessage[] {
+  return [
+    { role: "system", content: "You read." },
+    { role: "user", content: [{ type: "text", text: `Read ${path}.` }] },
+    {
+      role: "assistant",
+      content: [{ type: "tool-call", toolCallId, toolName: "read", input: { path } }],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId,
+          toolName: "read",
+          output: { type: "json", value: page },
+        },
+      ],
+    },
+  ]
 }
 
 async function failure(promise: Promise<unknown>): Promise<string> {

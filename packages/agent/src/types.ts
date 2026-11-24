@@ -54,6 +54,8 @@ export interface AgentTurnContext {
   readonly tools: readonly ModelTool[]
   /** The stored file of a call whose output was too large for the context, for its message. */
   readonly outputFileOf?: (toolCallId: string) => AgentToolCallFile | undefined
+  /** The context guard cut a `read` result: the model is shown the file only up to that line. */
+  readonly onReadCut?: (toolCallId: string, shownThrough: number) => void
   readonly prepareStep?: RunModelLoopInput["prepareStep"]
   /** Complete worker-owned system prompt, derived from the mode and provisioned runtime. */
   readonly systemPrompt: string

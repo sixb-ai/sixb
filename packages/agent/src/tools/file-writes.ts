@@ -31,6 +31,8 @@ export interface SeenFile {
  */
 export class SeenFiles {
   readonly #files = new Map<string, SeenFile>()
+  /** Each read by its tool call, for the context guard to say when it cut one. */
+  readonly #reads = new Map<string, SeenRead>()
   #queue: Promise<unknown> = Promise.resolve()
 
   get(realPath: string): SeenFile | undefined {
@@ -41,19 +43,34 @@ export class SeenFiles {
   recordRead(
     realPath: string,
     fingerprint: string,
-    page: { readonly from: number; readonly to: number; readonly end: boolean }
+    page: { readonly from: number; readonly to: number; readonly end: boolean },
+    toolCallId?: string
   ): void {
     const seen = this.#files.get(realPath)
     const before = seen?.fingerprint === fingerprint ? seen : undefined
+    if (toolCallId !== undefined) {
+      this.#reads.set(toolCallId, { realPath, fingerprint, from: page.from, before })
+    }
     if (before?.whole) return
 
-    const through = before?.through ?? 0
-    const follows = page.from <= through + 1
-    this.#files.set(realPath, {
-      fingerprint,
-      whole: follows && page.end,
-      through: follows ? Math.max(through, page.to) : through,
-    })
+    this.#files.set(realPath, followOn(fingerprint, before, page))
+  }
+
+  /**
+   * The context guard cut what a read returned before the model read it: it is shown the file
+   * only up to `shownThrough`. What that read recorded becomes what the model really saw, so a
+   * `write` still needs the rest read first.
+   */
+  recordCut(toolCallId: string, shownThrough: number): void {
+    const read = this.#reads.get(toolCallId)
+    if (read === undefined) return
+
+    // Seen whole before this read, or since replaced by another version: nothing to take back.
+    if (read.before?.whole) return
+    if (this.#files.get(read.realPath)?.fingerprint !== read.fingerprint) return
+
+    const page = { from: read.from, to: shownThrough, end: false }
+    this.#files.set(read.realPath, followOn(read.fingerprint, read.before, page))
   }
 
   /** `edit` or `write` left this version: the model knows all of it when `whole`. */
@@ -71,6 +88,29 @@ export class SeenFiles {
     const result = this.#queue.then(task)
     this.#queue = result.catch(() => {})
     return result
+  }
+}
+
+/** A read as `SeenFiles` recorded it, with what the model had seen of that version before it. */
+interface SeenRead {
+  readonly realPath: string
+  readonly fingerprint: string
+  readonly from: number
+  readonly before: SeenFile | undefined
+}
+
+/** What the model has seen of a version once a page of it follows what it saw `before`. */
+function followOn(
+  fingerprint: string,
+  before: SeenFile | undefined,
+  page: { readonly from: number; readonly to: number; readonly end: boolean }
+): SeenFile {
+  const through = before?.through ?? 0
+  const follows = page.from <= through + 1
+  return {
+    fingerprint,
+    whole: follows && page.end,
+    through: follows ? Math.max(through, page.to) : through,
   }
 }
 

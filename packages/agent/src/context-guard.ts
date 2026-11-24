@@ -75,6 +75,11 @@ export interface AgentContextGuardInput {
    * then on, in place of those they started with. Undefined when it could not.
    */
   readonly compact?: CompactConversationBeforeTurn
+  /**
+   * A `read` result was cut before the model read it: it is shown the file only up to
+   * `shownThrough`, so `write` must not count the file as seen whole.
+   */
+  readonly onReadCut?: (toolCallId: string, shownThrough: number) => void
 }
 
 export interface AgentContextGuard {
@@ -426,6 +431,8 @@ class ContextGuard {
       if (cut.messages !== current) this.cleared = true
       this.remember(cut.calls)
       current = cut.messages
+
+      for (const read of cut.reads) this.input.onReadCut?.(read.toolCallId, read.shownThrough)
     }
 
     return current === messages ? undefined : current
@@ -506,7 +513,11 @@ class ContextGuard {
   private cutUnread(
     messages: readonly ModelMessage[],
     excessTokens: number
-  ): { readonly messages: readonly ModelMessage[]; readonly calls: readonly ReducedCall[] } {
+  ): {
+    readonly messages: readonly ModelMessage[]
+    readonly calls: readonly ReducedCall[]
+    readonly reads: readonly CutRead[]
+  } {
     const calls = toolCallKeys(messages)
     const inputs = toolCallInputs(messages)
     const read = messages.map((message) => message.role).lastIndexOf("assistant")
@@ -531,25 +542,31 @@ class ContextGuard {
     let maxBytes = Math.floor(longest / 2)
     let cut = messages
     let cutCalls: ReducedCall[] = []
+    let cutReads: CutRead[] = []
     while (maxBytes >= CUT_MIN_BYTES) {
       let freed = 0
       const limit = maxBytes
       const calledFor: ReducedCall[] = []
+      const reads: CutRead[] = []
       cut = replaceToolResults(messages, unread, (part) => {
         const text = toolResultText(part)
         const kept = cutToolResult(part, limit, inputs.get(part.toolCallId))
         const call = reducedCall(calls, part.toolCallId)
-        if (kept !== text && call) calledFor.push(call)
+        if (kept.text !== text && call) calledFor.push(call)
+        if (kept.shownThrough !== undefined) {
+          reads.push({ toolCallId: part.toolCallId, shownThrough: kept.shownThrough })
+        }
 
-        freed += this.tokensOf(utf8Bytes(text) - utf8Bytes(kept), true)
-        return { ...withoutOriginalOutput(part), output: { type: "text", value: kept } }
+        freed += this.tokensOf(utf8Bytes(text) - utf8Bytes(kept.text), true)
+        return { ...withoutOriginalOutput(part), output: { type: "text", value: kept.text } }
       })
       cutCalls = calledFor
+      cutReads = reads
       if (freed >= excessTokens) break
 
       maxBytes = Math.floor(maxBytes / 2)
     }
-    return { messages: cut, calls: cutCalls }
+    return { messages: cut, calls: cutCalls, reads: cutReads }
   }
 
   /** Remember the calls whose results were cleared or cut. */
@@ -722,14 +739,15 @@ function toolResultText(part: ModelToolResultPart): string {
  * shows whole lines and names the path and the line to go on from, as the read tool pages: a
  * vaguer note once left a model reading files that did not exist rather than the rest of its own.
  * A `view_file` names its file, to page through with read. Any other is called again for less.
+ * A cut `read` also says the last line of the file the model is shown whole.
  */
 function cutToolResult(
   part: ModelToolResultPart,
   maxBytes: number,
   input: JsonValue | undefined
-): string {
+): { readonly text: string; readonly shownThrough?: number } {
   const text = toolResultText(part)
-  if (utf8Bytes(text) <= maxBytes) return text
+  if (utf8Bytes(text) <= maxBytes) return { text }
 
   const page = part.toolName === "read" ? readPage(part) : undefined
   if (page) return cutReadPage(page, maxBytes)
@@ -741,7 +759,15 @@ function cutToolResult(
       : `Call ${part.toolName} again for a smaller part to read the rest.`
   const kept = cutLines(text, maxBytes)
   const omitted = utf8Bytes(text) - utf8Bytes(kept)
-  return `${kept}\n[Cut to fit the model's context: ${omitted.toLocaleString("en-US")} more bytes. ${rest}]`
+  return {
+    text: `${kept}\n[Cut to fit the model's context: ${omitted.toLocaleString("en-US")} more bytes. ${rest}]`,
+  }
+}
+
+/** A `read` whose page was cut: the model is shown the file's lines up to `shownThrough`. */
+interface CutRead {
+  readonly toolCallId: string
+  readonly shownThrough: number
 }
 
 /** A read tool's page of a file: its lines `startLine` to `endLine`. */
@@ -762,7 +788,10 @@ function readPage(part: ModelToolResultPart): ReadPage | undefined {
 }
 
 /** The page's first lines that fit, and the read call that shows the next. */
-function cutReadPage(page: ReadPage, maxBytes: number): string {
+function cutReadPage(
+  page: ReadPage,
+  maxBytes: number
+): { readonly text: string; readonly shownThrough: number } {
   const lines = page.content.split("\n")
   let bytes = 0
   let count = 0
@@ -783,7 +812,11 @@ function cutReadPage(page: ReadPage, maxBytes: number): string {
       : `line ${page.startLine.toLocaleString("en-US")} shown in part`
   const next = `read({ path: ${JSON.stringify(page.path)}, offset: ${lastShown + 1} })`
 
-  return `${kept}\n[Cut to fit the model's context: ${shown}. Read the rest with ${next}.]`
+  return {
+    text: `${kept}\n[Cut to fit the model's context: ${shown}. Read the rest with ${next}.]`,
+    // A first line shown in part is not seen: the file is seen up to the line before it.
+    shownThrough: count > 0 ? lastShown : page.startLine - 1,
+  }
 }
 
 /** `text`'s whole lines that fit `maxBytes`, or as much of its first line. */

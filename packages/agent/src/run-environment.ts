@@ -1141,6 +1141,7 @@ async function startAgentEnvironment(
         endedWith: sandbox.background ? "the sixb that ran it" : "the run that started it",
       }).wrap(toolOutputFiles.wrap(tools)),
       outputFileOf: (toolCallId) => toolOutputFiles.fileOf(toolCallId),
+      onReadCut: (toolCallId, shownThrough) => seenFiles.recordCut(toolCallId, shownThrough),
       prepareStep: mediaBridge.prepareStep,
       systemPrompt: systemPrompt.text,
       systemPromptSize: systemPrompt,

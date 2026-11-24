@@ -181,6 +181,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       ...(limits.measuredBytesPerToken === undefined
         ? {}
         : { measuredBytesPerToken: limits.measuredBytesPerToken }),
+      ...(context.onReadCut === undefined ? {} : { onReadCut: context.onReadCut }),
       tools: tools.map((tool) => ({
         name: tool.name,
         description: tool.description,
