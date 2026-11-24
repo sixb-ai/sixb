@@ -9,7 +9,11 @@ import {
   SandboxRequestRefusedError,
 } from "@sixb/core"
 import { waitForAbort } from "./abort"
-import { commandDirectory, LOGIN_SHELL_SCRIPT_IN_DIRECTORY, SCRIPT_VARIABLE } from "./login-shell"
+import {
+  BACKGROUND_SHELL_SCRIPT_IN_DIRECTORY,
+  commandDirectory,
+  SCRIPT_VARIABLE,
+} from "./login-shell"
 import { type AgentSandboxHandle, contextPath } from "./sandbox-handle"
 
 // A background command runs in the call that starts it, held open until it ends: a provider that
@@ -171,7 +175,7 @@ export class BackgroundCommands {
         paths.pid,
         paths.exit,
         nonce,
-        LOGIN_SHELL_SCRIPT_IN_DIRECTORY,
+        BACKGROUND_SHELL_SCRIPT_IN_DIRECTORY,
         commandDirectory(sandbox.workingDirectory, input.cwd) ?? sandbox.workingDirectory,
       ],
       {
@@ -383,20 +387,22 @@ export class BackgroundCommands {
     // the wrapper and leave the group it started running.
     await entry.started
 
+    const graceMs = this.options.stopGraceMs ?? STOP_GRACE_MS
+    const deadline = Date.now() + graceMs
     let left = true
     if (await signalGroup(entry, "TERM")) {
       let timer: ReturnType<typeof setTimeout> | undefined
-      const grace = new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, this.options.stopGraceMs ?? STOP_GRACE_MS)
-      })
-      await Promise.race([entry.ended, grace])
-      // Its shell can end at once while a process it started takes longer, or never stops: what
-      // is left of the group has the rest of the grace period.
-      if (entry.status !== "running") {
-        left = await signalGroup(entry, "0")
-        if (left) await grace
-      }
+      await Promise.race([
+        entry.ended,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, graceMs)
+        }),
+      ])
       clearTimeout(timer)
+
+      // A process its shell started can outlive it: what is left of the group has the rest of
+      // the grace period.
+      if (entry.status !== "running") left = await groupOutlives(entry, deadline - Date.now())
     }
 
     if (left) await signalGroup(entry, "KILL")
@@ -483,15 +489,11 @@ async function readGroup(
 }
 
 /**
- * Signal its process group from inside the sandbox it runs in; `0` only asks whether anything of
- * it is left. False when nothing received it: no group known, or one this sandbox cannot see, as
- * a command run under a PID namespace of its own (bwrap): its stop is then the held call's abort,
- * at once.
+ * Signal its process group from inside the sandbox it runs in. False when nothing received it:
+ * no group known, or one this sandbox cannot see, as a command run under a PID namespace of its
+ * own (bwrap): its stop is then the held call's abort, at once.
  */
-async function signalGroup(
-  entry: BackgroundCommand,
-  signal: "TERM" | "KILL" | "0"
-): Promise<boolean> {
+async function signalGroup(entry: BackgroundCommand, signal: "TERM" | "KILL"): Promise<boolean> {
   if (entry.group === undefined) return false
 
   try {
@@ -503,6 +505,23 @@ async function signalGroup(
     return result.exitCode === 0
   } catch {
     return false
+  }
+}
+
+/** Whether anything of its group still runs once `waitMs` have passed, watched in the sandbox. */
+async function groupOutlives(entry: BackgroundCommand, waitMs: number): Promise<boolean> {
+  if (entry.group === undefined) return false
+
+  const polls = Math.max(1, Math.ceil(waitMs / 50))
+  try {
+    const result = await entry.sandbox.runCommand(
+      "bash",
+      ["-c", GROUP_LEFT_SCRIPT, "sixb-background", String(entry.group), String(polls)],
+      { timeout: waitMs + CONTROL_TIMEOUT_MS }
+    )
+    return result.exitCode !== 1
+  } catch {
+    return true
   }
 }
 
@@ -528,6 +547,19 @@ export async function stopLeftRunning(
 
 /** Signal a process group. Arguments: the signal, the group. */
 const SIGNAL_SCRIPT = 'kill -s "$1" -- "-$2" 2>/dev/null'
+
+/**
+ * Exit 1 as soon as nothing of a process group runs, 0 if something still does after the polls,
+ * 50 ms apart. Zombies do not count: a sandbox with no init to reap them keeps them in the group.
+ * Arguments: the group, the polls.
+ */
+const GROUP_LEFT_SCRIPT = `i=0
+while :; do
+  ps -A -o pgid= -o stat= | awk -v group="$1" '$1 == group && $2 !~ /^Z/ { left = 1 } END { exit !left }' || exit 1
+  i=$((i + 1))
+  [ "$i" -ge "$2" ] && exit 0
+  sleep 0.05
+done`
 
 /**
  * Started detached from the held call's own output, in a process group of its own (`set -m`: no

@@ -250,20 +250,41 @@ describe("background commands", () => {
     }
   })
 
-  // Removal proof: wait for the wrapper alone in BackgroundCommands' #stop, as it did. Its shell
-  // ends at the SIGTERM, the stop returns, and the process that ignores it runs on. Real time: its
-  // signals are sandbox commands, whose own timeouts fake time would fire.
+  // Removal proof: wait for the wrapper alone in BackgroundCommands' #stop, as it did. Its shell,
+  // in `wait`, ends at the SIGTERM, the stop returns, and the process that ignores it runs on.
+  // Real time, under a short grace period: its signals are sandbox commands, whose own timeouts
+  // fake time would fire.
   test("kill what is left of its group once its grace period elapsed, after its shell ended", async () => {
-    const started = await commands.start({
+    const graced = new BackgroundCommands({ stopGraceMs: 200 })
+    const started = await graced.start({
       handle,
-      command: `sh -c 'trap "" TERM; echo $$ > child.pid; while true; do sleep 0.05; done'`,
+      command: `sh -c 'trap "" TERM; echo $$ > child.pid; while true; do sleep 0.05; done' & wait`,
     })
     await waitFor(() => existsSync(join(root, "child.pid")))
     const child = Number(readFileSync(join(root, "child.pid"), "utf8"))
 
-    expect(await commands.stop(started.id)).toMatchObject({ status: "stopped" })
-    await waitFor(() => gone(child), { label: "the process that ignores SIGTERM exits" })
-  }, 10_000)
+    try {
+      expect(await graced.stop(started.id)).toMatchObject({ status: "stopped" })
+      await waitFor(() => gone(child), { label: "the process that ignores SIGTERM exits" })
+    } finally {
+      await graced.stopAll()
+    }
+  })
+
+  // Removal proof: run a background command in LOGIN_SHELL_SCRIPT_IN_DIRECTORY, without the trap.
+  // Its shell, the parent of a lone command since `eval`, then ends at the SIGTERM with 143, and
+  // the stop waits out the rest of the grace period for the command still draining.
+  test("let a command that drains on SIGTERM end as it chose, without the grace period", async () => {
+    const started = await commands.start({
+      handle,
+      command: `sh -c 'trap "sleep 0.2; exit 0" TERM; echo ready; while true; do sleep 0.05; done'`,
+    })
+    await waitFor(() => readFileSync(started.outputPath, "utf8").includes("ready"))
+
+    const stopping = Date.now()
+    expect(await commands.stop(started.id)).toMatchObject({ status: "exited", exitCode: 0 })
+    expect(Date.now() - stopping).toBeLessThan(2_000)
+  })
 
   // Removal proof: drop `await entry.started` from BackgroundCommands' #stop. The stop then finds
   // no group yet, aborts the held call, which ends the wrapper alone, and the group runs on.

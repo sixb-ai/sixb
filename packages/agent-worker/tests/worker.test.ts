@@ -1693,9 +1693,9 @@ class BackgroundSandbox extends RecordingSandbox {
         options.signal?.addEventListener("abort", () => this.#endHeld(137))
       })
     }
-    // Its process group, then a signal to it, or the question whether anything of it is left.
+    // Its process group, then a signal to it, or a watch on what of it is left, which names it.
     if (args[3]?.endsWith(".pid")) return { ...done, exitCode: 0, stdout: "4242\n" }
-    if (args[3] === "0") return { ...done, exitCode: this.#running ? 0 : 1 }
+    if (args[3] === "4242") return { ...done, exitCode: this.#running ? 0 : 1 }
     this.events.push(String(args[3]))
     this.#endHeld(args[3] === "TERM" ? 143 : 137)
     return { ...done, exitCode: 0 }

@@ -240,8 +240,10 @@ call leaves behind (a cgroup, a PID namespace) leaves it alone, in a process gro
 (`set -m`: macOS has no `setsid`). Its output, pid and exit code are files under `background/` in
 the context directory; the pid file carries the start's nonce, so a file an earlier start left is
 never read. `stop` waits for the group to be known, sends it SIGTERM from inside the sandbox,
-then SIGKILL after 3 seconds to whatever of the group is left, and aborts the held call: its shell
-can end at the SIGTERM while a process it started does not. Where the group is out of reach, as
+then SIGKILL after 3 seconds to whatever of the group still runs, and aborts the held call. Its
+shell waits for the command it runs before it exits, with that command's code; a process the
+command started can outlive both, and is watched until it ends or the 3 seconds pass, zombies
+aside. Where the group is out of reach, as
 under bwrap's PID namespace on Linux, the stop is that abort at once: a kill, with no grace period.
 A command reads as stopped when a signal of its stop ended it; one that exited meanwhile, or caught
 the signal and exited, reads as exited.

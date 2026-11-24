@@ -38,6 +38,14 @@ export const LOGIN_SHELL_SCRIPT = `exec "$BASH" -c '${RUN_SCRIPT}' bash`
  */
 export const LOGIN_SHELL_SCRIPT_IN_DIRECTORY = `cd -- "$1" && exec "$BASH" -c '${RUN_SCRIPT}' bash`
 
+/**
+ * {@link LOGIN_SHELL_SCRIPT_IN_DIRECTORY} for a background command, whose stop sends SIGTERM to
+ * its whole group. `eval` keeps the shell as the command's parent, and bash defers a trapped
+ * signal until the command it waits for ends: the shell then exits with the command's own code,
+ * so a server that drains on SIGTERM ends as it chose, not with the shell's 143.
+ */
+export const BACKGROUND_SHELL_SCRIPT_IN_DIRECTORY = `cd -- "$1" && exec "$BASH" -c 'trap exit TERM; ${RUN_SCRIPT}' bash`
+
 /** What `runCommand("bash", …)` takes to run a script as {@link LOGIN_SHELL_SCRIPT} does. */
 export interface LoginShellCommand {
   readonly args: string[]
