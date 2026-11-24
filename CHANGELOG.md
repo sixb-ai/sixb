@@ -2,7 +2,9 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
-## Unreleased
+## 2026-11-24 — Sixb 0.2.9
+
+0.2.9 fixes a command the Agent runs stopping itself when it stops processes by name.
 
 ### Highlights
 
@@ -10,6 +12,14 @@ Sixb packages are versioned independently. Each release entry names the packages
   `pkill -f "sixb dev"` matched the agent's own shell, whose arguments held the command; the
   command now reaches its shell in the environment. Stopping a background command also stops a
   process it started that ignores SIGTERM, after the grace period, as it did a lone command.
+
+### Upgrade notes
+
+- No migration. Upgrade the packages below together.
+
+### Package versions
+
+- `0.2.9`: `@sixb/agent`, `@sixb/agent-worker`, `@sixb/cli`.
 
 ## 2026-11-24 — Sixb 0.2.8
 

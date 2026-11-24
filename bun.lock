@@ -712,7 +712,7 @@
     },
     "packages/agent": {
       "name": "@sixb/agent",
-      "version": "0.2.8",
+      "version": "0.2.9",
       "dependencies": {
         "@sixb/cli-core": "workspace:^",
         "hast-util-from-parse5": "^8.0.4",
@@ -737,7 +737,7 @@
     },
     "packages/agent-worker": {
       "name": "@sixb/agent-worker",
-      "version": "0.2.8",
+      "version": "0.2.9",
       "dependencies": {
         "@sixb/agent": "workspace:*",
       },
@@ -803,7 +803,7 @@
     },
     "packages/cli": {
       "name": "@sixb/cli",
-      "version": "0.2.8",
+      "version": "0.2.9",
       "bin": {
         "sixb": "./src/index.tsx",
       },
