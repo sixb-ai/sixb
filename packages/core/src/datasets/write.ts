@@ -33,6 +33,11 @@ export interface WriteDatasetInput<TValue extends DatasetWriteValue = DatasetWri
    * for. A merge has this already, or rebases on purpose: only a plain write needs it.
    */
   readonly guardLatestVersion?: boolean
+  /**
+   * Commit a first version even when the write changes nothing, so the dataset exists, empty, for
+   * whatever reads it. Without it, a merge or an append that brings no rows commits nothing.
+   */
+  readonly createInitialVersion?: boolean
   readonly commitMessage?: string
   /** Diagnostic label for the caller, including its component prefix. */
   readonly sourceLabel?: string
@@ -113,7 +118,7 @@ export async function writeDataset<TValue extends DatasetWriteValue>(
       await input.beforeCommit?.()
       const result = await session.commit({
         commitMessage: input.commitMessage,
-        createInitialVersion: reconcileSnapshot,
+        createInitialVersion: reconcileSnapshot || input.createInitialVersion === true,
         retryOnConflict: dataset.sequenceBy !== undefined,
         signal,
       })
@@ -138,11 +143,14 @@ export async function writeDataset<TValue extends DatasetWriteValue>(
     )
     throwIfAborted(signal)
 
-    // Preserve sync semantics: an empty append must not invent an initial dataset version.
+    // An empty append adds nothing, unless it is the first write of a dataset asked to exist.
     if (rowsRead === 0 && input.mode === "append") {
       const version = await lakeStorage.getLatestVersion(dataset.id)
-      await session.abort()
-      return { outcome: "unchanged", version, rowsRead }
+
+      if (version !== null || !input.createInitialVersion) {
+        await session.abort()
+        return { outcome: "unchanged", version, rowsRead }
+      }
     }
 
     const expectedLatestVersionId = await commitGuard(input, dataset)

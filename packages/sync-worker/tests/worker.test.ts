@@ -480,7 +480,9 @@ describe("SyncWorker", () => {
     ])
   })
 
-  test("finishes a first empty append without emitting a dataset version", async () => {
+  // Pipelines on the dataset start from this first version, empty. To watch this fail, drop
+  // `createInitialVersion` from the sync worker's `writeDataset` call.
+  test("commits the dataset, empty, on a first empty append", async () => {
     const dataset = defineDataset("raw.erp.orders", { schema: [col("orderId", "string")] })
     const sync = defineSync("sync-orders", { mode: "append" })
       .checkpoint<{ cursor: string }>()
@@ -500,14 +502,16 @@ describe("SyncWorker", () => {
     await worker.stop()
     const run = await sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-first-empty" })
 
-    expect(run?.output).toBeUndefined()
+    expect(run?.output?.versionId).toBeDefined()
     expect(run?.checkpoint).toEqual(storedErpCheckpoint("cursor-1"))
-    expect(events.map((event) => event.type)).toEqual(["sync.run.started", "sync.run.finished"])
-    expect(events[1]?.payload).toEqual({
-      syncId: sync.id,
-      runId: "run-first-empty",
-      status: "succeeded",
+    expect(events.map((event) => event.type)).toEqual([
+      "sync.run.started",
+      "dataset.version.committed",
+      "sync.run.finished",
+    ])
+    expect(events[1]?.payload).toMatchObject({
       datasetId: dataset.id,
+      versionId: run?.output?.versionId,
     })
   })
 

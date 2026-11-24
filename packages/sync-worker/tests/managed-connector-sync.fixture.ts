@@ -100,7 +100,7 @@ export function source(
 }
 
 export interface RunOptions {
-  /** The connection the run reads. Omitted for a run queued before syncs ran per connection. */
+  /** The connection the run reads. Omitted for the run of an OAuth connector no one connected. */
   readonly connectionId?: string
   readonly signal?: AbortSignal
 }
@@ -140,9 +140,12 @@ export async function seedSuccessfulCheckpoint(
   })
 }
 
-export async function rows(storage: InMemoryLakeStorage): Promise<DatasetRow[]> {
+export async function rows(
+  storage: InMemoryLakeStorage,
+  datasetId: string = socialRows.id
+): Promise<DatasetRow[]> {
   const result: DatasetRow[] = []
-  for await (const row of storage.readRows({ datasetId: socialRows.id })) {
+  for await (const row of storage.readRows({ datasetId })) {
     result.push(row)
   }
   return result

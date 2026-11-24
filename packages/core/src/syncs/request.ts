@@ -44,7 +44,10 @@ export interface SyncRunRequestResult {
   readonly created: boolean
 }
 
-/** A static connector's sync queues one run; an OAuth connector's sync one per connection. */
+/**
+ * A static connector's sync queues one run; an OAuth connector's sync one per connection, or one
+ * that reads nothing when no account is connected.
+ */
 export interface SyncRunRequestResults {
   readonly runs: readonly SyncRunRequestResult[]
 }
@@ -121,9 +124,8 @@ export async function requestSyncRun(
       `[Sixb] Sync '${sync.id}' reads OAuth connector '${sync.connector.id}', whose connections this runtime cannot list.`
     )
   }
-  const runnable = (await connections.list(sync.connector)).filter((connection) =>
-    mayRunConnection(runtime, execution, connection)
-  )
+  const usable = await connections.list(sync.connector)
+  const runnable = usable.filter((connection) => mayRunConnection(runtime, execution, connection))
 
   if (connectionId !== undefined) {
     if (!runnable.some((connection) => connection.id === connectionId)) {
@@ -133,6 +135,9 @@ export async function requestSyncRun(
     }
     return { runs: [await dispatch(request.runId, connectionId)] }
   }
+
+  // With no account connected yet, the sync runs once, reading nothing, so its dataset exists.
+  if (usable.length === 0) return { runs: [await dispatch(request.runId)] }
 
   const runs: SyncRunRequestResult[] = []
   for (const connection of runnable) {

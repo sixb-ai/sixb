@@ -256,6 +256,8 @@ async function commitRun(execution: SyncExecution, logger: Logger): Promise<Sync
     mapValidationError: (error, value, itemIndex) =>
       sourceValidationError(error, value, { syncId: sync.id, runId: run.id, dataset }, itemIndex),
     guardLatestVersion: true,
+    // A sync's dataset exists once it ran, even if the source had no rows, so readers find it.
+    createInitialVersion: true,
     beforeCommit: () => prepareCommit(execution),
   })
 
@@ -474,27 +476,28 @@ function cloneCheckpoint(checkpoint: JsonValue | undefined): JsonValue | undefin
 
 /**
  * The checkpoint of the last succeeded run of this sync, and of this run's connection. A
- * connection's first run of its own starts from the last succeeded run that read every connection,
- * whose checkpoint holds an entry for each.
+ * connection's first run of its own starts from the last succeeded run that read no single
+ * connection: the one that read every connection holds an entry for each, and a run that read no
+ * account carries that checkpoint forward.
  */
 async function readPreviousCheckpoint(
   runtime: RunSyncJobInput["runtime"],
   sync: SyncDefinition,
   run: SyncRunRecord
 ): Promise<JsonValue | undefined> {
-  const latest = (connectionId?: string | null) =>
+  const latest = (connectionId: string | null) =>
     runtime.syncRunsStorage
       .list({
         projectId: runtime.id,
         syncId: sync.id,
-        ...(connectionId === undefined ? {} : { connectionId }),
+        connectionId,
         statuses: ["succeeded"],
         limit: 1,
         order: "desc",
       })
       .then(({ runs }) => runs[0])
 
-  if (run.connectionId === undefined) return (await latest())?.checkpoint
+  if (run.connectionId === undefined) return (await latest(null))?.checkpoint
 
   const own = await latest(run.connectionId)
   if (own) return own.checkpoint

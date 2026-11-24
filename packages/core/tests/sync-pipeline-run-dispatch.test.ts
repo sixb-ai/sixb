@@ -772,10 +772,13 @@ describe("automatic dispatch of a Sync on an OAuth connector", () => {
     expect(await dispatch("connected-2", { id: "other", connectorId: "gmail" })).toHaveLength(2)
   })
 
-  test("queues nothing while no one is connected", async () => {
+  // The run reads nothing and creates the dataset, which pipelines reading it need. To watch this
+  // fail, drop the no-connection branch from `SyncRunDispatcher.dispatch`.
+  test("queues one run that reads no connection while no one is connected", async () => {
     const { dispatch, runs } = createDispatcher([])
 
-    expect(await dispatch("event-1")).toEqual([])
-    expect(await runs()).toEqual([])
+    expect(await dispatch("event-1")).toMatchObject([{ runId: "sync:event-1", created: true }])
+    expect(await dispatch("event-2")).toMatchObject([{ runId: "sync:event-1", created: false }])
+    expect(await runs()).toEqual([{ id: "sync:event-1", connectionId: undefined }])
   })
 })

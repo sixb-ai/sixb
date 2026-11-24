@@ -36,7 +36,10 @@ export interface AutomaticSyncRunDispatchInput extends SyncRunRequestOptions {
   readonly connection?: { readonly id: string; readonly connectorId: string }
 }
 
-/** A sync of a static connector queues one run; a sync of an OAuth connector one per connection. */
+/**
+ * A sync of a static connector queues one run; a sync of an OAuth connector one per connection, or
+ * one that reads nothing when no account is connected.
+ */
 export type SyncRunDispatchPort = RunDispatcher<
   AutomaticSyncRunDispatchInput,
   readonly SyncRunRequestResult[]
@@ -83,6 +86,10 @@ export class SyncRunDispatcher implements SyncRunDispatchPort {
       input.connection?.connectorId === sync.connector.id
         ? [input.connection.id]
         : await listSyncConnectionIds(this.dependencies, sync)
+
+    // With no account connected yet, the sync still runs once. It reads nothing, and its dataset
+    // exists, empty, for whatever reads it.
+    if (connectionIds.length === 0) return [await this.dispatchRun(sync, input, input.runId)]
 
     // Each run id comes from the trigger's and the connection's, so a redelivered trigger, or one
     // retried after some of its runs were queued, queues nothing twice.

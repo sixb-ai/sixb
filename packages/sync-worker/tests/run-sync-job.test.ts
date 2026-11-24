@@ -574,7 +574,9 @@ describe("runSyncJob", () => {
     })
   })
 
-  test("advances a checkpoint for an initial merge no-op without inventing a version", async () => {
+  // A pipeline reading the dataset fails while it has no version. To watch this fail, drop
+  // `createInitialVersion` from the sync worker's `writeDataset` call.
+  test("commits an empty first version for an initial merge no-op, and nothing after", async () => {
     const lakeStorage = new InMemoryLakeStorage()
     const syncRunsStorage = createSyncRunStorage()
     const sync = defineSync("sync-keyed-orders", { mode: "merge" })
@@ -585,23 +587,27 @@ describe("runSyncJob", () => {
         context.setCheckpoint({ cursor: "event-1" })
       })
       .intoDataset(keyedOrdersDataset)
+    const runtime = createRuntime({ sync, syncRunsStorage, lakeStorage })
 
-    const result = await runSyncJob({
-      runtime: createRuntime({ sync, syncRunsStorage, lakeStorage }),
-      job: { id: "run_initial_noop", syncId: sync.id },
-    })
+    const first = await runSyncJob({ runtime, job: { id: "run_initial_noop", syncId: sync.id } })
 
-    expect(result).toMatchObject({ rowsRead: 1, versionCreated: false })
-    expect(result.version).toBeUndefined()
-    expect(await lakeStorage.listVersions(keyedOrdersDataset.id)).toEqual([])
+    expect(first).toMatchObject({ rowsRead: 1, versionCreated: true })
+    expect(await collectRows(lakeStorage.readRows({ datasetId: keyedOrdersDataset.id }))).toEqual(
+      []
+    )
     expect(
       await syncRunsStorage.getById({ projectId: "project-1", id: "run_initial_noop" })
     ).toMatchObject({
       status: "succeeded",
       rowsRead: 1,
       checkpoint: storedErpCheckpoint({ cursor: "event-1" }),
-      output: undefined,
+      output: { datasetId: keyedOrdersDataset.id, versionId: first.version?.versionId },
     })
+
+    const next = await runSyncJob({ runtime, job: { id: "run_next_noop", syncId: sync.id } })
+
+    expect(next).toMatchObject({ versionCreated: false, version: first.version })
+    expect(await lakeStorage.listVersions(keyedOrdersDataset.id)).toHaveLength(1)
   })
 
   test("rejects a stale requested merge version before connecting to the source", async () => {
