@@ -110,9 +110,13 @@ describe("materializer write ownership", () => {
       )
     ).flat()
 
-    // A snapshot's load is the one other writer: it fills an empty branch namespace with one base
-    // commit, which no event announces, so there is no materialization to go through.
-    const snapshotLoads = ["storage/pg/src/snapshot-load.ts", "storage/sqlite/src/snapshot-load.ts"]
+    // A snapshot's load, or its copy, is the one other writer: it fills an empty branch namespace
+    // with one base commit, which no event announces, so there is no materialization to go through.
+    const snapshotLoads = [
+      "storage/pg/src/snapshot-load.ts",
+      "storage/pg/src/snapshot-copy.ts",
+      "storage/sqlite/src/snapshot-load.ts",
+    ]
     await expectSqlWritesOwnedBy(
       providerFiles,
       /INSERT\s+INTO\s+ontology_(?:commits|outbox)\b/i,
