@@ -98,9 +98,9 @@ file the branch imports.
 
 - The branch's definitions arrive as data (`branchDefinitions`, JSON): production plans the copy
   with the same `ImportPlan` the import uses, and never loads the branch's code.
-- PostgreSQL adopts production's exported snapshot on several lanes, each copying ranges of
-  primary ids with `INSERT … SELECT`, then vacuums and indexes as a load does. The vectors' keys
-  are dropped during the copy and added again after it, which checks every row.
+- PostgreSQL adopts production's exported snapshot on four lanes, each copying ranges of primary
+  ids with `INSERT … SELECT`. The tables' keys and indexes are dropped during the copy and built
+  again after it, which checks every row; autovacuum sets the pages visible later.
 - `handOverBranchNamespace` gives the schema and everything in it to the branch's role. Production
   then refuses to open it or copy into it: a trigger the role plants runs as whoever writes, so
   production's statements must never meet it. A new copy drops the namespace and starts again.

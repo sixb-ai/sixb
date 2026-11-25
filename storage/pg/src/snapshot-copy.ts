@@ -57,8 +57,9 @@ interface CopyWork {
  *    indexes of the tables the copy fills.
  * 2. Lanes, each a transaction on the snapshot, take work by type and range of primary ids until
  *    none is left, then commit.
- * 3. Each table is vacuumed, so its pages are visible to all, its keys and indexes are built again
- *    side by side, and the mark is cleared.
+ * 3. Each table is analyzed, its keys and indexes are built again side by side, and the mark is
+ *    cleared. Vacuuming is left to autovacuum: at 10M objects it rewrote every page for 90 s, and
+ *    counts on the branch were no faster for it.
  *
  * A failure rolls back the open lanes, empties what any committed and adds the keys and indexes
  * again. A crash leaves the mark.
@@ -219,8 +220,8 @@ async function isPartition(sql: SQLClient, table: string): Promise<boolean> {
 }
 
 /**
- * Vacuum every table, so pages are visible to all at once. Then build the keys and indexes side
- * by side: partitions' keys before their table's, which attaches them, and foreign keys last.
+ * Analyze every table, then build the keys and indexes side by side: partitions' keys before their
+ * table's, which attaches them, and foreign keys last.
  */
 async function finish(
   connections: readonly ReservedSQL[],
@@ -232,7 +233,7 @@ async function finish(
   await Promise.all(
     connections.map(async (sql) => {
       for (let table = tables.shift(); table; table = tables.shift()) {
-        await sql.unsafe(`VACUUM (ANALYZE) ${table}`)
+        await sql.unsafe(`ANALYZE ${table}`)
       }
     })
   )
