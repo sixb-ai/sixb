@@ -1,3 +1,4 @@
+import type { MigrationDefinition } from "../../migrations/types"
 import type { OntologyDefinitionCatalog } from "../../ontology/registry"
 import type { SecurityDefinitionCatalog } from "../../security/registry"
 import type { ObjectQueryPreparationResult } from "../objects/query-preparation"
@@ -26,10 +27,13 @@ export interface MigrationSet<TContext> {
   readonly steps: readonly MigrationStep<TContext>[]
 }
 
-export interface DefineMigrationsOptions<TContext> {
+export interface DefineStorageMigrationsOptions<TContext> {
   readonly adapterId: string
   readonly steps: readonly MigrationStep<TContext>[]
 }
+
+/** @deprecated Use `DefineStorageMigrationsOptions`. Removed in the next release. */
+export type DefineMigrationsOptions<TContext> = DefineStorageMigrationsOptions<TContext>
 
 export interface MigrationRecord {
   readonly adapterId: string
@@ -140,6 +144,8 @@ export interface StorageMigrationOptions {
    * or refuse. Without it, the step does not run. See {@link TypeShapeMode}.
    */
   readonly ontologyShapes?: TypeShapeMode
+  /** The project's migrations: a change their pending steps cover isn't missing one. */
+  readonly migrations?: readonly MigrationDefinition[]
 }
 
 export interface StorageMigrationResult {

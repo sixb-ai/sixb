@@ -347,9 +347,9 @@ const sixb = await createSixb({
 
 ```ts
 import { migrateStorage } from "@sixb/core"
-import { defineMigrations, runMigrationSet, step } from "@sixb/core/storage"
+import { defineStorageMigrations, runMigrationSet, step } from "@sixb/core/storage"
 
-export const objectStorageMigrations = defineMigrations({
+export const objectStorageMigrations = defineStorageMigrations({
   adapterId: "MyObjectStorage",
   steps: [
     step("001-initial-schema", async (db) => {
@@ -359,7 +359,7 @@ export const objectStorageMigrations = defineMigrations({
 })
 ```
 
-- `defineMigrations(...)` validates ordered migration sets and derives versions from ids like `001-initial-schema`.
+- `defineStorageMigrations(...)` validates ordered migration sets and derives versions from ids like `001-initial-schema`. `defineMigrations` is its deprecated former name, removed in the next release. It is unrelated to the project's `defineMigration`, which moves stored objects when an object type changes.
 - `runMigrationSet(...)` plans pending work from migration history, blocks dirty or mismatched history, and returns a report.
 - `migrateStorage(storage)` runs a storage provider's exposed `migrators` when available.
 

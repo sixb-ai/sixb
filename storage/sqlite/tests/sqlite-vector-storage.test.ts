@@ -24,7 +24,7 @@ import {
 } from "@sixb/core/internal/materialization"
 import { ProjectionRegistry } from "@sixb/core/internal/materializer"
 import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
-import { defineMigrations } from "@sixb/core/storage"
+import { defineStorageMigrations } from "@sixb/core/storage"
 import {
   createMaterializerTestFixture,
   createTestSixb,
@@ -88,7 +88,7 @@ async function fixture(migrate = true) {
   if (!migrate) {
     await createSqliteMigrator({
       path: sqliteStoragePath(path),
-      migrations: defineMigrations({
+      migrations: defineStorageMigrations({
         adapterId: sqliteStorageMigrations.adapterId,
         steps: sqliteStorageMigrations.steps.filter((step) => step.version < 41),
       }),

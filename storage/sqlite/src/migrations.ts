@@ -11,7 +11,7 @@ import type {
   MigrationStepOptions,
 } from "@sixb/core/storage"
 import {
-  defineMigrations,
+  defineStorageMigrations,
   describeMigrationHistory,
   runMigrationSet,
   step,
@@ -143,7 +143,7 @@ const MIGRATIONS_TABLE_SQL = `
 export const SQLITE_STORAGE_ADAPTER_ID = "SixbSqliteStorage"
 export const SQLITE_STORAGE_FILE = "storage.sqlite"
 
-export const sqliteStorageMigrations = defineMigrations({
+export const sqliteStorageMigrations = defineStorageMigrations({
   adapterId: SQLITE_STORAGE_ADAPTER_ID,
   steps: [
     sqliteSql("001-initial-schema", initialSchemaSql),

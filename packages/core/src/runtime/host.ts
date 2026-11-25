@@ -95,6 +95,7 @@ import { directoryPass } from "../maintenance/passes/directory-pass"
 import { lakeRetentionPass } from "../maintenance/passes/lake-retention-pass"
 import { ontologyPass } from "../maintenance/passes/ontology-pass"
 import { createOntologyMaterializer, type OntologyMaterializerContract } from "../materializer"
+import type { MigrationDefinition } from "../migrations"
 import type { ModelCatalogInput } from "../models"
 import { bindEmbeddingModels } from "../models/execution/embedding"
 import { bindRerankingModels } from "../models/execution/reranking"
@@ -201,6 +202,7 @@ export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsCon
   roles?: readonly RoleDefinition[]
   membershipPolicies?: readonly MembershipPolicyDefinition[]
   shares?: readonly ShareDefinition[]
+  migrations?: readonly MigrationDefinition[]
   /** The folder each definition sits in below its directory. createSixb() discovers them. */
   definitionFolders?: DefinitionFolderIndex
   auth?: SixbAuthConfig

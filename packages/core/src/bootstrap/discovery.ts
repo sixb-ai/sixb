@@ -13,6 +13,7 @@ import { pathToFileURL } from "node:url"
 import { isActionDefinition } from "../actions"
 import { isConnectorDefinition } from "../connectors"
 import { isDatasetDefinition } from "../datasets"
+import { isMigrationDefinition } from "../migrations/builders"
 import type { OntologyDocumentInput, OntologySource } from "../ontology/registry"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { ValueType } from "../ontology/types"
@@ -106,6 +107,7 @@ export type DiscoveryModuleKind =
   | "group"
   | "marking"
   | "membershipPolicy"
+  | "migration"
   | "ontology"
   | "pipeline"
   | "projection"
@@ -198,6 +200,11 @@ const definitionDiscoveryRegistry = {
     isDefinition: isMembershipPolicyDefinition,
   },
   shares: { directory: ["shares"], kind: "share", isDefinition: isShareDefinition },
+  migrations: {
+    directory: ["migrations"],
+    kind: "migration",
+    isDefinition: isMigrationDefinition,
+  },
 } as const satisfies Record<string, DefinitionDiscoveryFamily<unknown>>
 
 /** Inventory every discovery family without evaluating project code. */

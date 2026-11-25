@@ -1,4 +1,5 @@
 import {
+  defineMigration,
   defineObjectType,
   InMemoryBlobStorage,
   InMemoryLakeStorage,
@@ -11,7 +12,8 @@ import { PostgresStorage } from "@sixb/pg"
 import { SharedBroker } from "../shared/sharedBroker"
 
 // One project, deployed as several releases of its code: `SIXB_SHAPES_RELEASE` picks which `Job`
-// this run defines, and `SIXB_SHAPES_SCHEMA` the test's own PostgreSQL schema.
+// this run defines, `SIXB_SHAPES_MIGRATION` which migration it declares, and `SIXB_SHAPES_SCHEMA`
+// the test's own PostgreSQL schema.
 
 const releases = {
   /** The release whose shape is recorded first. */
@@ -42,10 +44,23 @@ const Job = defineObjectType({
   properties: [prop("ref", "string", { primary: true, required: true }), ...releases[release]],
 })
 
+const migrations = {
+  none: [],
+  /** Covers `withoutGate`'s removal. */
+  removeGate: [defineMigration("job-gate", Job).removeProperty("gate")],
+  /** Gives the primary property a value: refused at load. */
+  invalid: [defineMigration("job-ref", Job).fillProperty("ref", () => "R")],
+  /** Removes a property `Job` declares again: inert, and `sixb check` says it can go. */
+  inert: [defineMigration("job-hours", Job).removeProperty("hours")],
+}
+
+const migration = (process.env.SIXB_SHAPES_MIGRATION ?? "none") as keyof typeof migrations
+
 export const sixb = new SixbHost({
   id: "cli-type-shapes",
   auth: { id: "disabled", kind: "disabled", allowDisabledInProduction: true },
   ontology: [Job],
+  migrations: migrations[migration],
   // Declared shared, so a production role boots past the shareability guard on one test host.
   broker: new SharedBroker(),
   queues,

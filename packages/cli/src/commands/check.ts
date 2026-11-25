@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path"
 import { migrateStorage, type TypeShapeCheck } from "@sixb/core"
 import { getLakeRetentionRuntime, ingestStalledSince } from "@sixb/core/internal/runtime"
-import { applyTypeShapes, checkTypeShapes } from "@sixb/core/internal/storage"
+import { applyTypeShapes, checkTypeShapes, inertMigrations } from "@sixb/core/internal/storage"
 import { countLostRuns } from "@sixb/core/internal/workers"
 import { assertDeclaredEnv } from "../lib/env-config"
 import { errorMessage } from "../lib/errors"
@@ -121,6 +121,10 @@ async function probe(
       warnings: [
         ...health.warnings,
         ...markings.warnings,
+        ...inertMigrations({
+          migrations: sixb.definitions.migrations.list(),
+          ontology: sixb.definitions.ontology,
+        }),
         ...(await lakeWorkerWarnings(sixb, health.storage.ok)),
         ...(await lostRunWarnings(sixb, health.storage.ok)),
       ],
@@ -168,6 +172,7 @@ async function checkShapes(
         storage: sixb.storage,
         projectId: sixb.id,
         ontology: sixb.definitions.ontology,
+        migrations: sixb.definitions.migrations.list(),
         mode: "check",
       }))
     const findings = check.types.flatMap((type) => type.findings)
@@ -189,6 +194,7 @@ function migrationOptions(sixb: LoadedSixbHost) {
   return {
     projectId: sixb.id,
     ontology: sixb.definitions.ontology,
+    migrations: sixb.definitions.migrations.list(),
     security: sixb.definitions.security,
   }
 }

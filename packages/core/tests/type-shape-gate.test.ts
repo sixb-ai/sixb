@@ -267,7 +267,9 @@ describe("a deploy", () => {
       [
         "[Sixb] The stored objects don't fit this code:",
         "  ✗ Job: 'gate' was removed, and 1,200 objects hold it.",
-        "    Declare it again until a migration removes it.",
+        "    Rename or remove it in a migration:",
+        '      defineMigration("job-gate", Job).renameProperty("gate", "<new id>")',
+        '      defineMigration("job-gate", Job).removeProperty("gate")',
       ].join("\n")
     )
     expect(await storedJob(storage)).toEqual(before)

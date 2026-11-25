@@ -12,6 +12,7 @@ import { isDatasetPick } from "../datasets/builders"
 import { columnsByName } from "../datasets/column-index"
 import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
+import { type MigrationDefinition, validateMigrationsAtStartup } from "../migrations"
 import { createModelCatalog, type ModelCatalogInput } from "../models"
 import { sameEmbeddingModel } from "../models/embedding-model"
 import { OntologyRegistry } from "../ontology"
@@ -60,6 +61,7 @@ interface DefinitionOptions {
   readonly agent?: AgentDefinitionsInput
   readonly models?: ModelCatalogInput
   readonly shares?: readonly ShareDefinition[]
+  readonly migrations?: readonly MigrationDefinition[]
   readonly markings?: readonly MarkingDefinition[]
   readonly groups?: readonly GroupDefinition[]
   readonly roles?: readonly RoleDefinition[]
@@ -84,6 +86,10 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     shares: options.shares ?? [],
     ontology,
     actions: actionRegistry,
+  })
+  const migrationsById = validateMigrationsAtStartup({
+    migrations: options.migrations ?? [],
+    ontology,
   })
 
   const models = options.models === undefined ? undefined : createModelCatalog(options.models)
@@ -248,6 +254,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     schedules: createDefinitionCatalog(schedulesById),
     security,
     shares: createDefinitionCatalog(sharesById),
+    migrations: createDefinitionCatalog(migrationsById),
     syncs: createDefinitionCatalog(syncsById),
     workflows: createDefinitionCatalog(workflowsById),
     folders: Object.freeze({ ...options.definitionFolders }),

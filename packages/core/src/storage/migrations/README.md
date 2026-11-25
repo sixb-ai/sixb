@@ -57,6 +57,10 @@ changes it.
 
   The diff with the code then shows what needs a migration like any other change, and the type
   pauses writes: the old release may still write keys the code drops.
+- **Migrations.** Given the project's migrations, `coverChanges` (`migrations/coverage.ts`) splits
+  the changes into those pending steps cover and those still missing one, read under the key a
+  pending rename leaves. A missing one gets the `defineMigration(...)` lines that would cover it;
+  while no build runs migrations, a covered one data holds still blocks, naming them.
 
 `next` says what recording writes: the code's shape, the baseline (`dev` only, when data doesn't
 fit), the row's removal (a type gone from code that holds nothing), or nothing, when the stored

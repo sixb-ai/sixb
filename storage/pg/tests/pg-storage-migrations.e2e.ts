@@ -9,7 +9,7 @@ import {
   type OntologyMaterializationEventDraft,
 } from "@sixb/core/internal/materialization"
 import {
-  defineMigrations,
+  defineStorageMigrations,
   type MigrationReport,
   ONTOLOGY_OUTBOX_FAILURE_CODES,
   SYNC_RUN_FAILURE_CODES,
@@ -2224,7 +2224,7 @@ async function withDatabase(
         createPostgresMigrator({
           sql,
           schemaName,
-          migrations: defineMigrations({
+          migrations: defineStorageMigrations({
             adapterId: POSTGRES_STORAGE_ADAPTER_ID,
             steps: steps.slice(0, count),
           }),

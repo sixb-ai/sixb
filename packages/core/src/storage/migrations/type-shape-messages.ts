@@ -33,10 +33,12 @@ export interface TypeShapeFinding {
   readonly remedy: readonly string[]
 }
 
+/** `remedy`, when the project's migrations say something, replaces the change's own. */
 export function finding(
   objectTypeId: string,
   change: ProbedChange,
-  count: number
+  count: number,
+  remedy?: readonly string[]
 ): TypeShapeFinding {
   const objects = count === 1 ? "1 object" : `${count.toLocaleString("en-US")} objects`
   const described = describe(objectTypeId, change)
@@ -46,7 +48,7 @@ export function finding(
     change,
     count,
     message: `${described.what}, and ${described.data(objects, count === 1)}.`,
-    remedy: described.remedy,
+    remedy: remedy && remedy.length > 0 ? remedy : described.remedy,
   }
 }
 
@@ -112,8 +114,8 @@ interface DescribedChange {
 }
 
 /**
- * Worded for whoever reads the deploy log, the agent included. The migration steps that resolve a
- * change add their own `defineMigration(...)` lines to `remedy`.
+ * Worded for whoever reads the deploy log, the agent included. A change a migration can resolve
+ * has no remedy here: the gate writes the `defineMigration(...)` lines that resolve it.
  */
 function describe(type: string, change: NarrowedChange): DescribedChange {
   const hold = (objects: string, one: boolean) => `${objects} ${one ? "holds" : "hold"} it`
@@ -139,13 +141,13 @@ function describe(type: string, change: NarrowedChange): DescribedChange {
       return {
         what: `${type}: '${change.propertyId}' was added as required`,
         data: lack,
-        remedy: ["Add it as optional until a migration fills it."],
+        remedy: [],
       }
     case "property-required":
       return {
         what: `${type}: '${change.propertyId}' is now required`,
         data: lack,
-        remedy: ["Keep it optional until a migration fills it."],
+        remedy: [],
       }
     case "property-removed":
       return change.effect === "refused"
@@ -157,7 +159,7 @@ function describe(type: string, change: NarrowedChange): DescribedChange {
         : {
             what: `${type}: '${change.propertyId}' was removed`,
             data: hold,
-            remedy: ["Declare it again until a migration removes it."],
+            remedy: [],
           }
     case "property-mode":
       return {
@@ -182,7 +184,7 @@ function describe(type: string, change: NarrowedChange): DescribedChange {
         : {
             what: `${type}: '${change.propertyId}' ${changed}`,
             data: unfit,
-            remedy: ["Keep its old schema until a migration converts them."],
+            remedy: [],
           }
     }
     case "property-unique":
@@ -204,7 +206,7 @@ function describe(type: string, change: NarrowedChange): DescribedChange {
       return {
         what: `${type}: link '${change.linkId}' was removed`,
         data: hold,
-        remedy: ["Declare it again until a migration removes it."],
+        remedy: [],
       }
     case "link-targets": {
       const dropped = change.from.filter((target) => !change.to.includes(target))

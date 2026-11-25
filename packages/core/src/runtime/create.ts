@@ -22,6 +22,7 @@ import type { LoggerProvider } from "../logging"
 import type { ObservabilityOptions } from "../logging/service"
 import type { OntologyMaintenanceOptions } from "../maintenance"
 import type { LakeMaintenanceOptions } from "../maintenance/lake-retention"
+import type { MigrationDefinition } from "../migrations"
 import type { ModelCatalogInput } from "../models"
 import type { PipelineDefinition } from "../pipelines/types"
 import type { ProjectionDefinition } from "../projections/types"
@@ -96,6 +97,8 @@ export interface CreateSixbOptions<in out TParams extends ParamsConfig = ParamsC
   membershipPolicies?: readonly MembershipPolicyDefinition[]
   /** Share definitions to register in addition to auto-discovered `shares/` exports. */
   shares?: readonly ShareDefinition[]
+  /** Migrations to register in addition to auto-discovered `migrations/` exports. */
+  migrations?: readonly MigrationDefinition[]
   auth?: SixbAuthConfig
   /**
    * Where the project's code lives, such as `{ repository: "acme/operations" }`: production runs
@@ -110,7 +113,7 @@ export interface CreateSixbOptions<in out TParams extends ParamsConfig = ParamsC
  *
  * The host auto-discovers exported definitions from `ontology/`, `actions/`, `datasets/`,
  * `connectors/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`,
- * `rules/`, `workflows/`, `shares/`, and `security/{groups,roles,policies}/`
+ * `rules/`, `workflows/`, `shares/`, `migrations/`, and `security/{groups,roles,policies}/`
  * relative to `projectRoot`, along with the Agent's `skills/`, `SIXB.md`, and the docs and scripts
  * under `ontology/`.
  */
@@ -181,6 +184,7 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
       ontologyDocs: { modules: discoveredOntology.modules, ...ontologyFiles },
     },
     shares: [...(options.shares ?? []), ...definitions.shares],
+    migrations: [...(options.migrations ?? []), ...definitions.migrations],
     definitionFolders: { ...definitions.folders, objectTypes: discoveredOntology.folders },
     auth: options.auth,
     source: options.source,

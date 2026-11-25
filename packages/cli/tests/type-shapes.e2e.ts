@@ -209,7 +209,58 @@ describe("sixb db migrate --check", () => {
       const check = await sixb(schema, "withoutGate", ["db", "migrate", "--check"])
       expect(check.exitCode).toBe(1)
       expect(check.stdout).toContain("✗ Job: 'gate' was removed, and 1 object holds it.")
-      expect(check.stdout).toContain("Declare it again until a migration removes it.")
+      expect(check.stdout).toContain('defineMigration("job-gate", Job).removeProperty("gate")')
+    },
+    CLI_TIMEOUT_MS * 3
+  )
+})
+
+describe("migrations", () => {
+  test(
+    "a deploy names the pending migration that covers data, and records nothing",
+    async () => {
+      const schema = await deployedSchema("pending")
+      await createJob(schema, { gate: "B12" })
+      const before = await storedShape(schema)
+
+      const deployed = await sixb(schema, "withoutGate", ["check", "--migrate"], {
+        SIXB_SHAPES_MIGRATION: "removeGate",
+      })
+      expect(deployed.exitCode).toBe(1)
+      expect(deployed.stdout).toContain("✗ Job: 'gate' was removed, and 1 object holds it.")
+      expect(deployed.stdout).toContain(
+        "Migration 'job-gate' is pending; this build can't apply it yet."
+      )
+      expect(await storedShape(schema)).toEqual(before)
+    },
+    CLI_TIMEOUT_MS * 3
+  )
+
+  test(
+    "`sixb check` refuses a migration that can never be right, before reading storage",
+    async () => {
+      const checked = await sixb(`type_shapes_invalid_${process.pid}`, "withoutGate", ["check"], {
+        SIXB_SHAPES_MIGRATION: "invalid",
+      })
+      expect(checked.exitCode).not.toBe(0)
+      expect(checked.stdout + checked.stderr).toContain(
+        "Migration 'job-ref' fills 'ref', the primary property of Job"
+      )
+    },
+    CLI_TIMEOUT_MS
+  )
+
+  test(
+    "`sixb check` passes over a migration the code moved past, and says it can be deleted",
+    async () => {
+      const schema = await deployedSchema("inert")
+      const checked = await sixb(schema, "withoutGate", ["check"], {
+        SIXB_SHAPES_MIGRATION: "inert",
+      })
+      expect(checked.exitCode).toBe(0)
+      expect(checked.stdout).toContain(
+        "Migration 'job-hours' removes 'hours', which Job declares again: it does nothing now"
+      )
     },
     CLI_TIMEOUT_MS * 3
   )

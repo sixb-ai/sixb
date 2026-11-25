@@ -538,6 +538,20 @@ export type {
 } from "./shares"
 export { defineShare, ShareDefinitionError, ShareError } from "./shares"
 
+// ── Migrations ─────────────────────────────────────────────
+// How stored objects follow a change of their object type. Not the storage provider's schema
+// migrations, which `@sixb/core/storage` defines with `defineStorageMigrations`.
+
+export type {
+  ConvertPropertyInput,
+  FillPropertyInput,
+  MigrationBuilder,
+  MigrationDefinition,
+  OntologyMigrationStep,
+  StoredObjectProperties,
+} from "./migrations"
+export { defineMigration } from "./migrations"
+
 // ── Storage ────────────────────────────────────────────────
 // Config contract + operator migration API + in-memory dev providers.
 // The full storage-provider contract lives at `@sixb/core/storage`.

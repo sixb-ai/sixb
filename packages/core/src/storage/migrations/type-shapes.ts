@@ -1,4 +1,7 @@
 import type { JsonValue } from "../../json"
+import { coverChanges } from "../../migrations/coverage"
+import { CONFLICT_REMEDY } from "../../migrations/messages"
+import type { MigrationDefinition } from "../../migrations/types"
 import type { OntologyDefinitionCatalog } from "../../ontology/registry"
 import {
   diffTypeShapes,
@@ -103,6 +106,8 @@ export async function checkTypeShapes(input: {
   readonly storage: Storage
   readonly projectId: string
   readonly ontology: OntologyDefinitionCatalog
+  /** The project's migrations: a change their pending steps cover isn't missing one. */
+  readonly migrations?: readonly MigrationDefinition[]
   readonly mode: TypeShapeMode
   /**
    * Runs the unique preparation's dry run, as `applyTypeShapes` does before anything is written,
@@ -112,6 +117,7 @@ export async function checkTypeShapes(input: {
   readonly uniqueDuplicates?: boolean
 }): Promise<TypeShapeCheck> {
   const { storage, projectId, ontology, mode } = input
+  const migrations = input.migrations ?? []
   const stored = await storage.ontology.typeShapes.list({ projectId })
   const storedById = new Map(stored.map((row) => [row.objectTypeId, row]))
 
@@ -128,6 +134,7 @@ export async function checkTypeShapes(input: {
       projectId,
       ontology,
       mode,
+      migrations,
       objectType: ontology.getObjectTypeById(objectTypeId),
       objectTypeId,
       stored: storedById.get(objectTypeId) ?? null,
@@ -240,11 +247,12 @@ async function checkType(input: {
   readonly projectId: string
   readonly ontology: OntologyDefinitionCatalog
   readonly mode: TypeShapeMode
+  readonly migrations: readonly MigrationDefinition[]
   readonly objectType: ObjectType | null
   readonly objectTypeId: string
   readonly stored: StoredTypeShape | null
 }): Promise<TypeShapeTypeCheck | "unrecorded"> {
-  const { storage, projectId, ontology, mode, objectType, objectTypeId, stored } = input
+  const { storage, projectId, ontology, mode, migrations, objectType, objectTypeId, stored } = input
   const code = objectType ? typeShape(objectType, ontology) : null
   const unchanged = { objectTypeId, stored, changes: [], findings: [], pausesWrites: false }
 
@@ -267,18 +275,17 @@ async function checkType(input: {
     ? undefined
     : await baselineShape(storage, projectId, objectType!, code!, ontology)
   // A stored link target the code no longer defines is a removed type, which its own change probes.
-  const changes = diffTypeShapes(withoutRemovedTargets(stored?.shape ?? baseline!, ontology), code)
+  const from = withoutRemovedTargets(stored?.shape ?? baseline!, ontology)
+  const changes = diffTypeShapes(from, code)
   const narrowed = changes.filter(narrows)
   const pending = narrowed.filter(needsData)
 
-  const findings = await probeChanges({
-    storage,
-    projectId,
-    objectType,
-    objectTypeId,
-    ontology,
-    pending,
-  })
+  const probed = { storage, projectId, objectType, objectTypeId, ontology }
+  const findings = code
+    ? await migrationFindings({ ...probed, from, code, pending, migrations })
+    : (await probeChanges({ ...probed, pending })).map(({ change, count }) =>
+        finding(objectTypeId, change, count)
+      )
 
   return {
     objectTypeId,
@@ -404,58 +411,120 @@ function nextWrite(input: {
   return { kind: "write", shape: code }
 }
 
-/** What decides whether the data fits a change: a probe, or a pass over the edits' values. */
-type ShapeRead = TypeShapeProbe | { readonly kind: "values"; readonly propertyId: string }
-
-/**
- * Reads the data for each change that isn't compatible, and counts only what fails. Two changes
- * can need the same read, such as a property retyped and no longer nullable: the read runs once,
- * and only the first change it belongs to can become a finding.
- */
-async function probeChanges(input: {
+interface ProbeInput {
   readonly storage: Storage
   readonly projectId: string
   readonly objectType: ObjectType | null
   readonly objectTypeId: string
   readonly ontology: OntologyDefinitionCatalog
-  readonly pending: readonly ProbedChange[]
-}): Promise<TypeShapeFinding[]> {
+}
+
+/**
+ * Each change the stored objects don't fit is covered by pending migration steps, or missing one.
+ * Only the changes data holds become findings, so a removal nobody ever set needs nothing.
+ */
+async function migrationFindings(
+  input: ProbeInput & {
+    readonly from: TypeShape
+    readonly code: TypeShape
+    readonly pending: readonly ProbedChange[]
+    readonly migrations: readonly MigrationDefinition[]
+  }
+): Promise<TypeShapeFinding[]> {
+  const { objectTypeId, ontology, from, code, pending, migrations } = input
+  const coverage = coverChanges({
+    objectTypeId,
+    stored: from,
+    code,
+    changes: pending,
+    ontology,
+    migrations,
+  })
+
+  if (coverage.conflicts.length > 0) {
+    return coverage.conflicts.map(({ change, message }) => ({
+      objectTypeId,
+      change,
+      count: null,
+      message,
+      remedy: [CONFLICT_REMEDY],
+    }))
+  }
+
+  // What the steps leave is read under the keys the data holds it by; until a build runs
+  // migrations, a covered change with data still stops the deploy.
+  const missing = coverage.missing.filter(needsData)
+  const held = [
+    ...(await probeChanges({ ...input, pending: missing, storedKey: coverage.storedKey })),
+    ...(await probeChanges({ ...input, pending: coverage.covered })),
+  ]
+  return held.map(({ change, count }) =>
+    finding(objectTypeId, change, count, coverage.remedy(change))
+  )
+}
+
+/** What decides whether the data fits a change: a probe, or a pass over the edits' values. */
+type ShapeRead =
+  | TypeShapeProbe
+  | {
+      readonly kind: "values"
+      /** The key the stored values are under. */
+      readonly propertyId: string
+      /** The property whose schema they must fit. */
+      readonly codePropertyId: string
+    }
+
+/**
+ * Reads the data for each change that isn't compatible, and counts only what fails. Two changes
+ * can need the same read, such as a property retyped and no longer nullable: the read runs once,
+ * and only the first change it belongs to counts. `storedKey` maps a property of the code to the
+ * key the stored objects hold it by, through pending renames.
+ */
+async function probeChanges(
+  input: ProbeInput & {
+    readonly pending: readonly ProbedChange[]
+    readonly storedKey?: (propertyId: string) => string
+  }
+): Promise<{ readonly change: ProbedChange; readonly count: number }[]> {
   const { storage, projectId, objectType, objectTypeId, ontology, pending } = input
+  const storedKey = input.storedKey ?? ((propertyId: string) => propertyId)
   const done = new Set<string>()
-  const findings: TypeShapeFinding[] = []
+  const held: { readonly change: ProbedChange; readonly count: number }[] = []
 
   for (const change of pending) {
-    const read = readFor(change)
+    const read = readFor(change, storedKey)
     const key = JSON.stringify(read)
     if (done.has(key)) continue
     done.add(key)
 
     const count =
       read.kind === "values"
-        ? await countUnfitEdits(storage, projectId, objectType!, read.propertyId, ontology)
+        ? await countUnfitEdits(storage, projectId, objectType!, read, ontology)
         : await countHolders(storage, { projectId, objectTypeId, probe: read })
-    if (count > 0) findings.push(finding(objectTypeId, change, count))
+    if (count > 0) held.push({ change, count })
   }
 
-  return findings
+  return held
 }
 
-function readFor(change: ProbedChange): ShapeRead {
+function readFor(change: ProbedChange, storedKey: (propertyId: string) => string): ShapeRead {
   switch (change.kind) {
     case "type-removed":
     case "primary":
       return { kind: "type" }
     case "property-added":
     case "property-required":
-      return { kind: "missingRequired", propertyId: change.propertyId }
+      return { kind: "missingRequired", propertyId: storedKey(change.propertyId) }
     case "property-retyped":
-    case "property-not-nullable":
+    case "property-not-nullable": {
+      const propertyId = storedKey(change.propertyId)
       // A telemetry change is refused: whether a series exists decides.
-      if (change.effect === "refused") return { kind: "property", propertyId: change.propertyId }
-      return { kind: "values", propertyId: change.propertyId }
+      if (change.effect === "refused") return { kind: "property", propertyId }
+      return { kind: "values", propertyId, codePropertyId: change.propertyId }
+    }
     case "property-removed":
     case "property-mode":
-      return { kind: "property", propertyId: change.propertyId }
+      return { kind: "property", propertyId: storedKey(change.propertyId) }
     case "link-added":
     case "link-removed":
     case "link-targets":
@@ -480,16 +549,17 @@ async function countUnfitEdits(
   storage: Storage,
   projectId: string,
   objectType: ObjectType,
-  propertyId: string,
+  read: { readonly propertyId: string; readonly codePropertyId: string },
   ontology: OntologyDefinitionCatalog
 ): Promise<number> {
-  const property = objectType.properties.find((candidate) => candidate.id === propertyId)!
+  const property = objectType.properties.find((candidate) => candidate.id === read.codePropertyId)!
   const valueTypes = ontology.getValueTypesById()
   let unfit = 0
 
-  await forEachEdit(storage, projectId, objectType.id, propertyId, (edit) => {
+  // The code's schema, over the values stored under the key the data still has.
+  await forEachEdit(storage, projectId, objectType.id, read.propertyId, (edit) => {
     const values = edit.value.kind === "create" ? edit.value.properties : edit.value.set
-    if (!fits(property, values[propertyId], valueTypes)) unfit += 1
+    if (!fits(property, values[read.propertyId], valueTypes)) unfit += 1
   })
 
   return unfit

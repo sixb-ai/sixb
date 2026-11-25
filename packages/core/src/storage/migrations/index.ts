@@ -2,6 +2,7 @@ export { checkStorageSchema, type StorageSchemaCheck } from "./check-schema"
 export { isMigrationCapableStorage, migrateStorage } from "./migrate-storage"
 export {
   defineMigrations,
+  defineStorageMigrations,
   describeMigrationHistory,
   runMigrationSet,
   step,
@@ -14,6 +15,7 @@ export type {
 } from "./type-shapes"
 export type {
   DefineMigrationsOptions,
+  DefineStorageMigrationsOptions,
   MigrationCapableStorage,
   MigrationHistoryStore,
   MigrationRecord,
