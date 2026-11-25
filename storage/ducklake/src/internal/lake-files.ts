@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm, stat } from "node:fs/promises"
+import { mkdir, readdir, rm, stat, utimes } from "node:fs/promises"
 import { join, resolve, sep } from "node:path"
 import type { LakeFile, LakeFileRange } from "@sixb/core/lake-storage"
 import { LakeStorageError } from "@sixb/core/lake-storage"
@@ -69,24 +69,32 @@ export class LakeFiles {
     return Bun.file(localPath(this.copyLocation(name))).exists()
   }
 
-  /** The copies there are, with when each was written and its size. */
+  /**
+   * Marks a copy used now. A cut that reuses a copy written long ago restarts the grace production
+   * keeps it for, as a new copy has: retention that read the live slices before the cut recorded
+   * its slice then keeps it. A local copy takes the time as its own; an object store's cannot be
+   * changed, so a marker beside the copies carries it.
+   */
+  async touchCopy(name: string): Promise<void> {
+    if (this.s3) {
+      await this.objectFile(this.usedMarker(name)).write("")
+      return
+    }
+    const now = new Date()
+    await utimes(localPath(this.copyLocation(name)), now, now)
+  }
+
+  /** The copies there are, with when each was last written or reused, and its size. */
   async listCopies(): Promise<readonly LakeCopy[]> {
     if (this.s3) {
-      const prefix = objectKey(this.copiesRoot)
-      const copies: LakeCopy[] = []
-      let startAfter: string | undefined
-      for (;;) {
-        const page = await this.s3.list({ prefix, ...(startAfter ? { startAfter } : {}) })
-        for (const object of page.contents ?? []) {
-          copies.push({
-            name: object.key.slice(prefix.length),
-            writtenAt: new Date(object.lastModified ?? 0),
-            sizeBytes: object.size ?? 0,
-          })
-        }
-        if (!page.isTruncated || !page.contents?.length) return copies
-        startAfter = page.contents[page.contents.length - 1]?.key
-      }
+      const used = new Map(
+        (await this.listObjects(this.usedRoot)).map((object) => [object.name, object.at])
+      )
+      return (await this.listObjects(this.copiesRoot)).map((object) => ({
+        name: object.name,
+        writtenAt: latest(object.at, used.get(object.name)),
+        sizeBytes: object.sizeBytes,
+      }))
     }
 
     const root = localPath(this.copiesRoot)
@@ -99,9 +107,62 @@ export class LakeFiles {
     )
   }
 
+  /** When a copy was last written or reused, or null when there is none. */
+  async copyWrittenAt(name: string): Promise<Date | null> {
+    if (this.s3) {
+      const [copy, marker] = await Promise.all([
+        this.lastModified(this.copyLocation(name)),
+        this.lastModified(this.usedMarker(name)),
+      ])
+      return copy && latest(copy, marker ?? undefined)
+    }
+
+    const stats = await stat(localPath(this.copyLocation(name))).catch(() => null)
+    return stats?.mtime ?? null
+  }
+
   async deleteCopy(name: string): Promise<void> {
-    if (this.s3) await this.objectFile(this.copyLocation(name)).delete()
-    else await rm(localPath(this.copyLocation(name)), { force: true })
+    if (this.s3) {
+      await this.objectFile(this.copyLocation(name)).delete()
+      await this.objectFile(this.usedMarker(name)).delete()
+    } else await rm(localPath(this.copyLocation(name)), { force: true })
+  }
+
+  /** Where an object store keeps the markers of reused copies: beside the copies, not in them. */
+  private get usedRoot(): string {
+    return `${this.copiesRoot.slice(0, -1)}-used/`
+  }
+
+  private usedMarker(name: string): string {
+    return `${this.usedRoot}${name}`
+  }
+
+  private async listObjects(root: string) {
+    if (!this.s3) return []
+    const prefix = objectKey(root)
+    const objects: { name: string; at: Date; sizeBytes: number }[] = []
+    let startAfter: string | undefined
+    for (;;) {
+      const page = await this.s3.list({ prefix, ...(startAfter ? { startAfter } : {}) })
+      for (const object of page.contents ?? []) {
+        objects.push({
+          name: object.key.slice(prefix.length),
+          at: new Date(object.lastModified ?? 0),
+          sizeBytes: object.size ?? 0,
+        })
+      }
+      if (!page.isTruncated || !page.contents?.length) return objects
+      startAfter = page.contents[page.contents.length - 1]?.key
+    }
+  }
+
+  private async lastModified(location: string): Promise<Date | null> {
+    try {
+      return new Date((await this.objectFile(location).stat()).lastModified)
+    } catch (error) {
+      if (isMissingObject(error)) return null
+      throw error
+    }
   }
 
   private async openObject(location: string): Promise<LakeFile | null> {
@@ -127,6 +188,10 @@ export class LakeFiles {
     if (!this.s3) throw new LakeStorageError("[SixbDuckLake] This lake's files are local.")
     return this.s3.file(objectKey(location))
   }
+}
+
+function latest(at: Date, other: Date | undefined): Date {
+  return other && other.getTime() > at.getTime() ? other : at
 }
 
 export interface LakeCopy {

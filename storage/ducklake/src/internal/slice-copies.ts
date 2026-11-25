@@ -38,7 +38,7 @@ export interface CopyInput {
  * field ids, so a catalog reads it in place of the file: same rows, same ids, nothing deleted.
  *
  * A copy is named by the file and the snapshot it is read at, so one copy serves every slice of
- * that version, whatever their points. One that exists is reused as written.
+ * that version, whatever their points. One that exists is reused as written, and marked used.
  * Production writes it once, through its own DuckDB, and deletes it when no live slice reads it.
  */
 export async function writeCopy(
@@ -75,6 +75,9 @@ export async function writeCopy(
       TO ${quoteSqlString(target)} (FORMAT parquet, COMPRESSION zstd, FIELD_IDS {${fieldIds}})
     `)
     if (target !== location) await rename(target, location)
+  } else {
+    // Its slice is recorded already: production keeps the copy as long as it keeps a new one.
+    await files.touchCopy(input.name)
   }
 
   const [counted] = await runtime.query(

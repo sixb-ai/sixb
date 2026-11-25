@@ -93,6 +93,10 @@ export class DuckLakeForks implements LakeForks {
     const cutoff = Date.now() - COPY_GRACE_MS
     for (const copy of await files.listCopies()) {
       if (kept.has(copy.name) || copy.writtenAt.getTime() > cutoff) continue
+
+      // A cut may have reused it since it was listed: its time is read again before it goes.
+      const writtenAt = await files.copyWrittenAt(copy.name)
+      if (!writtenAt || writtenAt.getTime() > cutoff) continue
       await files.deleteCopy(copy.name)
       released += 1
     }

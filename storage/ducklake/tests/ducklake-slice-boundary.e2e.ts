@@ -229,6 +229,32 @@ describe("a slice's boundary", () => {
     }
   })
 
+  // Red check: in slice-copies.ts `writeCopy`, drop the `touchCopy` of a copy it reuses: the
+  // second slice's copy keeps its first write's time, and the retention below deletes it.
+  lakeTest("a copy a new cut reuses stays as long as a new copy would", async (lake) => {
+    await lake.write(
+      people,
+      Array.from({ length: 2_000 }, (_, index) => person(index, index))
+    )
+    await lake.merge(people, [change.delete({ id: "p-3" })])
+    const first = await lake.slice([people.id])
+    const [copy] = [...first.files].filter((path) => path.startsWith("sixb-branch-copies/"))
+    expect(copy).toBeDefined()
+
+    // Two hours later another branch is cut at the same version: it reuses the copy.
+    setSystemTime(new Date(Date.now() + 2 * 60 * 60_000))
+    try {
+      const second = await lake.slice([people.id])
+      expect(second.files.has(`${copy}`)).toBe(true)
+
+      // Retention that read the live slices before the second cut recorded its slice.
+      expect(await lake.production.forks.releaseFiles({ liveSlices: [] })).toBe(0)
+      expect(await lake.production.forks.openFile(`${copy}`)).not.toBeNull()
+    } finally {
+      setSystemTime()
+    }
+  })
+
   // Red check: in catalog-slice.ts `liveFiles`, copy no file for its `partial_max`: the cut then
   // refuses, its rows not the version's. Drop the row-count check too, and the merged file is
   // served whole, rows written after the version included (DuckLake still filters them on read).
