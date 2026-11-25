@@ -141,6 +141,7 @@
       ],
       "@sixb/core/internal/security": ["./packages/core/src/security/internal.ts"],
       "@sixb/core/internal/shares": ["./packages/core/src/shares/internal.ts"],
+      "@sixb/core/internal/snapshots": ["./packages/core/src/snapshots/index.ts"],
       "@sixb/core/internal/sync-run-storage-provider": [
         "./packages/core/src/storage/sync-runs/provider.ts"
       ],
