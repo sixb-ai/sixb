@@ -16,6 +16,7 @@ import {
   type InMemoryOntologyStorageTestHooks,
   restoreOntologyState,
 } from "./shared-state"
+import { InMemorySnapshots } from "./snapshots"
 import { InMemoryOntologySourceStorage } from "./sources"
 import { InMemoryMaterializationStateReader } from "./state-reader"
 import {
@@ -47,6 +48,8 @@ export class InMemoryOntologyStorage implements OntologyStorage {
   readonly replacementPlans: InMemoryOntologyReplacementPlanStorage
   readonly outbox: InMemoryOntologyOutboxStorage
   readonly uniqueValues: InMemoryOntologyUniqueValueStorage
+  /** @internal What the in-memory storage reads a snapshot through. */
+  readonly snapshots: InMemorySnapshots
   private testHooks: InMemoryOntologyStorageTestHooks = {}
   private readonly testingAdapter: InMemoryOntologyStorageTestingAdapter = {
     setTestHooks: (hooks) => this.setTestHooks(hooks),
@@ -84,6 +87,7 @@ export class InMemoryOntologyStorage implements OntologyStorage {
       options.readExecution
     )
     this.uniqueValues = new InMemoryOntologyUniqueValueStorage(objects, options.runRootOperation)
+    this.snapshots = new InMemorySnapshots(this.state)
     const hooks: InMemoryOntologyStorageTestHooks = {
       beforeRead: (boundary) => this.testHooks.beforeRead?.(boundary),
       beforeWrite: (boundary, ordinal) => this.testHooks.beforeWrite?.(boundary, ordinal),

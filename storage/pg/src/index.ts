@@ -31,6 +31,9 @@ import {
   type ObjectQueryPreparationResult,
   type ObjectStorage,
   type QueryPreparationCapableStorage,
+  type SnapshotReadOptions,
+  type SnapshotReadStorage,
+  type SnapshotReadView,
   StorageTransactionError,
 } from "@sixb/core/storage"
 import { PgAgentStorage } from "./agents"
@@ -54,7 +57,7 @@ import { PgAiCostStorage } from "./pg-ai-cost-storage"
 import { PgAiLimitStorage } from "./pg-ai-limit-storage"
 import { PgAiUsageStorage } from "./pg-ai-usage-storage"
 import { PgArtifactStorage } from "./pg-artifact-storage"
-import { createPgClient, type SQL, type SQLClient } from "./pg-client"
+import { createPgClient, type ReservedSQL, type SQL, type SQLClient } from "./pg-client"
 import { PgDatasetIngestStorage } from "./pg-dataset-ingest-storage"
 import { PgExecutionStorage } from "./pg-execution-storage"
 import { PgFileDownloadGrantStorage } from "./pg-file-download-grant-storage"
@@ -71,9 +74,15 @@ import { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storag
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
 import { PgShareGrantStorage } from "./share-grant-storage"
 import { PgShareSessionStorage } from "./share-session-storage"
+import { readPgLatestPoints, readPgMemberships, readPgRanges, readPgVectors } from "./snapshot-read"
 import { isRetryableTransactionConflict } from "./storage-errors"
 import { registerPostgresStorageTestingAdapter } from "./testing"
-import { type PgStoreClient, runPgTransaction } from "./transactions"
+import {
+  beginPgSnapshot,
+  endPgSnapshot,
+  type PgStoreClient,
+  runPgTransaction,
+} from "./transactions"
 
 export interface PostgresStorageOptions {
   /**
@@ -165,7 +174,9 @@ export interface PostgresStorageOptions {
  * })
  * ```
  */
-export class PostgresStorage implements MigrationCapableStorage, QueryPreparationCapableStorage {
+export class PostgresStorage
+  implements MigrationCapableStorage, QueryPreparationCapableStorage, SnapshotReadStorage
+{
   readonly objects: ObjectStorage
   readonly ontology: PgOntologyStorage
   readonly auth: PgAuthStorage
@@ -196,6 +207,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
   readonly migrators: readonly StorageMigrator[]
 
   private readonly sql: SQL
+  private readonly options: PostgresStorageOptions
   private readonly schemaName: string
   private readonly shutdownTimeoutSeconds: number
   private readonly transactionScope = new AsyncLocalStorage<boolean>()
@@ -208,6 +220,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
         options.maxConcurrentAggregates < 1)
     )
       throw new Error("[SixbPg] maxConcurrentAggregates must be a positive integer")
+    this.options = options
     this.schemaName = options.schemaName ?? "sixb"
     this.shutdownTimeoutSeconds = Math.max(
       1,
@@ -389,6 +402,55 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
    */
   async close(): Promise<void> {
     await this.sql.end({ timeout: this.shutdownTimeoutSeconds })
+  }
+
+  /**
+   * Views on connections of their own, each in a `REPEATABLE READ READ ONLY` transaction on the
+   * snapshot the first one exports, so they read in parallel and all see one state. They take at
+   * most half the pool, leaving the rest to the project's own work. Each transaction is bounded
+   * on the server too: by `transaction_timeout` on PostgreSQL 17 and later, by the statement and
+   * idle timeouts before.
+   */
+  async readSnapshot<T>(
+    options: SnapshotReadOptions,
+    run: (views: readonly SnapshotReadView[]) => Promise<T>
+  ): Promise<T> {
+    this.assertRootOperationAvailable()
+    const count = Math.max(1, Math.min(options.views, Math.floor((this.options.max ?? 10) / 2)))
+    const connections: ReservedSQL[] = []
+    const open: ReservedSQL[] = []
+
+    try {
+      let snapshotId: string | undefined
+      for (let index = 0; index < count; index += 1) {
+        const connection = await this.sql.reserve()
+        connections.push(connection)
+        open.push(connection)
+        snapshotId = await beginPgSnapshot(connection, {
+          maxDurationMs: options.maxDurationMs,
+          ...(snapshotId === undefined ? {} : { snapshotId }),
+        })
+      }
+
+      return await run(connections.map((connection) => this.snapshotView(connection)))
+    } finally {
+      for (const connection of open) await endPgSnapshot(connection).catch(() => undefined)
+      for (const connection of connections) connection.release()
+    }
+  }
+
+  private snapshotView(connection: ReservedSQL): SnapshotReadView {
+    return {
+      storage: this.createTransactionStorage(connection, {
+        id: {},
+        materializations: new ProviderMaterializationTransactionLifecycle(),
+        active: true,
+      }),
+      readVectors: ({ projectId, refs }) => readPgVectors(connection, projectId, refs),
+      readLatestPoints: (input) => readPgLatestPoints(connection, input),
+      readMemberships: ({ projectId }) => readPgMemberships(connection, projectId),
+      readRanges: (input) => readPgRanges(connection, input),
+    }
   }
 
   /**

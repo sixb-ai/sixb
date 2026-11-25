@@ -48,6 +48,7 @@ import { InMemoryProjectionRunStorage } from "../projection-runs"
 import { InMemoryRulesStorage, type RulesStorage } from "../rules"
 import { InMemoryShareGrantStorage, type ShareGrantStorage } from "../share-grants"
 import { InMemoryShareSessionStorage, type ShareSessionStorage } from "../share-sessions"
+import type { SnapshotReadOptions, SnapshotReadStorage, SnapshotReadView } from "../snapshots"
 import { InMemorySyncRunStorage, type SyncRunStorage } from "../sync-runs"
 import type { TimeseriesStorage } from "../timeseries"
 import { InMemoryTimeseriesStorage } from "../timeseries/store"
@@ -77,7 +78,7 @@ export interface InMemoryStorageOptions {
   }
 }
 
-export class InMemoryStorage implements Storage {
+export class InMemoryStorage implements SnapshotReadStorage {
   readonly objects: ObjectStorage
   readonly timeseries: TimeseriesStorage
   readonly ontology: OntologyStorage
@@ -285,6 +286,39 @@ export class InMemoryStorage implements Storage {
       workflowId: node.workflowId,
       workflowRunId: node.workflowRunId,
     }
+  }
+
+  /** One view of a copy of this storage, taken under its lock: later writes never reach it. */
+  async readSnapshot<T>(
+    _options: SnapshotReadOptions,
+    run: (views: readonly SnapshotReadView[]) => Promise<T>
+  ): Promise<T> {
+    const copy = new InMemoryStorage()
+    await this.withStorageOperation(() => copy.restore(this.snapshot()))
+
+    return run([
+      {
+        storage: copy,
+        readVectors: async ({ projectId, refs }) =>
+          structuredClone(copy.ontologyStorage.snapshots.readVectors(projectId, refs)),
+        readLatestPoints: async ({ projectId, objectTypeId, objectIds, propertyIds }) => {
+          const series = objectIds.flatMap((objectId) =>
+            propertyIds.map((propertyId) => ({ projectId, objectTypeId, objectId, propertyId }))
+          )
+          const points = await Promise.all(series.map((one) => copy.timeseries.getLatest(one)))
+          return points.filter((point) => point !== null)
+        },
+        readMemberships: async ({ projectId }) => {
+          const users = await copy.auth.users.list({ projectId, limit: Number.MAX_SAFE_INTEGER })
+          const memberships = await Promise.all(
+            users.users.map((user) =>
+              copy.auth.groupMemberships.listForUser({ projectId, userId: user.id })
+            )
+          )
+          return memberships.flat()
+        },
+      },
+    ])
   }
 
   private readonly transactionScope = new AsyncLocalStorage<object>()

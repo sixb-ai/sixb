@@ -126,6 +126,21 @@ export function runDeferredReadTransaction<T>(db: Database, run: () => T): T {
   }
 }
 
+/**
+ * Open a snapshot's read transaction on its own connection: reads through it, scoped reads
+ * included, join it and all see the state of its first read.
+ */
+export function beginSqliteSnapshot(db: Database): void {
+  db.run("BEGIN DEFERRED")
+  activeDeferredReadTransactions.add(db)
+  db.query("SELECT count(*) FROM sqlite_master").get()
+}
+
+export function endSqliteSnapshot(db: Database): void {
+  activeDeferredReadTransactions.delete(db)
+  if (db.inTransaction) rollbackQuietly(db)
+}
+
 function rollbackQuietly(db: Database): void {
   try {
     db.run("ROLLBACK")
