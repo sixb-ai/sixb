@@ -487,6 +487,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("114-artifact-video-export-asks", artifactVideoExportAsksSql),
     pgSql("115-agent-message-artifact-context", agentMessageArtifactContextSql),
     pgSql("116-snapshot-load-executions", snapshotLoadExecutionsSql),
+    pgSql("117-lake-slices", lakeSlicesSql),
   ],
 })
 
@@ -611,3 +612,4 @@ import agentMessageArtifactContextSql from "./migrations/115-agent-message-artif
 import snapshotLoadExecutionsSql from "./migrations/116-snapshot-load-executions.sql" with {
   type: "text",
 }
+import lakeSlicesSql from "./migrations/117-lake-slices.sql" with { type: "text" }

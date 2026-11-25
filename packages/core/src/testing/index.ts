@@ -121,6 +121,10 @@ export {
   runLakeRetentionRunStorageContractSuite,
 } from "./lake-retention-run-storage-contract"
 export {
+  type LakeSliceStorageContractSuiteOptions,
+  runLakeSliceStorageContractSuite,
+} from "./lake-slice-storage-contract"
+export {
   type LakeStorageContractSuiteOptions,
   type LakeStorageSchemaEvolutionCapability,
   runLakeStorageContractSuite,

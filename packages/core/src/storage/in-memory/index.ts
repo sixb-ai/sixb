@@ -25,6 +25,7 @@ import {
   InMemoryLakeRetentionRunStorage,
   type LakeRetentionRunStorage,
 } from "../lake-retention-runs"
+import { InMemoryLakeSliceStorage, type LakeSliceStorage } from "../lake-slices"
 import {
   InMemoryMaintenanceHeartbeatStorage,
   type MaintenanceHeartbeatStorage,
@@ -159,6 +160,7 @@ export class InMemoryStorage
   private readonly fileUploadSessionStorage = new InMemoryFileUploadSessions()
   private readonly datasetIngestStorage = new InMemoryDatasetIngestStorage()
   private readonly fileDownloadGrantStorage = new InMemoryFileDownloadGrantStorage()
+  private readonly lakeSliceStorage = new InMemoryLakeSliceStorage()
   private readonly maintenanceHeartbeatStorage = new InMemoryMaintenanceHeartbeatStorage()
   private readonly lakeRetentionRunStorage = new InMemoryLakeRetentionRunStorage()
   private readonly connectorConnectionStorage: InMemoryConnectorConnectionStorage
@@ -183,6 +185,7 @@ export class InMemoryStorage
   readonly fileUploadSessions: FileUploadSessionStore
   readonly datasetIngest: DatasetIngestStorage
   readonly fileDownloadGrants: FileDownloadGrantStorage
+  readonly lakeSlices: LakeSliceStorage
   readonly maintenanceHeartbeats: MaintenanceHeartbeatStorage
   readonly lakeRetentionRuns: LakeRetentionRunStorage
   readonly connectorConnections: ConnectorConnectionStorage
@@ -221,6 +224,7 @@ export class InMemoryStorage
     this.fileUploadSessions = createOperationScopedFacade(this.fileUploadSessionStorage, scope)
     this.datasetIngest = createOperationScopedFacade(this.datasetIngestStorage, scope)
     this.fileDownloadGrants = createOperationScopedFacade(this.fileDownloadGrantStorage, scope)
+    this.lakeSlices = createOperationScopedFacade(this.lakeSliceStorage, scope)
     this.maintenanceHeartbeats = createOperationScopedFacade(
       this.maintenanceHeartbeatStorage,
       scope
@@ -523,6 +527,7 @@ export class InMemoryStorage
       fileUploadSessions: this.fileUploadSessionStorage,
       datasetIngest: this.datasetIngestStorage,
       fileDownloadGrants: this.fileDownloadGrantStorage,
+      lakeSlices: this.lakeSliceStorage,
       maintenanceHeartbeats: this.maintenanceHeartbeatStorage,
       lakeRetentionRuns: this.lakeRetentionRunStorage,
       connectorConnections: this.connectorConnectionStorage,
@@ -559,6 +564,7 @@ export class InMemoryStorage
       fileUploadSessions: this.fileUploadSessionStorage.snapshot(),
       datasetIngest: this.datasetIngestStorage.snapshot(),
       fileDownloadGrants: this.fileDownloadGrantStorage.snapshot(),
+      lakeSlices: this.lakeSliceStorage.snapshot(),
       maintenanceHeartbeats: this.maintenanceHeartbeatStorage.snapshot(),
       lakeRetentionRuns: this.lakeRetentionRunStorage.snapshot(),
       connectorConnections: this.connectorConnectionStorage.snapshot(),
@@ -590,6 +596,7 @@ export class InMemoryStorage
     this.fileUploadSessionStorage.restore(snapshot.fileUploadSessions)
     this.datasetIngestStorage.restore(snapshot.datasetIngest)
     this.fileDownloadGrantStorage.restore(snapshot.fileDownloadGrants)
+    this.lakeSliceStorage.restore(snapshot.lakeSlices)
     this.maintenanceHeartbeatStorage.restore(snapshot.maintenanceHeartbeats)
     this.lakeRetentionRunStorage.restore(snapshot.lakeRetentionRuns)
     this.connectorConnectionStorage.restore(snapshot.connectorConnections)
@@ -621,6 +628,7 @@ export interface InMemoryStorageSnapshot {
   readonly fileUploadSessions: ReturnType<InMemoryFileUploadSessions["snapshot"]>
   readonly datasetIngest: ReturnType<InMemoryDatasetIngestStorage["snapshot"]>
   readonly fileDownloadGrants: ReturnType<InMemoryFileDownloadGrantStorage["snapshot"]>
+  readonly lakeSlices: ReturnType<InMemoryLakeSliceStorage["snapshot"]>
   readonly maintenanceHeartbeats: ReturnType<InMemoryMaintenanceHeartbeatStorage["snapshot"]>
   readonly lakeRetentionRuns: ReturnType<InMemoryLakeRetentionRunStorage["snapshot"]>
   readonly connectorConnections: ReturnType<InMemoryConnectorConnectionStorage["snapshot"]>

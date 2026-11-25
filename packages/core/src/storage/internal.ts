@@ -60,6 +60,7 @@ export {
 } from "./artifacts/record"
 export { parseFileDownloadGrantRow } from "./file-download-grants/record"
 export { createFileUploadId, createUploadExpiresAt } from "./file-upload-sessions/utils"
+export { parseLakeSliceGrantRow, parseLakeSliceRow } from "./lake-slices/record"
 export {
   parseMaintenanceHeartbeatRow,
   serializeMaintenancePasses,

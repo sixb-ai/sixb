@@ -72,6 +72,7 @@ import { PgExecutionStorage } from "./pg-execution-storage"
 import { PgFileDownloadGrantStorage } from "./pg-file-download-grant-storage"
 import { PgFileUploadSessionStorage } from "./pg-file-upload-session-storage"
 import { PgLakeRetentionRunStorage } from "./pg-lake-retention-run-storage"
+import { PgLakeSliceStorage } from "./pg-lake-slice-storage"
 import { PgMaintenanceHeartbeatStorage } from "./pg-maintenance-heartbeat-storage"
 import { PgPipelineRunStorage } from "./pg-pipeline-run-storage"
 import { PgProjectionRunStorage } from "./pg-projection-run-storage"
@@ -216,6 +217,7 @@ export class PostgresStorage
   readonly fileUploadSessions: PgFileUploadSessionStorage
   readonly datasetIngest: PgDatasetIngestStorage
   readonly fileDownloadGrants: PgFileDownloadGrantStorage
+  readonly lakeSlices: PgLakeSliceStorage
   readonly activity: PgActivityStorage
   readonly maintenanceHeartbeats: PgMaintenanceHeartbeatStorage
   readonly lakeRetentionRuns: PgLakeRetentionRunStorage
@@ -315,6 +317,7 @@ export class PostgresStorage
     this.fileUploadSessions = createOperationScopedFacade(stores.fileUploadSessions, scope)
     this.datasetIngest = createOperationScopedFacade(stores.datasetIngest, scope)
     this.fileDownloadGrants = createOperationScopedFacade(stores.fileDownloadGrants, scope)
+    this.lakeSlices = createOperationScopedFacade(stores.lakeSlices, scope)
     this.activity = createOperationScopedFacade(stores.activity, scope)
     this.maintenanceHeartbeats = createOperationScopedFacade(stores.maintenanceHeartbeats, scope)
     this.lakeRetentionRuns = createOperationScopedFacade(stores.lakeRetentionRuns, scope)
@@ -700,6 +703,7 @@ function createPostgresStores(
     fileUploadSessions: new PgFileUploadSessionStorage(sql),
     datasetIngest: new PgDatasetIngestStorage(sql),
     fileDownloadGrants: new PgFileDownloadGrantStorage(sql),
+    lakeSlices: new PgLakeSliceStorage(sql),
     activity: new PgActivityStorage(sql),
     maintenanceHeartbeats: new PgMaintenanceHeartbeatStorage(sql),
     lakeRetentionRuns: new PgLakeRetentionRunStorage(sql),
@@ -731,6 +735,7 @@ interface PostgresStoreSet {
   readonly fileUploadSessions: PgFileUploadSessionStorage
   readonly datasetIngest: PgDatasetIngestStorage
   readonly fileDownloadGrants: PgFileDownloadGrantStorage
+  readonly lakeSlices: PgLakeSliceStorage
   readonly activity: PgActivityStorage
   readonly maintenanceHeartbeats: PgMaintenanceHeartbeatStorage
   readonly lakeRetentionRuns: PgLakeRetentionRunStorage

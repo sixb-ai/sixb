@@ -599,6 +599,14 @@ export type { InMemoryStorageOptions } from "./in-memory"
 export { InMemoryStorage } from "./in-memory"
 export type { LakeRetentionRunRecord, LakeRetentionRunStorage } from "./lake-retention-runs"
 export type {
+  DeleteExpiredLakeSlicesInput,
+  LakeSliceGrantRecord,
+  LakeSliceRecord,
+  LakeSliceRef,
+  LakeSliceStorage,
+  ListLiveLakeSlicesInput,
+} from "./lake-slices"
+export type {
   MaintenanceHeartbeatRecord,
   MaintenanceHeartbeatStorage,
   MaintenanceLoopOwner,

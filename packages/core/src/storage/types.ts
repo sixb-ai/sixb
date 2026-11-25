@@ -12,6 +12,7 @@ import type { ExecutionStorage } from "./executions"
 import type { FileDownloadGrantStorage } from "./file-download-grants"
 import type { FileUploadSessionStore } from "./file-upload-sessions"
 import type { LakeRetentionRunStorage } from "./lake-retention-runs"
+import type { LakeSliceStorage } from "./lake-slices"
 import type { MaintenanceHeartbeatStorage } from "./maintenance-heartbeats"
 import type { ObjectStorage } from "./objects/types"
 import type { OntologyStorage } from "./ontology"
@@ -384,6 +385,7 @@ export interface Storage {
   fileUploadSessions?: FileUploadSessionStore
   datasetIngest?: DatasetIngestStorage
   fileDownloadGrants?: FileDownloadGrantStorage
+  lakeSlices?: LakeSliceStorage
   maintenanceHeartbeats?: MaintenanceHeartbeatStorage
   lakeRetentionRuns?: LakeRetentionRunStorage
   connectorConnections?: ConnectorConnectionStorage
