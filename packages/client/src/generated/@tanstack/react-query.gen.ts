@@ -21,6 +21,7 @@ import {
   captureActivity,
   clearArtifactState,
   completeFileUpload,
+  copyForBranch,
   countObjects,
   createAgentThread,
   createAiLimitPolicy,
@@ -40,6 +41,7 @@ import {
   deleteArtifactStateValue,
   disableAuthServiceAccount,
   disconnectConnectorConnection,
+  dropBranchLakeSlice,
   editAgentThreadMessage,
   exchangeDeviceAuthorization,
   exchangeSharedAccess,
@@ -199,6 +201,7 @@ import {
   refreshAuthSession,
   releaseAgentComputerSession,
   removeAgentThreadParticipant,
+  renewBranchLakeToken,
   requestAction,
   requestPipelineRun,
   requestSyncRun,
@@ -274,6 +277,7 @@ import type {
   CompleteFileUploadData,
   CompleteFileUploadError,
   CompleteFileUploadResponse,
+  CopyForBranchData,
   CountObjectsData,
   CountObjectsError,
   CountObjectsResponse,
@@ -331,6 +335,7 @@ import type {
   DisconnectConnectorConnectionData,
   DisconnectConnectorConnectionError,
   DisconnectConnectorConnectionResponse,
+  DropBranchLakeSliceData,
   EditAgentThreadMessageData,
   EditAgentThreadMessageError,
   EditAgentThreadMessageResponse,
@@ -788,6 +793,7 @@ import type {
   ReleaseAgentComputerSessionError,
   RemoveAgentThreadParticipantData,
   RemoveAgentThreadParticipantError,
+  RenewBranchLakeTokenData,
   RequestActionData,
   RequestActionError,
   RequestActionResponse,
@@ -2907,6 +2913,71 @@ export const getLakeHealthOptions = (options?: Options<GetLakeHealthData>) =>
     },
     queryKey: getLakeHealthQueryKey(options),
   })
+
+/**
+ * Copy what you read for a branch: the snapshot, then the lake slice of the same moment
+ */
+export const copyForBranchMutation = (
+  options?: Partial<Options<CopyForBranchData>>
+): UseMutationOptions<unknown, DefaultError, Options<CopyForBranchData>> => {
+  const mutationOptions: UseMutationOptions<unknown, DefaultError, Options<CopyForBranchData>> = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await copyForBranch({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Issue a new token for your branch's lake slice
+ */
+export const renewBranchLakeTokenMutation = (
+  options?: Partial<Options<RenewBranchLakeTokenData>>
+): UseMutationOptions<unknown, DefaultError, Options<RenewBranchLakeTokenData>> => {
+  const mutationOptions: UseMutationOptions<
+    unknown,
+    DefaultError,
+    Options<RenewBranchLakeTokenData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await renewBranchLakeToken({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Delete your branch's lake slice
+ */
+export const dropBranchLakeSliceMutation = (
+  options?: Partial<Options<DropBranchLakeSliceData>>
+): UseMutationOptions<unknown, DefaultError, Options<DropBranchLakeSliceData>> => {
+  const mutationOptions: UseMutationOptions<
+    unknown,
+    DefaultError,
+    Options<DropBranchLakeSliceData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await dropBranchLakeSlice({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const listSyncsQueryKey = (options?: Options<ListSyncsData>) =>
   createQueryKey("listSyncs", options)

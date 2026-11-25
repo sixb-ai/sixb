@@ -31,6 +31,10 @@ export const OPENAPI_TAGS = {
     name: "Webhooks",
     description: "Webhook run history",
   },
+  branches: {
+    name: "Branches",
+    description: "What `sixb dev --from production` takes from production",
+  },
   datasets: {
     name: "Datasets",
     description: "Dataset definitions",

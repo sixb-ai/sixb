@@ -1944,6 +1944,10 @@
       "description": "Webhook run history"
     },
     {
+      "name": "Branches",
+      "description": "What `sixb dev --from production` takes from production"
+    },
+    {
       "name": "Datasets",
       "description": "Dataset definitions"
     },
@@ -22002,6 +22006,70 @@
             }
           }
         }
+      }
+    },
+    "/api/branches/copy": {
+      "post": {
+        "summary": "Copy what you read for a branch: the snapshot, then the lake slice of the same moment",
+        "tags": ["Branches"],
+        "operationId": "copyForBranch",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ]
+      }
+    },
+    "/api/branches/lake-token": {
+      "post": {
+        "summary": "Issue a new token for your branch's lake slice",
+        "tags": ["Branches"],
+        "operationId": "renewBranchLakeToken",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ]
+      }
+    },
+    "/api/branches/slices/{sliceId}": {
+      "delete": {
+        "summary": "Delete your branch's lake slice",
+        "tags": ["Branches"],
+        "operationId": "dropBranchLakeSlice",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sliceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/api/syncs": {

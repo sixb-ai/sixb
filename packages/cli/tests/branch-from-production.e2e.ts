@@ -1,7 +1,8 @@
+import { Database } from "bun:sqlite"
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import {
   can,
   change,
@@ -299,4 +300,191 @@ describe.each(laptops)("a laptop branch on %s", (_name, localStorage) => {
     await local.lake.close()
     await local.storage.close?.()
   }, 60_000)
+})
+
+// The developer's own path: `sixb dev --from production` in a git checkout, against production.
+describe("sixb dev --from production", () => {
+  const cli = resolve(import.meta.dir, "../src/index.tsx")
+
+  /** A project checked out on `feature/x`, its local storage SQLite and its lake DuckLake. */
+  async function checkout() {
+    const scratch = resolve(import.meta.dir, "../../../.local")
+    await mkdir(scratch, { recursive: true })
+    const root = await mkdtemp(join(scratch, "dev-from-production-"))
+    await symlink(resolve(import.meta.dir, "../node_modules"), join(root, "node_modules"), "dir")
+    const write = async (path: string, source: string) => {
+      await mkdir(resolve(join(root, path), ".."), { recursive: true })
+      await writeFile(join(root, path), source)
+    }
+    await write(
+      "ontology/Ticket.ts",
+      `import { defineObjectType, prop } from "@sixb/core"
+export const Ticket = defineObjectType({ id: "BranchTicket", name: "Ticket", properties: [
+  prop("id", "string", { primary: true, required: true }),
+  prop("status", "string", { query: { searchable: true, filterable: true } }),
+  prop("title", "string"),
+] })
+`
+    )
+    await write(
+      "sixb.config.ts",
+      `import { can, col, createSixb, defineDataset, defineGroup, defineRole, InMemoryBlobStorage,
+  InMemoryBroker, InMemoryQueues, project } from "@sixb/core"
+import { DuckLakeStorage } from "@sixb/ducklake"
+import { migrateSqliteStorage, SqliteStorage } from "@sixb/sqlite"
+import { Ticket } from "./ontology/Ticket"
+const orders = defineDataset("branch.orders", { schema: [col("id", "string"), col("total", "float64")], primaryKey: "id" })
+const developers = defineGroup("developers")
+const readers = defineGroup("readers")
+await migrateSqliteStorage(import.meta.dir + "/.sixb/storage")
+export const sixb = await createSixb({
+  id: "branch-copy", projectRoot: import.meta.dir,
+  broker: new InMemoryBroker(), queues: new InMemoryQueues(), blobStorage: new InMemoryBlobStorage(),
+  storage: new SqliteStorage({ path: import.meta.dir + "/.sixb/storage" }),
+  lakeStorage: new DuckLakeStorage({ catalog: { type: "duckdb", path: import.meta.dir + "/.sixb/lake.ducklake" }, dataPath: import.meta.dir + "/.sixb/lake" }),
+  datasets: [orders], groups: [developers, readers],
+  roles: [
+    defineRole("developers", { grantedTo: [developers], grants: [can.manage(project.source),
+      can.view(Ticket).where((ticket) => ticket.p.status.eq("open")), can.view(orders)] }),
+    defineRole("readers", { grantedTo: [readers], grants: [can.view(Ticket)] }),
+  ],
+})
+`
+    )
+    for (const args of [
+      ["init", "-q", "-b", "main"],
+      ["add", "."],
+      ["-c", "user.email=dev@x.test", "-c", "user.name=dev", "commit", "-qm", "project"],
+      ["checkout", "-q", "-b", "feature/x"],
+    ]) {
+      await run(["git", ...args], root)
+    }
+    return root
+  }
+
+  async function run(command: string[], cwd: string) {
+    const proc = Bun.spawn(command, { cwd, stdout: "pipe", stderr: "pipe" })
+    const timer = setTimeout(() => proc.kill(), 30_000)
+    try {
+      const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited])
+      if (code !== 0) throw new Error(`${command.join(" ")}: ${stderr}`)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  function freePort(): number {
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() })
+    const port = Number(server.port)
+    server.stop(true)
+    return port
+  }
+
+  /** One `sixb dev --from production` until it is ready: its output, its API, and how to stop it. */
+  async function dev(root: string, token: string, args: string[] = []) {
+    const port = freePort()
+    const apiPort = freePort()
+    let output = ""
+    const proc = Bun.spawn(
+      [
+        process.execPath,
+        cli,
+        "dev",
+        "--from",
+        "production",
+        "--port",
+        String(port),
+        "--api-port",
+        String(apiPort),
+        ...args,
+      ],
+      {
+        cwd: root,
+        // The developer's CLI sign-in in production, and a home of its own: no other profile.
+        env: { ...process.env, HOME: root, SIXB_API_URL: production.url, SIXB_API_TOKEN: token },
+        stdout: "pipe",
+        stderr: "pipe",
+        stdin: "ignore",
+      }
+    )
+    const capture = async (stream: ReadableStream<Uint8Array>) => {
+      const decoder = new TextDecoder()
+      for await (const chunk of stream) output += decoder.decode(chunk, { stream: true })
+    }
+    const readers = [capture(proc.stdout), capture(proc.stderr)]
+    const deadline = setTimeout(() => proc.kill("SIGKILL"), 90_000)
+    const stop = async () => {
+      proc.kill("SIGTERM")
+      const kill = setTimeout(() => proc.kill("SIGKILL"), 12_000)
+      await proc.exited
+      clearTimeout(kill)
+      clearTimeout(deadline)
+      await Promise.all(readers)
+    }
+
+    const started = Date.now()
+    while (!/\[SixbDev\] Ready/.test(output)) {
+      if (proc.exitCode !== null || Date.now() - started > 60_000) {
+        await stop()
+        throw new Error(`sixb dev did not start:\n${output}`)
+      }
+      await Bun.sleep(50)
+    }
+    return { api: `http://127.0.0.1:${apiPort}`, output: () => output, stop }
+  }
+
+  const tickets = async (api: string) => {
+    const response = await fetch(`${api}/api/objects?objectTypeId=BranchTicket`)
+    const body = (await response.json()) as { objects: { properties: Record<string, string> }[] }
+    return body.objects.map((object) => `${object.properties.id}:${object.properties.title}`).sort()
+  }
+
+  /** Edit t-1 straight in the branch's SQLite file, as the branch's own write would land. */
+  async function editOnBranch(root: string) {
+    const directory = join(root, ".sixb/storage/branches", namespaceFor("feature/x"))
+    const file = (await readdir(directory)).find((name) => !name.includes("-"))!
+    const db = new Database(join(directory, file))
+    db.run(
+      "UPDATE objects SET properties = json_set(properties, '$.title', 'Edited on the branch') WHERE primary_id = 't-1'"
+    )
+    db.close()
+  }
+
+  // Red checks: in commands/dev-runner.ts, start the project's own host instead of the branch's:
+  // the API serves the laptop's empty storage. In lib/dev-supervisor.ts, mark every child a
+  // restart: --refresh is ignored, as it was before this test found it.
+  test("copies, serves the copy as the person, reuses it, refreshes it, and drops it with its git branch", async () => {
+    const root = await checkout()
+    const alice = (await signedIn("usr_alice")).authorization
+    const token = (await alice()).slice("Bearer ".length)
+    try {
+      const first = await dev(root, token)
+      expect(first.output()).toContain("Branch: production's data as you read it, copied now")
+      expect(first.output()).toContain("Off on this branch")
+      // Served as Alice: the closed ticket stays in production.
+      expect(await tickets(first.api)).toEqual(["t-1:Ticket t-1", "t-3:Ticket t-3"])
+      await first.stop()
+
+      await editOnBranch(root)
+      const second = await dev(root, token)
+      expect(second.output()).not.toContain("copied now")
+      expect(await tickets(second.api)).toEqual(["t-1:Edited on the branch", "t-3:Ticket t-3"])
+      await second.stop()
+
+      const refreshed = await dev(root, token, ["--refresh"])
+      expect(refreshed.output()).toContain("copied now")
+      expect(await tickets(refreshed.api)).toEqual(["t-1:Ticket t-1", "t-3:Ticket t-3"])
+      await refreshed.stop()
+
+      // Back on main with feature/x deleted: the next run drops its copy.
+      await run(["git", "checkout", "-q", "main"], root)
+      await run(["git", "branch", "-q", "-D", "feature/x"], root)
+      const onMain = await dev(root, token)
+      expect(onMain.output()).toContain("Dropped the copy of deleted git branch feature/x")
+      await onMain.stop()
+      expect(await readdir(join(root, ".sixb/storage/branches"))).toEqual([namespaceFor("main")])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 300_000)
 })

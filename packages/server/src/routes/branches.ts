@@ -6,7 +6,9 @@ import { isAllowed } from "@sixb/core/internal/authorization"
 import { copyForBranch } from "@sixb/core/internal/branches"
 import { dropLakeSlice, issueLakeSliceToken } from "@sixb/core/internal/lake-slices"
 import type { Elysia } from "elysia"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
+import { OPENAPI_TAGS } from "../openapi/tags"
 
 interface BranchRouteContext {
   readonly request: Request
@@ -17,18 +19,28 @@ interface BranchRouteContext {
 /**
  * What `sixb dev --from production` asks production for, as the signed-in person: the copy of
  * what they read, a new token for the lake slice it cut, and the slice's deletion when the copy
- * could not be loaded. Only the CLI calls them, with its own session: hidden from OpenAPI.
+ * could not be loaded. The CLI's session or a personal access token: both are the person.
  */
 export function registerBranchRoutes(app: Elysia, host: SixbHostView) {
+  const detail = (operationId: string, summary: string) => ({
+    summary,
+    tags: [OPENAPI_TAGS.branches.name],
+    operationId,
+    security: accessTokenSecurityRequirement(operationId),
+  })
+
   return app
     .post("/api/branches/copy", (context) => copyResponse(host, context), {
-      detail: { hide: true },
+      detail: detail(
+        "copyForBranch",
+        "Copy what you read for a branch: the snapshot, then the lake slice of the same moment"
+      ),
     })
     .post("/api/branches/lake-token", (context) => lakeTokenResponse(host, context), {
-      detail: { hide: true },
+      detail: detail("renewBranchLakeToken", "Issue a new token for your branch's lake slice"),
     })
     .delete("/api/branches/slices/:sliceId", (context) => dropSliceResponse(host, context), {
-      detail: { hide: true },
+      detail: detail("dropBranchLakeSlice", "Delete your branch's lake slice"),
     })
 }
 

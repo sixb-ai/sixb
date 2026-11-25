@@ -960,6 +960,30 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: true,
   },
+  // `sixb dev --from production`: the copy of what the person reads, a new token for its lake
+  // slice, and the slice's deletion. A personal access token copies as its person, as `sixb
+  // login` does; a service account's is refused, since a branch copies what one person reads.
+  {
+    operationId: "copyForBranch",
+    method: "POST",
+    path: "/api/branches/copy",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "renewBranchLakeToken",
+    method: "POST",
+    path: "/api/branches/lake-token",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "dropBranchLakeSlice",
+    method: "DELETE",
+    path: "/api/branches/slices/:sliceId",
+    accessToken: true,
+    agentApi: false,
+  },
   // How the lake stores each dataset the caller may view: counts and sizes, never rows.
   {
     operationId: "getLakeHealth",
