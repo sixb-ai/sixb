@@ -365,6 +365,12 @@
       "import": "./dist/security/internal.js",
       "default": "./dist/security/internal.js"
     },
+    "./internal/snapshots": {
+      "types": "./dist/snapshots/index.d.ts",
+      "bun": "./src/snapshots/index.ts",
+      "import": "./dist/snapshots/index.js",
+      "default": "./dist/snapshots/index.js"
+    },
     "./internal/shares": {
       "types": "./dist/shares/internal.d.ts",
       "bun": "./src/shares/internal.ts",
