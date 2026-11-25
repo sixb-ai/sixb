@@ -156,6 +156,7 @@ const SHIPPED_MIGRATIONS = [
   "115-agent-message-artifact-context",
   "116-snapshot-load-executions",
   "117-lake-slices",
+  "118-skipped-action-effects",
 ]
 
 const steps = postgresStorageMigrations.steps

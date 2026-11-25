@@ -346,6 +346,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("112-agent-message-artifact-context", agentMessageArtifactContextSql),
     sqliteSql("113-snapshot-load-executions", snapshotLoadExecutionsSql),
     sqliteSql("114-lake-slices", lakeSlicesSql),
+    sqliteSql("115-skipped-action-effects", skippedActionEffectsSql),
   ],
 })
 
@@ -805,3 +806,6 @@ import snapshotLoadExecutionsSql from "./migrations/113-snapshot-load-executions
   type: "text",
 }
 import lakeSlicesSql from "./migrations/114-lake-slices.sql" with { type: "text" }
+import skippedActionEffectsSql from "./migrations/115-skipped-action-effects.sql" with {
+  type: "text",
+}

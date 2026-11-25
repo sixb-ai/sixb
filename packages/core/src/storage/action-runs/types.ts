@@ -65,6 +65,12 @@ export type ActionRunEffectsRecord =
       readonly completedAt: Date
       readonly error: ActionRunFailure<"effects">
     }
+  | {
+      /** The effects did not run, as on a branch, which sends nothing. */
+      readonly status: "skipped"
+      readonly completedAt: Date
+      readonly error?: never
+    }
 
 interface ActionRunRecordFields {
   readonly id: string
@@ -107,6 +113,12 @@ export type RecordActionEffectsInput =
       readonly status: "failed"
       readonly completedAt?: Date
       readonly error: ActionRunFailure<"effects">
+    }
+  | {
+      readonly id: string
+      readonly projectId: string
+      readonly status: "skipped"
+      readonly completedAt?: Date
     }
 
 export interface ListActionRunsInput {
