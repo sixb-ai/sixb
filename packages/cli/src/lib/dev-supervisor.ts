@@ -148,6 +148,8 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
             ...process.env,
             SIXB_DEV_CHILD: "1",
             SIXB_DEV_GENERATION: crypto.randomUUID(),
+            // A restart reuses the branch's copy: --refresh takes a new one once, at start.
+            SIXB_DEV_RESTART: started ? "1" : "",
             SIXB_DEV_READY: "",
             [DEV_UI_ENV]: reporter.output === "pipe" ? "footer" : "",
           },

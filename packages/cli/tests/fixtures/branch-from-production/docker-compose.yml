@@ -1,0 +1,16 @@
+# Throwaway PostgreSQL of `branch-from-production.e2e.ts`: production's storage and lake catalog,
+# and a laptop's local storage. Host ports are left to Docker; the test names its own project.
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.1-pg17
+    environment:
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1::5432"
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 1s
+      timeout: 5s
+      retries: 30

@@ -1,4 +1,6 @@
 import { dirname, resolve } from "node:path"
+import { BRANCH_DATA_FROM_ENV, BRANCH_NAME_ENV } from "@sixb/core/internal/runtime"
+import { currentGitBranch } from "../lib/branch-from-production"
 import { runDevSupervisor } from "../lib/dev-supervisor"
 import type { DevOptions } from "./dev-runner"
 import { assertDevEnv } from "./env"
@@ -31,6 +33,18 @@ export async function runDev(options: DevOptions = {}) {
     }
     process.exit(process.exitCode ?? 0)
   }
-  await assertDevEnv(dirname(resolve(options.entry ?? "sixb.config.ts")))
+  const root = dirname(resolve(options.entry ?? "sixb.config.ts"))
+  await assertDevEnv(root)
+
+  // Core reads the branch when it loads, in each child: say it before any child starts.
+  if (options.from !== undefined || options.refresh) {
+    if (options.from !== "production") {
+      throw new Error(
+        "[SixbCLI] `sixb dev --from` takes `production`: a branch copies its data from production. Add --refresh to take a new copy."
+      )
+    }
+    process.env[BRANCH_NAME_ENV] = await currentGitBranch(root)
+    process.env[BRANCH_DATA_FROM_ENV] = "production"
+  }
   await runDevSupervisor(options)
 }
