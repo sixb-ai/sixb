@@ -23,6 +23,11 @@ import {
   TIMEOUT_MS,
 } from "./snapshot-contract-fixture"
 
+/** The branch's definitions as production receives them: JSON, with no code of the branch's. */
+function asData<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
 export interface SnapshotLoadContractProvider<TStorage extends Storage> {
   /** A migrated storage holding no project yet. */
   readonly createStorage: () => Promise<
@@ -348,7 +353,7 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
               source,
               scope: options.scope,
               storage: copied,
-              definitions: branchDefinitions(ontology()),
+              definitions: asData(branchDefinitions(ontology())),
             })
             const load = await importSnapshot({
               snapshot: exportSnapshot(source, options),
@@ -396,7 +401,7 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
             source,
             scope: ownerOptions(production).scope,
             storage: into,
-            definitions: branchDefinitions(ontology()),
+            definitions: asData(branchDefinitions(ontology())),
           })
 
         try {
