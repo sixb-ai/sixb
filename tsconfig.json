@@ -124,6 +124,7 @@
       "@sixb/core/internal/materialization": ["./packages/core/src/materialization/index.ts"],
       "@sixb/core/internal/materializer": ["./packages/core/src/materializer/index.ts"],
       "@sixb/core/internal/model-execution": ["./packages/core/src/models/execution/index.ts"],
+      "@sixb/core/internal/model-origins": ["./packages/core/src/models/origins.ts"],
       "@sixb/core/internal/objects": ["./packages/core/src/objects/index.ts"],
       "@sixb/core/internal/ontology": ["./packages/core/src/ontology/internal.ts"],
       "@sixb/core/internal/ontology-storage-provider": [
@@ -195,6 +196,7 @@
       "@sixb/desktop": ["./packages/desktop/src/index.ts"],
       "@sixb/lake-local": ["./storage/lake-local/src/index.ts"],
       "@sixb/lake-worker": ["./packages/lake-worker/src/index.ts"],
+      "@sixb/branch-worker": ["./packages/branch-worker/src/index.ts"],
       "@sixb/logger-pino": ["./loggers/pino/src/index.ts"],
       "@sixb/model-protocols/responses": ["./models/protocols/src/responses.ts"],
       "@sixb/model-protocols/messages": ["./models/protocols/src/messages.ts"],

@@ -175,6 +175,7 @@ export type {
   ModelToolResultPart,
   ProviderData,
 } from "./messages"
+export { registerModelOrigin } from "./origins"
 export type {
   ModelCallCost,
   ModelCostComponent,

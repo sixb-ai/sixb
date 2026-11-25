@@ -329,6 +329,12 @@
       "import": "./dist/materializer/index.js",
       "default": "./dist/materializer/index.js"
     },
+    "./internal/model-origins": {
+      "types": "./dist/models/origins.d.ts",
+      "bun": "./src/models/origins.ts",
+      "import": "./dist/models/origins.js",
+      "default": "./dist/models/origins.js"
+    },
     "./internal/model-execution": {
       "types": "./dist/models/execution/index.d.ts",
       "bun": "./src/models/execution/index.ts",

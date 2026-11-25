@@ -256,7 +256,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage
   readonly queues: Queues
-  readonly sandboxes?: Pick<SandboxFactory, "create" | "resume" | "sharesHost">
+  readonly sandboxes?: Pick<SandboxFactory, "create" | "resume" | "sharesHost" | "runsBranches">
   /**
    * The variables the sandbox recipe sets, by name. Its provider gives them to every sandbox it
    * makes, so a hosted branch refuses a recipe that sets any.
@@ -687,6 +687,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
         : { connectorConnections: this.connectorService.connectionProcess }),
       blobStorage: this.blobStorage,
       apiPublicOrigin: () => getApiPublicOrigin(this),
+      source: this.source,
       lakeStorage: this.lakeStorage,
       datasetVersionMarkings: this.datasetVersionMarkings,
       datasetIngest: this.datasetIngest,

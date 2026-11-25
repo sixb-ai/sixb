@@ -39,6 +39,7 @@ import {
   deleteArtifact,
   deleteArtifactComment,
   deleteArtifactStateValue,
+  deleteBranch,
   disableAuthServiceAccount,
   disconnectConnectorConnection,
   editAgentThreadMessage,
@@ -156,6 +157,7 @@ import {
   listAuthServiceAccountAccessTokens,
   listAuthServiceAccounts,
   listAuthSessions,
+  listBranches,
   listConnectorAccounts,
   listConnectorConnectionSyncRuns,
   listConnectorConnections,
@@ -190,6 +192,7 @@ import {
   moveAgentThreadToCloud,
   moveAgentThreadToComputer,
   type Options,
+  openBranch,
   postAgentThreadMessage,
   printArtifactPdf,
   queryObjectLinks,
@@ -198,6 +201,7 @@ import {
   reauthorizeConnectorConnection,
   recreateAgentThreadSandbox,
   refreshAuthSession,
+  refreshBranch,
   releaseAgentComputerSession,
   removeAgentThreadParticipant,
   requestAction,
@@ -228,6 +232,7 @@ import {
   startConnectorConnectionRun,
   startVideoGeneration,
   stopAgentBackgroundCommand,
+  stopBranch,
   submitWorkflowIntervention,
   suspendAuthMember,
   transcribeAudio,
@@ -327,6 +332,9 @@ import type {
   DeleteArtifactStateValueData,
   DeleteArtifactStateValueError,
   DeleteArtifactStateValueResponse,
+  DeleteBranchData,
+  DeleteBranchError,
+  DeleteBranchResponse,
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountError,
   DisableAuthServiceAccountResponse,
@@ -673,6 +681,9 @@ import type {
   ListAuthSessionsData,
   ListAuthSessionsError,
   ListAuthSessionsResponse,
+  ListBranchesData,
+  ListBranchesError,
+  ListBranchesResponse,
   ListConnectorAccountsData,
   ListConnectorAccountsResponse,
   ListConnectorConnectionSyncRunsData,
@@ -762,6 +773,9 @@ import type {
   MoveAgentThreadToComputerData,
   MoveAgentThreadToComputerError,
   MoveAgentThreadToComputerResponse,
+  OpenBranchData,
+  OpenBranchError,
+  OpenBranchResponse,
   PostAgentThreadMessageData,
   PostAgentThreadMessageError,
   PostAgentThreadMessageResponse,
@@ -786,6 +800,9 @@ import type {
   RefreshAuthSessionData,
   RefreshAuthSessionError,
   RefreshAuthSessionResponse,
+  RefreshBranchData,
+  RefreshBranchError,
+  RefreshBranchResponse,
   ReleaseAgentComputerSessionData,
   ReleaseAgentComputerSessionError,
   RemoveAgentThreadParticipantData,
@@ -874,6 +891,9 @@ import type {
   StopAgentBackgroundCommandData,
   StopAgentBackgroundCommandError,
   StopAgentBackgroundCommandResponse,
+  StopBranchData,
+  StopBranchError,
+  StopBranchResponse,
   SubmitWorkflowInterventionData,
   SubmitWorkflowInterventionError,
   SubmitWorkflowInterventionResponse,
@@ -3304,6 +3324,123 @@ export const runScheduleMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await runSchedule({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Delete a branch: its sandbox, its schema and its role
+ */
+export const deleteBranchMutation = (
+  options?: Partial<Options<DeleteBranchData>>
+): UseMutationOptions<DeleteBranchResponse, DeleteBranchError, Options<DeleteBranchData>> => {
+  const mutationOptions: UseMutationOptions<
+    DeleteBranchResponse,
+    DeleteBranchError,
+    Options<DeleteBranchData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await deleteBranch({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const listBranchesQueryKey = (options?: Options<ListBranchesData>) =>
+  createQueryKey("listBranches", options)
+
+/**
+ * List the branches that run next to production
+ */
+export const listBranchesOptions = (options?: Options<ListBranchesData>) =>
+  queryOptions<
+    ListBranchesResponse,
+    ListBranchesError,
+    ListBranchesResponse,
+    ReturnType<typeof listBranchesQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listBranches({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listBranchesQueryKey(options),
+  })
+
+/**
+ * Open a git branch next to production, on a copy of what you read
+ */
+export const openBranchMutation = (
+  options?: Partial<Options<OpenBranchData>>
+): UseMutationOptions<OpenBranchResponse, OpenBranchError, Options<OpenBranchData>> => {
+  const mutationOptions: UseMutationOptions<
+    OpenBranchResponse,
+    OpenBranchError,
+    Options<OpenBranchData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await openBranch({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Take a new copy of production for a branch, discarding what it wrote
+ */
+export const refreshBranchMutation = (
+  options?: Partial<Options<RefreshBranchData>>
+): UseMutationOptions<RefreshBranchResponse, RefreshBranchError, Options<RefreshBranchData>> => {
+  const mutationOptions: UseMutationOptions<
+    RefreshBranchResponse,
+    RefreshBranchError,
+    Options<RefreshBranchData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await refreshBranch({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Stop a branch's runtime; its copy stays
+ */
+export const stopBranchMutation = (
+  options?: Partial<Options<StopBranchData>>
+): UseMutationOptions<StopBranchResponse, StopBranchError, Options<StopBranchData>> => {
+  const mutationOptions: UseMutationOptions<
+    StopBranchResponse,
+    StopBranchError,
+    Options<StopBranchData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await stopBranch({
         ...options,
         ...fnOptions,
         throwOnError: true,

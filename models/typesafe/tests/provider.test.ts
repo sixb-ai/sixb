@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { question } from "@sixb/core"
+import { modelOriginsOf } from "@sixb/core/internal/model-origins"
 import { DecisionModelResponseError, ModelProviderError } from "@sixb/core/models"
 import { createTypesafe } from "../src"
 
@@ -210,4 +211,11 @@ test("resolves credentials on each evaluation without rebuilding the provider", 
   key = "second-key"
   await model.evaluate({ input: "x", questions })
   expect(authorization).toEqual(["Bearer first-key", "Bearer second-key"])
+})
+
+// A branch production runs reaches only where the project's providers say they call.
+// Guard check: drop `registerModelOrigin` from `createTypesafe`.
+test("says where it calls, for a branch's sandbox to reach it", () => {
+  createTypesafe({ baseUrl: "https://typesafe.proxy.test/v1", apiKey: "key" })
+  expect(modelOriginsOf({ providerId: "typesafe" })).toContain("https://typesafe.proxy.test")
 })

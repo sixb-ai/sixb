@@ -13,6 +13,8 @@ import { type ArtifactsRuntime, createArtifactsRuntime } from "../artifacts/exec
 import { type BlobsRuntime, createBlobsRuntime } from "../blob-storage/execution"
 import type { BlobStorage } from "../blob-storage/types"
 import type { SixbBranch } from "../branch-mode"
+import { type BranchesRuntime, createBranchesRuntime } from "../branches/execution"
+import type { ProjectSource } from "../branches/source"
 import { registerConnectorConnectionsRuntime } from "../connectors/connections/capability"
 import type { ConnectorConnectionProcess } from "../connectors/connections/contracts"
 import { createConnectorConnectionsRuntime } from "../connectors/connections/execution"
@@ -74,6 +76,8 @@ export interface Sixb<TParams extends Record<string, unknown> = Record<string, u
   readonly schedules: SchedulesRuntime
   readonly shares: SharesRuntime
   readonly users: UsersRuntime
+  /** The branches that run next to production: open, refresh, stop and delete them. */
+  readonly branches: BranchesRuntime
   readonly connector: ConnectorRuntime
   readonly blobs: BlobsRuntime
 }
@@ -92,6 +96,7 @@ export interface SixbDependencies {
   readonly activity: ActivityService
   readonly connectorService: ConnectorService
   readonly connectorConnections?: ConnectorConnectionProcess
+  readonly source: ProjectSource | null
   readonly members: MemberStatusRuntime
   readonly blobStorage: BlobStorage
   readonly apiPublicOrigin: () => string | undefined
@@ -222,6 +227,7 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
     schedules: createSchedulesRuntime(runtime, dependencies.definitions),
     shares: createSharesRuntime(runtime, execution, dependencies.definitions.shares),
     users: createUsersRuntime(runtime, dependencies.members),
+    branches: createBranchesRuntime(runtime, execution, { source: dependencies.source }),
     connector: createConnectorRuntime(runtime, execution, dependencies.connectorService),
     blobs: createBlobsRuntime(
       runtime,

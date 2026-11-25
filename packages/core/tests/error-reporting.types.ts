@@ -41,6 +41,7 @@ type _errorContextIsDiscriminated = Expect<
     | "maintenance.pass.failed"
     | "orchestrator.dispatch.failed"
     | "lake.retention.failed"
+    | "branch.failed"
     | "dataset.ingest.flush.failed"
     | "dataset.ingest.rejected"
     | "artifact.live_write.failed"

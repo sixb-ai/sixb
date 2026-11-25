@@ -14,6 +14,7 @@ import {
   ModelProviderError,
   type ModelRateCard,
   type ModelReasoningLevel,
+  registerModelOrigin,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { chatEvents } from "@sixb/model-protocols/chat"
@@ -185,6 +186,9 @@ export interface AzureAIFoundryProvider extends LanguageModelProvider {
   chat(deploymentName: string, options?: AzureAIFoundryChatOptions): AzureAIFoundryModel<"chat">
 }
 
+/** Where Entra ID signs a credential in. */
+const ENTRA_AUTHORITY = "https://login.microsoftonline.com"
+
 export function createAzureAIFoundry(options: AzureAIFoundryOptions = {}): AzureAIFoundryProvider {
   if ("embeddings" in options)
     throw new TypeError(
@@ -204,6 +208,9 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions = {}): Azure
   })
   const providerId = options.providerId ?? "azure-ai-foundry"
   if (!providerId.trim()) throw new TypeError(`${PREFIX} providerId must not be empty.`)
+  registerModelOrigin(providerId, endpoint)
+  // Entra ID signs in at Microsoft's own host.
+  if (options.credential) registerModelOrigin(providerId, ENTRA_AUTHORITY)
   const deployments = new FoundryDeployments(providerId, transport, options.discovery)
   const modelCatalog = new RemoteModelsDevCatalog(options.catalog)
   const embedding = (name: string, input: AzureAIFoundryEmbeddingOptions) =>

@@ -36,6 +36,7 @@ import {
   modelReasoningSupportIssue,
   type RerankingModel,
   rateModelCall,
+  registerModelOrigin,
   type SpeechCostEstimator,
   type SpeechModel,
   type TranscriptionModel,
@@ -175,6 +176,16 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
   assertPositiveIntegerOption(options.catalogTtlMs, "catalogTtlMs")
   assertNonnegativeInteger(options.maxRetries, "maxRetries")
   assertPositiveIntegerOption(options.maxRetryDelayMs, "maxRetryDelayMs")
+  registerModelOrigin(PROVIDER_ID, baseUrl)
+  for (const url of [
+    options.webSearchUrl,
+    options.imageUrl,
+    options.speechUrl,
+    options.videoUrl,
+    options.transcriptionUrl,
+  ]) {
+    if (url && URL.canParse(url)) registerModelOrigin(PROVIDER_ID, url)
+  }
   const transport: GatewayTransport = {
     ...options,
     apiKey:

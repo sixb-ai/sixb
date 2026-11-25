@@ -8406,6 +8406,346 @@ export type RunScheduleResponses = {
 
 export type RunScheduleResponse = RunScheduleResponses[keyof RunScheduleResponses]
 
+export type DeleteBranchData = {
+  body?: never
+  path?: never
+  query: {
+    name: string
+  }
+  url: "/api/branches"
+}
+
+export type DeleteBranchErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+}
+
+export type DeleteBranchError = DeleteBranchErrors[keyof DeleteBranchErrors]
+
+export type DeleteBranchResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    name: string
+    wanted: "running" | "stopped" | "deleted"
+    state: "stopped" | "copying" | "starting" | "ready" | "failed"
+    createdBy: string
+    generation: number | null
+    commit: string | null
+    error: {
+      message: string
+      file?: string
+    } | null
+    notices: Array<{
+      code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
+      message: string
+    }>
+    data: {
+      takenAt: string
+      objects: number
+      skipped: Array<{
+        objectTypeId: string
+        reason: string
+      }>
+      lakeSliceId: string | null
+    } | null
+    refreshRequestedAt: string | null
+    openedAt: string
+    lastSeenAt: string
+  }
+}
+
+export type DeleteBranchResponse = DeleteBranchResponses[keyof DeleteBranchResponses]
+
+export type ListBranchesData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/branches"
+}
+
+export type ListBranchesErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+}
+
+export type ListBranchesError = ListBranchesErrors[keyof ListBranchesErrors]
+
+export type ListBranchesResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    branches: Array<{
+      name: string
+      wanted: "running" | "stopped" | "deleted"
+      state: "stopped" | "copying" | "starting" | "ready" | "failed"
+      createdBy: string
+      generation: number | null
+      commit: string | null
+      error: {
+        message: string
+        file?: string
+      } | null
+      notices: Array<{
+        code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
+        message: string
+      }>
+      data: {
+        takenAt: string
+        objects: number
+        skipped: Array<{
+          objectTypeId: string
+          reason: string
+        }>
+        lakeSliceId: string | null
+      } | null
+      refreshRequestedAt: string | null
+      openedAt: string
+      lastSeenAt: string
+    }>
+  }
+}
+
+export type ListBranchesResponse = ListBranchesResponses[keyof ListBranchesResponses]
+
+export type OpenBranchData = {
+  body: {
+    name: string
+  }
+  path?: never
+  query?: never
+  url: "/api/branches"
+}
+
+export type OpenBranchErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+}
+
+export type OpenBranchError = OpenBranchErrors[keyof OpenBranchErrors]
+
+export type OpenBranchResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    name: string
+    wanted: "running" | "stopped" | "deleted"
+    state: "stopped" | "copying" | "starting" | "ready" | "failed"
+    createdBy: string
+    generation: number | null
+    commit: string | null
+    error: {
+      message: string
+      file?: string
+    } | null
+    notices: Array<{
+      code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
+      message: string
+    }>
+    data: {
+      takenAt: string
+      objects: number
+      skipped: Array<{
+        objectTypeId: string
+        reason: string
+      }>
+      lakeSliceId: string | null
+    } | null
+    refreshRequestedAt: string | null
+    openedAt: string
+    lastSeenAt: string
+  }
+}
+
+export type OpenBranchResponse = OpenBranchResponses[keyof OpenBranchResponses]
+
+export type RefreshBranchData = {
+  body: {
+    name: string
+  }
+  path?: never
+  query?: never
+  url: "/api/branches/refresh"
+}
+
+export type RefreshBranchErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+}
+
+export type RefreshBranchError = RefreshBranchErrors[keyof RefreshBranchErrors]
+
+export type RefreshBranchResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    name: string
+    wanted: "running" | "stopped" | "deleted"
+    state: "stopped" | "copying" | "starting" | "ready" | "failed"
+    createdBy: string
+    generation: number | null
+    commit: string | null
+    error: {
+      message: string
+      file?: string
+    } | null
+    notices: Array<{
+      code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
+      message: string
+    }>
+    data: {
+      takenAt: string
+      objects: number
+      skipped: Array<{
+        objectTypeId: string
+        reason: string
+      }>
+      lakeSliceId: string | null
+    } | null
+    refreshRequestedAt: string | null
+    openedAt: string
+    lastSeenAt: string
+  }
+}
+
+export type RefreshBranchResponse = RefreshBranchResponses[keyof RefreshBranchResponses]
+
+export type StopBranchData = {
+  body: {
+    name: string
+  }
+  path?: never
+  query?: never
+  url: "/api/branches/stop"
+}
+
+export type StopBranchErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+}
+
+export type StopBranchError = StopBranchErrors[keyof StopBranchErrors]
+
+export type StopBranchResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    name: string
+    wanted: "running" | "stopped" | "deleted"
+    state: "stopped" | "copying" | "starting" | "ready" | "failed"
+    createdBy: string
+    generation: number | null
+    commit: string | null
+    error: {
+      message: string
+      file?: string
+    } | null
+    notices: Array<{
+      code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
+      message: string
+    }>
+    data: {
+      takenAt: string
+      objects: number
+      skipped: Array<{
+        objectTypeId: string
+        reason: string
+      }>
+      lakeSliceId: string | null
+    } | null
+    refreshRequestedAt: string | null
+    openedAt: string
+    lastSeenAt: string
+  }
+}
+
+export type StopBranchResponse = StopBranchResponses[keyof StopBranchResponses]
+
 export type ListWorkflowsData = {
   body?: never
   path?: never

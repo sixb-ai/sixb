@@ -149,6 +149,9 @@
       "path": "packages/lake-worker/tsconfig.build.json"
     },
     {
+      "path": "packages/branch-worker/tsconfig.build.json"
+    },
+    {
       "path": "packages/orchestrator/tsconfig.build.json"
     },
     {

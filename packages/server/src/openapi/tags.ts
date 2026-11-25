@@ -33,7 +33,8 @@ export const OPENAPI_TAGS = {
   },
   branches: {
     name: "Branches",
-    description: "What `sixb dev --from production` takes from production",
+    description:
+      "Git branches off production: the copy `sixb dev --from production` takes, and the branches production runs next to itself",
   },
   datasets: {
     name: "Datasets",

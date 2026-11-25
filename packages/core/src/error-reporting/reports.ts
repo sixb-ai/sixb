@@ -310,6 +310,25 @@ export function reportLakeRetentionFailure(
   })
 }
 
+export interface ReportBranchFailureInput {
+  readonly projectId: string
+  readonly branch: string
+  readonly failure: SixbFailure<"internal.unexpected">
+}
+
+export function reportBranchFailure(
+  reporter: ErrorReporter,
+  error: unknown,
+  input: ReportBranchFailureInput
+): void {
+  reporter.report(error, {
+    ...input,
+    type: "branch.failed",
+    occurredAt: input.failure.at,
+    notificationId: `branch:${input.projectId}:${input.branch}:${input.failure.at}`,
+  })
+}
+
 export interface ReportDatasetIngestFlushFailureInput {
   readonly projectId: string
   readonly datasetId: string

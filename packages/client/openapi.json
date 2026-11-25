@@ -1945,7 +1945,7 @@
     },
     {
       "name": "Branches",
-      "description": "What `sixb dev --from production` takes from production"
+      "description": "Git branches off production: the copy `sixb dev --from production` takes, and the branches production runs next to itself"
     },
     {
       "name": "Datasets",
@@ -25211,6 +25211,1147 @@
           },
           "404": {
             "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches": {
+      "get": {
+        "summary": "List the branches that run next to production",
+        "tags": ["Branches"],
+        "operationId": "listBranches",
+        "security": [
+          {
+            "sixbSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "branches": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "wanted": {
+                            "type": "string",
+                            "enum": ["running", "stopped", "deleted"]
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": ["stopped", "copying", "starting", "ready", "failed"]
+                          },
+                          "createdBy": {
+                            "type": "string"
+                          },
+                          "generation": {
+                            "type": "number",
+                            "nullable": true
+                          },
+                          "commit": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "error": {
+                            "type": "object",
+                            "properties": {
+                              "message": {
+                                "type": "string"
+                              },
+                              "file": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["message"],
+                            "additionalProperties": false,
+                            "nullable": true
+                          },
+                          "notices": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": [
+                                    "data-reset",
+                                    "no-dev-env",
+                                    "machine-ended",
+                                    "temp-files-uncapped"
+                                  ]
+                                },
+                                "message": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["code", "message"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "data": {
+                            "type": "object",
+                            "properties": {
+                              "takenAt": {
+                                "type": "string"
+                              },
+                              "objects": {
+                                "type": "number"
+                              },
+                              "skipped": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "objectTypeId": {
+                                      "type": "string"
+                                    },
+                                    "reason": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["objectTypeId", "reason"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "lakeSliceId": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            },
+                            "required": ["takenAt", "objects", "skipped", "lakeSliceId"],
+                            "additionalProperties": false,
+                            "nullable": true
+                          },
+                          "refreshRequestedAt": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "openedAt": {
+                            "type": "string"
+                          },
+                          "lastSeenAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "wanted",
+                          "state",
+                          "createdBy",
+                          "generation",
+                          "commit",
+                          "error",
+                          "notices",
+                          "data",
+                          "refreshRequestedAt",
+                          "openedAt",
+                          "lastSeenAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["branches"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Open a git branch next to production, on a copy of what you read",
+        "tags": ["Branches"],
+        "operationId": "openBranch",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "wanted": {
+                      "type": "string",
+                      "enum": ["running", "stopped", "deleted"]
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": ["stopped", "copying", "starting", "ready", "failed"]
+                    },
+                    "createdBy": {
+                      "type": "string"
+                    },
+                    "generation": {
+                      "type": "number",
+                      "nullable": true
+                    },
+                    "commit": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "file": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["message"],
+                      "additionalProperties": false,
+                      "nullable": true
+                    },
+                    "notices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "enum": [
+                              "data-reset",
+                              "no-dev-env",
+                              "machine-ended",
+                              "temp-files-uncapped"
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "message"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "takenAt": {
+                          "type": "string"
+                        },
+                        "objects": {
+                          "type": "number"
+                        },
+                        "skipped": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["objectTypeId", "reason"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "lakeSliceId": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": ["takenAt", "objects", "skipped", "lakeSliceId"],
+                      "additionalProperties": false,
+                      "nullable": true
+                    },
+                    "refreshRequestedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "openedAt": {
+                      "type": "string"
+                    },
+                    "lastSeenAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "wanted",
+                    "state",
+                    "createdBy",
+                    "generation",
+                    "commit",
+                    "error",
+                    "notices",
+                    "data",
+                    "refreshRequestedAt",
+                    "openedAt",
+                    "lastSeenAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a branch: its sandbox, its schema and its role",
+        "tags": ["Branches"],
+        "operationId": "deleteBranch",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "wanted": {
+                      "type": "string",
+                      "enum": ["running", "stopped", "deleted"]
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": ["stopped", "copying", "starting", "ready", "failed"]
+                    },
+                    "createdBy": {
+                      "type": "string"
+                    },
+                    "generation": {
+                      "type": "number",
+                      "nullable": true
+                    },
+                    "commit": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "file": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["message"],
+                      "additionalProperties": false,
+                      "nullable": true
+                    },
+                    "notices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "enum": [
+                              "data-reset",
+                              "no-dev-env",
+                              "machine-ended",
+                              "temp-files-uncapped"
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "message"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "takenAt": {
+                          "type": "string"
+                        },
+                        "objects": {
+                          "type": "number"
+                        },
+                        "skipped": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["objectTypeId", "reason"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "lakeSliceId": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": ["takenAt", "objects", "skipped", "lakeSliceId"],
+                      "additionalProperties": false,
+                      "nullable": true
+                    },
+                    "refreshRequestedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "openedAt": {
+                      "type": "string"
+                    },
+                    "lastSeenAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "wanted",
+                    "state",
+                    "createdBy",
+                    "generation",
+                    "commit",
+                    "error",
+                    "notices",
+                    "data",
+                    "refreshRequestedAt",
+                    "openedAt",
+                    "lastSeenAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/refresh": {
+      "post": {
+        "summary": "Take a new copy of production for a branch, discarding what it wrote",
+        "tags": ["Branches"],
+        "operationId": "refreshBranch",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "wanted": {
+                      "type": "string",
+                      "enum": ["running", "stopped", "deleted"]
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": ["stopped", "copying", "starting", "ready", "failed"]
+                    },
+                    "createdBy": {
+                      "type": "string"
+                    },
+                    "generation": {
+                      "type": "number",
+                      "nullable": true
+                    },
+                    "commit": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "file": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["message"],
+                      "additionalProperties": false,
+                      "nullable": true
+                    },
+                    "notices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "enum": [
+                              "data-reset",
+                              "no-dev-env",
+                              "machine-ended",
+                              "temp-files-uncapped"
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "message"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "takenAt": {
+                          "type": "string"
+                        },
+                        "objects": {
+                          "type": "number"
+                        },
+                        "skipped": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["objectTypeId", "reason"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "lakeSliceId": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": ["takenAt", "objects", "skipped", "lakeSliceId"],
+                      "additionalProperties": false,
+                      "nullable": true
+                    },
+                    "refreshRequestedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "openedAt": {
+                      "type": "string"
+                    },
+                    "lastSeenAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "wanted",
+                    "state",
+                    "createdBy",
+                    "generation",
+                    "commit",
+                    "error",
+                    "notices",
+                    "data",
+                    "refreshRequestedAt",
+                    "openedAt",
+                    "lastSeenAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/branches/stop": {
+      "post": {
+        "summary": "Stop a branch's runtime; its copy stays",
+        "tags": ["Branches"],
+        "operationId": "stopBranch",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "wanted": {
+                      "type": "string",
+                      "enum": ["running", "stopped", "deleted"]
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": ["stopped", "copying", "starting", "ready", "failed"]
+                    },
+                    "createdBy": {
+                      "type": "string"
+                    },
+                    "generation": {
+                      "type": "number",
+                      "nullable": true
+                    },
+                    "commit": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "file": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["message"],
+                      "additionalProperties": false,
+                      "nullable": true
+                    },
+                    "notices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "enum": [
+                              "data-reset",
+                              "no-dev-env",
+                              "machine-ended",
+                              "temp-files-uncapped"
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "message"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "takenAt": {
+                          "type": "string"
+                        },
+                        "objects": {
+                          "type": "number"
+                        },
+                        "skipped": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["objectTypeId", "reason"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "lakeSliceId": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": ["takenAt", "objects", "skipped", "lakeSliceId"],
+                      "additionalProperties": false,
+                      "nullable": true
+                    },
+                    "refreshRequestedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "openedAt": {
+                      "type": "string"
+                    },
+                    "lastSeenAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "wanted",
+                    "state",
+                    "createdBy",
+                    "generation",
+                    "commit",
+                    "error",
+                    "notices",
+                    "data",
+                    "refreshRequestedAt",
+                    "openedAt",
+                    "lastSeenAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
             "content": {
               "application/json": {
                 "schema": {

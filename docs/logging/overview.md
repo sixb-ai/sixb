@@ -93,6 +93,7 @@ Pass `onError` to `createSixb()`. `reportError` is your monitoring integration. 
 | `maintenance.pass.failed` | A background pass of the orchestrator failed. It runs again on its own; alert on `consecutiveFailures`. |
 | `orchestrator.dispatch.failed` | A scheduled or event-triggered run could not be dispatched. `dropped: true`: this event can never start it, often a mapper that throws, and the trigger is gone. `dropped: false`: it has failed for five minutes and keeps retrying. `target` names the run. |
 | `lake.retention.failed` | One automatic lake cleanup failed. The next one, `cleanupEvery` later, tries again. |
+| `branch.failed` | A git branch production runs failed: its checkout, its copy or its runtime. `branch` names it; it stays failed until someone opens it again. |
 | `dataset.ingest.flush.failed` | Changes `ingest` stored wait: writing them to the dataset failed five times in a row, or nothing wrote them for 10 minutes. They stay stored, and writing goes on trying. |
 | `dataset.ingest.rejected` | One `ingest` call's changes were refused when written to the dataset. The context names the call (`deliveryId`, `executionId`), how many changes it held, the refused change's key and sequence, and why. `sixb lake rejected` prints the whole call for a week. |
 | `artifact.live_write.failed` | Changes made to a canvas live were never saved: the server stopped first, or nobody left could save them. `artifactId` names the canvas. |

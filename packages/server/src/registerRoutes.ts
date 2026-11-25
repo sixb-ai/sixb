@@ -26,6 +26,7 @@ import { registerDatasetRoutes } from "./routes/datasets"
 import { registerEventRoutes } from "./routes/events"
 import { registerFileDownloadRoutes } from "./routes/file-downloads"
 import { registerFileRoutes } from "./routes/files"
+import { registerHostedBranchRoutes } from "./routes/hosted-branches"
 import { registerLakeRoutes } from "./routes/lake"
 import { registerLakeSliceFileRoutes } from "./routes/lake-slice-files"
 import { registerLinkRoutes } from "./routes/links"
@@ -74,6 +75,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerSyncRoutes(app, host)
   registerPipelineRoutes(app, host)
   registerScheduleRoutes(app, host)
+  registerHostedBranchRoutes(app, host)
   registerWorkflowRoutes(app, host)
   registerRuleRoutes(app, host)
   registerShareGrantRoutes(app, host)

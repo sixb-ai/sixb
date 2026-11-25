@@ -4,6 +4,7 @@
  */
 
 export { type CopyForBranchInput, copyForBranch } from "./copy"
+export { takeBranchCopySlot } from "./copy-slots"
 export {
   authorizeBranchCredential,
   BRANCH_CREDENTIAL_PREFIX,
@@ -27,6 +28,12 @@ export {
   isBranchHostingStorage,
   prepareBranchData,
 } from "./data"
+export {
+  assertMayManageBranches,
+  type BranchesRuntime,
+  type BranchView,
+  toBranchView,
+} from "./execution"
 export {
   BRANCH_COPIES_DIRECTORY,
   BRANCH_DATABASE_SCHEMA_ENV,

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import { reportModelCalls } from "@sixb/core/internal/model-execution"
+import { modelOriginsOf } from "@sixb/core/internal/model-origins"
 import type {
   JsonObject,
   LanguageModelRequest,
@@ -846,4 +847,19 @@ test("keeps the binding's own name and description over the public catalog's", a
   expect(() => provider.messages("deployment", { name: "GPT\n" })).toThrow(
     "[SixbAzureAIFoundry] name must be a nonempty trimmed string."
   )
+})
+
+// A branch production runs reaches only where the project's providers say they call: the
+// project's resource, and Entra ID when it signs in with a credential.
+// Guard check: drop `registerModelOrigin` from `createAzureAIFoundry`.
+test("says where it calls, for a branch's sandbox to reach it", () => {
+  createAzureAIFoundry({
+    endpoint,
+    providerId: "foundry-origins",
+    credential: { getToken: async () => ({ token: "t", expiresOnTimestamp: Date.now() + 60_000 }) },
+  })
+  expect(modelOriginsOf({ providerId: "foundry-origins" })).toEqual([
+    "https://login.microsoftonline.com",
+    "https://resource.services.ai.azure.com",
+  ])
 })

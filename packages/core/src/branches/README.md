@@ -51,8 +51,9 @@ In production the worker refuses `@sixb/sandboxes-local`, which runs a branch on
 `@sixb/sandboxes-smolvm` on the host's loopback.
 
 Its network is restricted to production's PostgreSQL instance, production's API, the git host,
-the npm and yarn registries, and the origins `SIXB_BRANCH_ALLOW` adds (the services the `dev`
-values point at). The provider refuses the rest: private ranges, link-local and cloud metadata
+the npm and yarn registries, the providers of the project's models (each says where it calls when
+it is made: `models/origins.ts`), and the origins `SIXB_BRANCH_ALLOW` adds (the services the `dev`
+values point at, a model provider of the project's own). The provider refuses the rest: private ranges, link-local and cloud metadata
 included. PostgreSQL is allowed by its addresses, resolved when the sandbox is made: it negotiates
 TLS after it connects, so no firewall that reads TLS names can match its host name.
 

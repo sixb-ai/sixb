@@ -3,6 +3,7 @@ import {
   estimateModelReservation,
   type ModelRateCard,
   rateModelCall,
+  registerModelOrigin,
 } from "@sixb/core/models"
 import { evaluateTypesafe, type TypesafeTransport } from "./transport"
 
@@ -28,6 +29,7 @@ export type TypesafeProvider = (modelId: string) => DecisionModel
 /** No hidden inference retries. Each evaluate() makes at most one HTTP request. */
 export function createTypesafe(options: TypesafeOptions = {}): TypesafeProvider {
   const transport = resolveTransport(options)
+  registerModelOrigin("typesafe", transport.endpoint)
   return (modelId) => createModel(modelId, transport)
 }
 

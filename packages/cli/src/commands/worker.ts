@@ -64,7 +64,8 @@ export async function runWorker(options: WorkerOptions = {}) {
       {
         agentApiBaseUrl: options.apiPublicOrigin,
       },
-      agentRuntimeRequired(sixb.definitions)
+      agentRuntimeRequired(sixb.definitions),
+      sixb
     )
     if (unmet) {
       throw new SixbCliError(`[SixbCLI] \`sixb worker ${workerType}\` cannot start: it ${unmet}.`)
