@@ -74,6 +74,56 @@ export function resolveBranchMode(
 }
 
 /**
+ * The variables as they were when core was first evaluated. Core is imported before the body of
+ * `sixb.config.ts` runs, so nothing the project's code does to `process.env` changes the branch a
+ * host runs as. Only the raw values are kept: they are validated when a host is built, so a wrong
+ * one fails the host, not every import of core.
+ */
+const HOST_ENV: Readonly<Record<string, string | undefined>> = Object.freeze({
+  [BRANCH_NAME_ENV]: process.env[BRANCH_NAME_ENV],
+  [BRANCH_DATA_FROM_ENV]: process.env[BRANCH_DATA_FROM_ENV],
+  NODE_ENV: process.env.NODE_ENV,
+})
+
+const placedOnBranch = new WeakMap<object, SixbBranch>()
+
+/**
+ * Put the host these options build on a branch, as the environment would. For this repo's tests,
+ * which cannot set the variables before core loads. It can only add a branch: a host the
+ * environment put on one stays on it.
+ */
+export function putOnBranch<T extends object>(options: T, branch: SixbBranch): T {
+  placedOnBranch.set(options, branch)
+  return options
+}
+
+/**
+ * The branch a host built from `options` runs as. `NODE_ENV=production` is refused whether it was
+ * set before core loaded or after, as the production commands of the CLI set it.
+ */
+export function resolveHostBranch(options: object): SixbBranch | null {
+  const nodeEnv = process.env.NODE_ENV === "production" ? "production" : HOST_ENV.NODE_ENV
+  const fromEnv = resolveBranchMode({ ...HOST_ENV, NODE_ENV: nodeEnv })
+
+  const placed = placedOnBranch.get(options)
+  if (!placed) return fromEnv
+
+  const branch = resolveBranchMode({
+    [BRANCH_NAME_ENV]: placed.name,
+    [BRANCH_DATA_FROM_ENV]: placed.dataFrom,
+    NODE_ENV: nodeEnv,
+  })
+  if (fromEnv && fromEnv.name !== branch?.name) {
+    throw new RuntimeError(
+      `[Sixb] Branch "${fromEnv.name}": this host runs as that branch and cannot be put on ` +
+        `branch "${placed.name}".`
+    )
+  }
+
+  return fromEnv ?? branch
+}
+
+/**
  * The project id the branch's broker streams and queue lanes go by, so that nothing it publishes
  * or enqueues reaches a consumer of production, or of another branch, on shared infrastructure.
  *

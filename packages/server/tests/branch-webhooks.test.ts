@@ -9,6 +9,7 @@ import {
   InMemoryStorage,
   SixbHost,
 } from "@sixb/core"
+import { putOnBranch } from "@sixb/core/internal/runtime"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -28,28 +29,22 @@ function createHost(input: { branch: boolean; handled: string[]; storage: InMemo
     connect: () => ({}),
   })
 
-  const create = () =>
-    new SixbHost({
-      id: "test-project",
-      ontology: [],
-      broker: new InMemoryBroker(),
-      storage: input.storage,
-      lakeStorage: new InMemoryLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      connectors: [connector],
-    })
-
-  if (!input.branch) return create()
-
-  process.env.SIXB_BRANCH = "feature/invoices"
-  process.env.SIXB_BRANCH_DATA_FROM = "production"
-  try {
-    return create()
-  } finally {
-    delete process.env.SIXB_BRANCH
-    delete process.env.SIXB_BRANCH_DATA_FROM
+  const options = {
+    id: "test-project",
+    ontology: [],
+    broker: new InMemoryBroker(),
+    storage: input.storage,
+    lakeStorage: new InMemoryLakeStorage(),
+    blobStorage: new InMemoryBlobStorage(),
+    queues: new InMemoryQueues(),
+    connectors: [connector],
   }
+
+  return new SixbHost(
+    input.branch
+      ? putOnBranch(options, { name: "feature/invoices", dataFrom: "production" })
+      : options
+  )
 }
 
 function deliver(host: SixbHost) {

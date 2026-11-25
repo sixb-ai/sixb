@@ -14,9 +14,9 @@ import {
   type SixbHostOptions,
 } from "../src"
 import { drainActionRuns } from "../src/actions"
-import type { OidcAuthStrategy } from "../src/auth"
+import type { MagicLinkAuthStrategy, OidcAuthStrategy } from "../src/auth"
 import type { AuthStrategyDirectory } from "../src/auth/strategy"
-import { resolveBranchMode, type SixbBranch } from "../src/branch-mode"
+import { putOnBranch, resolveBranchMode, type SixbBranch } from "../src/branch-mode"
 import { reportMaintenancePassFailure } from "../src/error-reporting/capability"
 import { isSixbError } from "../src/errors/internal"
 import { InMemoryLakeStorage, type LakeMaintenance } from "../src/lake-storage"
@@ -45,31 +45,21 @@ const Invoice = defineObjectType({
   properties: [prop("id", "string", { primary: true, required: true }), prop("status", "string")],
 })
 
-/** Build a host the way `sixb dev --from production` starts one: the host sets the variables. */
-function onBranch<T>(create: () => T, branch: SixbBranch = BRANCH): T {
-  const saved = { name: process.env.SIXB_BRANCH, from: process.env.SIXB_BRANCH_DATA_FROM }
-  process.env.SIXB_BRANCH = branch.name
-  process.env.SIXB_BRANCH_DATA_FROM = branch.dataFrom
-
-  try {
-    return create()
-  } finally {
-    restore("SIXB_BRANCH", saved.name)
-    restore("SIXB_BRANCH_DATA_FROM", saved.from)
-  }
-}
-
-function restore(name: string, value: string | undefined): void {
-  if (value === undefined) delete process.env[name]
-  else process.env[name] = value
+/**
+ * A host on `branch`, as `sixb dev --from production` starts one. The variables are read when core
+ * loads, so a test process puts its host on a branch through its options instead; the test that
+ * spawns a process below proves the variables.
+ */
+function buildHost(options: SixbHostOptions, branch?: SixbBranch): SixbHost {
+  return new SixbHost(branch ? putOnBranch(options, branch) : options)
 }
 
 /** The same project twice: as production runs it, and on a branch. */
 function hosts(options: Omit<SixbHostOptions, keyof ReturnType<typeof createTestRuntimeDeps>>) {
-  const create = () =>
-    new SixbHost({ id: PROJECT_ID, ...createTestRuntimeDeps(), onError: () => {}, ...options })
+  const create = (branch?: SixbBranch) =>
+    buildHost({ id: PROJECT_ID, ...createTestRuntimeDeps(), onError: () => {}, ...options }, branch)
 
-  return { production: create(), branch: onBranch(create) }
+  return { production: create(), branch: create(BRANCH) }
 }
 
 function expectRefusal(error: unknown, ...mentions: string[]): void {
@@ -109,6 +99,31 @@ describe("branch mode", () => {
         NODE_ENV: "production",
       })
     ).toThrow('Branch "feature/invoices" cannot run with NODE_ENV=production')
+  })
+
+  // Guard check: read `process.env` in `resolveHostBranch` instead of the values `mode.ts` captured
+  // when it loaded (`branch-mode/mode.ts`): the tampered config runs off the branch.
+  test.each([
+    "delete",
+    "rename",
+  ])("holds when the project's code tampers with the variables (%s)", async (tamper) => {
+    const child = Bun.spawn(
+      [process.execPath, `${import.meta.dir}/fixtures/branch-config.ts`, tamper],
+      {
+        env: { ...process.env, SIXB_BRANCH: BRANCH.name, SIXB_BRANCH_DATA_FROM: "production" },
+        stdout: "pipe",
+        stderr: "pipe",
+      }
+    )
+    const kill = setTimeout(() => child.kill("SIGKILL"), 10_000)
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]).finally(() => clearTimeout(kill))
+
+    expect(exitCode, stderr).toBe(0)
+    expect(JSON.parse(stdout)).toEqual(BRANCH)
   })
 
   test("is what the host and every execution read as `branch`", () => {
@@ -299,9 +314,10 @@ describe("syncs on a branch", () => {
     .read(() => [])
     .intoDataset(rawInvoices)
 
-  // Guard check: remove the branch check from `SyncRunDispatcher.dispatch`
-  // (`syncs/run-dispatch.ts`): the trigger queues a run.
-  test("refuse a trigger's run, which the orchestrator reports once and drops", async () => {
+  // The error is coded and not retryable, which the orchestrator's dispatch reports once and drops
+  // (`isPermanentDispatchFailure`, `packages/orchestrator/src/job-dispatch.ts`). Guard check:
+  // remove the branch check from `SyncRunDispatcher.dispatch` (`syncs/run-dispatch.ts`).
+  test("refuse a trigger's run with a permanent error, and queue nothing", async () => {
     const { production, branch } = hosts({
       ontology: [Invoice],
       connectors: [erp],
@@ -389,9 +405,9 @@ describe("upkeep on a branch", () => {
     directory: { confirmAfterMs: 0, check: async () => new Map() },
   }
 
-  function upkeepHost(branch: boolean) {
-    const create = () =>
-      new SixbHost({
+  function upkeepHost(onBranch: boolean) {
+    return buildHost(
+      {
         id: PROJECT_ID,
         ...createTestRuntimeDeps(),
         lakeStorage: retentionLake().lake,
@@ -399,8 +415,9 @@ describe("upkeep on a branch", () => {
         datasets: [rawInvoices],
         schedules: [daily, onInvoice],
         auth: directory,
-      })
-    return branch ? onBranch(create) : create()
+      },
+      onBranch ? BRANCH : undefined
+    )
   }
 
   /** The passes a started loop runs, read from the heartbeat it writes to storage. */
@@ -460,15 +477,15 @@ describe("upkeep on a branch", () => {
   // Guard check: remove the branch check at the top of `LakeRetention.apply`.
   test("refuses lake retention, and still answers a dry run", async () => {
     const { lake, applied } = retentionLake()
-    const host = onBranch(
-      () =>
-        new SixbHost({
-          id: PROJECT_ID,
-          ...createTestRuntimeDeps(),
-          lakeStorage: lake,
-          ontology: [Invoice],
-          datasets: [rawInvoices],
-        })
+    const host = buildHost(
+      {
+        id: PROJECT_ID,
+        ...createTestRuntimeDeps(),
+        lakeStorage: lake,
+        ontology: [Invoice],
+        datasets: [rawInvoices],
+      },
+      BRANCH
     )
     const retention = getLakeRetentionRuntime(host)
 
@@ -494,12 +511,41 @@ describe("upkeep on a branch", () => {
     expectRefusal(error, "directory is not checked")
   })
 
-  // Guard check: return the configured strategy from `AuthRuntime.getStrategy` whatever the branch.
+  // Guard check: return the configured strategy from `AuthRuntime.getStrategy` whatever the
+  // branch, or drop either entry from `refused` in `withoutEmails` (`auth/runtime.ts`).
   test("emails no invitation and no sign-in link", async () => {
-    const strategy = upkeepHost(true).auth.getStrategy() as OidcAuthStrategy
+    const sent: string[] = []
+    const magicLink: MagicLinkAuthStrategy = {
+      id: "email",
+      kind: "magicLink",
+      async requestMagicLink() {
+        sent.push("sign-in link")
+        return { status: "sent" }
+      },
+      async completeMagicLinkSignIn(): Promise<never> {
+        throw new Error("unused")
+      },
+      async deliverInvitation() {
+        sent.push("invitation")
+        return { status: "sent" }
+      },
+    }
+    const create = (branch?: SixbBranch) =>
+      buildHost(
+        { id: PROJECT_ID, ...createTestRuntimeDeps(), ontology: [Invoice], auth: magicLink },
+        branch
+      ).auth.getStrategy() as MagicLinkAuthStrategy
 
-    expectRefusal(await rejectionOf(strategy.deliverInvitation({} as never)), "no invitation")
-    expect(strategy.id).toBe("entra")
+    const production = create()
+    await production.requestMagicLink({} as never)
+    await production.deliverInvitation({} as never)
+    expect(sent).toEqual(["sign-in link", "invitation"])
+
+    const branch = create(BRANCH)
+    expectRefusal(await rejectionOf(branch.requestMagicLink({} as never)), "no sign-in link")
+    expectRefusal(await rejectionOf(branch.deliverInvitation({} as never)), "no invitation")
+    expect(branch.id).toBe("email")
+    expect(sent).toEqual(["sign-in link", "invitation"])
   })
 })
 
@@ -507,17 +553,20 @@ describe("what a branch tells and shares", () => {
   // Guard check: report `reported` as is in `SixbErrorReporter.report` (`error-reporting/reporter.ts`).
   test("hands `onError` the branch's name", async () => {
     const contexts: SixbErrorContext[] = []
-    const create = () =>
-      new SixbHost({
-        id: PROJECT_ID,
-        ...createTestRuntimeDeps(),
-        ontology: [Invoice],
-        onError: (_error, context) => {
-          contexts.push(context)
+    const create = (branch?: SixbBranch) =>
+      buildHost(
+        {
+          id: PROJECT_ID,
+          ...createTestRuntimeDeps(),
+          ontology: [Invoice],
+          onError: (_error, context) => {
+            contexts.push(context)
+          },
         },
-      })
+        branch
+      )
 
-    for (const host of [create(), onBranch(create)]) {
+    for (const host of [create(), create(BRANCH)]) {
       reportMaintenancePassFailure(host, new Error("pass failed"), {
         projectId: PROJECT_ID,
         passId: "ontology",
@@ -536,10 +585,10 @@ describe("what a branch tells and shares", () => {
   // Guard check: hand `options.queues` to the branch host unwrapped (`runtime/host.ts`).
   test("keeps its jobs from production's workers on shared queues", async () => {
     const queues = new InMemoryQueues()
-    const create = () =>
-      new SixbHost({ id: PROJECT_ID, ...createTestRuntimeDeps(), queues, ontology: [Invoice] })
+    const create = (branch?: SixbBranch) =>
+      buildHost({ id: PROJECT_ID, ...createTestRuntimeDeps(), queues, ontology: [Invoice] }, branch)
     const production = create()
-    const branch = onBranch(create)
+    const branch = create(BRANCH)
     const job = (id: string) => ({
       id,
       type: "pipeline.run.requested" as const,
@@ -564,15 +613,18 @@ describe("what a branch tells and shares", () => {
   // Guard check: hand `options.broker` to the branch host unwrapped (`runtime/host.ts`).
   test("keeps its events from production's subscribers on a shared broker", async () => {
     const deps = createTestRuntimeDeps()
-    const create = () =>
-      new SixbHost({
-        id: PROJECT_ID,
-        ...createTestRuntimeDeps(),
-        broker: deps.broker,
-        ontology: [Invoice],
-      })
+    const create = (branch?: SixbBranch) =>
+      buildHost(
+        {
+          id: PROJECT_ID,
+          ...createTestRuntimeDeps(),
+          broker: deps.broker,
+          ontology: [Invoice],
+        },
+        branch
+      )
     const production = create()
-    const branch = onBranch(create)
+    const branch = create(BRANCH)
 
     await createTestSixb(branch)
       .objects(Invoice)

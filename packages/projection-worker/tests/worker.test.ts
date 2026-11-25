@@ -14,6 +14,7 @@ import {
   type LakeStorage,
   type ProjectionDefinition,
   prop,
+  type SixbBranch,
   type SixbErrorContext,
   type SixbErrorHandler,
   SixbHost,
@@ -22,6 +23,7 @@ import {
   ProjectionRunDispatcher,
   type ProjectionRunDispatcherDependencies,
 } from "@sixb/core/internal/projections"
+import { putOnBranch } from "@sixb/core/internal/runtime"
 import type { ProjectionRunStorage } from "@sixb/core/storage"
 import { ProjectionWorker } from "../src"
 
@@ -54,17 +56,20 @@ function createSixb(
     datasets?: readonly DatasetDefinition[]
     projections?: readonly ProjectionDefinition[]
     onError?: SixbErrorHandler
+    branch?: SixbBranch
   },
   deps = createDeps()
 ) {
-  return new SixbHost({
+  const hostOptions = {
     id: "projection-worker-tests",
     ontology: [Room],
     ...deps,
     datasets: options.datasets ?? [],
     projections: options.projections ?? [],
     onError: options.onError,
-  })
+  }
+
+  return new SixbHost(options.branch ? putOnBranch(hostOptions, options.branch) : hostOptions)
 }
 
 function requireProjectionRunsStorage(input: {
@@ -176,15 +181,11 @@ describe("ProjectionWorker", () => {
   // Guard check: stop passing the branch to `assertProjectionJobId` in `runProjectionJob`, or to
   // the context in `buildProjectionContext`: the worker no longer recognizes the branch's run id.
   test("on a branch, runs a projection under the branch's own run id", async () => {
-    process.env.SIXB_BRANCH = "feature/rooms"
-    process.env.SIXB_BRANCH_DATA_FROM = "production"
-    let sixb: SixbHost
-    try {
-      sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] })
-    } finally {
-      delete process.env.SIXB_BRANCH
-      delete process.env.SIXB_BRANCH_DATA_FROM
-    }
+    const sixb = createSixb({
+      datasets: [roomsDataset],
+      projections: [roomProjection],
+      branch: { name: "feature/rooms", dataFrom: "production" },
+    })
 
     const version = await commitDatasetVersion(sixb.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen" },

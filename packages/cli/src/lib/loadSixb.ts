@@ -108,7 +108,35 @@ function isSixbHost(value: unknown): value is LoadedSixbHost {
   )
 }
 
+/**
+ * Every command loads the project here. The branch it was started for, `SIXB_BRANCH`, is read
+ * before the project's code runs, and the host must run as that branch: a project that changes the
+ * variable, or hands back a host built otherwise, does not start.
+ */
 export async function loadSixbFromEntry(entry: string): Promise<LoadedSixbHost> {
+  const branch = process.env.SIXB_BRANCH
+
+  return assertHostBranch(await importSixbHost(entry), branch)
+}
+
+/** Refuse a host that does not run as the branch the command was started for. */
+export function assertHostBranch(
+  host: LoadedSixbHost,
+  expected: string | undefined
+): LoadedSixbHost {
+  const actual = host.branch?.name
+  if (actual === expected) return host
+
+  const wanted = expected === undefined ? "off any branch" : `on branch "${expected}"`
+  const found = actual === undefined ? "off any branch" : `on branch "${actual}"`
+
+  throw new Error(
+    `[SixbCLI] This command was started ${wanted}, but the project's host runs ${found}. ` +
+      "Leave SIXB_BRANCH and SIXB_BRANCH_DATA_FROM to the CLI, and export the host createSixb() returns."
+  )
+}
+
+async function importSixbHost(entry: string): Promise<LoadedSixbHost> {
   const module = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
   const candidate = module.sixb ?? module.default
 

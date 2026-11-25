@@ -27,7 +27,7 @@ import {
   branchTransportId,
   namespaceBroker,
   namespaceQueues,
-  resolveBranchMode,
+  resolveHostBranch,
   type SixbBranch,
 } from "../branch-mode"
 import type { Broker } from "../broker"
@@ -250,9 +250,9 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly auth: AuthRuntime
 
   constructor(options: SixbHostOptions<TParams>) {
-    // The host says whether this process runs as a branch, as it says NODE_ENV: before anything
-    // else, so that every provider and report below already knows.
-    this.branch = resolveBranchMode(process.env)
+    // The host says whether this process runs as a branch, as it says NODE_ENV, before core loads
+    // (see `resolveHostBranch`). First thing, so every provider and report below already knows.
+    this.branch = resolveHostBranch(options)
     const errorReporter = attachSixbErrorReporter(this, options.onError, this.branch)
     this.errorReporter = errorReporter
     this.projectId = options.id ?? "default"
