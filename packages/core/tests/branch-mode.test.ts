@@ -21,7 +21,6 @@ import { putOnBranch, resolveBranchMode, type SixbBranch } from "../src/branch-m
 import { reportMaintenancePassFailure } from "../src/error-reporting/capability"
 import { isSixbError } from "../src/errors/internal"
 import { InMemoryLakeStorage, type LakeMaintenance } from "../src/lake-storage"
-import { getLakeRetentionRuntime } from "../src/maintenance/lake-retention"
 import { createProjectionRunId } from "../src/projections/internal"
 import { InMemoryQueues } from "../src/queues"
 import { SyncRunDispatcher } from "../src/syncs/run-dispatch"
@@ -436,9 +435,9 @@ describe("upkeep on a branch", () => {
   }
 
   // Guard check: put `this.cron` back unconditionally in `startMaintenance`, return the directory
-  // pass whatever the branch in `directoryPasses` (`runtime/host.ts`), or drop `!input.branch`
-  // from `LakeRetention.automatic` (`maintenance/lake-retention.ts`).
-  test("runs no cron schedule, no lake retention and no directory check", async () => {
+  // pass whatever the branch in `directoryPasses` (`runtime/host.ts`). Lake retention runs: on a
+  // branch's lake it never deletes production's files (`storage/ducklake` README, Branches).
+  test("runs no cron schedule and no directory check", async () => {
     const notice = spyOn(console, "info").mockImplementation(() => {})
 
     try {
@@ -450,7 +449,7 @@ describe("upkeep on a branch", () => {
       ])
       expect(notice).not.toHaveBeenCalled()
 
-      expect(await passesOf(upkeepHost(true))).toEqual(["ontology"])
+      expect(await passesOf(upkeepHost(true))).toEqual(["lake-retention", "ontology"])
       expect(notice).toHaveBeenCalledTimes(1)
       expect(String(notice.mock.calls[0]?.[0])).toContain(
         "cron schedules do not run on their own clock on a branch ('daily-reminders')"
@@ -513,35 +512,6 @@ describe("upkeep on a branch", () => {
     await expect(sixb.schedules.run(onInvoice.id)).rejects.toThrow("runs when its event happens")
     await expect(sixb.schedules.run(idle.id)).rejects.toThrow("starts nothing")
     await expect(sixb.schedules.run("missing")).rejects.toThrow("Unknown schedule 'missing'")
-  })
-
-  // Guard check: remove the branch check at the top of `LakeRetention.apply`.
-  test("refuses lake retention, and still answers a dry run", async () => {
-    const { lake, applied } = retentionLake()
-    const host = buildHost(
-      {
-        id: PROJECT_ID,
-        ...createTestRuntimeDeps(),
-        lakeStorage: lake,
-        ontology: [Invoice],
-        datasets: [rawInvoices],
-      },
-      BRANCH
-    )
-    const retention = getLakeRetentionRuntime(host)
-
-    const error = await rejectionOf(
-      retention.apply({ keepVersionsForMs: 3_600_000, deleteFilesAfterMs: 3_600_000 })
-    )
-    expectRefusal(error, "lake retention does not run on a branch")
-    expect(applied).toEqual([])
-
-    await retention.apply({
-      keepVersionsForMs: 3_600_000,
-      deleteFilesAfterMs: 3_600_000,
-      dryRun: true,
-    })
-    expect(applied).toEqual([true])
   })
 
   // Guard check: remove the branch check at the top of `AuthRuntime.checkDirectory`.

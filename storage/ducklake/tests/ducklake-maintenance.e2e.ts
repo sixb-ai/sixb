@@ -327,7 +327,6 @@ describe("DuckLakeStorage retention", () => {
     })
 
     await new LakeRetention({
-      branch: null,
       projectId: "project",
       options: undefined,
       lakeStorage: storage,

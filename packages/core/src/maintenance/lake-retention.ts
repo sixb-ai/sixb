@@ -1,5 +1,3 @@
-import type { SixbBranch } from "../branch-mode"
-import { branchRefusals } from "../branch-mode/refusals"
 import { liveLakeSlices, releaseLakeSliceFiles } from "../datasets/lake-slices"
 import type {
   DatasetVersionRef,
@@ -108,8 +106,6 @@ interface LakeRetentionInput {
   >
   readonly sources: Pick<OntologySourceStorage, "listActive">
   readonly datasetCount: number
-  /** On a branch, retention never runs: it deletes files, and a branch reads production's. */
-  readonly branch: SixbBranch | null
 }
 
 /** Retention for one project: the entry point of the worker, the CLI and the API. */
@@ -132,9 +128,8 @@ export class LakeRetention {
     }
 
     // Syncs, pipelines and the SDK write registered datasets only, so a project without datasets
-    // writes nothing to the lake. A branch never deletes a file (see `apply`).
-    this.automatic =
-      this.settings.enabled && this.maintenance !== null && input.datasetCount > 0 && !input.branch
+    // writes nothing to the lake.
+    this.automatic = this.settings.enabled && this.maintenance !== null && input.datasetCount > 0
   }
 
   /**
@@ -144,12 +139,6 @@ export class LakeRetention {
   async apply(options: LakeRetentionPassOptions): Promise<LakeRetentionReport> {
     if (this.maintenance === null) {
       throw new RuntimeError("[Sixb] The lake storage provider has no maintenance.")
-    }
-
-    // A branch's lake reads production's files: retention there would delete them. A dry run
-    // changes nothing, so it still says what retention would do.
-    if (this.input.branch && options.dryRun !== true) {
-      throw branchRefusals.lakeRetention(this.input.branch)
     }
 
     const report = await runRetentionPasses({

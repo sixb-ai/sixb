@@ -51,13 +51,6 @@ export const branchRefusals = {
       "the directory is not checked on a branch: checking it suspends people. Production checks it."
     ),
 
-  lakeRetention: (branch: SixbBranch) =>
-    branchRefusal(
-      branch,
-      "lake retention does not run on a branch: it deletes files, and a branch's lake reads " +
-        "production's. A dry run still reports what it would do."
-    ),
-
   email: (branch: SixbBranch, what: "invitation" | "sign-in link") =>
     branchRefusal(
       branch,

@@ -2,7 +2,7 @@
 
 A branch runs a git branch's code on a copy of what its creator reads in production. It may hold
 anything that person can read, and it reaches nothing outside it through Sixb: connectors,
-writebacks, effects, syncs, webhooks, emails, cron, directory checks and lake retention are refused
+writebacks, effects, syncs, webhooks, emails, cron and directory checks are refused
 here, in core, and the project's configuration cannot turn that off. What the project's code
 reaches on its own is out of core's sight (see the last section).
 
@@ -57,7 +57,6 @@ to do instead (`refusals.ts`). Nothing turned off is a silent no-op. The HTTP AP
 | Inbound webhooks refused before a run is admitted | `registerWebhookRoutes` (server) | Providers call production |
 | Directory checks off, and refused when called | `SixbHost.directoryPasses`, `AuthRuntime.checkDirectory` | They suspend people |
 | No invitation and no sign-in link emailed | `withoutEmails` in `auth/runtime.ts` | A branch's members are production's people |
-| Lake retention off, and refused when called; a dry run still answers | `LakeRetention` (`maintenance/lake-retention.ts`) | It deletes files, and a branch's lake reads production's |
 | Agent turns and agent steps on | Nothing to gate | A model call writes nothing to production. Their actions, connectors and sandbox tokens hit the gates above; their web tools do not (below) |
 
 ## Keeping to itself

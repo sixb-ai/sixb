@@ -430,7 +430,6 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       storage: this.storage,
       sources: this.storage.ontology.sources,
       datasetCount: definitions.datasets.list().length,
-      branch: this.branch,
     })
     registerLakeRetentionRuntime(this, lakeRetention)
 
