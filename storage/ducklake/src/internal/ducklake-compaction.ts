@@ -211,9 +211,12 @@ export class DuckLakeCompaction {
 
     const inlinedDeletes = sum((storage) => storage.inlinedDeletes)
     const flush = sum((storage) => storage.inlinedRows) + inlinedDeletes >= FLUSH_INLINED_ROWS
+    // A branch's tables hold production's files: rewriting or merging them would copy production's
+    // rows into the branch. A branch only flushes what it keeps in its own catalog.
     const compact =
-      sum((storage) => storage.filesToRewrite) > 0 ||
-      sum((storage) => storage.smallDataFiles) >= MERGE_SMALL_FILES
+      this.options.productionFiles === undefined &&
+      (sum((storage) => storage.filesToRewrite) > 0 ||
+        sum((storage) => storage.smallDataFiles) >= MERGE_SMALL_FILES)
 
     return flush || compact
       ? { table: found.table, flush, flushesDeletes: flush && inlinedDeletes > 0, compact }

@@ -36,7 +36,28 @@ export interface SixbCommitMetadata {
   readonly lineageChanged?: boolean
 }
 
+/**
+ * Where a branch's snapshots start. A slice ends with a snapshot of this id, so every commit on the
+ * branch gets one above it: production's ids stay below, as no lake reaches 2^40 commits.
+ */
+export const BRANCH_SNAPSHOT_BASE = 2n ** 40n
+
+const BRANCH_VERSION_PREFIX = "ducklake:branch:"
+
+/**
+ * The snapshot a version id names. A branch's own versions read `ducklake:branch:<n>`, the n-th
+ * commit after the slice: such an id is never taken for one of production's, which are
+ * `ducklake:<snapshot>`.
+ */
 export function parseVersionId(versionId: string): string {
+  if (versionId.startsWith(BRANCH_VERSION_PREFIX)) {
+    const commit = versionId.slice(BRANCH_VERSION_PREFIX.length)
+    if (!/^\d+$/.test(commit)) {
+      throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`)
+    }
+    return (BRANCH_SNAPSHOT_BASE + BigInt(commit)).toString()
+  }
+
   if (!versionId.startsWith("ducklake:")) {
     throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`)
   }
@@ -50,7 +71,15 @@ export function parseVersionId(versionId: string): string {
 }
 
 export function toVersionId(snapshotId: string): string {
-  return `ducklake:${snapshotId}`
+  const snapshot = BigInt(snapshotId)
+  return snapshot >= BRANCH_SNAPSHOT_BASE
+    ? `${BRANCH_VERSION_PREFIX}${snapshot - BRANCH_SNAPSHOT_BASE}`
+    : `ducklake:${snapshotId}`
+}
+
+/** Whether a version id names one of a branch's own versions. */
+export function isBranchVersionId(versionId: string): boolean {
+  return versionId.startsWith(BRANCH_VERSION_PREFIX)
 }
 
 export function parseCommitMetadata(value: unknown): SixbCommitMetadata | undefined {

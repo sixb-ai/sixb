@@ -7,7 +7,7 @@ import type {
 } from "@sixb/core/lake-storage"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
-import { catalogDataPath } from "./catalog-slice"
+import { catalogDataPath, PRODUCTION_FILES_ROOT } from "./catalog-slice"
 import { getBigIntLike, getOptionalString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
@@ -25,7 +25,7 @@ import {
   duckLakeMetadataTableName,
   quoteSqlString,
 } from "./sql"
-import { parseVersionId } from "./versions"
+import { BRANCH_SNAPSHOT_BASE, parseVersionId } from "./versions"
 
 const HOUR_MS = 60 * 60 * 1000
 const DEFAULT_RETENTION_MS = 7 * 24 * HOUR_MS
@@ -111,6 +111,11 @@ export class DuckLakeMaintenance implements LakeMaintenance {
 
     if (this.options.readOnly && !retention.dryRun) {
       throw new LakeStorageError("[SixbDuckLake] DuckLake retention cannot run in read-only mode.")
+    }
+
+    // A branch's lake holds production's versions it was cut with: they stay, whatever their age.
+    if (this.options.productionFiles !== undefined) {
+      for (const snapshotId of await this.productionSnapshots()) protect.add(snapshotId)
     }
 
     const plan = await this.planExpiry(retention, protect)
@@ -267,6 +272,16 @@ export class DuckLakeMaintenance implements LakeMaintenance {
     }
   }
 
+  /** The snapshots of a branch's slice: production's versions, its point, and the branch's base. */
+  private async productionSnapshots(): Promise<readonly string[]> {
+    const rows = await this.connections.withAttachedRuntime((runtime) =>
+      runtime.query(
+        `SELECT snapshot_id FROM ${duckLakeMetadataTableName(this.options, "ducklake_snapshot")} WHERE snapshot_id <= ${BRANCH_SNAPSHOT_BASE}`
+      )
+    )
+    return rows.map((row) => String(getBigIntLike(row, "snapshot_id")))
+  }
+
   private async expireSnapshots(snapshotIds: readonly string[], dryRun: boolean): Promise<number> {
     if (snapshotIds.length === 0) {
       return 0
@@ -303,6 +318,12 @@ export class DuckLakeMaintenance implements LakeMaintenance {
     }
 
     return this.connections.withMaintenanceRuntime(retention.signal, async (runtime) => {
+      // A branch never deletes production's files: they leave its schedule unread by DuckLake.
+      if (this.options.productionFiles !== undefined && !retention.dryRun) {
+        await runtime.run(
+          `DELETE FROM ${duckLakeMetadataTableName(this.options, "ducklake_files_scheduled_for_deletion")} WHERE path LIKE ${quoteSqlString(`${PRODUCTION_FILES_ROOT}%`)}`
+        )
+      }
       if (!retention.dryRun) await this.holdFiles(runtime, retention.holdFiles)
 
       const scheduled = await this.scheduledFileTimes(runtime, dueBefore, retention.limit + 1)

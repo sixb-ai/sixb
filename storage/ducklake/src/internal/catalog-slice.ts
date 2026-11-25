@@ -16,6 +16,7 @@ import {
   quoteIdentifier,
   quoteSqlString,
 } from "./sql"
+import { BRANCH_SNAPSHOT_BASE } from "./versions"
 
 /**
  * The host a slice names production's files under. It never resolves (`.invalid` is reserved):
@@ -309,13 +310,24 @@ async function copySnapshots(
     )
   }
 
-  // The point closes the slice's history: commits there belong to the branch, above it. It may be
-  // another dataset's commit, so it carries none of production's.
+  // The point closes production's history in the slice. It may be another dataset's commit, so it
+  // carries none of production's.
   if (!versions.includes(input.pointSnapshotId)) {
     await runtime.run(
       `INSERT INTO ${into("ducklake_snapshot_changes")} VALUES (${input.pointSnapshotId}, '', NULL, NULL, NULL)`
     )
   }
+
+  // The branch's history starts above production's: its first commit is BRANCH_SNAPSHOT_BASE + 1,
+  // so its version ids carry the branch's marker (`versions.ts`).
+  await runtime.run(`
+    INSERT INTO ${into("ducklake_snapshot")}
+    SELECT ${BRANCH_SNAPSHOT_BASE}, snapshot_time, schema_version, next_catalog_id, next_file_id
+    FROM ${into("ducklake_snapshot")} WHERE snapshot_id = ${input.pointSnapshotId}
+  `)
+  await runtime.run(
+    `INSERT INTO ${into("ducklake_snapshot_changes")} VALUES (${BRANCH_SNAPSHOT_BASE}, '', NULL, NULL, NULL)`
+  )
 }
 
 async function copyFiles(
