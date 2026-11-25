@@ -9588,6 +9588,7 @@ export type GetWorkflowAgentNodeExecutionResponses = {
                     | "action.read_conflict"
                     | "action.rejected"
                     | "action.timeout"
+                    | "branch.refused"
                     | "object.unique_violation"
                   message: string
                   retryable: boolean
@@ -9622,6 +9623,7 @@ export type GetWorkflowAgentNodeExecutionResponses = {
                     | "agent.step_limit_reached"
                     | "ai.usage_limit_exceeded"
                     | "ai.usage_limit_unavailable"
+                    | "branch.refused"
                     | "connector.adapter_invalid"
                     | "connector.authorization_invalid"
                     | "connector.authorization_required"
@@ -12374,6 +12376,7 @@ export type RequestActionErrors = {
       | "agent.step_limit_reached"
       | "ai.usage_limit_exceeded"
       | "ai.usage_limit_unavailable"
+      | "branch.refused"
       | "connector.adapter_invalid"
       | "connector.authorization_invalid"
       | "connector.authorization_required"
@@ -12456,6 +12459,7 @@ export type RequestActionResponses = {
         | "action.read_conflict"
         | "action.rejected"
         | "action.timeout"
+        | "branch.refused"
         | "object.unique_violation"
       message: string
       retryable: boolean
@@ -12500,6 +12504,7 @@ export type RequestActionResponses = {
               | "action.read_conflict"
               | "action.rejected"
               | "action.timeout"
+              | "branch.refused"
               | "object.unique_violation"
             message: string
             retryable: boolean
@@ -12530,6 +12535,7 @@ export type RequestActionResponses = {
               | "action.read_conflict"
               | "action.rejected"
               | "action.timeout"
+              | "branch.refused"
               | "object.unique_violation"
             message: string
             retryable: boolean
@@ -12543,6 +12549,10 @@ export type RequestActionResponses = {
             redacted?: true
             truncated?: true
           }
+        }
+      | {
+          status: "skipped"
+          completedAt: string
         }
   }
 }
@@ -12970,6 +12980,7 @@ export type ListActionRunsResponses = {
           | "action.read_conflict"
           | "action.rejected"
           | "action.timeout"
+          | "branch.refused"
           | "object.unique_violation"
         message: string
         retryable: boolean
@@ -13052,6 +13063,7 @@ export type GetActionRunResponses = {
         | "action.read_conflict"
         | "action.rejected"
         | "action.timeout"
+        | "branch.refused"
         | "object.unique_violation"
       message: string
       retryable: boolean
@@ -13096,6 +13108,7 @@ export type GetActionRunResponses = {
               | "action.read_conflict"
               | "action.rejected"
               | "action.timeout"
+              | "branch.refused"
               | "object.unique_violation"
             message: string
             retryable: boolean
@@ -13126,6 +13139,7 @@ export type GetActionRunResponses = {
               | "action.read_conflict"
               | "action.rejected"
               | "action.timeout"
+              | "branch.refused"
               | "object.unique_violation"
             message: string
             retryable: boolean
@@ -13139,6 +13153,10 @@ export type GetActionRunResponses = {
             redacted?: true
             truncated?: true
           }
+        }
+      | {
+          status: "skipped"
+          completedAt: string
         }
   }
 }
@@ -14583,6 +14601,7 @@ export type ListAgentThreadMessagesResponses = {
                       | "action.read_conflict"
                       | "action.rejected"
                       | "action.timeout"
+                      | "branch.refused"
                       | "object.unique_violation"
                     message: string
                     retryable: boolean
@@ -14617,6 +14636,7 @@ export type ListAgentThreadMessagesResponses = {
                       | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
+                      | "branch.refused"
                       | "connector.adapter_invalid"
                       | "connector.authorization_invalid"
                       | "connector.authorization_required"
@@ -15275,6 +15295,7 @@ export type PostAgentThreadMessageResponses = {
                       | "action.read_conflict"
                       | "action.rejected"
                       | "action.timeout"
+                      | "branch.refused"
                       | "object.unique_violation"
                     message: string
                     retryable: boolean
@@ -15309,6 +15330,7 @@ export type PostAgentThreadMessageResponses = {
                       | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
+                      | "branch.refused"
                       | "connector.adapter_invalid"
                       | "connector.authorization_invalid"
                       | "connector.authorization_required"
@@ -15813,6 +15835,7 @@ export type ListAgentThreadInboxResponses = {
                       | "action.read_conflict"
                       | "action.rejected"
                       | "action.timeout"
+                      | "branch.refused"
                       | "object.unique_violation"
                     message: string
                     retryable: boolean
@@ -15847,6 +15870,7 @@ export type ListAgentThreadInboxResponses = {
                       | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
+                      | "branch.refused"
                       | "connector.adapter_invalid"
                       | "connector.authorization_invalid"
                       | "connector.authorization_required"
@@ -16341,6 +16365,7 @@ export type UpdateAgentThreadInboxItemResponses = {
                       | "action.read_conflict"
                       | "action.rejected"
                       | "action.timeout"
+                      | "branch.refused"
                       | "object.unique_violation"
                     message: string
                     retryable: boolean
@@ -16375,6 +16400,7 @@ export type UpdateAgentThreadInboxItemResponses = {
                       | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
+                      | "branch.refused"
                       | "connector.adapter_invalid"
                       | "connector.authorization_invalid"
                       | "connector.authorization_required"
@@ -17020,6 +17046,7 @@ export type EditAgentThreadMessageResponses = {
                       | "action.read_conflict"
                       | "action.rejected"
                       | "action.timeout"
+                      | "branch.refused"
                       | "object.unique_violation"
                     message: string
                     retryable: boolean
@@ -17054,6 +17081,7 @@ export type EditAgentThreadMessageResponses = {
                       | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
+                      | "branch.refused"
                       | "connector.adapter_invalid"
                       | "connector.authorization_invalid"
                       | "connector.authorization_required"
@@ -19502,6 +19530,7 @@ export type ListAgentThreadApprovalsResponses = {
                 | "action.read_conflict"
                 | "action.rejected"
                 | "action.timeout"
+                | "branch.refused"
                 | "object.unique_violation"
               message: string
               retryable: boolean
@@ -19536,6 +19565,7 @@ export type ListAgentThreadApprovalsResponses = {
                 | "agent.step_limit_reached"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
+                | "branch.refused"
                 | "connector.adapter_invalid"
                 | "connector.authorization_invalid"
                 | "connector.authorization_required"
@@ -19738,6 +19768,7 @@ export type DecideAgentApprovalResponses = {
                 | "action.read_conflict"
                 | "action.rejected"
                 | "action.timeout"
+                | "branch.refused"
                 | "object.unique_violation"
               message: string
               retryable: boolean
@@ -19772,6 +19803,7 @@ export type DecideAgentApprovalResponses = {
                 | "agent.step_limit_reached"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
+                | "branch.refused"
                 | "connector.adapter_invalid"
                 | "connector.authorization_invalid"
                 | "connector.authorization_required"
@@ -20087,6 +20119,7 @@ export type ListAgentApprovalsResponses = {
                 | "action.read_conflict"
                 | "action.rejected"
                 | "action.timeout"
+                | "branch.refused"
                 | "object.unique_violation"
               message: string
               retryable: boolean
@@ -20121,6 +20154,7 @@ export type ListAgentApprovalsResponses = {
                 | "agent.step_limit_reached"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
+                | "branch.refused"
                 | "connector.adapter_invalid"
                 | "connector.authorization_invalid"
                 | "connector.authorization_required"
@@ -20462,6 +20496,7 @@ export type ListObservedAgentThreadMessagesResponses = {
                       | "action.read_conflict"
                       | "action.rejected"
                       | "action.timeout"
+                      | "branch.refused"
                       | "object.unique_violation"
                     message: string
                     retryable: boolean
@@ -20496,6 +20531,7 @@ export type ListObservedAgentThreadMessagesResponses = {
                       | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
+                      | "branch.refused"
                       | "connector.adapter_invalid"
                       | "connector.authorization_invalid"
                       | "connector.authorization_required"

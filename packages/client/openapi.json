@@ -28519,6 +28519,7 @@
                                               "action.read_conflict",
                                               "action.rejected",
                                               "action.timeout",
+                                              "branch.refused",
                                               "object.unique_violation"
                                             ]
                                           },
@@ -28624,6 +28625,7 @@
                                               "agent.step_limit_reached",
                                               "ai.usage_limit_exceeded",
                                               "ai.usage_limit_unavailable",
+                                              "branch.refused",
                                               "connector.adapter_invalid",
                                               "connector.authorization_invalid",
                                               "connector.authorization_required",
@@ -36501,6 +36503,7 @@
                             "action.read_conflict",
                             "action.rejected",
                             "action.timeout",
+                            "branch.refused",
                             "object.unique_violation"
                           ]
                         },
@@ -36614,6 +36617,7 @@
                                     "action.read_conflict",
                                     "action.rejected",
                                     "action.timeout",
+                                    "branch.refused",
                                     "object.unique_violation"
                                   ]
                                 },
@@ -36706,6 +36710,7 @@
                                     "action.read_conflict",
                                     "action.rejected",
                                     "action.timeout",
+                                    "branch.refused",
                                     "object.unique_violation"
                                   ]
                                 },
@@ -36756,6 +36761,20 @@
                             }
                           },
                           "required": ["status", "completedAt", "error"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["skipped"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["status", "completedAt"],
                           "additionalProperties": false
                         }
                       ]
@@ -36874,6 +36893,7 @@
                         "agent.step_limit_reached",
                         "ai.usage_limit_exceeded",
                         "ai.usage_limit_unavailable",
+                        "branch.refused",
                         "connector.adapter_invalid",
                         "connector.authorization_invalid",
                         "connector.authorization_required",
@@ -38189,6 +38209,7 @@
                                   "action.read_conflict",
                                   "action.rejected",
                                   "action.timeout",
+                                  "branch.refused",
                                   "object.unique_violation"
                                 ]
                               },
@@ -38411,6 +38432,7 @@
                             "action.read_conflict",
                             "action.rejected",
                             "action.timeout",
+                            "branch.refused",
                             "object.unique_violation"
                           ]
                         },
@@ -38524,6 +38546,7 @@
                                     "action.read_conflict",
                                     "action.rejected",
                                     "action.timeout",
+                                    "branch.refused",
                                     "object.unique_violation"
                                   ]
                                 },
@@ -38616,6 +38639,7 @@
                                     "action.read_conflict",
                                     "action.rejected",
                                     "action.timeout",
+                                    "branch.refused",
                                     "object.unique_violation"
                                   ]
                                 },
@@ -38666,6 +38690,20 @@
                             }
                           },
                           "required": ["status", "completedAt", "error"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["skipped"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["status", "completedAt"],
                           "additionalProperties": false
                         }
                       ]
@@ -43048,6 +43086,7 @@
                                                     "action.read_conflict",
                                                     "action.rejected",
                                                     "action.timeout",
+                                                    "branch.refused",
                                                     "object.unique_violation"
                                                   ]
                                                 },
@@ -43153,6 +43192,7 @@
                                                     "agent.step_limit_reached",
                                                     "ai.usage_limit_exceeded",
                                                     "ai.usage_limit_unavailable",
+                                                    "branch.refused",
                                                     "connector.adapter_invalid",
                                                     "connector.authorization_invalid",
                                                     "connector.authorization_required",
@@ -45281,6 +45321,7 @@
                                                   "action.read_conflict",
                                                   "action.rejected",
                                                   "action.timeout",
+                                                  "branch.refused",
                                                   "object.unique_violation"
                                                 ]
                                               },
@@ -45386,6 +45427,7 @@
                                                   "agent.step_limit_reached",
                                                   "ai.usage_limit_exceeded",
                                                   "ai.usage_limit_unavailable",
+                                                  "branch.refused",
                                                   "connector.adapter_invalid",
                                                   "connector.authorization_invalid",
                                                   "connector.authorization_required",
@@ -46724,6 +46766,7 @@
                                                     "action.read_conflict",
                                                     "action.rejected",
                                                     "action.timeout",
+                                                    "branch.refused",
                                                     "object.unique_violation"
                                                   ]
                                                 },
@@ -46829,6 +46872,7 @@
                                                     "agent.step_limit_reached",
                                                     "ai.usage_limit_exceeded",
                                                     "ai.usage_limit_unavailable",
+                                                    "branch.refused",
                                                     "connector.adapter_invalid",
                                                     "connector.authorization_invalid",
                                                     "connector.authorization_required",
@@ -48077,6 +48121,7 @@
                                                   "action.read_conflict",
                                                   "action.rejected",
                                                   "action.timeout",
+                                                  "branch.refused",
                                                   "object.unique_violation"
                                                 ]
                                               },
@@ -48182,6 +48227,7 @@
                                                   "agent.step_limit_reached",
                                                   "ai.usage_limit_exceeded",
                                                   "ai.usage_limit_unavailable",
+                                                  "branch.refused",
                                                   "connector.adapter_invalid",
                                                   "connector.authorization_invalid",
                                                   "connector.authorization_required",
@@ -50433,6 +50479,7 @@
                                                   "action.read_conflict",
                                                   "action.rejected",
                                                   "action.timeout",
+                                                  "branch.refused",
                                                   "object.unique_violation"
                                                 ]
                                               },
@@ -50538,6 +50585,7 @@
                                                   "agent.step_limit_reached",
                                                   "ai.usage_limit_exceeded",
                                                   "ai.usage_limit_unavailable",
+                                                  "branch.refused",
                                                   "connector.adapter_invalid",
                                                   "connector.authorization_invalid",
                                                   "connector.authorization_required",
@@ -57458,6 +57506,7 @@
                                           "action.read_conflict",
                                           "action.rejected",
                                           "action.timeout",
+                                          "branch.refused",
                                           "object.unique_violation"
                                         ]
                                       },
@@ -57557,6 +57606,7 @@
                                           "agent.step_limit_reached",
                                           "ai.usage_limit_exceeded",
                                           "ai.usage_limit_unavailable",
+                                          "branch.refused",
                                           "connector.adapter_invalid",
                                           "connector.authorization_invalid",
                                           "connector.authorization_required",
@@ -58084,6 +58134,7 @@
                                         "action.read_conflict",
                                         "action.rejected",
                                         "action.timeout",
+                                        "branch.refused",
                                         "object.unique_violation"
                                       ]
                                     },
@@ -58183,6 +58234,7 @@
                                         "agent.step_limit_reached",
                                         "ai.usage_limit_exceeded",
                                         "ai.usage_limit_unavailable",
+                                        "branch.refused",
                                         "connector.adapter_invalid",
                                         "connector.authorization_invalid",
                                         "connector.authorization_required",
@@ -59078,6 +59130,7 @@
                                           "action.read_conflict",
                                           "action.rejected",
                                           "action.timeout",
+                                          "branch.refused",
                                           "object.unique_violation"
                                         ]
                                       },
@@ -59177,6 +59230,7 @@
                                           "agent.step_limit_reached",
                                           "ai.usage_limit_exceeded",
                                           "ai.usage_limit_unavailable",
+                                          "branch.refused",
                                           "connector.adapter_invalid",
                                           "connector.authorization_invalid",
                                           "connector.authorization_required",
@@ -60054,6 +60108,7 @@
                                                     "action.read_conflict",
                                                     "action.rejected",
                                                     "action.timeout",
+                                                    "branch.refused",
                                                     "object.unique_violation"
                                                   ]
                                                 },
@@ -60159,6 +60214,7 @@
                                                     "agent.step_limit_reached",
                                                     "ai.usage_limit_exceeded",
                                                     "ai.usage_limit_unavailable",
+                                                    "branch.refused",
                                                     "connector.adapter_invalid",
                                                     "connector.authorization_invalid",
                                                     "connector.authorization_required",
