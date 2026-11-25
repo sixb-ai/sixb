@@ -239,8 +239,9 @@ export function readSqliteObjectEdits(
 }
 
 /**
- * A page of the edits over links from a type's objects, in their primary key's order: edges, then
- * slots, by identity. A slot an old migration left in conflict is no edit a branch takes over.
+ * A page of the edits over links from a type's objects: edges, then slots, each in the order of
+ * `idx_ontology_link_overrides_source`. A slot an old migration left in conflict is no edit a
+ * branch takes over: the query leaves it out, so a page of them never ends the read early.
  */
 export function readSqliteLinkEdits(
   db: Database,
@@ -251,14 +252,32 @@ export function readSqliteLinkEdits(
     readonly limit: number
   }
 ): SnapshotLinkEditRow[] {
-  const [afterKind, afterIdentity] = input.afterKey
-    ? (JSON.parse(input.afterKey) as [string, string])
-    : ["", ""]
+  const after = input.afterKey === undefined ? undefined : (JSON.parse(input.afterKey) as string[])
+  const edges =
+    after?.[0] === "slot" ? [] : sqliteLinkEditsOf(db, input, "edge", after, input.limit)
+  if (edges.length === input.limit) return edges
+
+  const slots = sqliteLinkEditsOf(
+    db,
+    input,
+    "slot",
+    after?.[0] === "slot" ? after : undefined,
+    input.limit - edges.length
+  )
+  return [...edges, ...slots]
+}
+
+function sqliteLinkEditsOf(
+  db: Database,
+  input: { readonly projectId: string; readonly sourceTypeId: string },
+  kind: "edge" | "slot",
+  after: readonly string[] | undefined,
+  limit: number
+): SnapshotLinkEditRow[] {
+  const [, sourcePrimaryId = "", linkId = "", targetTypeId = "", targetPrimaryId = ""] = after ?? []
   const rows = db
     .query<
       {
-        identity_kind: "edge" | "slot"
-        identity_key: string
         source_primary_id: string
         link_id: string
         target_type_id: string
@@ -266,41 +285,55 @@ export function readSqliteLinkEdits(
         value: string
         updated_at: string
       },
-      [string, string, string, string, number]
+      [string, string, string, string, string, string, string, number]
     >(
-      `SELECT identity_kind, identity_key, source_primary_id, link_id, target_type_id,
-         target_primary_id, value, updated_at
+      `SELECT source_primary_id, link_id, target_type_id, target_primary_id, value, updated_at
        FROM ontology_link_overrides
-       WHERE project_id = ? AND source_type_id = ? AND (identity_kind, identity_key) > (?, ?)
-       ORDER BY identity_kind, identity_key LIMIT ?`
+       WHERE project_id = ? AND identity_kind = ? AND source_type_id = ?
+         AND NOT (identity_kind = 'slot' AND json_extract(value, '$.kind') = 'legacy-conflict')
+         AND (source_primary_id, link_id, target_type_id, target_primary_id) > (?, ?, ?, ?)
+       ORDER BY source_primary_id, link_id, target_type_id, target_primary_id LIMIT ?`
     )
-    .all(input.projectId, input.sourceTypeId, afterKind, afterIdentity, input.limit)
+    .all(
+      input.projectId,
+      kind,
+      input.sourceTypeId,
+      sourcePrimaryId,
+      linkId,
+      targetTypeId,
+      after ? targetPrimaryId : "",
+      limit
+    )
 
-  return rows.flatMap((row): SnapshotLinkEditRow[] => {
-    const key = JSON.stringify([row.identity_kind, row.identity_key])
+  return rows.map((row): SnapshotLinkEditRow => {
+    const key = JSON.stringify([
+      kind,
+      row.source_primary_id,
+      row.link_id,
+      row.target_type_id,
+      row.target_primary_id,
+    ])
     const source = { objectTypeId: input.sourceTypeId, primaryId: row.source_primary_id }
-    const value = JSON.parse(row.value) as
-      | LinkOverride
-      | LinkSlotOverride
-      | { readonly kind: "legacy-conflict" }
-    if (row.identity_kind === "edge") {
-      const ref = {
-        source,
-        linkId: row.link_id,
-        target: { objectTypeId: row.target_type_id, primaryId: row.target_primary_id },
-      }
-      return [{ kind: "edge", key, ref, value: value as LinkOverride, updatedAt: row.updated_at }]
-    }
-    if (value.kind === "legacy-conflict") return []
-    return [
-      {
-        kind: "slot",
-        key,
-        source,
-        linkId: row.link_id,
-        value: value as LinkSlotOverride,
-        updatedAt: row.updated_at,
-      },
-    ]
+    const value = JSON.parse(row.value) as LinkOverride | LinkSlotOverride
+    return kind === "edge"
+      ? {
+          kind,
+          key,
+          ref: {
+            source,
+            linkId: row.link_id,
+            target: { objectTypeId: row.target_type_id, primaryId: row.target_primary_id },
+          },
+          value: value as LinkOverride,
+          updatedAt: row.updated_at,
+        }
+      : {
+          kind,
+          key,
+          source,
+          linkId: row.link_id,
+          value: value as LinkSlotOverride,
+          updatedAt: row.updated_at,
+        }
   })
 }

@@ -18,7 +18,6 @@ import type {
 } from "@sixb/core/storage"
 import { objectPartitionName } from "./objects/partitions"
 import { identityPageToken } from "./objects/query-compiler"
-import { jsonParameter as json } from "./ontology-storage/shared"
 import { PUBLISHED } from "./ontology-storage/source-roots"
 import type { SQLClient } from "./pg-client"
 
@@ -287,8 +286,10 @@ export async function readPgObjectEdits(
 }
 
 /**
- * A page of the edits over links from a type's objects, in their primary key's order: edges, then
- * slots, by identity. A slot an old migration left in conflict is no edit a branch takes over.
+ * A page of the edits over links from a type's objects: edges, then slots, each in the order of
+ * `idx_ontology_link_overrides_source`, so every page is a range of that index. A slot an old
+ * migration left in conflict is no edit a branch takes over: the query leaves it out, so a page of
+ * them never ends the read early.
  */
 export async function readPgLinkEdits(
   sql: SQLClient,
@@ -300,57 +301,93 @@ export async function readPgLinkEdits(
   }
 ): Promise<SnapshotLinkEditRow[]> {
   const after = input.afterKey === undefined ? undefined : linkEditCursor(input.afterKey)
+  const edges =
+    after?.kind === "slot" ? [] : await readPgLinkEditsOf(sql, input, "edge", after, input.limit)
+  if (edges.length === input.limit) return edges
+
+  const slots = await readPgLinkEditsOf(
+    sql,
+    input,
+    "slot",
+    after?.kind === "slot" ? after : undefined,
+    input.limit - edges.length
+  )
+  return [...edges, ...slots]
+}
+
+async function readPgLinkEditsOf(
+  sql: SQLClient,
+  input: { readonly projectId: string; readonly sourceTypeId: string },
+  kind: "edge" | "slot",
+  after: LinkEditCursor | undefined,
+  limit: number
+): Promise<SnapshotLinkEditRow[]> {
   const rows = await sql<
     {
-      identity_kind: "edge" | "slot"
-      identity_key: string[]
       source_primary_id: string
       link_id: string
       target_type_id: string
       target_primary_id: string
-      value: LinkOverride | LinkSlotOverride | { readonly kind: "legacy-conflict" }
+      value: LinkOverride | LinkSlotOverride
       updated_at: Date
     }[]
   >`
-    SELECT identity_kind, identity_key, source_primary_id, link_id, target_type_id,
-      target_primary_id, value, updated_at
+    SELECT source_primary_id, link_id, target_type_id, target_primary_id, value, updated_at
     FROM ontology_link_overrides
-    WHERE project_id = ${input.projectId} AND source_type_id = ${input.sourceTypeId}
-      ${after ? sql`AND (identity_kind, identity_key) > (${after.kind}, ${json(sql, after.identity)}::jsonb)` : sql``}
-    ORDER BY identity_kind, identity_key
-    LIMIT ${input.limit}
+    WHERE project_id = ${input.projectId} AND identity_kind = ${kind}
+      AND source_type_id = ${input.sourceTypeId}
+      AND NOT (identity_kind = 'slot' AND value ->> 'kind' = 'legacy-conflict')
+      ${
+        after
+          ? sql`AND (source_primary_id, link_id, target_type_id, target_primary_id)
+              > (${after.sourcePrimaryId}, ${after.linkId}, ${after.targetTypeId}, ${after.targetPrimaryId})`
+          : sql``
+      }
+    ORDER BY source_primary_id, link_id, target_type_id, target_primary_id
+    LIMIT ${limit}
   `
 
-  const source = (row: (typeof rows)[number]) => ({
-    objectTypeId: input.sourceTypeId,
-    primaryId: row.source_primary_id,
-  })
-  return rows.flatMap((row): SnapshotLinkEditRow[] => {
-    const key = JSON.stringify([row.identity_kind, row.identity_key])
+  return rows.map((row): SnapshotLinkEditRow => {
+    const key = JSON.stringify([
+      kind,
+      row.source_primary_id,
+      row.link_id,
+      row.target_type_id,
+      row.target_primary_id,
+    ])
+    const source = { objectTypeId: input.sourceTypeId, primaryId: row.source_primary_id }
     const updatedAt = row.updated_at.toISOString()
-    if (row.identity_kind === "edge") {
-      const ref = {
-        source: source(row),
-        linkId: row.link_id,
-        target: { objectTypeId: row.target_type_id, primaryId: row.target_primary_id },
-      }
-      return [{ kind: "edge", key, ref, value: row.value as LinkOverride, updatedAt }]
-    }
-    if (row.value.kind === "legacy-conflict") return []
-    return [
-      {
-        kind: "slot",
-        key,
-        source: source(row),
-        linkId: row.link_id,
-        value: row.value as LinkSlotOverride,
-        updatedAt,
-      },
-    ]
+    return kind === "edge"
+      ? {
+          kind,
+          key,
+          ref: {
+            source,
+            linkId: row.link_id,
+            target: { objectTypeId: row.target_type_id, primaryId: row.target_primary_id },
+          },
+          value: row.value as LinkOverride,
+          updatedAt,
+        }
+      : { kind, key, source, linkId: row.link_id, value: row.value as LinkSlotOverride, updatedAt }
   })
 }
 
-function linkEditCursor(key: string): { kind: string; identity: readonly string[] } {
-  const [kind, identity] = JSON.parse(key) as [string, string[]]
-  return { kind, identity }
+interface LinkEditCursor {
+  readonly kind: string
+  readonly sourcePrimaryId: string
+  readonly linkId: string
+  readonly targetTypeId: string
+  readonly targetPrimaryId: string
+}
+
+function linkEditCursor(key: string): LinkEditCursor {
+  const [kind, sourcePrimaryId, linkId, targetTypeId, targetPrimaryId] = JSON.parse(key) as string[]
+  return {
+    kind: `${kind}`,
+    sourcePrimaryId: `${sourcePrimaryId}`,
+    linkId: `${linkId}`,
+    targetTypeId: `${targetTypeId}`,
+    targetPrimaryId: `${targetPrimaryId}`,
+  }
 }

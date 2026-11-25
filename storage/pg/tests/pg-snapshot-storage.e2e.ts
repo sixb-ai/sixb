@@ -317,3 +317,36 @@ test("a source whose rows pass a COPY batch before its roots do loads whole", as
     await disposeTestStorage(storage)
   }
 }, 60_000)
+
+// Red check: in readPgLinkEditsOf, leave legacy slots in the query and drop them after it: a page
+// of them comes back empty, and the export stops reading link edits there.
+test("a page of slots an old migration left in conflict does not end the link edits", async () => {
+  const storage = await testStorage()
+  try {
+    await withClient(storage, undefined, async (sql) => {
+      for (const [id, kind] of [
+        ["a", "legacy-conflict"],
+        ["b", "legacy-conflict"],
+        ["c", "legacy-conflict"],
+        ["d", "clear"],
+      ] as const) {
+        const value =
+          kind === "clear" ? { kind, target: { objectTypeId: "Thing", primaryId: "x" } } : { kind }
+        await sql`
+          INSERT INTO ontology_link_overrides (project_id, identity_kind, identity_key,
+            source_type_id, source_primary_id, link_id, target_type_id, target_primary_id, value,
+            last_commit_id, updated_at)
+          VALUES (${PROJECT}, 'slot', ${sql.json(["Thing", id, "owner"])}, 'Thing', ${id},
+            'owner', 'Thing', 'x', ${sql.json(value)}, 'c', ${at})
+        `
+      }
+    })
+
+    const page = await storage.readSnapshot({ views: 1, maxDurationMs: 60_000 }, ([view]) =>
+      view!.readLinkEdits({ projectId: PROJECT, sourceTypeId: "Thing", limit: 3 })
+    )
+    expect(page.map((edit) => (edit.kind === "slot" ? edit.source.primaryId : ""))).toEqual(["d"])
+  } finally {
+    await disposeTestStorage(storage)
+  }
+}, 60_000)

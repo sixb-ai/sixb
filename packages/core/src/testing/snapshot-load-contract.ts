@@ -321,13 +321,40 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
           })
           expect(later.map(({ root }) => root)).toEqual([DEVICE_ROOTS[1]![0]])
 
-          // The link d-2 asserts is its source's: no edit holds it.
           expect(
             await view!.readObjectEdits({ projectId: PROJECT, objectTypeId: Device.id, limit: 10 })
           ).toEqual([DEVICE_EDIT])
-          expect(
-            await view!.readLinkEdits({ projectId: PROJECT, sourceTypeId: Device.id, limit: 10 })
-          ).toEqual([])
+
+          // The link d-2 asserts is its source's: no edit holds it. The edits read in pages of
+          // one cross from edges to slots, each in order, as one page of ten reads them.
+          const describe = (edit: Awaited<ReturnType<typeof view.readLinkEdits>>[number]) =>
+            edit.kind === "edge"
+              ? `edge ${edit.ref.source.primaryId}→${edit.ref.target.primaryId} ${edit.value.kind}`
+              : `slot ${edit.source.primaryId} ${edit.value.kind}`
+          const whole = await view!.readLinkEdits({
+            projectId: PROJECT,
+            sourceTypeId: Device.id,
+            limit: 10,
+          })
+          const paged: string[] = []
+          for (let after: string | undefined; ; ) {
+            const page = await view!.readLinkEdits({
+              projectId: PROJECT,
+              sourceTypeId: Device.id,
+              limit: 1,
+              ...(after === undefined ? {} : { afterKey: after }),
+            })
+            if (page.length === 0) break
+            paged.push(...page.map(describe))
+            after = page.at(-1)?.key
+          }
+          expect(whole.map(describe)).toEqual([
+            "edge d-1→d-2 upsert",
+            "edge d-2→d-1 delete",
+            "slot d-1 clear",
+            "slot d-2 set",
+          ])
+          expect(paged).toEqual(whole.map(describe))
         })
       })
     },
@@ -380,7 +407,10 @@ const Device = defineObjectType({
   id: "SnapshotDevice",
   name: "Device",
   properties: [prop("id", "string", { primary: true, required: true }), prop("name", "string")],
-  links: [link.self("parent", { cardinality: "one" })],
+  links: [
+    link.self("parent", { cardinality: "one" }),
+    link.self("related", { cardinality: "many" }),
+  ],
 })
 const devices = defineDataset("snapshot_devices", {
   schema: [col("id", "string"), col("name", "string"), col("parent", "string", { nullable: true })],
@@ -482,12 +512,26 @@ async function* devicesSnapshot(host: SixbHost): AsyncGenerator<Uint8Array> {
       kind: "edits",
       objectTypeId: Device.id,
       objects: [["d-2", DEVICE_EDIT.value, DEVICE_EDIT.editedAt, at]],
-      links: [],
-      slots: [],
+      links: [
+        [
+          { source: object("d-2"), linkId: "related", target: object("d-1") },
+          { kind: "delete" },
+          at,
+        ],
+        [
+          { source: object("d-1"), linkId: "related", target: object("d-2") },
+          { kind: "upsert" },
+          at,
+        ],
+      ],
+      slots: [
+        ["d-2", "parent", { kind: "set", target: object("d-1") }, at],
+        ["d-1", "parent", { kind: "clear", target: object("d-2") }, at],
+      ],
     },
     {
       kind: "end",
-      counts: { objects: 2, links: 1, points: 0, vectors: 0, users: 0, sourceRoots: 2, edits: 1 },
+      counts: { objects: 2, links: 1, points: 0, vectors: 0, users: 0, sourceRoots: 2, edits: 5 },
     },
   ]
 
