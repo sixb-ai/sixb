@@ -554,8 +554,9 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
    * Run the project's upkeep on one loop: ontology maintenance, cron schedules, lake retention, the
    * auth strategy's directory check, and `passes`. The orchestrator is what hosts it.
    *
-   * A branch runs no cron schedule, no lake retention and no directory check: nothing on it starts
-   * on its own clock, deletes files or suspends people. `sixb schedules run <id>` runs one now.
+   * A branch runs no cron schedule and no directory check: nothing on it starts on its own clock
+   * or suspends people. `sixb schedules run <id>` runs one now. Its lake's retention runs, on the
+   * branch's own versions and files: it never deletes production's.
    */
   startMaintenance(passes: readonly MaintenancePass[]): OntologyMaintenanceHandle {
     if (this.branch) announceBranchMaintenance(this.branch, this.definitions.schedules.list())

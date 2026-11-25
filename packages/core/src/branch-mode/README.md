@@ -15,6 +15,7 @@ project never does.
 |---|---|
 | `SIXB_BRANCH` | The git branch's name, such as `feature/invoices` |
 | `SIXB_BRANCH_DATA_FROM` | `production`, the only source a branch copies |
+| `SIXB_BRANCH_RUNTIME` | Optional: who runs it, such as a checkout's id. Its broker streams and queue lanes go by it with the name, so two runtimes of one git branch never share a job |
 
 `mode.ts` captures them once, when core is first evaluated. Core is imported before the body of
 `sixb.config.ts` runs, so a project that deletes or changes them afterwards changes nothing.

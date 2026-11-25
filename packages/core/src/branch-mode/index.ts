@@ -2,6 +2,7 @@ export type { SixbBranch } from "./mode"
 export {
   BRANCH_DATA_FROM_ENV,
   BRANCH_NAME_ENV,
+  BRANCH_RUNTIME_ENV,
   branchTransportId,
   putOnBranch,
   resolveBranchMode,

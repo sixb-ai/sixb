@@ -90,6 +90,20 @@ describe("branch mode", () => {
     ).toThrow("must be a git branch name")
   })
 
+  test("says who runs it when the host does, and only with the branch", () => {
+    const named = { SIXB_BRANCH: "feature/invoices", SIXB_BRANCH_DATA_FROM: "production" }
+    expect(resolveBranchMode({ ...named, SIXB_BRANCH_RUNTIME: "checkout_7f3a" })).toEqual({
+      ...BRANCH,
+      runtime: "checkout_7f3a",
+    })
+    expect(() => resolveBranchMode({ ...named, SIXB_BRANCH_RUNTIME: "a/b" })).toThrow(
+      "SIXB_BRANCH_RUNTIME must be 1 to 64 letters"
+    )
+    expect(() => resolveBranchMode({ SIXB_BRANCH_RUNTIME: "checkout_7f3a" })).toThrow(
+      "is set only with SIXB_BRANCH"
+    )
+  })
+
   // Guard check: remove the NODE_ENV check in `resolveBranchMode` (`branch-mode/mode.ts`).
   test("never runs with NODE_ENV=production", () => {
     expect(() =>
@@ -619,6 +633,30 @@ describe("what a branch tells and shares", () => {
     expect(claimedByBranch.map(({ job }) => [job.id, job.projectId])).toEqual([
       ["branch-run", PROJECT_ID],
     ])
+  })
+
+  // Guard check: hash the git branch's name alone in `branchTransportId` (`branch-mode/mode.ts`).
+  test("keeps its jobs from another runtime of the same git branch on shared queues", async () => {
+    const queues = new InMemoryQueues()
+    const create = (runtime: string) =>
+      buildHost(
+        { id: PROJECT_ID, ...createTestRuntimeDeps(), queues, ontology: [Invoice] },
+        { ...BRANCH, runtime }
+      )
+    const laptop = create("checkout-1")
+    const hosted = create("hosted-1")
+
+    await laptop.queues.pipelines.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [
+        { id: "laptop-run", type: "pipeline.run.requested", payload: { runId: "laptop-run" } },
+      ],
+    })
+    const claim = (host: SixbHost) =>
+      host.queues.pipelines.claim({ projectId: PROJECT_ID, workerId: "worker", limit: 10 })
+
+    expect(await claim(hosted)).toEqual([])
+    expect((await claim(laptop)).map(({ job }) => job.id)).toEqual(["laptop-run"])
   })
 
   // Guard check: hand `options.broker` to the branch host unwrapped (`runtime/host.ts`).

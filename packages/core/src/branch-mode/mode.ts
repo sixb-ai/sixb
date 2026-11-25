@@ -10,6 +10,11 @@ export interface SixbBranch {
   readonly name: string
   /** Where the branch's data was copied from. */
   readonly dataFrom: "production"
+  /**
+   * Who runs it, when the same git branch can run in more than one place on shared
+   * infrastructure: a checkout on a laptop, a hosted branch. Absent for a host that sets none.
+   */
+  readonly runtime?: string
 }
 
 /** The branch's name. The host sets it, as it sets `NODE_ENV`; a project never does. */
@@ -17,6 +22,11 @@ export const BRANCH_NAME_ENV = "SIXB_BRANCH"
 
 /** Where the branch's data comes from. Set with `SIXB_BRANCH`, never alone. */
 export const BRANCH_DATA_FROM_ENV = "SIXB_BRANCH_DATA_FROM"
+
+/** Who runs the branch, such as a checkout's id. Optional, and only with `SIXB_BRANCH`. */
+export const BRANCH_RUNTIME_ENV = "SIXB_BRANCH_RUNTIME"
+
+const RUNTIME_ID = /^[A-Za-z0-9_-]{1,64}$/
 
 const MAX_BRANCH_NAME_LENGTH = 255
 
@@ -36,8 +46,14 @@ export function resolveBranchMode(
 ): SixbBranch | null {
   const name = env[BRANCH_NAME_ENV]
   const dataFrom = env[BRANCH_DATA_FROM_ENV]
+  const runtime = env[BRANCH_RUNTIME_ENV]
 
-  if (name === undefined && dataFrom === undefined) return null
+  if (name === undefined && dataFrom === undefined) {
+    if (runtime === undefined) return null
+    throw new RuntimeError(
+      `[Sixb] ${BRANCH_RUNTIME_ENV} says who runs a branch, and is set only with ${BRANCH_NAME_ENV}. Unset it.`
+    )
+  }
 
   if (name === undefined || dataFrom === undefined) {
     const found = name === undefined ? BRANCH_DATA_FROM_ENV : BRANCH_NAME_ENV
@@ -70,7 +86,14 @@ export function resolveBranchMode(
     )
   }
 
-  return Object.freeze({ name, dataFrom })
+  if (runtime !== undefined && !RUNTIME_ID.test(runtime)) {
+    throw new RuntimeError(
+      `[Sixb] Branch "${name}": ${BRANCH_RUNTIME_ENV} must be 1 to 64 letters, digits, \`-\` or \`_\`. ` +
+        `Received ${JSON.stringify(runtime)}.`
+    )
+  }
+
+  return Object.freeze({ name, dataFrom, ...(runtime === undefined ? {} : { runtime }) })
 }
 
 /**
@@ -82,6 +105,7 @@ export function resolveBranchMode(
 const HOST_ENV: Readonly<Record<string, string | undefined>> = Object.freeze({
   [BRANCH_NAME_ENV]: process.env[BRANCH_NAME_ENV],
   [BRANCH_DATA_FROM_ENV]: process.env[BRANCH_DATA_FROM_ENV],
+  [BRANCH_RUNTIME_ENV]: process.env[BRANCH_RUNTIME_ENV],
   NODE_ENV: process.env.NODE_ENV,
 })
 
@@ -111,6 +135,7 @@ export function resolveHostBranch(options: object): SixbBranch | null {
   const branch = resolveBranchMode({
     [BRANCH_NAME_ENV]: placed.name,
     [BRANCH_DATA_FROM_ENV]: placed.dataFrom,
+    [BRANCH_RUNTIME_ENV]: placed.runtime,
     NODE_ENV: nodeEnv,
   })
   if (fromEnv && fromEnv.name !== branch?.name) {
@@ -129,7 +154,8 @@ export function resolveHostBranch(options: object): SixbBranch | null {
  *
  * It keeps to `[a-zA-Z0-9_-]`, which every provider accepts. A git branch name may hold `/` or `.`,
  * so the readable part is a slug, and the hash of the exact name keeps `feature/a` and `feature-a`
- * apart.
+ * apart. The hash covers who runs it too: a laptop's `feature/a` and a hosted one never share a
+ * job on a dev broker both reach.
  */
 export function branchTransportId(projectId: string, branch: SixbBranch): string {
   const slug = branch.name
@@ -137,7 +163,8 @@ export function branchTransportId(projectId: string, branch: SixbBranch): string
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 32)
-  const hash = createHash("sha256").update(branch.name).digest("hex").slice(0, 8)
+  const identity = branch.runtime === undefined ? branch.name : `${branch.name}\0${branch.runtime}`
+  const hash = createHash("sha256").update(identity).digest("hex").slice(0, 8)
 
   return `${projectId}--branch-${slug}-${hash}`
 }
