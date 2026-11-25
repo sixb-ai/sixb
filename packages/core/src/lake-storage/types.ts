@@ -1,5 +1,6 @@
 import type { DatasetDefinition, DatasetSchema } from "../datasets"
 import type { MergeChange } from "../datasets/changes"
+import type { LakeForks } from "./forks"
 import type { LakeMaintenance } from "./maintenance"
 import type { BeginDatasetMergeInput, LakeMergeSession } from "./merge"
 
@@ -299,6 +300,9 @@ export interface LakeStorage {
 
   /** Optional retention and storage description. A provider that keeps no history omits it. */
   readonly maintenance?: LakeMaintenance
+
+  /** Optional: what a branch needs to read this lake in place. */
+  readonly forks?: LakeForks
 
   /** Release external resources. Optional: a provider that owns none omits it. */
   close?(): void | Promise<void>

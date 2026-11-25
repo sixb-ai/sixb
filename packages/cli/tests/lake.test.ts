@@ -110,6 +110,7 @@ describe("sixb lake cleanup", () => {
         keepVersionsForMs: 7 * DAY_MS,
         deleteFilesAfterMs: 7 * DAY_MS,
         protect: [],
+        holdFiles: [],
       },
       closed,
     ])

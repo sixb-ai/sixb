@@ -35,6 +35,11 @@ export interface LakeRetentionOptions {
   readonly deleteFilesAfterMs?: number
   /** Versions to keep whatever their age, such as the versions projections applied. */
   readonly protect?: readonly DatasetVersionRef[]
+  /**
+   * Files to keep while they stay listed, as `LakeForks` paths name them: the files of the slices
+   * branches may still read. Compaction may still replace them; they are deleted once unlisted.
+   */
+  readonly holdFiles?: readonly string[]
   /** Report what the pass would expire and delete without changing anything. Default: false. */
   readonly dryRun?: boolean
   /** Most versions one pass expires, and most files it deletes. Default: 1,000. */
