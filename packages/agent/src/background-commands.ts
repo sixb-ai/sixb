@@ -549,13 +549,31 @@ export async function stopLeftRunning(
 const SIGNAL_SCRIPT = 'kill -s "$1" -- "-$2" 2>/dev/null'
 
 /**
+ * Print the pid and state of each process of a group, one per line. Linux reads them from `/proc`:
+ * slim images, the ones sandboxes run among them, ship no `ps`. macOS has no `/proc`, and always a
+ * `ps`. Argument: the group.
+ */
+const MEMBERS_SCRIPT = `members() {
+  if [ -r /proc/self/stat ]; then
+    for file in /proc/[0-9]*/stat; do
+      { read -r stat < "$file"; } 2>/dev/null || continue
+      read -r state _ group _ <<< "\${stat##*") "}"
+      [ "$group" = "$1" ] && echo "\${stat%% *} $state"
+    done
+    return 0
+  fi
+  ps -A -o pid= -o pgid= -o stat= | awk -v group="$1" '$2 == group { print $1, $3 }'
+}`
+
+/**
  * Exit 1 as soon as nothing of a process group runs, 0 if something still does after the polls,
  * 50 ms apart. Zombies do not count: a sandbox with no init to reap them keeps them in the group.
  * Arguments: the group, the polls.
  */
-const GROUP_LEFT_SCRIPT = `i=0
+const GROUP_LEFT_SCRIPT = `${MEMBERS_SCRIPT}
+i=0
 while :; do
-  ps -A -o pgid= -o stat= | awk -v group="$1" '$1 == group && $2 !~ /^Z/ { left = 1 } END { exit !left }' || exit 1
+  members "$1" | awk '$2 !~ /^[ZX]/ { left = 1 } END { exit !left }' || exit 1
   i=$((i + 1))
   [ "$i" -ge "$2" ] && exit 0
   sleep 0.05
@@ -614,6 +632,7 @@ exit 0`
  * `/proc`; macOS through `lsof`.
  */
 const REAP_SCRIPT = `signal() { ${SIGNAL_SCRIPT}; }
+${MEMBERS_SCRIPT}
 holds() {
   if [ -d /proc/self/fd ]; then
     for fd in "/proc/$1/fd/"*; do
@@ -625,7 +644,7 @@ holds() {
 }
 ours() {
   case "$1" in ''|*[!0-9]*|0|1) return 1 ;; esac
-  for pid in $(ps -A -o pid= -o pgid= | awk -v group="$1" '$2 == group { print $1 }'); do
+  for pid in $(members "$1" | awk '{ print $1 }'); do
     holds "$pid" "$2" && return 0
   done
   return 1
