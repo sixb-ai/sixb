@@ -7,10 +7,12 @@ import {
   type CommandResult,
   type RunCommandOptions,
   type Sandbox,
+  SandboxError,
   type SandboxFileRecord,
   SandboxIsolationUnavailableError,
   type SandboxNetworkPolicy,
   SandboxNotRunningError,
+  type SandboxProcess,
   type SandboxRequestCredential,
   type SandboxSessionOptions,
   type SandboxStatus,
@@ -39,6 +41,8 @@ export interface LocalSandboxOptions extends SandboxSessionOptions {
    * an isolation backend: creation fails without one.
    */
   readonly denyReadPaths?: readonly string[]
+  /** Ports on this machine a started command may serve; each must be free at creation. */
+  readonly ports?: readonly number[]
 }
 
 const HOST_ENV_ALLOWLIST = ["PATH", "HOME", "LANG", "TMPDIR"] as const
@@ -62,6 +66,8 @@ export class LocalSandbox implements Sandbox {
   private readonly readWritePaths: readonly string[]
   private readonly denyReadPaths: readonly ResolvedDeniedPath[]
   private readonly inFlight = new Set<AbortController>()
+  private readonly started = new Set<SandboxProcess>()
+  private readonly ports: ReadonlySet<number>
   private readonly cleanupWorkingDirectory: boolean
   private readonly forwarder: CredentialForwarder
 
@@ -75,6 +81,7 @@ export class LocalSandbox implements Sandbox {
     readonly readOnlyPaths: readonly string[]
     readonly readWritePaths: readonly string[]
     readonly denyReadPaths: readonly ResolvedDeniedPath[]
+    readonly ports: readonly number[]
     readonly cleanupWorkingDirectory: boolean
     readonly forwarder: CredentialForwarder
   }) {
@@ -87,6 +94,7 @@ export class LocalSandbox implements Sandbox {
     this.readOnlyPaths = input.readOnlyPaths
     this.readWritePaths = input.readWritePaths
     this.denyReadPaths = input.denyReadPaths
+    this.ports = new Set(input.ports)
     this.cleanupWorkingDirectory = input.cleanupWorkingDirectory
     this.forwarder = input.forwarder
     this.currentStatus = "running"
@@ -128,6 +136,10 @@ export class LocalSandbox implements Sandbox {
       )
     }
 
+    // Commands share this machine's network, so a port is this machine's port: it must be free.
+    const ports = options.ports ?? []
+    for (const port of ports) await assertPortFree(port)
+
     const id = options.id ?? randomUUID()
     const { workingDirectory, generated } = await resolveWorkingDirectory(
       options.workingDirectory,
@@ -138,6 +150,12 @@ export class LocalSandbox implements Sandbox {
     // network. Warn once here (rather than per backend) so the degradation is never silent.
     const network = options.network ?? { mode: "none" }
     warnIfRestrictedDowngraded(network)
+    if (ports.length > 0 && backend === "bwrap" && network.mode === "none") {
+      // bwrap gives a sandbox without network a namespace of its own, which this machine can't reach.
+      throw new SandboxError(
+        "[Sandbox] a local sandbox serving ports needs a network policy other than none."
+      )
+    }
 
     const forwarder = await CredentialForwarder.start()
     try {
@@ -157,6 +175,7 @@ export class LocalSandbox implements Sandbox {
       readOnlyPaths: options.readOnlyPaths ?? [],
       readWritePaths: options.readWritePaths ?? [],
       denyReadPaths,
+      ports,
       cleanupWorkingDirectory: generated,
       forwarder,
     })
@@ -202,6 +221,63 @@ export class LocalSandbox implements Sandbox {
       options.signal?.removeEventListener("abort", onUserAbort)
     }
   }
+
+  /** Runs the command under the same isolation as {@link runCommand}, in a process group of its own. */
+  readonly start = async (
+    command: string,
+    args: readonly string[] = [],
+    options: Pick<RunCommandOptions, "cwd" | "env"> = {}
+  ): Promise<SandboxProcess> => {
+    if (this.currentStatus !== "running") {
+      throw new SandboxNotRunningError(
+        `[Sandbox] sandbox ${this.id} is ${this.currentStatus}; cannot start commands`
+      )
+    }
+    const child = Bun.spawn([...this.buildArgv(command, args)], {
+      cwd: resolve(this.workingDirectory, options.cwd ?? "."),
+      env: this.mergeEnv(options.env),
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+      detached: true,
+    })
+    const exited = child.exited.then(
+      (code) => code,
+      () => 137
+    )
+    const started: SandboxProcess = {
+      exited,
+      kill: async () => {
+        try {
+          process.kill(-child.pid, "SIGTERM")
+        } catch {
+          // The group is gone: the command and everything it started already exited.
+          return
+        }
+        const ended = await Promise.race([exited.then(() => true), Bun.sleep(5_000)])
+        if (ended !== true) {
+          try {
+            process.kill(-child.pid, "SIGKILL")
+          } catch {}
+          await exited
+        }
+      },
+    }
+    this.started.add(started)
+    void exited.then(() => this.started.delete(started))
+    return started
+  }
+
+  /** This machine's loopback address: commands share its network. */
+  readonly url = (port: number): string => {
+    if (!this.ports.has(port)) {
+      throw new SandboxError(`[Sandbox] port ${port} was not among the ports this sandbox has.`)
+    }
+    return `http://127.0.0.1:${port}`
+  }
+
+  /** A local sandbox has no deadline to push out. */
+  readonly keepAlive = async (_ms: number): Promise<void> => {}
 
   async writeFiles(files: readonly SandboxFileRecord[]): Promise<void> {
     if (this.currentStatus !== "running") {
@@ -273,6 +349,7 @@ export class LocalSandbox implements Sandbox {
       controller.abort()
     }
     this.inFlight.clear()
+    await Promise.all([...this.started].map((started) => started.kill()))
     await this.forwarder.stop()
   }
 
@@ -331,6 +408,17 @@ export class LocalSandbox implements Sandbox {
       Object.assign(out, perCall)
     }
     return out
+  }
+}
+
+async function assertPortFree(port: number): Promise<void> {
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new SandboxError(`[Sandbox] port ${port} is not a TCP port.`)
+  }
+  try {
+    Bun.listen({ hostname: "127.0.0.1", port, socket: { data() {} } }).stop(true)
+  } catch {
+    throw new SandboxError(`[Sandbox] port ${port} is already in use on this machine.`)
   }
 }
 

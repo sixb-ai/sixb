@@ -74,6 +74,13 @@ forwards only to `url` and adds the credential that matches the request. The cre
 guest in a root process's environment, never in arguments, and stay in root-only files. The
 forwarder needs Bun or Node in the image.
 
+## Serving a port
+
+A sandbox created with `ports` publishes each one on the same port of the host's loopback:
+`url(port)` is `http://127.0.0.1:<port>`, for this host only. `start` leaves a command running there,
+unprivileged, in a process group of its own that its `kill` ends whole. Its variables reach the
+guest through smolvm's own environment, never its arguments.
+
 ## Options
 
 | Option | Default | Notes |

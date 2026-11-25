@@ -13,7 +13,7 @@ type PersistentSession = Pick<
   Session,
   "sessionId" | "status" | "cwd" | "runCommand" | "writeFiles" | "stop" | "update"
 > &
-  Partial<Pick<Session, "createdAt" | "timeout" | "extendTimeout">>
+  Partial<Pick<Session, "createdAt" | "timeout" | "extendTimeout" | "domain">>
 
 export interface VercelPersistentClient {
   readonly name: string
@@ -118,6 +118,7 @@ export async function bindPersistentSandbox(
       return sessionExpiry(session)
     },
     ...(session.extendTimeout ? { extendTimeout: session.extendTimeout.bind(session) } : {}),
+    ...(session.domain ? { domain: session.domain.bind(session) } : {}),
     runCommand: (params) => session.runCommand({ ...params, args: [...(params.args ?? [])] }),
     writeFiles: (files) =>
       session.writeFiles(

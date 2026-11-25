@@ -61,6 +61,7 @@ export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<ne
 {
   /** A root forwarder in the guest adds them; commands run unprivileged. Needs Bun or Node. */
   readonly supportsRequestCredentials = true
+  readonly runsBranches = true
   readonly configuration: SandboxConfig<TParams>
   private cli: SmolvmCliConfig | undefined
   private probe: SmolvmProbe | undefined
@@ -84,6 +85,7 @@ export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<ne
       network: options.network ?? this.configuration.network,
       env: { ...this.configuration.env, ...options.env },
       workingDirectory: options.workingDirectory,
+      ...(options.ports === undefined ? {} : { ports: options.ports }),
       ...(options.requestCredentials === undefined
         ? {}
         : { requestCredentials: options.requestCredentials }),

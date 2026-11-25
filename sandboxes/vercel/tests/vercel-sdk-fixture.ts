@@ -28,6 +28,8 @@ export function fixture(setup?: readonly string[]) {
   let stopGate: Promise<void> | undefined
   let sessionCreatedAt = 1
   let sessionTimeout = 60_000
+  // Vercel routes each port the sandbox was created with to a subdomain of its own.
+  let ports: number[] = []
   const session = () => ({
     id: `session-${generation}`,
     status,
@@ -49,7 +51,15 @@ export function fixture(setup?: readonly string[]) {
     createdAt: 1,
     updatedAt: 1,
   })
-  const response = () => ({ sandbox: named(), session: session(), routes: [] })
+  const response = () => ({
+    sandbox: named(),
+    session: session(),
+    routes: ports.map((port) => ({
+      port,
+      subdomain: `sb-${port}`,
+      url: `https://sb-${port}.vercel.run`,
+    })),
+  })
   const fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input))
@@ -64,6 +74,7 @@ export function fixture(setup?: readonly string[]) {
         if (exists) return failure(409, "conflict")
         exists = true
         name = typeof body.name === "string" ? body.name : name
+        ports = Array.isArray(body.ports) ? body.ports.map(Number) : []
         return Response.json(response())
       }
       if (path === `/v2/sandboxes/${encodeURIComponent(name)}`) {

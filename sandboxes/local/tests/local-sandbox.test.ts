@@ -13,6 +13,7 @@ import { join } from "node:path"
 import { runSandboxesContractSuite } from "@sixb/core/testing"
 import { LocalSandbox } from "../src/local-sandbox"
 import { LocalSandboxFactory } from "../src/local-sandbox-factory"
+import { serveOk } from "./helpers/serve"
 
 runSandboxesContractSuite("LocalSandbox (none)", {
   createFactory: () => new LocalSandboxFactory({ isolation: "none" }),
@@ -23,6 +24,22 @@ runSandboxesContractSuite("LocalSandbox (none)", {
   },
   // The timer starts after the spawn, so any bound below `sleep`'s runtime proves the kill.
   shortTimeoutMs: 50,
+  serve: serveOk,
+})
+
+describe("LocalSandbox ports", () => {
+  test("refuses a port something on this machine already listens on", async () => {
+    const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
+    try {
+      const error = await new LocalSandboxFactory({ isolation: "none" })
+        .create({ ports: [listener.port] })
+        .catch((caught: unknown) => caught)
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toContain("already in use")
+    } finally {
+      listener.stop(true)
+    }
+  })
 })
 
 describe("LocalSandbox shell-injection regression", () => {

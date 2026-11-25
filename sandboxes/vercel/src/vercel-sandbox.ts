@@ -7,6 +7,7 @@ import {
   SandboxError,
   type SandboxFileRecord,
   SandboxNotRunningError,
+  type SandboxProcess,
   SandboxRequestRefusedError,
   type SandboxSessionOptions,
   type SandboxStatus,
@@ -87,6 +88,8 @@ export interface VercelSandboxClient {
   readonly expiresAt?: Date
   /** Add `durationMs` to the session's lifetime, up to the plan's maximum. */
   readonly extendTimeout?: (durationMs: number) => Promise<void>
+  /** The public URL of a port the sandbox was created with. Throws for any other port. */
+  readonly domain?: (port: number) => string
   runCommand(params: VercelRunCommandParams): Promise<VercelCommandClient>
   writeFiles(
     files: readonly {
@@ -122,6 +125,7 @@ export interface VercelSandboxOptions extends SandboxSessionOptions {
 export class VercelSandbox implements Sandbox {
   readonly setRequestCredentials?: Sandbox["setRequestCredentials"]
   readonly credentialedUrl?: Sandbox["credentialedUrl"]
+  readonly url?: Sandbox["url"]
   readonly id: string
   readonly provider = "vercel"
   readonly workingDirectory: string
@@ -133,6 +137,8 @@ export class VercelSandbox implements Sandbox {
   private readonly defaultTimeoutMs: number | undefined
   private readonly keepAliveIdleMs: number | undefined
   private readonly inFlight = new Set<VercelCommandClient>()
+  /** Commands {@link start} left running: the sandbox is in use while one serves. */
+  private readonly serving = new Set<VercelCommandClient>()
   private destroyed = false
   private stopPromise: Promise<void> | undefined
 
@@ -157,6 +163,19 @@ export class VercelSandbox implements Sandbox {
 
     if (options.client.extendTimeout && options.client.expiresAt !== undefined) {
       this.startKeepAlive()
+    }
+
+    const { domain } = options.client
+    if (domain) {
+      this.url = (port) => {
+        try {
+          return domain.call(options.client, port)
+        } catch {
+          throw new SandboxError(
+            `[Sandbox] port ${port} of ${this.id} is not public: create the sandbox with it in \`ports\`.`
+          )
+        }
+      }
     }
 
     if (options.client.updateNetworkPolicy) {
@@ -353,6 +372,76 @@ export class VercelSandbox implements Sandbox {
     }
   }
 
+  /**
+   * A detached command that outlives this call: it ends when it exits, is killed, or the session
+   * stops. While it runs the sandbox counts as in use, so its session is kept alive.
+   */
+  readonly start = async (
+    command: string,
+    args: readonly string[] = [],
+    options: Pick<RunCommandOptions, "cwd" | "env"> = {}
+  ): Promise<SandboxProcess> => {
+    this.assertRunning("start commands")
+    this.markUsed()
+
+    const marker = randomUUID()
+    let handle: VercelCommandClient
+    try {
+      handle = await this.client.runCommand({
+        cmd: command,
+        args: [...args],
+        cwd: posix.resolve(this.workingDirectory, options.cwd ?? "."),
+        env: { ...this.sandboxEnv, ...(options.env ?? {}), [COMMAND_MARKER]: marker },
+        detached: true,
+      })
+    } catch (error) {
+      if (isSessionStopped(error)) throw this.sessionStopped()
+      throw new SandboxError(
+        `[Sandbox] vercel could not start a command in ${this.id}: ${errorMessage(error)}`
+      )
+    }
+
+    this.serving.add(handle)
+    const exited = handle.wait().then(
+      (finished) => normalizeExitCode(finished.exitCode, false),
+      () => KILLED_EXIT_CODE
+    )
+    void exited.then(() => this.serving.delete(handle))
+
+    let killing: Promise<void> | undefined
+    return {
+      exited,
+      kill: () => {
+        // Its own process, then whatever it started, as a killed command's are.
+        killing ??= handle
+          .kill("SIGKILL")
+          .catch(() => {})
+          .then(() => this.killMarkedProcesses(marker))
+        return killing
+      },
+    }
+  }
+
+  /** Makes sure the session lasts at least `ms` more, extending it when it would end sooner. */
+  readonly keepAlive = async (ms: number): Promise<void> => {
+    this.assertRunning("extend its session")
+    this.markUsed()
+
+    const { expiresAt, extendTimeout } = this.client
+    if (!extendTimeout || !expiresAt) return
+    const missing = Date.now() + ms - expiresAt.getTime()
+    if (missing <= 0) return
+
+    try {
+      await extendTimeout.call(this.client, missing)
+    } catch (error) {
+      if (isSessionStopped(error)) throw this.sessionStopped()
+      throw new SandboxError(
+        `[Sandbox] vercel could not extend the session of ${this.id}: ${errorMessage(error)}`
+      )
+    }
+  }
+
   async writeFiles(files: readonly SandboxFileRecord[]): Promise<void> {
     this.assertRunning("write files")
     if (files.length === 0) {
@@ -391,10 +480,11 @@ export class VercelSandbox implements Sandbox {
   }
 
   private async stopRemote(): Promise<void> {
-    for (const commandHandle of this.inFlight) {
+    for (const commandHandle of [...this.inFlight, ...this.serving]) {
       commandHandle.kill("SIGKILL").catch(() => {})
     }
     this.inFlight.clear()
+    this.serving.clear()
     try {
       await this.client.stop()
     } catch (error) {
@@ -436,6 +526,7 @@ export class VercelSandbox implements Sandbox {
     this.currentStatus = "stopped"
     this.stopKeepAlive()
     this.inFlight.clear()
+    this.serving.clear()
     return new SandboxNotRunningError(
       `[Sandbox] sandbox ${this.id} stopped: Vercel ended its session.`
     )
@@ -446,7 +537,7 @@ export class VercelSandbox implements Sandbox {
     this.lastUsedAt = Date.now()
     if (this.keepAliveState === "idle" && this.currentStatus === "running") this.startKeepAlive()
 
-    void this.keepAlive()
+    void this.extendSession()
   }
 
   /**
@@ -454,13 +545,14 @@ export class VercelSandbox implements Sandbox {
    * handle, so the next call fails at once instead of reaching Vercel; one Vercel will not extend
    * further, at the plan's maximum for one, ends when it says.
    */
-  private keepAlive(): Promise<void> {
+  private extendSession(): Promise<void> {
     if (this.extending) return this.extending
     if (this.keepAliveState !== "on" || this.currentStatus !== "running") return Promise.resolve()
 
     const idle =
       this.keepAliveIdleMs !== undefined &&
       this.inFlight.size === 0 &&
+      this.serving.size === 0 &&
       Date.now() - this.lastUsedAt >= this.keepAliveIdleMs
     if (idle) {
       this.pauseKeepAlive()
@@ -508,7 +600,7 @@ export class VercelSandbox implements Sandbox {
   /** Never holds the process open: a worker that exits stops extending, and the session ends. */
   private startKeepAlive(): void {
     this.keepAliveState = "on"
-    this.keepAliveTimer = setInterval(() => void this.keepAlive(), KEEP_ALIVE_INTERVAL_MS)
+    this.keepAliveTimer = setInterval(() => void this.extendSession(), KEEP_ALIVE_INTERVAL_MS)
     this.keepAliveTimer.unref?.()
   }
 

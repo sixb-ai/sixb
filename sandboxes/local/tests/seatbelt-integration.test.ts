@@ -1,6 +1,7 @@
 import { runSandboxesContractSuite } from "@sixb/core/testing"
 import { detectIsolation } from "../src/isolation/detect"
 import { LocalSandboxFactory } from "../src/local-sandbox-factory"
+import { serveOk } from "./helpers/serve"
 
 if (process.platform === "darwin" && detectIsolation().backend === "seatbelt") {
   runSandboxesContractSuite("LocalSandbox (seatbelt)", {
@@ -12,5 +13,6 @@ if (process.platform === "darwin" && detectIsolation().backend === "seatbelt") {
     },
     // The timer starts after the spawn, so any bound below `sleep`'s runtime proves the kill.
     shortTimeoutMs: 50,
+    serve: serveOk,
   })
 }

@@ -52,6 +52,23 @@ describe("buildCreateArgv", () => {
   })
 })
 
+// Removal proof: drop the `--port` loop from `buildCreateArgv`; the host reaches no guest port.
+test("publishes each guest port on the same port of the host's loopback", () => {
+  expect(
+    buildCreateArgv({ bin: "smolvm" }, { id: "run-1", network: [], ports: [20000, 20001] })
+  ).toEqual([
+    "smolvm",
+    "machine",
+    "create",
+    "--name",
+    "run-1",
+    "--port",
+    "20000:20000",
+    "--port",
+    "20001:20001",
+  ])
+})
+
 test("start, stop and delete address the machine by name; delete skips the confirmation prompt", () => {
   expect(buildStartArgv(config, "run-1")).toEqual(["smolvm", "machine", "start", "--name", "run-1"])
   expect(buildStopArgv(config, "run-1")).toEqual(["smolvm", "machine", "stop", "--name", "run-1"])

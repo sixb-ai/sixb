@@ -39,7 +39,8 @@ export function isLocalImageArchive(image: string): boolean {
 }
 
 /**
- * `smolvm machine create --name <id> [--image <img>] [--storage N] [--overlay N] [<net>...]`
+ * `smolvm machine create --name <id> [--image <img>] [--storage N] [--overlay N] [--port N:N...]
+ * [<net>...]`
  *
  * No host volume is mounted: the guest filesystem is fully isolated and files are materialized
  * in-guest via {@link SmolvmSandbox.writeFiles}.
@@ -50,6 +51,8 @@ export function buildCreateArgv(
     readonly id: string
     /** Network flags from buildNetworkFlags. */
     readonly network: readonly string[]
+    /** Guest ports the host reaches on the same port of its loopback (`--port N:N`). */
+    readonly ports?: readonly number[]
   }
 ): string[] {
   const argv = [config.bin, "machine", "create", "--name", params.id]
@@ -61,6 +64,9 @@ export function buildCreateArgv(
   }
   if (config.overlayGiB !== undefined) {
     argv.push("--overlay", String(config.overlayGiB))
+  }
+  for (const port of params.ports ?? []) {
+    argv.push("--port", `${port}:${port}`)
   }
   argv.push(...params.network)
   return argv

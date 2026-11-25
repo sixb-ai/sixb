@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
+import { networkInterfaces } from "node:os"
 import { join } from "node:path"
 import { probeSmolvm } from "../src/preflight"
 import { SmolvmSandbox } from "../src/smolvm-sandbox"
@@ -93,3 +94,104 @@ guard("SmolvmSandbox (real bare VM)", () => {
     expect(result.timedOut).toBe(true)
   }, 180_000)
 })
+
+// A hosted branch's runtime: a server the VM keeps running, reached on one of its ports.
+// Removal proof: signal the recorded process alone in `start`'s kill, not its group: the loop
+// it started serves on.
+guard("SmolvmSandbox serving a port (real bare VM)", () => {
+  const port = 20_000 + Math.floor(Math.random() * 9_000)
+  let sandbox: SmolvmSandbox
+
+  beforeAll(async () => {
+    sandbox = await SmolvmSandbox.create({ cli: { bin: "smolvm" }, ports: [port] })
+  }, 180_000)
+
+  afterAll(async () => {
+    await sandbox?.destroy()
+  }, 180_000)
+
+  test("serves a started command on the host's loopback, until it is killed", async () => {
+    const server = await sandbox.start(
+      "sh",
+      [
+        "-c",
+        'while true; do printf "HTTP/1.0 200 OK\\r\\nContent-Length: 6\\r\\n\\r\\n$GREETING" | nc -l -p "$PORT"; done',
+      ],
+      { env: { GREETING: "served", PORT: String(port) } }
+    )
+
+    // The VM's server comes up on its own time: poll it, bounded.
+    let body = ""
+    for (let attempt = 0; attempt < 100 && body !== "served"; attempt += 1) {
+      body = await fetch(sandbox.url(port), { signal: AbortSignal.timeout(1_000) })
+        .then((response) => response.text())
+        .catch(() => "")
+      if (body !== "served") await Bun.sleep(100)
+    }
+    expect(body).toBe("served")
+    expect(() => sandbox.url(port + 1)).toThrow("not published")
+
+    await server.kill()
+    await server.exited
+    const after = await fetch(sandbox.url(port), { signal: AbortSignal.timeout(1_000) })
+      .then((response) => response.text())
+      .catch(() => "")
+    expect(after).toBe("")
+  }, 180_000)
+})
+
+/** This host's address on its network, which a VM reaches; none on a host with no network. */
+function hostAddress(): string | undefined {
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === "IPv4" && !address.internal) return address.address
+    }
+  }
+  return undefined
+}
+
+// A hosted branch's sandbox reaches what its policy names, and not the cloud's metadata endpoint
+// or the rest of a private network. Removal proof: return `["--net"]` for a restricted policy in
+// `buildNetworkFlags`: every address answers.
+const lan = hostAddress()
+;(available && lan ? describe : describe.skip)(
+  "SmolvmSandbox restricted network (real bare VM)",
+  () => {
+    const port = 20_000 + Math.floor(Math.random() * 9_000)
+    let sandbox: SmolvmSandbox
+    let server: ReturnType<typeof Bun.serve>
+
+    beforeAll(async () => {
+      server = Bun.serve({ hostname: "0.0.0.0", port, fetch: () => new Response("allowed") })
+      sandbox = await SmolvmSandbox.create({
+        cli: { bin: "smolvm" },
+        network: { mode: "restricted", allow: [{ name: "host", origin: `http://${lan}:${port}` }] },
+      })
+    }, 180_000)
+
+    afterAll(async () => {
+      await sandbox?.destroy()
+      await server?.stop(true)
+    }, 180_000)
+
+    test("reaches what it allows, and no metadata endpoint or other private address", async () => {
+      const reach = async (host: string, target: number) => {
+        const result = await sandbox.runCommand("sh", [
+          "-c",
+          `printf 'GET / HTTP/1.0\\r\\n\\r\\n' | nc -w 3 "$1" "$2"`,
+          "sh",
+          host,
+          String(target),
+        ])
+        // nc exits 0 once it connected, whatever the host answers.
+        return result.exitCode === 0
+      }
+
+      expect(await reach(lan!, port)).toBe(true)
+      expect(await reach("169.254.169.254", 80)).toBe(false)
+      expect(await reach("10.255.255.1", 80)).toBe(false)
+      // A host the open network reaches, on a machine online: what proves the policy is enforced.
+      expect(await reach("1.1.1.1", 80)).toBe(false)
+    }, 180_000)
+  }
+)
