@@ -7290,22 +7290,6 @@ export type CopyForBranchData = {
   url: "/api/branches/copy"
 }
 
-export type RenewBranchLakeTokenData = {
-  body?: never
-  path?: never
-  query?: never
-  url: "/api/branches/lake-token"
-}
-
-export type DropBranchLakeSliceData = {
-  body?: never
-  path: {
-    sliceId: string
-  }
-  query?: never
-  url: "/api/branches/slices/{sliceId}"
-}
-
 export type ListSyncsData = {
   body?: never
   path?: never

@@ -489,6 +489,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("116-snapshot-load-executions", snapshotLoadExecutionsSql),
     pgSql("117-lake-slices", lakeSlicesSql),
     pgSql("118-skipped-action-effects", skippedActionEffectsSql),
+    pgSql("119-lake-slice-credentials", lakeSliceCredentialsSql),
   ],
 })
 
@@ -615,5 +616,8 @@ import snapshotLoadExecutionsSql from "./migrations/116-snapshot-load-executions
 }
 import lakeSlicesSql from "./migrations/117-lake-slices.sql" with { type: "text" }
 import skippedActionEffectsSql from "./migrations/118-skipped-action-effects.sql" with {
+  type: "text",
+}
+import lakeSliceCredentialsSql from "./migrations/119-lake-slice-credentials.sql" with {
   type: "text",
 }

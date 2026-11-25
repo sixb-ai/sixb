@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto"
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { createHash, randomUUID } from "node:crypto"
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { type BranchRuntime, hostOnBranch, readBranchCopy } from "@sixb/core/internal/branches"
 import { branchNamespaces, importSnapshot } from "@sixb/core/internal/snapshots"
@@ -7,37 +7,21 @@ import type { LakeStorage } from "@sixb/core/lake-storage"
 import { type BranchNamespace, migrateStorage } from "@sixb/core/storage"
 import type { LoadedSixbHost } from "./loadSixb"
 
-/** Production as `sixb dev --from production` reaches it: the developer's own CLI sign-in. */
+// `sixb dev --from production` in two steps, so the process that runs the branch's code never
+// holds the developer's production session:
+//
+// 1. The supervisor, signed in as the developer, asks production for a copy when the branch needs
+//    one (`fetchBranchCopy`) and writes it to a file, whole or not at all. Production's read closes
+//    as fast as it exports, whatever the load costs after.
+// 2. The process that runs the branch (`branchFromProduction`) loads that file into the git
+//    branch's namespace, or reuses the namespace. It reaches production only with the branch's own
+//    credential, which reads its objects' files and its lake slice, and nothing else.
+
+/** Production as the supervisor reaches it: the developer's own CLI sign-in. */
 export interface ProductionConnection {
   readonly apiUrl: string
   /** The `Authorization` header of the developer's CLI session in production. */
   authorization(): Promise<string>
-}
-
-export interface BranchFromProductionInput {
-  /** The project's host, loaded as the branch: its gates are on, its providers the project's. */
-  readonly host: LoadedSixbHost
-  readonly projectRoot: string
-  readonly production: ProductionConnection
-  /** The checked-out git branch, and every local one: a namespace outlives no git branch. */
-  readonly gitBranch: string
-  readonly gitBranches: readonly string[]
-  /** Take a new copy, discarding what the branch wrote to the last one. */
-  readonly refresh?: boolean
-}
-
-export interface BranchFromProduction {
-  /** The project's host on the branch's own data. */
-  readonly host: LoadedSixbHost
-  readonly namespace: string
-  /** Whether this run took the copy; otherwise it reused the last one. */
-  readonly copied: boolean
-  /** When production's data was copied. */
-  readonly takenAt: string
-  /** Namespaces dropped because their git branch is gone. */
-  readonly dropped: readonly string[]
-  /** What production's datasets give the branch, or why they give it nothing. */
-  readonly lake: "in place" | string
 }
 
 /** What the CLI keeps of each branch's copy, next to its data. */
@@ -45,94 +29,58 @@ interface BranchRecord {
   readonly gitBranch: string
   readonly takenAt: string
   readonly userId: string
+  /** Production's API, and the CLI profile the copy was taken with. */
+  readonly apiUrl: string
+  readonly profile: string
+  /** The branch's own credential in production. */
+  readonly credential?: string
   readonly lake?: { readonly sliceId: string; readonly point: string }
 }
 
 type BranchIndex = Record<string, BranchRecord>
 
-/**
- * Sets a git branch up on a copy of what its developer reads in production, in that branch's own
- * namespace of the project's local storage: copied on the first run, reused on the next, taken
- * again with `refresh`. A namespace whose git branch is gone is dropped first.
- */
-export async function branchFromProduction(
-  input: BranchFromProductionInput
-): Promise<BranchFromProduction> {
-  // A storage that cannot keep the branch apart is refused: the copy is real data.
-  const storage = branchNamespaces(input.host.storage)
-
-  const directory = join(input.projectRoot, ".sixb", "branches")
-  await mkdir(directory, { recursive: true })
-  const index = await readIndex(directory)
-  const name = namespaceFor(input.gitBranch)
-
-  // Namespaces outlive no git branch, and a refresh starts from nothing.
-  const dropped: string[] = []
-  for (const existing of await storage.listBranchNamespaces()) {
-    const record = index[existing]
-    if (!record) continue
-    const gone = !input.gitBranches.includes(record.gitBranch)
-    if (!gone && !(existing === name && input.refresh)) continue
-
-    await dropBranch(storage, directory, index, existing, input.production)
-    if (gone) dropped.push(record.gitBranch)
-  }
-
-  let namespace = await storage.openBranchNamespace(name)
-  const copied = namespace === null || index[name] === undefined
-  if (copied) {
-    if (namespace) await dropBranch(storage, directory, index, name, input.production)
-    namespace = await copyFromProduction({ ...input, storage, directory, index, name })
-  }
-  await writeIndex(directory, index)
-
-  const record = index[name]
-  if (!namespace || !record) {
-    throw new Error(`[SixbCLI] Branch namespace '${name}' was not set up. Run with --refresh.`)
-  }
-
-  const { lakeStorage, lake } = branchLake(input, directory, name, record)
-  const runtime: BranchRuntime = {
-    person: { userId: record.userId },
-    production: { url: input.production.apiUrl, authorization: input.production.authorization },
-    takenAt: record.takenAt,
-  }
-  const host = hostOnBranch(input.host, {
-    storage: namespace,
-    ...(lakeStorage ? { lakeStorage } : {}),
-    runtime,
-  }) as LoadedSixbHost
-
-  return { host, namespace: name, copied, takenAt: record.takenAt, dropped, lake }
-}
-
-/**
- * A namespace name for a git branch: lowercase, digits and dashes, at most 40 characters, the
- * exact name's hash keeping `feature/a` and `feature-a` apart.
- */
-export function namespaceFor(gitBranch: string): string {
-  const slug = gitBranch
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 31)
-  const hash = createHash("sha256").update(gitBranch).digest("hex").slice(0, 8)
-  return slug ? `${slug}-${hash}` : hash
-}
-
-async function copyFromProduction(input: {
-  readonly host: LoadedSixbHost
-  readonly production: ProductionConnection
+/** A copy fetched by the supervisor and not loaded yet. */
+interface PendingCopy {
   readonly gitBranch: string
-  readonly storage: { createBranchNamespace(name: string): Promise<BranchNamespace> }
-  readonly directory: string
-  readonly index: BranchIndex
-  readonly name: string
-}): Promise<BranchNamespace> {
-  const response = await fetch(new URL("api/branches/copy", apiBase(input.production.apiUrl)), {
+  readonly apiUrl: string
+  readonly profile: string
+}
+
+export interface FetchBranchCopyInput {
+  readonly projectRoot: string
+  readonly gitBranch: string
+  /** Take a new copy, discarding what the branch wrote to the last one. */
+  readonly refresh?: boolean
+  /** The CLI profile the developer is signed in with, read without the network. */
+  readonly profile: string
+  /** Signs in to production: called only when a copy is needed. */
+  readonly connect: () => Promise<ProductionConnection>
+}
+
+/**
+ * The supervisor's step: fetch a copy when the git branch has none, or when asked to refresh.
+ * Reusing a copy needs no network, and refuses one taken under another CLI profile.
+ */
+export async function fetchBranchCopy(input: FetchBranchCopyInput): Promise<boolean> {
+  const directory = branchesDirectory(input.projectRoot)
+  await mkdir(directory, { recursive: true })
+  const name = await namespaceOf(input.projectRoot, input.gitBranch)
+  const record = (await readIndex(directory))[name]
+
+  if (record && !input.refresh) {
+    if (record.profile !== input.profile) {
+      throw new Error(
+        `[SixbCLI] This branch's copy was taken as ${record.profile}, and you are signed in as ${input.profile}. Run \`sixb dev --from production --refresh\` to take your own.`
+      )
+    }
+    return false
+  }
+
+  const production = await input.connect()
+  const response = await fetch(new URL("api/branches/copy", apiBase(production.apiUrl)), {
     method: "POST",
     headers: {
-      authorization: await input.production.authorization(),
+      authorization: await production.authorization(),
       "content-type": "application/json",
     },
     body: JSON.stringify({ branch: input.gitBranch }),
@@ -145,8 +93,153 @@ async function copyFromProduction(input: {
     )
   }
 
+  // Whole or not at all: a copy cut short never becomes the branch's.
+  const spool = join(directory, `${name}.copy`)
+  const partial = `${spool}.${randomUUID()}.partial`
+  try {
+    await Bun.write(partial, response)
+    await chmod(partial, 0o600)
+    await rename(partial, spool)
+  } finally {
+    await rm(partial, { force: true })
+  }
+  const pending: PendingCopy = {
+    gitBranch: input.gitBranch,
+    apiUrl: production.apiUrl,
+    profile: input.profile,
+  }
+  await writeFile(`${spool}.json`, JSON.stringify(pending))
+  return true
+}
+
+export interface BranchFromProductionInput {
+  /** The project's host, loaded as the branch: its gates are on, its providers the project's. */
+  readonly host: LoadedSixbHost
+  readonly projectRoot: string
+  /** The branch this process runs as, and every local git branch. */
+  readonly gitBranch: string
+  readonly gitBranches: readonly string[]
+}
+
+export interface BranchFromProduction {
+  /** The project's host on the branch's own data. */
+  readonly host: LoadedSixbHost
+  readonly namespace: string
+  /** Whether this run loaded a new copy; otherwise it reused the last one. */
+  readonly copied: boolean
+  /** When production's data was copied. */
+  readonly takenAt: string
+  /** Git branches whose copies were dropped because they are gone. */
+  readonly dropped: readonly string[]
+  /** What production's datasets give the branch, or why they give it nothing. */
+  readonly lake: "in place" | string
+}
+
+/**
+ * The branch's step: load the copy the supervisor fetched into the git branch's namespace of the
+ * project's local storage, or reuse it. A namespace whose git branch is gone is dropped first.
+ * Only namespaces this checkout made are ever dropped: the index lists them.
+ */
+export async function branchFromProduction(
+  input: BranchFromProductionInput
+): Promise<BranchFromProduction> {
+  // A storage that cannot keep the branch apart is refused: the copy is real data.
+  const storage = branchNamespaces(input.host.storage)
+  const directory = branchesDirectory(input.projectRoot)
+  await mkdir(directory, { recursive: true })
+  const index = await readIndex(directory)
+  const name = await namespaceOf(input.projectRoot, input.gitBranch)
+
+  const dropped: string[] = []
+  for (const [existing, record] of Object.entries(index)) {
+    if (input.gitBranches.includes(record.gitBranch)) continue
+    await dropBranch(storage, directory, index, existing)
+    dropped.push(record.gitBranch)
+  }
+
+  const spool = join(directory, `${name}.copy`)
+  const fetched = await stat(spool).then(
+    () => true,
+    () => false
+  )
+  if (fetched) {
+    if (index[name] || (await storage.openBranchNamespace(name))) {
+      await dropBranch(storage, directory, index, name)
+    }
+    await loadCopy({ host: input.host, storage, directory, index, name, spool })
+  }
+
+  const namespace = await storage.openBranchNamespace(name)
+  const record = index[name]
+  if (!namespace || !record) {
+    throw new Error(
+      `[SixbCLI] Branch ${input.gitBranch} has no copy here. Run \`sixb dev --from production\`.`
+    )
+  }
+
+  const { lakeStorage, lake } = branchLake(input.host, directory, name, record)
+  const credential = record.credential
+  const runtime: BranchRuntime = {
+    person: { userId: record.userId },
+    // Production as the branch reaches it: its credential, never the developer's session.
+    production: {
+      url: record.apiUrl,
+      authorization: async () => (credential ? `Bearer ${credential}` : ""),
+    },
+    takenAt: record.takenAt,
+  }
+  const host = hostOnBranch(input.host, {
+    storage: namespace,
+    ...(lakeStorage ? { lakeStorage } : {}),
+    runtime,
+  }) as LoadedSixbHost
+
+  return { host, namespace: name, copied: fetched, takenAt: record.takenAt, dropped, lake }
+}
+
+/**
+ * The namespace of a git branch in this checkout: lowercase, digits and dashes, at most 40
+ * characters. The hash covers the checkout too, so two checkouts sharing a database never meet.
+ */
+export function namespaceFor(gitBranch: string, checkout: string): string {
+  const slug = gitBranch
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 31)
+  const hash = createHash("sha256").update(`${checkout}\0${gitBranch}`).digest("hex").slice(0, 8)
+  return slug ? `${slug}-${hash}` : hash
+}
+
+/** This checkout's namespace for a git branch. */
+export async function namespaceOf(projectRoot: string, gitBranch: string): Promise<string> {
+  const directory = branchesDirectory(projectRoot)
+  await mkdir(directory, { recursive: true })
+  const file = join(directory, "checkout")
+  let checkout = (await readFile(file, "utf8").catch(() => "")).trim()
+  if (!checkout) {
+    checkout = randomUUID()
+    await writeFile(file, `${checkout}\n`)
+  }
+  return namespaceFor(gitBranch, checkout)
+}
+
+async function loadCopy(input: {
+  readonly host: LoadedSixbHost
+  readonly storage: { createBranchNamespace(name: string): Promise<BranchNamespace> } & {
+    dropBranchNamespace(name: string): Promise<void>
+  }
+  readonly directory: string
+  readonly index: BranchIndex
+  readonly name: string
+  readonly spool: string
+}): Promise<void> {
+  const pending = JSON.parse(await readFile(`${input.spool}.json`, "utf8")) as PendingCopy
   const namespace = await input.storage.createBranchNamespace(input.name)
-  const copy = readBranchCopy(response.body as unknown as AsyncIterable<Uint8Array>)
+  const copy = readBranchCopy(
+    Bun.file(input.spool).stream() as unknown as AsyncIterable<Uint8Array>
+  )
+
   try {
     const report = await importSnapshot({
       snapshot: copy.snapshot,
@@ -166,30 +259,48 @@ async function copyFromProduction(input: {
     if (rest) await writeFile(join(branchDirectory, "lake.ducklake"), rest.catalog)
 
     input.index[input.name] = {
-      gitBranch: input.gitBranch,
+      gitBranch: pending.gitBranch,
       takenAt: report.takenAt,
       userId: report.takenBy.id,
-      ...(rest ? { lake: { sliceId: rest.lake.sliceId, point: rest.lake.point } } : {}),
+      apiUrl: pending.apiUrl,
+      profile: pending.profile,
+      ...(rest
+        ? {
+            credential: rest.lake.credential,
+            lake: { sliceId: rest.lake.sliceId, point: rest.lake.point },
+          }
+        : {}),
     }
-    return namespace
+    await writeIndex(input.directory, input.index)
   } catch (error) {
     // Nothing of a failed copy is kept, here or in production.
+    await input.storage.dropBranchNamespace(input.name).catch(() => undefined)
     const rest = await copy.rest().catch(() => null)
-    if (rest) await deleteSlice(input.production, rest.lake.sliceId)
+    if (rest) {
+      await deleteSlice(pending.apiUrl, rest.lake.credential, rest.lake.sliceId).catch(
+        () => undefined
+      )
+    }
     throw error
+  } finally {
+    await rm(input.spool, { force: true })
+    await rm(`${input.spool}.json`, { force: true })
   }
 }
 
 /** Production's datasets on the branch, read in place, when the project's lake can be branched. */
 function branchLake(
-  input: BranchFromProductionInput,
+  host: LoadedSixbHost,
   directory: string,
   name: string,
   record: BranchRecord
 ): { readonly lakeStorage?: LakeStorage; readonly lake: string } {
-  if (!record.lake) return { lake: "production's lake cannot be branched: no dataset is copied" }
+  const credential = record.credential
+  if (!record.lake || !credential) {
+    return { lake: "production's lake cannot be branched: no dataset is copied" }
+  }
 
-  const openBranch = input.host.lakeStorage.openBranch
+  const openBranch = host.lakeStorage.openBranch
   if (!openBranch) {
     return {
       lake: "the project's local lake cannot read production's datasets in place: use DuckLake",
@@ -198,15 +309,15 @@ function branchLake(
 
   const sliceId = record.lake.sliceId
   let token: { value: string; expiresAt: number } | undefined
-  const lakeStorage = openBranch.call(input.host.lakeStorage, {
+  const lakeStorage = openBranch.call(host.lakeStorage, {
     catalogPath: join(directory, name, "lake.ducklake"),
     dataPath: join(directory, name, "lake"),
     productionFiles: {
-      url: new URL("api/lake/slice-files/", apiBase(input.production.apiUrl)).toString(),
+      url: new URL("api/lake/slice-files/", apiBase(record.apiUrl)).toString(),
       // Production renews the slice's token for its person while they still read every version.
       token: async () => {
         if (token && token.expiresAt - Date.now() > 60_000) return token.value
-        const renewed = await renewToken(input.production, sliceId)
+        const renewed = await renewToken(record.apiUrl, credential, sliceId)
         token = renewed
         return renewed.value
       },
@@ -216,13 +327,10 @@ function branchLake(
   return { lakeStorage, lake: "in place" }
 }
 
-async function renewToken(production: ProductionConnection, sliceId: string) {
-  const response = await fetch(new URL("api/branches/lake-token", apiBase(production.apiUrl)), {
+async function renewToken(apiUrl: string, credential: string, sliceId: string) {
+  const response = await fetch(new URL("api/branches/lake-token", apiBase(apiUrl)), {
     method: "POST",
-    headers: {
-      authorization: await production.authorization(),
-      "content-type": "application/json",
-    },
+    headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" },
     body: JSON.stringify({ sliceId }),
   })
   const body = (await response.json().catch(() => null)) as {
@@ -243,27 +351,29 @@ async function dropBranch(
   storage: { dropBranchNamespace(name: string): Promise<void> },
   directory: string,
   index: BranchIndex,
-  name: string,
-  production: ProductionConnection
+  name: string
 ): Promise<void> {
   await storage.dropBranchNamespace(name)
   await rm(join(directory, name), { recursive: true, force: true })
 
-  const sliceId = index[name]?.lake?.sliceId
+  const record = index[name]
   delete index[name]
   await writeIndex(directory, index)
   // Production keeps a slice two weeks unless told: say it is no longer read.
-  if (sliceId) await deleteSlice(production, sliceId).catch(() => undefined)
+  if (record?.credential && record.lake) {
+    await deleteSlice(record.apiUrl, record.credential, record.lake.sliceId).catch(() => undefined)
+  }
 }
 
-async function deleteSlice(production: ProductionConnection, sliceId: string): Promise<void> {
-  await fetch(
-    new URL(`api/branches/slices/${encodeURIComponent(sliceId)}`, apiBase(production.apiUrl)),
-    {
-      method: "DELETE",
-      headers: { authorization: await production.authorization() },
-    }
-  )
+async function deleteSlice(apiUrl: string, credential: string, sliceId: string): Promise<void> {
+  await fetch(new URL(`api/branches/slices/${encodeURIComponent(sliceId)}`, apiBase(apiUrl)), {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${credential}` },
+  })
+}
+
+function branchesDirectory(projectRoot: string): string {
+  return join(projectRoot, ".sixb", "branches")
 }
 
 async function readIndex(directory: string): Promise<BranchIndex> {
@@ -271,8 +381,11 @@ async function readIndex(directory: string): Promise<BranchIndex> {
   return text ? (JSON.parse(text) as BranchIndex) : {}
 }
 
+/** The index holds each branch's credential: readable by its owner only. */
 async function writeIndex(directory: string, index: BranchIndex): Promise<void> {
-  await writeFile(join(directory, "index.json"), `${JSON.stringify(index, null, 2)}\n`)
+  const file = join(directory, "index.json")
+  await writeFile(file, `${JSON.stringify(index, null, 2)}\n`, { mode: 0o600 })
+  await chmod(file, 0o600)
 }
 
 function apiBase(apiUrl: string): string {

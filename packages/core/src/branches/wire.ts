@@ -16,6 +16,8 @@ export interface BranchCopyLake {
   readonly point: string
   readonly token: string
   readonly expiresAt: string
+  /** The branch's credential: it reads production only as its person, only for the branch. */
+  readonly credential: string
 }
 
 export function encodeBranchCopyPart(kind: "snapshot" | "catalog", bytes: Uint8Array): Uint8Array
@@ -98,28 +100,47 @@ async function nextPart(
 async function* readParts(
   stream: AsyncIterable<Uint8Array>
 ): AsyncGenerator<{ readonly kind: number; readonly bytes: Uint8Array }> {
-  // Chunks are joined only once a whole part has arrived: a part may be hundreds of megabytes.
+  // Chunks wait in a queue, and each part copies only its own bytes out of it: a part may be
+  // hundreds of megabytes, and a chunk may hold thousands of small parts.
   const chunks: Uint8Array[] = []
+  let offset = 0
   let length = 0
-  const take = (count: number): Uint8Array => {
-    const joined = Buffer.concat(chunks, length)
-    chunks.length = 0
-    chunks.push(joined.subarray(count))
-    length -= count
-    return joined.subarray(0, count)
+  const read = (count: number, consume: boolean): Uint8Array => {
+    const out = new Uint8Array(count)
+    let copied = 0
+    let index = 0
+    let at = offset
+    while (copied < count) {
+      const chunk = chunks[index]!
+      const take = Math.min(count - copied, chunk.length - at)
+      out.set(chunk.subarray(at, at + take), copied)
+      copied += take
+      at += take
+      if (at === chunk.length) {
+        index += 1
+        at = 0
+      }
+    }
+    if (consume) {
+      chunks.splice(0, index)
+      offset = at
+      length -= count
+    }
+    return out
   }
 
   for await (const chunk of stream) {
+    if (chunk.length === 0) continue
     chunks.push(chunk)
     length += chunk.length
 
     while (length >= HEADER_BYTES) {
-      const header = chunks[0]!.length >= HEADER_BYTES ? chunks[0]! : Buffer.concat(chunks, length)
-      const size = new DataView(header.buffer, header.byteOffset).getUint32(1, true)
+      const header = read(HEADER_BYTES, false)
+      const size = new DataView(header.buffer).getUint32(1, true)
       if (length < HEADER_BYTES + size) break
 
-      const part = take(HEADER_BYTES + size)
-      yield { kind: part[0]!, bytes: part.slice(HEADER_BYTES) }
+      read(HEADER_BYTES, true)
+      yield { kind: header[0]!, bytes: read(size, true) }
     }
   }
 

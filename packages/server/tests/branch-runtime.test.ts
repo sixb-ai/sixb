@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import {
   can,
   defineGroup,
@@ -9,13 +10,18 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  project,
   prop,
   resolveAuthorizationContext,
   SixbHost,
   type SixbHostOptions,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
-import { type BranchRuntime, hostOnBranch } from "@sixb/core/internal/branches"
+import {
+  BRANCH_CREDENTIAL_PREFIX,
+  type BranchRuntime,
+  hostOnBranch,
+} from "@sixb/core/internal/branches"
 import { putOnBranch } from "@sixb/core/internal/runtime"
 import { exportSnapshot, hostSnapshotSource, importSnapshot } from "@sixb/core/internal/snapshots"
 import { createTestSixb } from "@sixb/core/testing"
@@ -41,7 +47,10 @@ const readers = defineGroup("readers")
 const roles = [
   defineRole("developers", {
     grantedTo: [developers],
-    grants: [can.view(Ticket).where((ticket) => ticket.p.status.eq("open"))],
+    grants: [
+      can.manage(project.source),
+      can.view(Ticket).where((ticket) => ticket.p.status.eq("open")),
+    ],
   }),
   defineRole("readers", { grantedTo: [readers], grants: [can.view(Ticket)] }),
 ]
@@ -65,6 +74,7 @@ let production: { host: SixbHost; storage: InMemoryStorage; url: string }
 let server: ReturnType<typeof Bun.serve>
 let branch: { app: ReturnType<typeof createSixbApi>; storage: InMemoryStorage }
 const tokens: Record<string, string> = {}
+let credential: string
 
 beforeAll(async () => {
   const storage = new InMemoryStorage()
@@ -126,9 +136,22 @@ beforeAll(async () => {
     storage: namespace,
     ontology: base.definitions.ontology as never,
   })
+  // The branch's credential, as a copy records it with its slice: the branch holds no other.
+  credential = `${BRANCH_CREDENTIAL_PREFIX}${"k".repeat(43)}`
+  await storage.lakeSlices.create({
+    id: "slice_alice",
+    projectId: PROJECT,
+    userId: "usr_alice",
+    branch: "feature/x",
+    point: "point",
+    versions: [],
+    files: [],
+    createdAt: new Date(),
+    credentialHash: createHash("sha256").update(credential).digest("hex"),
+  })
   const runtime: BranchRuntime = {
     person: { userId: "usr_alice" },
-    production: { url: production.url, authorization: async () => tokens.usr_alice! },
+    production: { url: production.url, authorization: async () => `Bearer ${credential}` },
     takenAt: report.takenAt,
   }
   const branchHost = hostOnBranch(base, { storage: namespace, runtime })
@@ -200,5 +223,67 @@ describe("a branch from production", () => {
       { headers: { authorization: tokens.usr_bob! } }
     )
     expect(await asBob.text()).toBe("t-2 file")
+  })
+})
+
+describe("a branch's credential in production", () => {
+  // Red check: in server.ts, drop `isBranchCredentialRoute` from the credential's binding: it
+  // reads every object Alice reads, and writes where she may.
+  test("reads its objects' files as its person, and nothing else", async () => {
+    const asBranch = (path: string, init: RequestInit = {}) =>
+      fetch(new URL(path, production.url), {
+        ...init,
+        headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" },
+      })
+
+    const path = encodeURIComponent("/properties/attachment")
+    expect((await asBranch(`api/objects/ticket/t-1/files/content?path=${path}`)).status).toBe(200)
+    expect((await asBranch("api/objects?objectTypeId=ticket")).status).toBe(403)
+    expect(
+      (await asBranch("api/objects/query", { method: "POST", body: JSON.stringify({}) })).status
+    ).toBe(403)
+    expect(
+      (
+        await asBranch("api/branches/copy", {
+          method: "POST",
+          body: JSON.stringify({ branch: "feature/y" }),
+        })
+      ).status
+    ).toBe(403)
+  })
+
+  // Red check: in branches/credential.ts, drop the `source.manage` check: Bob reads t-1's file.
+  test("reads nothing once its person may no longer copy to a branch", async () => {
+    // A slice Bob took when he still could: he reads every ticket, but no longer manages the source.
+    const bobs = `${BRANCH_CREDENTIAL_PREFIX}${"b".repeat(43)}`
+    await production.storage.lakeSlices.create({
+      id: "slice_bob",
+      projectId: PROJECT,
+      userId: "usr_bob",
+      branch: "feature/y",
+      point: "point",
+      versions: [],
+      files: [],
+      createdAt: new Date(),
+      credentialHash: createHash("sha256").update(bobs).digest("hex"),
+    })
+
+    const path = encodeURIComponent("/properties/attachment")
+    const response = await fetch(
+      new URL(`api/objects/ticket/t-1/files/content?path=${path}`, production.url),
+      { headers: { authorization: `Bearer ${bobs}` } }
+    )
+    expect(response.status).toBe(401)
+    expect(await response.text()).not.toContain("t-1 file")
+  })
+
+  // Red check: in server.ts, drop the loopback check of the branch person's binding.
+  test("answers only requests that name this machine", async () => {
+    const response = await branch.app.fetch(
+      new Request("http://127.0.0.1/api/objects?objectTypeId=ticket", {
+        headers: { host: "rebound.example.com" },
+      })
+    )
+    expect(response.status).toBe(403)
   })
 })

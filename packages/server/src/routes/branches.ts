@@ -3,8 +3,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { SixbHostView } from "@sixb/core"
 import { isAllowed } from "@sixb/core/internal/authorization"
-import { copyForBranch } from "@sixb/core/internal/branches"
+import { authorizeBranchCredential, copyForBranch } from "@sixb/core/internal/branches"
 import { dropLakeSlice, issueLakeSliceToken } from "@sixb/core/internal/lake-slices"
+import { resolveBranchMode } from "@sixb/core/internal/runtime"
 import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
@@ -17,9 +18,9 @@ interface BranchRouteContext {
 }
 
 /**
- * What `sixb dev --from production` asks production for, as the signed-in person: the copy of
- * what they read, a new token for the lake slice it cut, and the slice's deletion when the copy
- * could not be loaded. The CLI's session or a personal access token: both are the person.
+ * What `sixb dev --from production` asks production for. The copy of what the person reads takes
+ * the CLI's session or a personal access token: both are the person. The branch then renews its
+ * lake token and deletes its slice with the credential the copy gave it, which nothing else takes.
  */
 export function registerBranchRoutes(app: Elysia, host: SixbHostView) {
   const detail = (operationId: string, summary: string) => ({
@@ -29,19 +30,22 @@ export function registerBranchRoutes(app: Elysia, host: SixbHostView) {
     security: accessTokenSecurityRequirement(operationId),
   })
 
-  return app
-    .post("/api/branches/copy", (context) => copyResponse(host, context), {
-      detail: detail(
-        "copyForBranch",
-        "Copy what you read for a branch: the snapshot, then the lake slice of the same moment"
-      ),
-    })
-    .post("/api/branches/lake-token", (context) => lakeTokenResponse(host, context), {
-      detail: detail("renewBranchLakeToken", "Issue a new token for your branch's lake slice"),
-    })
-    .delete("/api/branches/slices/:sliceId", (context) => dropSliceResponse(host, context), {
-      detail: detail("dropBranchLakeSlice", "Delete your branch's lake slice"),
-    })
+  return (
+    app
+      .post("/api/branches/copy", (context) => copyResponse(host, context), {
+        detail: detail(
+          "copyForBranch",
+          "Copy what you read for a branch: the snapshot, then the lake slice of the same moment"
+        ),
+      })
+      // The branch's own credential calls these two; no client builds them.
+      .post("/api/branches/lake-token", (context) => lakeTokenResponse(host, context), {
+        detail: { hide: true },
+      })
+      .delete("/api/branches/slices/:sliceId", (context) => dropSliceResponse(host, context), {
+        detail: { hide: true },
+      })
+  )
 }
 
 async function copyResponse(
@@ -64,15 +68,27 @@ async function copyResponse(
   }
 
   const branch = fieldsOf(payload).branch
-  if (typeof branch !== "string" || branch.trim().length === 0) {
+  const named = branchName(branch)
+  if (named) {
     set.status = 400
-    return { error: "[SixbServer] Name the git branch the copy is for: { branch }." }
+    return { error: named }
   }
+
+  // A copy holds a consistent read open in production: a few at a time, per project.
+  const running = copiesRunning.get(host.id) ?? 0
+  if (running >= MAX_COPIES_PER_PROJECT) {
+    set.status = 429
+    return {
+      error: `[SixbServer] ${running} copies to branches are running for this project. Try again in a minute.`,
+    }
+  }
+  copiesRunning.set(host.id, running + 1)
+  const done = () => copiesRunning.set(host.id, (copiesRunning.get(host.id) ?? 1) - 1)
 
   const directory = await mkdtemp(join(tmpdir(), "sixb-branch-copy-"))
   const parts = copyForBranch(host, {
     person,
-    branch,
+    branch: branch as string,
     requestId: `branch_copy_${crypto.randomUUID()}`,
     directory,
     credential:
@@ -80,56 +96,91 @@ async function copyResponse(
         ? { type: "session", id: session.session.id }
         : { type: "accessToken", id: session.accessToken.id },
   })
+  let finished = false
+  const finish = async () => {
+    if (finished) return
+    finished = true
+    done()
+    await rm(directory, { recursive: true, force: true })
+  }
+  // A branch that goes away mid-copy ends it: its read, its slice and its place in the limit.
+  request.signal.addEventListener(
+    "abort",
+    () => {
+      void parts.return(undefined).finally(finish)
+    },
+    { once: true }
+  )
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         const next = await parts.next()
         if (next.done) {
           controller.close()
-          await rm(directory, { recursive: true, force: true })
+          await finish()
         } else controller.enqueue(next.value)
       } catch (error) {
         controller.error(error)
-        await rm(directory, { recursive: true, force: true })
+        await finish()
       }
     },
     async cancel() {
       await parts.return(undefined)
-      await rm(directory, { recursive: true, force: true })
+      await finish()
     },
   })
 
   return new Response(body, { headers: { "content-type": "application/octet-stream" } })
 }
 
+/** The slice of the branch credential a request carries, or null: these routes take no other. */
+async function credentialSlice(host: SixbHostView, request: Request) {
+  const authorization = request.headers.get("authorization") ?? ""
+  const credential = authorization.startsWith("Bearer ") ? authorization.slice(7) : ""
+  return (await authorizeBranchCredential(host, credential))?.slice ?? null
+}
+
 async function lakeTokenResponse(host: SixbHostView, context: BranchRouteContext) {
+  const slice = await credentialSlice(host, context.request)
   const sliceId = fieldsOf(context.body).sliceId
-  if (typeof sliceId !== "string") {
-    context.set.status = 400
-    return { error: "[SixbServer] Name the lake slice: { sliceId }." }
+  if (!slice || sliceId !== slice.id) {
+    context.set.status = 404
+    return { error: "[SixbServer] This branch has no such lake slice. Take a new copy." }
   }
 
-  const { token, expiresAt } = await issueLakeSliceToken(host, requireRequestSixb(context), {
-    sliceId,
-  })
-  return { token, expiresAt: expiresAt.toISOString() }
+  try {
+    const { token, expiresAt } = await issueLakeSliceToken(host, requireRequestSixb(context), {
+      sliceId,
+    })
+    return { token, expiresAt: expiresAt.toISOString() }
+  } catch (error) {
+    // The person no longer reads a version of the slice in full: they take a new copy.
+    context.set.status = 403
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 async function dropSliceResponse(
   host: SixbHostView,
   context: BranchRouteContext & { readonly params: { readonly sliceId: string } }
 ) {
-  const sixb = requireRequestSixb(context)
-  const userId = sixb.execution.requestedBy?.type === "user" ? sixb.execution.requestedBy.id : null
-  const slice = await host.storage.lakeSlices?.get({
-    projectId: host.id,
-    id: context.params.sliceId,
-  })
-
-  // A person deletes only their own slice; another's is not theirs to know of.
-  if (slice && slice.userId === userId) await dropLakeSlice(host, slice.id)
+  const slice = await credentialSlice(host, context.request)
+  if (slice && slice.id === context.params.sliceId) await dropLakeSlice(host, slice.id)
   context.set.status = 204
   return null
+}
+
+const MAX_COPIES_PER_PROJECT = 2
+const copiesRunning = new Map<string, number>()
+
+/** Null when `branch` names a git branch as a branch's `SIXB_BRANCH` would, else why not. */
+function branchName(branch: unknown): string | null {
+  try {
+    resolveBranchMode({ SIXB_BRANCH: branch as string, SIXB_BRANCH_DATA_FROM: "production" })
+    return typeof branch === "string" ? null : "[SixbServer] Name the git branch: { branch }."
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
 }
 
 function fieldsOf(body: unknown): Record<string, unknown> {

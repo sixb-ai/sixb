@@ -8,6 +8,7 @@ export {
   BRANCH_NAME_ENV,
   branchRefusals,
   putOnBranch,
+  resolveBranchMode,
 } from "../branch-mode"
 export { getConnectorConnectionsRuntime } from "../connectors/connections/capability"
 export type {

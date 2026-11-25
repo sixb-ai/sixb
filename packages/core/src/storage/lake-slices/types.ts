@@ -22,6 +22,11 @@ export interface LakeSliceRecord {
   readonly createdAt: Date
   /** When its last token expires. Absent before its first token. */
   readonly lastTokenExpiresAt?: Date
+  /**
+   * SHA-256 of the branch's credential, which reads production only as its person, only for the
+   * branch: its objects' files and its lake. Absent for a slice cut for no branch credential.
+   */
+  readonly credentialHash?: string
 }
 
 /** One token a branch reads a slice's files with. SHA-256 only: the token is never stored. */
@@ -60,6 +65,11 @@ export interface LakeSliceStorage {
   delete(input: LakeSliceRef): Promise<void>
   /** Records a token for the slice and keeps the later of its expiry and the slice's last one. */
   createGrant(record: LakeSliceGrantRecord): Promise<void>
+  /** The slice a branch credential belongs to, live or not: the caller decides. */
+  findByCredentialHash(input: {
+    readonly projectId: string
+    readonly credentialHash: string
+  }): Promise<LakeSliceRecord | null>
   /** Returns expired grants too; the caller decides whether one still serves. */
   findGrantByTokenHash(input: {
     readonly projectId: string

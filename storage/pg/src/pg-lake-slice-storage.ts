@@ -15,11 +15,12 @@ export class PgLakeSliceStorage implements LakeSliceStorage {
   async create(record: LakeSliceRecord): Promise<void> {
     await this.sql`
       INSERT INTO lake_slices (
-        project_id, id, user_id, branch, point, versions, files, created_at, last_token_expires_at
+        project_id, id, user_id, branch, point, versions, files, created_at, last_token_expires_at,
+        credential_hash
       ) VALUES (
         ${record.projectId}, ${record.id}, ${record.userId}, ${record.branch}, ${record.point},
         ${JSON.stringify(record.versions)}::text::jsonb, ${JSON.stringify(record.files)}::text::jsonb,
-        ${record.createdAt}, ${record.lastTokenExpiresAt ?? null}
+        ${record.createdAt}, ${record.lastTokenExpiresAt ?? null}, ${record.credentialHash ?? null}
       )
     `
   }
@@ -52,6 +53,17 @@ export class PgLakeSliceStorage implements LakeSliceStorage {
       FROM grant_row
       WHERE lake_slices.project_id = grant_row.project_id AND lake_slices.id = grant_row.slice_id
     `
+  }
+
+  async findByCredentialHash(input: {
+    readonly projectId: string
+    readonly credentialHash: string
+  }): Promise<LakeSliceRecord | null> {
+    const [row] = await this.sql<PgRow[]>`
+      SELECT * FROM lake_slices
+      WHERE project_id = ${input.projectId} AND credential_hash = ${input.credentialHash}
+    `
+    return row ? sliceFromRow(row) : null
   }
 
   async findGrantByTokenHash(input: {
@@ -119,5 +131,6 @@ function sliceFromRow(row: PgRow): LakeSliceRecord {
     files: row.files,
     createdAt: row.created_at,
     lastTokenExpiresAt: row.last_token_expires_at,
+    credentialHash: row.credential_hash,
   })
 }

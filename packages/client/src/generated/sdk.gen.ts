@@ -99,7 +99,6 @@ import type {
   DisconnectConnectorConnectionData,
   DisconnectConnectorConnectionErrors,
   DisconnectConnectorConnectionResponses,
-  DropBranchLakeSliceData,
   EditAgentThreadMessageData,
   EditAgentThreadMessageErrors,
   EditAgentThreadMessageResponses,
@@ -586,7 +585,6 @@ import type {
   RemoveAgentThreadParticipantData,
   RemoveAgentThreadParticipantErrors,
   RemoveAgentThreadParticipantResponses,
-  RenewBranchLakeTokenData,
   RequestActionData,
   RequestActionErrors,
   RequestActionResponses,
@@ -1970,38 +1968,6 @@ export const copyForBranch = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/branches/copy",
-    ...options,
-  })
-
-/**
- * Issue a new token for your branch's lake slice
- */
-export const renewBranchLakeToken = <ThrowOnError extends boolean = false>(
-  options?: Options<RenewBranchLakeTokenData, ThrowOnError>
-) =>
-  (options?.client ?? client).post<unknown, unknown, ThrowOnError>({
-    security: [
-      { name: "x-sixb-csrf", type: "apiKey" },
-      { scheme: "bearer", type: "http" },
-      { scheme: "bearer", type: "http" },
-    ],
-    url: "/api/branches/lake-token",
-    ...options,
-  })
-
-/**
- * Delete your branch's lake slice
- */
-export const dropBranchLakeSlice = <ThrowOnError extends boolean = false>(
-  options: Options<DropBranchLakeSliceData, ThrowOnError>
-) =>
-  (options.client ?? client).delete<unknown, unknown, ThrowOnError>({
-    security: [
-      { name: "x-sixb-csrf", type: "apiKey" },
-      { scheme: "bearer", type: "http" },
-      { scheme: "bearer", type: "http" },
-    ],
-    url: "/api/branches/slices/{sliceId}",
     ...options,
   })
 

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { encodeBranchCopyPart, readBranchCopy } from "../src/branches/wire"
 
 const lake = {
+  credential: "sixb_branch_x",
   sliceId: "slice-1",
   point: "ducklake:9",
   token: "t",

@@ -22026,52 +22026,6 @@
         ]
       }
     },
-    "/api/branches/lake-token": {
-      "post": {
-        "summary": "Issue a new token for your branch's lake slice",
-        "tags": ["Branches"],
-        "operationId": "renewBranchLakeToken",
-        "security": [
-          {
-            "sixbCsrf": []
-          },
-          {
-            "sixbAccessToken": []
-          },
-          {
-            "sixbSession": []
-          }
-        ]
-      }
-    },
-    "/api/branches/slices/{sliceId}": {
-      "delete": {
-        "summary": "Delete your branch's lake slice",
-        "tags": ["Branches"],
-        "operationId": "dropBranchLakeSlice",
-        "security": [
-          {
-            "sixbCsrf": []
-          },
-          {
-            "sixbAccessToken": []
-          },
-          {
-            "sixbSession": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "sliceId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
     "/api/syncs": {
       "get": {
         "summary": "List registered syncs",

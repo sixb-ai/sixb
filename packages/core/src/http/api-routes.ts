@@ -960,27 +960,13 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: true,
   },
-  // `sixb dev --from production`: the copy of what the person reads, a new token for its lake
-  // slice, and the slice's deletion. A personal access token copies as its person, as `sixb
-  // login` does; a service account's is refused, since a branch copies what one person reads.
+  // `sixb dev --from production` copies what its person reads. A personal access token copies as
+  // its person, as `sixb login` does; a service account's is refused, since a branch copies what
+  // one person reads. The branch then holds only its own credential (see `branches/credential.ts`).
   {
     operationId: "copyForBranch",
     method: "POST",
     path: "/api/branches/copy",
-    accessToken: true,
-    agentApi: false,
-  },
-  {
-    operationId: "renewBranchLakeToken",
-    method: "POST",
-    path: "/api/branches/lake-token",
-    accessToken: true,
-    agentApi: false,
-  },
-  {
-    operationId: "dropBranchLakeSlice",
-    method: "DELETE",
-    path: "/api/branches/slices/:sliceId",
     accessToken: true,
     agentApi: false,
   },

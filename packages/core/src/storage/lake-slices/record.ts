@@ -27,6 +27,9 @@ export function parseLakeSliceRow(row: { readonly [column: string]: unknown }): 
     ...(row.lastTokenExpiresAt == null
       ? {}
       : { lastTokenExpiresAt: date(row.lastTokenExpiresAt, "lastTokenExpiresAt", id) }),
+    ...(row.credentialHash == null
+      ? {}
+      : { credentialHash: text(row.credentialHash, "credentialHash", id) }),
   }
 }
 

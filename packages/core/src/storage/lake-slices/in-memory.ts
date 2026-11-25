@@ -47,6 +47,18 @@ export class InMemoryLakeSliceStorage implements LakeSliceStorage {
     }
   }
 
+  async findByCredentialHash(input: {
+    readonly projectId: string
+    readonly credentialHash: string
+  }): Promise<LakeSliceRecord | null> {
+    for (const slice of this.slices.values()) {
+      if (slice.projectId === input.projectId && slice.credentialHash === input.credentialHash) {
+        return structuredClone(slice)
+      }
+    }
+    return null
+  }
+
   async findGrantByTokenHash(input: {
     readonly projectId: string
     readonly tokenHash: string

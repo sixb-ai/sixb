@@ -52,6 +52,27 @@ export function runLakeSliceStorageContractSuite<TStorage extends LakeSliceStora
       })
     })
 
+    test("finds a slice by its branch credential, in its project only", async () => {
+      await withStorage(async (storage) => {
+        await storage.create({ ...slice(), credentialHash: "c".repeat(64) })
+        await storage.create({ ...slice(), id: "slice_2" })
+
+        expect(
+          await storage.findByCredentialHash({ projectId, credentialHash: "c".repeat(64) })
+        ).toEqual({ ...slice(), credentialHash: "c".repeat(64) })
+        expect(
+          await storage.findByCredentialHash({ projectId: "other", credentialHash: "c".repeat(64) })
+        ).toBeNull()
+        expect(
+          await storage.findByCredentialHash({ projectId, credentialHash: "d".repeat(64) })
+        ).toBeNull()
+        expect(await storage.get({ projectId, id: "slice_2" })).toEqual({
+          ...slice(),
+          id: "slice_2",
+        })
+      })
+    })
+
     test("refuses a second slice or grant with the same id, and a grant of no slice", async () => {
       await withStorage(async (storage) => {
         await storage.create(slice())

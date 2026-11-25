@@ -19,7 +19,6 @@ import {
   resolveBrowserTopology,
   servedUrl,
 } from "../lib/browser-topology"
-import { connect } from "../lib/connection"
 import {
   DEV_UI_ENV,
   type DevChildMessage,
@@ -185,7 +184,7 @@ export async function runDevRuntime(options: DevOptions = {}) {
         { type: "render", worker: runtime.renderWorker },
       ].flatMap(({ type, worker }) => (worker ? [{ type, concurrency: worker.concurrency }] : [])),
       warnings: [
-        ...(branch ? branchNotice(branch) : []),
+        ...(branch ? branchNotice(branch, apiUrl(topology)) : []),
         ...(devApp.warning ? [devApp.warning] : []),
         ...runtime.warnings,
       ],
@@ -243,39 +242,47 @@ export async function startDevApp(
   }
 }
 
-/** This git branch on a copy of what its developer reads in production, signed in as them. */
+/**
+ * This git branch on the copy the supervisor fetched, or the one it reused, run as the person who
+ * took it. No production session here: the branch reaches production only with its own credential.
+ */
 async function openBranch(
   host: LoadedSixbHost,
   projectRoot: string,
   options: DevOptions
 ): Promise<BranchFromProduction> {
-  const connection = await connect({})
-  if (!("client" in connection)) {
+  // Every request runs as that person, unauthenticated: only this machine may send them.
+  const exposed = [options.host, options.apiHost, options.apiPublicOrigin, options.appPublicOrigin]
+    .filter((value): value is string => value !== undefined)
+    .filter((value) => !isLoopback(value))
+  if (exposed.length > 0) {
     throw new Error(
-      `[SixbCLI] \`sixb dev --from production\` reads production as you: sign in with \`sixb login <production api url>\` (${connection.apiUrl || "no profile"}: ${connection.reason}).`
+      `[SixbCLI] A branch from production listens on this machine only, since every request runs as you: drop ${exposed.join(", ")}.`
     )
   }
 
   return branchFromProduction({
     host,
     projectRoot,
-    production: {
-      apiUrl: connection.apiUrl,
-      authorization: () => connection.authorization(),
-    },
-    gitBranch: await currentGitBranch(projectRoot),
+    // The branch the supervisor started: a checkout since does not change it.
+    gitBranch: process.env.SIXB_BRANCH ?? (await currentGitBranch(projectRoot)),
     gitBranches: await localGitBranches(projectRoot),
-    refresh: options.refresh === true && process.env.SIXB_DEV_RESTART !== "1",
   })
 }
 
+function isLoopback(value: string): boolean {
+  const host = /^[a-z]+:\/\//i.test(value) ? new URL(value).hostname : value
+  return ["localhost", "127.0.0.1", "[::1]", "::1"].includes(host.toLowerCase())
+}
+
 /** What the startup view says of a branch: where its data comes from, and what is off on it. */
-function branchNotice(branch: BranchFromProduction): string[] {
+function branchNotice(branch: BranchFromProduction, apiUrl: string): string[] {
   const age = Math.max(0, Math.round((Date.now() - Date.parse(branch.takenAt)) / 60_000))
   const when = age < 60 ? `${age} min ago` : `${Math.round(age / 60)} h ago`
   return [
     `Branch: production's data as you read it, ${branch.copied ? "copied now" : `copied ${when}`} (${branch.takenAt}). --refresh takes a new copy.`,
-    "Off on this branch: connectors, action writebacks and effects, syncs, inbound webhooks, emails, cron schedules and directory checks.",
+    "Off on this branch: connectors, action writebacks and effects, syncs, inbound webhooks, emails, cron schedules and directory checks. Your project's own fetch calls and the agent's web tools still go out.",
+    `Run a cron schedule on this branch: sixb schedules run <id> --api-url ${apiUrl}`,
     ...(branch.lake === "in place" ? [] : [`Datasets: ${branch.lake}.`]),
     ...branch.dropped.map((gitBranch) => `Dropped the copy of deleted git branch ${gitBranch}.`),
   ]

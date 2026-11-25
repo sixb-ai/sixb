@@ -70,6 +70,8 @@ export interface WriteLakeSliceOptions {
    * from it.
    */
   readonly pinned?: readonly DatasetVersionRef[]
+  /** SHA-256 of the branch's credential, recorded with the slice it reads production for. */
+  readonly credentialHash?: string
 }
 
 export interface IssueLakeSliceTokenInput {
@@ -183,6 +185,7 @@ export async function writeLakeSlice(
           projectId: host.id,
           userId,
           branch: input.branch,
+          ...(input.credentialHash ? { credentialHash: input.credentialHash } : {}),
           point: input.point,
           versions: refs,
           files: [...files],

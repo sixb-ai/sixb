@@ -68,8 +68,6 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
   // Opened once the app is first served, and kept open across restarts: the app reloads itself.
   let desktopWindow: Promise<{ close(): void } | null> | null = null
   let child: { process: ReturnType<typeof spawn>; exited: Promise<number | null> } | null = null
-  /** Whether a child ran already: a restart reuses the branch's copy, whatever `--refresh` said. */
-  let spawned = false
   let stopping = false
   let restarting = false
   let pending = false
@@ -150,15 +148,12 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
             ...process.env,
             SIXB_DEV_CHILD: "1",
             SIXB_DEV_GENERATION: crypto.randomUUID(),
-            // A restart reuses the branch's copy: --refresh takes a new one once, at start.
-            SIXB_DEV_RESTART: spawned ? "1" : "",
             SIXB_DEV_READY: "",
             [DEV_UI_ENV]: reporter.output === "pipe" ? "footer" : "",
           },
           detached: process.platform !== "win32",
           stdio: ["ignore", reporter.output, reporter.output, "ipc"],
         })
-        spawned = true
         if (reporter.output === "pipe") {
           forwardLines(proc.stdout, reporter)
           forwardLines(proc.stderr, reporter)

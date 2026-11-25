@@ -29,7 +29,11 @@ import { PostgresStorage } from "@sixb/pg"
 import { SqliteStorage } from "@sixb/sqlite"
 import { createSixbApi, SixbServer } from "../../server/src/server"
 import { createTestBrowserPolicy } from "../../server/tests/helpers"
-import { branchFromProduction, namespaceFor } from "../src/lib/branch-from-production"
+import {
+  branchFromProduction,
+  fetchBranchCopy,
+  namespaceOf,
+} from "../src/lib/branch-from-production"
 import type { LoadedSixbHost } from "../src/lib/loadSixb"
 
 // `sixb dev --from production` on a laptop: production runs on PostgreSQL with a DuckLake lake on
@@ -227,19 +231,26 @@ describe.each(laptops)("a laptop branch on %s", (_name, localStorage) => {
   test("copies what the person reads once, reuses it, refreshes it, and drops it with its git branch", async () => {
     const local = await laptop()
     const alice = await signedIn("usr_alice")
-    const open = (gitBranch: string, gitBranches: string[], refresh = false) =>
-      branchFromProduction({
+    // As `sixb dev --from production` does: the supervisor fetches, the branch's process loads.
+    const open = async (gitBranch: string, gitBranches: string[], refresh = false) => {
+      await fetchBranchCopy({
+        projectRoot: local.projectRoot,
+        gitBranch,
+        refresh,
+        profile: "alice",
+        connect: async () => alice,
+      })
+      return branchFromProduction({
         host: local.host,
         projectRoot: local.projectRoot,
-        production: alice,
         gitBranch,
         gitBranches,
-        refresh,
       })
+    }
 
     const first = await open("feature/x", ["feature/x", "main"])
     expect(first.copied).toBe(true)
-    expect(first.namespace).toBe(namespaceFor("feature/x"))
+    expect(first.namespace).toBe(await namespaceOf(local.projectRoot, "feature/x"))
     expect(first.lake).toBe("in place")
     expect(branchRuntimeOf(first.host)?.person.userId).toBe("usr_alice")
     // Only what Alice reads: the closed ticket stays in production.
@@ -277,7 +288,7 @@ describe.each(laptops)("a laptop branch on %s", (_name, localStorage) => {
       await (
         local.storage as never as { listBranchNamespaces(): Promise<string[]> }
       ).listBranchNamespaces()
-    ).toEqual([namespaceFor("main")])
+    ).toEqual([await namespaceOf(local.projectRoot, "main")])
     expect(await live()).toBe(slices)
 
     await onMain.host.lakeStorage.close?.()
@@ -285,15 +296,54 @@ describe.each(laptops)("a laptop branch on %s", (_name, localStorage) => {
     await local.storage.close?.()
   }, 120_000)
 
+  // Red check: in `fetchBranchCopy`, reuse whatever copy exists, whoever is signed in.
+  test("reuses a copy only for the profile that took it", async () => {
+    const local = await laptop()
+    const alice = await signedIn("usr_alice")
+    const fetch = (profile: string, refresh = false) =>
+      fetchBranchCopy({
+        projectRoot: local.projectRoot,
+        gitBranch: "feature/x",
+        refresh,
+        profile,
+        connect: async () => alice,
+      })
+    expect(await fetch("alice")).toBe(true)
+    await branchFromProduction({
+      host: local.host,
+      projectRoot: local.projectRoot,
+      gitBranch: "feature/x",
+      gitBranches: ["feature/x"],
+    }).then((opened) => opened.host.lakeStorage.close?.())
+
+    // Reusing needs no network: a connection would throw.
+    expect(
+      await fetchBranchCopy({
+        projectRoot: local.projectRoot,
+        gitBranch: "feature/x",
+        profile: "alice",
+        connect: async () => {
+          throw new Error("offline")
+        },
+      })
+    ).toBe(false)
+    expect(String(await fetch("bob").catch((error: unknown) => error))).toContain(
+      "taken as alice, and you are signed in as bob"
+    )
+    expect(await fetch("bob", true)).toBe(true)
+    await local.lake.close()
+    await local.storage.close?.()
+  }, 60_000)
+
   // Red check: drop the grant check from `copyForBranch` and the route.
   test("refuses a person who may not copy", async () => {
     const local = await laptop()
-    const refused = await branchFromProduction({
-      host: local.host,
+    const bob = await signedIn("usr_bob")
+    const refused = await fetchBranchCopy({
       projectRoot: local.projectRoot,
-      production: await signedIn("usr_bob"),
       gitBranch: "feature/x",
-      gitBranches: ["feature/x"],
+      profile: "bob",
+      connect: async () => bob,
     }).catch((error: unknown) => error)
 
     expect(String(refused)).toContain("can.manage(project.source)")
@@ -441,7 +491,7 @@ export const sixb = await createSixb({
 
   /** Edit t-1 straight in the branch's SQLite file, as the branch's own write would land. */
   async function editOnBranch(root: string) {
-    const directory = join(root, ".sixb/storage/branches", namespaceFor("feature/x"))
+    const directory = join(root, ".sixb/storage/branches", await namespaceOf(root, "feature/x"))
     const file = (await readdir(directory)).find((name) => !name.includes("-"))!
     const db = new Database(join(directory, file))
     db.run(
@@ -451,8 +501,8 @@ export const sixb = await createSixb({
   }
 
   // Red checks: in commands/dev-runner.ts, start the project's own host instead of the branch's:
-  // the API serves the laptop's empty storage. In lib/dev-supervisor.ts, mark every child a
-  // restart: --refresh is ignored, as it was before this test found it.
+  // the API serves the laptop's empty storage. In commands/dev.ts, leave `refresh` out of
+  // `fetchBranchCopy`: --refresh reuses the copy, as it once did before this test found it.
   test("copies, serves the copy as the person, reuses it, refreshes it, and drops it with its git branch", async () => {
     const root = await checkout()
     const alice = (await signedIn("usr_alice")).authorization
@@ -482,9 +532,51 @@ export const sixb = await createSixb({
       const onMain = await dev(root, token)
       expect(onMain.output()).toContain("Dropped the copy of deleted git branch feature/x")
       await onMain.stop()
-      expect(await readdir(join(root, ".sixb/storage/branches"))).toEqual([namespaceFor("main")])
+      expect(await readdir(join(root, ".sixb/storage/branches"))).toEqual([
+        await namespaceOf(root, "main"),
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
   }, 300_000)
+})
+
+describe("production's copy route", () => {
+  // Red check: in routes/branches.ts, drop the copies-running limit. (That a copy cut short leaves
+  // no slice is `packages/core/tests/branch-copy.test.ts`'s.)
+  test("runs two copies at a time, and a branch that goes away frees its place", async () => {
+    const alice = await signedIn("usr_alice")
+    const live = async () =>
+      (await production.storage.lakeSlices.listLive({ projectId: PROJECT, liveAfter: new Date(0) }))
+        .length
+    const before = await live()
+    const copy = async (signal?: AbortSignal) =>
+      fetch(new URL("api/branches/copy", production.url), {
+        method: "POST",
+        headers: { authorization: await alice.authorization(), "content-type": "application/json" },
+        body: JSON.stringify({ branch: "feature/limit" }),
+        ...(signal ? { signal } : {}),
+      })
+
+    const goneFirst = new AbortController()
+    const goneSecond = new AbortController()
+    const first = await copy(goneFirst.signal)
+    const second = await copy(goneSecond.signal)
+    const third = await copy()
+    expect([first.status, second.status, third.status]).toEqual([200, 200, 429])
+
+    // Both branches go away before reading their copies through: their places come back.
+    await first.body!.getReader().read()
+    goneFirst.abort()
+    goneSecond.abort()
+    let next = await copy()
+    for (const deadline = Date.now() + 10_000; next.status === 429 && Date.now() < deadline; ) {
+      await Bun.sleep(25)
+      next = await copy()
+    }
+    expect(next.status).toBe(200)
+    await next.arrayBuffer()
+
+    expect(await live()).toBe(before + 1)
+  }, 60_000)
 })

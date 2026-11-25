@@ -1,7 +1,9 @@
 import { dirname, resolve } from "node:path"
 import { BRANCH_DATA_FROM_ENV, BRANCH_NAME_ENV } from "@sixb/core/internal/runtime"
-import { currentGitBranch } from "../lib/branch-from-production"
+import { currentGitBranch, fetchBranchCopy } from "../lib/branch-from-production"
+import { connect } from "../lib/connection"
 import { runDevSupervisor } from "../lib/dev-supervisor"
+import { resolveProfile } from "../lib/profiles"
 import type { DevOptions } from "./dev-runner"
 import { assertDevEnv } from "./env"
 
@@ -43,8 +45,31 @@ export async function runDev(options: DevOptions = {}) {
         "[SixbCLI] `sixb dev --from` takes `production`: a branch copies its data from production. Add --refresh to take a new copy."
       )
     }
-    process.env[BRANCH_NAME_ENV] = await currentGitBranch(root)
+    const gitBranch = await currentGitBranch(root)
+    // Signed in as the developer here, once: the processes that run the branch's code never are.
+    await fetchBranchCopy({
+      projectRoot: root,
+      gitBranch,
+      refresh: options.refresh === true,
+      profile: await profileName(),
+      connect: async () => {
+        const connection = await connect({})
+        if (!("client" in connection)) {
+          throw new Error(
+            `[SixbCLI] \`sixb dev --from production\` copies production as you: sign in with \`sixb login <production api url>\` (${connection.apiUrl || "no profile"}: ${connection.reason}).`
+          )
+        }
+        return { apiUrl: connection.apiUrl, authorization: () => connection.authorization() }
+      },
+    })
+    process.env[BRANCH_NAME_ENV] = gitBranch
     process.env[BRANCH_DATA_FROM_ENV] = "production"
   }
   await runDevSupervisor(options)
+}
+
+/** Who the CLI is signed in as, read without the network: a copy is reused only by them. */
+async function profileName(): Promise<string> {
+  const profile = await resolveProfile({})
+  return `${profile.profile ?? profile.tokenSource ?? "no sign-in"} at ${profile.apiUrl}`
 }

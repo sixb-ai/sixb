@@ -12,7 +12,8 @@ import type { SqliteStoreConnection } from "./transactions"
 
 const SLICE_COLUMNS = `
   project_id AS projectId, id, user_id AS userId, branch, point, versions, files,
-  created_at AS createdAt, last_token_expires_at AS lastTokenExpiresAt
+  created_at AS createdAt, last_token_expires_at AS lastTokenExpiresAt,
+  credential_hash AS credentialHash
 `
 const LIVE_UNTIL = "coalesce(last_token_expires_at, created_at)"
 
@@ -27,8 +28,9 @@ export class SqliteLakeSliceStorage implements LakeSliceStorage {
     this.db
       .query(
         `INSERT INTO lake_slices (
-          project_id, id, user_id, branch, point, versions, files, created_at, last_token_expires_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          project_id, id, user_id, branch, point, versions, files, created_at, last_token_expires_at,
+          credential_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         record.projectId,
@@ -39,7 +41,8 @@ export class SqliteLakeSliceStorage implements LakeSliceStorage {
         JSON.stringify(record.versions),
         JSON.stringify(record.files),
         record.createdAt.toISOString(),
-        record.lastTokenExpiresAt?.toISOString() ?? null
+        record.lastTokenExpiresAt?.toISOString() ?? null,
+        record.credentialHash ?? null
       )
   }
 
@@ -88,6 +91,18 @@ export class SqliteLakeSliceStorage implements LakeSliceStorage {
           record.sliceId
         )
     })()
+  }
+
+  async findByCredentialHash(input: {
+    readonly projectId: string
+    readonly credentialHash: string
+  }): Promise<LakeSliceRecord | null> {
+    const row = this.db
+      .query(
+        `SELECT ${SLICE_COLUMNS} FROM lake_slices WHERE project_id = ? AND credential_hash = ?`
+      )
+      .get(input.projectId, input.credentialHash) as Record<string, unknown> | null
+    return row ? parseLakeSliceRow(row) : null
   }
 
   async findGrantByTokenHash(input: {
