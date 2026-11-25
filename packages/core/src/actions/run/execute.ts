@@ -1,4 +1,5 @@
 import type { ArtifactsRuntime } from "../../artifacts/execution"
+import type { SixbBranch } from "../../branch-mode"
 import { createSixbError } from "../../errors/internal"
 import {
   type BoundPrimitiveExecution,
@@ -21,6 +22,8 @@ import type {
 
 /** What executing a stored Action run needs from its host. */
 export interface ActionRunHost extends PrimitiveExecutionHost {
+  /** On a branch, a writeback is refused and effects are skipped: see `branch-mode/README.md`. */
+  readonly branch?: SixbBranch | null
   readonly storage: Storage
   readonly logging?: LoggingService
   readonly definitions: Pick<SixbDefinitions, "actions">
@@ -115,6 +118,7 @@ function buildActionContext(
   }
   return {
     id: host.id,
+    branch: host.branch ?? null,
     errorReporterHost: host,
     logging: host.logging,
     storage: host.storage,

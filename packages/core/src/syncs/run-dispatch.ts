@@ -1,3 +1,5 @@
+import type { SixbBranch } from "../branch-mode"
+import { branchRefusals } from "../branch-mode/refusals"
 import { isOAuthConnectorDefinition } from "../connectors"
 import { reportRunFailure } from "../error-reporting/capability"
 import { toSixbFailure } from "../errors/internal"
@@ -47,6 +49,8 @@ export type SyncRunDispatchPort = RunDispatcher<
 
 export interface SyncRunDispatcherDependencies {
   readonly id: string
+  /** On a branch, no sync runs: a trigger's dispatch is refused, and the orchestrator reports it. */
+  readonly branch?: SixbBranch | null
   readonly definitions: Pick<SixbDefinitions, "syncs">
   readonly storage: Storage
   readonly queues: Pick<Queues, "syncRuns">
@@ -77,6 +81,7 @@ export class SyncRunDispatcher implements SyncRunDispatchPort {
     assertAutomaticDispatchInput(input)
     const sync = this.dependencies.definitions.syncs.getById(input.syncId)
     if (!sync) throw new SyncValidationError(`[Sixb] Unknown sync '${input.syncId}'`)
+    if (this.dependencies.branch) throw branchRefusals.sync(this.dependencies.branch, sync.id)
 
     if (!isOAuthConnectorDefinition(sync.connector)) {
       return [await this.dispatchRun(sync, input, input.runId)]

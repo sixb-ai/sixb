@@ -15,6 +15,11 @@ export interface ProjectionsPassInput {
     LakeStorage,
     "getLatestVersion" | "getVersion" | "listVersions" | "fork"
   >
+  /**
+   * The datasets whose projections this pass recovers. Every one by default. A branch must never
+   * re-derive what production had already projected when it was copied, so it passes its own.
+   */
+  readonly recovers?: (datasetId: string) => boolean
 }
 
 /**
@@ -30,7 +35,12 @@ export interface ProjectionsPassInput {
  * Runs that lost their publication are the `runs` pass's (see `republishQueuedProjectionRuns`).
  */
 export function projectionsPass(input: ProjectionsPassInput): MaintenancePass {
-  const recovery = new ProjectionRecovery(input)
+  const { recovers } = input
+  const descriptors = recovers
+    ? input.descriptors.filter((descriptor) => recovers(descriptor.datasetId))
+    : input.descriptors
+
+  const recovery = new ProjectionRecovery({ ...input, descriptors })
 
   return recoveryPass("projections", (signal) => recovery.run(signal))
 }

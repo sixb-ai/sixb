@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import type { SixbBranch } from "../branch-mode"
 import type { RunDispatcher } from "../execution/dispatch"
 import { createPrimitiveExecutionRecord } from "../execution/durable"
 import type { DatasetProducer, LakeStorage } from "../lake-storage"
@@ -44,6 +45,8 @@ export type ProjectionRunDispatchPort = RunDispatcher<
 
 export interface ProjectionRunDispatcherDependencies {
   readonly id: string
+  /** A branch names its runs apart from production's (see `createProjectionRunId`). */
+  readonly branch?: SixbBranch | null
   readonly definitions: Pick<SixbDefinitions, "projections">
   readonly lakeStorage: Pick<LakeStorage, "getVersion">
   readonly storage: Storage
@@ -82,7 +85,7 @@ export class ProjectionRunDispatcher implements ProjectionRunDispatchPort {
       ...semanticIdentity,
       datasetVersion: structuredClone(input.datasetVersion),
     }
-    const runId = createProjectionRunId(this.dependencies.id, identity)
+    const runId = createProjectionRunId(this.dependencies.id, identity, this.dependencies.branch)
     const projectionRuns = requireProjectionRunStorage(this.dependencies.storage)
     // Most dispatches repeat an admitted one: the live commit event and the reconciler both
     // dispatch each version. Only admitProjectionRun creates a run, once the lake confirms its

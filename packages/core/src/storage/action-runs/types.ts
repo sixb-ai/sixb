@@ -23,6 +23,7 @@ export const ACTION_RUN_FAILURE_CODES = [
   "action.read_conflict",
   "action.rejected",
   "action.timeout",
+  "branch.refused",
   "object.unique_violation",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 
@@ -66,7 +67,7 @@ export type ActionRunEffectsRecord =
       readonly error: ActionRunFailure<"effects">
     }
   | {
-      /** The effects did not run, as on a branch, which sends nothing. */
+      /** The effects did not run: a branch sends nothing (see `branch-mode/README.md`). */
       readonly status: "skipped"
       readonly completedAt: Date
       readonly error?: never

@@ -104,6 +104,7 @@ async function createContext(
   })
   return {
     id: host.id,
+    branch: null,
     errorReporterHost: host,
     storage: host.storage,
     actionRunsStorage: host.storage.actionRuns!,

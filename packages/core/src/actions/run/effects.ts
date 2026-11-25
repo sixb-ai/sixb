@@ -1,3 +1,4 @@
+import type { SixbBranch } from "../../branch-mode"
 import { reportActionPhaseFailure } from "../../error-reporting/capability"
 import type { Logger } from "../../logging"
 import { resolveLoggingService } from "../../logging/service"
@@ -38,11 +39,11 @@ export async function runActionEffects(input: RunActionEffectsInput): Promise<vo
   const deadline = input.startDeadline()
 
   try {
-    const outcome = await callEffects(
-      input,
-      deadline.signal,
-      logSession.withContext({ phase: "effects" })
-    )
+    const logger = logSession.withContext({ phase: "effects" })
+    const outcome = runtime.branch
+      ? skipEffects(input, runtime.branch, logger)
+      : await callEffects(input, deadline.signal, logger)
+
     try {
       await runtime.actionRunsStorage.recordEffects(outcome)
     } catch (error) {
@@ -54,6 +55,28 @@ export async function runActionEffects(input: RunActionEffectsInput): Promise<vo
   } finally {
     deadline.dispose()
     await logSession.flush()
+  }
+}
+
+/**
+ * Effects notify people and systems, and a branch sends nothing: they are recorded as skipped, and
+ * the run's logs say why, so the run reads the same as in production but for what it sent.
+ */
+function skipEffects(
+  input: RunActionEffectsInput,
+  branch: SixbBranch,
+  logger: Logger
+): RecordActionEffectsInput {
+  logger.info(
+    `[Sixb] Branch "${branch.name}": the effects of action '${input.action.id}' were skipped. ` +
+      "A branch notifies no one; they run in production."
+  )
+
+  return {
+    id: input.state.run.id,
+    projectId: input.runtime.id,
+    status: "skipped",
+    completedAt: new Date(),
   }
 }
 

@@ -1029,6 +1029,7 @@ export type { VideoExportProgress } from "./artifacts/video/export"
 export type { ArtifactWarning } from "./artifacts/warnings"
 export type { CreateFileDownloadUrlOptions, FileDownloadUrl } from "./blob-storage/download-urls"
 export type { BlobsRuntime } from "./blob-storage/execution"
+export type { SixbBranch } from "./branch-mode"
 export type { ConnectorRuntime } from "./connectors/execution"
 export type {
   DatasetIngestInput,

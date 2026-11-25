@@ -12,6 +12,7 @@ import { registerCallerArtifacts } from "../artifacts/caller"
 import { type ArtifactsRuntime, createArtifactsRuntime } from "../artifacts/execution"
 import { type BlobsRuntime, createBlobsRuntime } from "../blob-storage/execution"
 import type { BlobStorage } from "../blob-storage/types"
+import type { SixbBranch } from "../branch-mode"
 import { registerConnectorConnectionsRuntime } from "../connectors/connections/capability"
 import type { ConnectorConnectionProcess } from "../connectors/connections/contracts"
 import { createConnectorConnectionsRuntime } from "../connectors/connections/execution"
@@ -50,6 +51,11 @@ import type { SixbRuntimeContext } from "./types"
 /** Domain SDK bound to one immutable execution and one registered runtime authority. */
 export interface Sixb<TParams extends Record<string, unknown> = Record<string, unknown>> {
   readonly execution: ExecutionContext
+  /**
+   * The branch this runs on, such as `{ name: "feature/invoices", dataFrom: "production" }`, or
+   * `null` in production and plain `sixb dev`. On a branch, nothing reaches an outside system.
+   */
+  readonly branch: SixbBranch | null
   readonly objects: ObjectsRuntime
   readonly actions: ActionsRuntime
   readonly datasets: DatasetsRuntime
@@ -109,6 +115,7 @@ export function createBoundSixb<TParams extends Record<string, unknown> = Record
   })
   const sixb: Sixb<TParams> = {
     execution,
+    branch: runtime.branch,
     ...createExecutionFacades<TParams>(runtime, execution, dependencies),
   }
   shareOntologyMutationRuntime(runtime, sixb)
@@ -135,7 +142,7 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   dependencies: SixbDependencies
-): Omit<Sixb<TParams>, "execution"> {
+): Omit<Sixb<TParams>, "execution" | "branch"> {
   const artifacts = createArtifactsRuntime(runtime, dependencies.blobStorage, {
     rendersInSandboxes: dependencies.rendersInSandboxes,
     transcribesMedia: dependencies.definitions.models?.audio?.transcription !== undefined,

@@ -68,6 +68,7 @@ function fixture(
   })
   const runtime: SixbHostContext = {
     projectId: host.id,
+    branch: null,
     ontology: f.ontology,
     embeddingModels: host.definitions.models?.embedding,
     actionRegistry: host.definitions.actions,

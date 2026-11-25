@@ -1,5 +1,6 @@
 import type { DomainEventLog } from "../../events"
 import { PendingTasks } from "../../pending-tasks"
+import { SchedulerValidationError } from "../../scheduler/errors"
 import { nextCronOccurrence } from "../../schedules/next-occurrence"
 import type { CronScheduleDefinition, ScheduleDefinition } from "../../schedules/types"
 import { rejectOnAbort } from "../../shared/backoff"
@@ -206,6 +207,37 @@ class CronOccurrences {
       return undefined
     }
   }
+}
+
+/**
+ * Appends `schedule.triggered` for a cron schedule now, outside its clock, so what it starts runs
+ * as on any occurrence. Its key is its own, so it never takes the place of a real occurrence that
+ * falls on the same second.
+ */
+export async function triggerScheduleNow(
+  events: Pick<DomainEventLog, "append">,
+  schedule: ScheduleDefinition,
+  now: Date = new Date()
+): Promise<void> {
+  if (!isCronSchedule(schedule)) {
+    throw new SchedulerValidationError(
+      `[Sixb] Schedule '${schedule.id}' runs when its event happens, not on a clock, so it cannot ` +
+        "be run now. Make the event happen instead."
+    )
+  }
+
+  const at = now.toISOString()
+  const occurrenceKey = `${schedule.id}:now:${at}`
+
+  await events.append({
+    events: [
+      {
+        type: "schedule.triggered",
+        idempotencyKey: occurrenceKey,
+        payload: { scheduleId: schedule.id, occurrenceAt: at, triggeredAt: at, occurrenceKey },
+      },
+    ],
+  })
 }
 
 function dueAt(next: NextOccurrence): Date {

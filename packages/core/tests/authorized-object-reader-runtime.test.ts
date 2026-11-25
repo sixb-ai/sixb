@@ -73,6 +73,7 @@ describe("AuthorizedObjectReader runtime binding", () => {
     }
     const runtime: SixbRuntimeContext = {
       projectId,
+      branch: null,
       runtimeAuthorization: scope.authorization,
       objectReader: createAuthorizedObjectReader({
         scope,

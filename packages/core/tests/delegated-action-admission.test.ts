@@ -78,6 +78,7 @@ async function createFixture() {
   })
   const runtimeHost: RuntimeHost = {
     projectId: host.id,
+    branch: null,
     broker: host.broker,
     ontology: host.definitions.ontology as OntologyRegistry,
     actionRegistry: host.definitions.actions,
@@ -108,6 +109,7 @@ function createDelegatedRuntime(
   })
   const runtime: SixbRuntimeContext = {
     projectId: host.projectId,
+    branch: null,
     broker: host.broker,
     ontology: host.ontology,
     actionRegistry: host.actionRegistry,

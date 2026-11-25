@@ -1,5 +1,6 @@
 import type { ArtifactsRuntime } from "../../artifacts/execution"
 import type { BlobsRuntime } from "../../blob-storage/execution"
+import type { SixbBranch } from "../../branch-mode"
 import type { ConnectorRuntime } from "../../connectors/execution"
 import type { RequestClient } from "../../execution/request-client"
 import type { AuthorizablePrincipal } from "../../execution/types"
@@ -27,6 +28,8 @@ export interface ActionExecutionFacade {
 
 export interface ActionRunContext {
   readonly id: string
+  /** The branch the run executes on, or `null`. */
+  readonly branch: SixbBranch | null
   readonly errorReporterHost: object
   readonly logging?: LoggingService
   readonly storage: Storage

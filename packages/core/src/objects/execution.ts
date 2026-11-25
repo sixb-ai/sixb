@@ -166,6 +166,7 @@ export function createObjectsRuntime(
   const authorization = runtime.authorization
   const capturedRuntime: SixbRuntimeContext = {
     projectId: runtime.projectId,
+    branch: runtime.branch,
     broker: runtime.broker,
     ontology: runtime.ontology,
     embeddingModels: runtime.embeddingModels,

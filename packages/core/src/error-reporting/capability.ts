@@ -1,3 +1,4 @@
+import type { SixbBranch } from "../branch-mode"
 import { SixbErrorReporter } from "./reporter"
 import {
   type ReportActionPhaseFailureInput,
@@ -45,9 +46,10 @@ function resolveSixbErrorReporter(host: unknown): SixbErrorReporter {
 
 export function attachSixbErrorReporter(
   host: object,
-  handler?: SixbErrorHandler
+  handler?: SixbErrorHandler,
+  branch?: SixbBranch | null
 ): SixbErrorReporter {
-  const reporter = new SixbErrorReporter(handler)
+  const reporter = new SixbErrorReporter(handler, branch ?? null)
   ;(host as ErrorReporterHost)[ERROR_REPORTER] = reporter
   return reporter
 }

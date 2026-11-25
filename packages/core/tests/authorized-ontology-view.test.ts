@@ -582,6 +582,7 @@ describe("authorized ontology view", () => {
     let objectReaderReads = 0
     const runtime = {
       projectId: scope.execution.projectId,
+      branch: null,
       broker: host.broker,
       ontology,
       actionRegistry: host.definitions.actions,
