@@ -27,7 +27,7 @@ import { exportSnapshot, hostSnapshotSource, importSnapshot } from "@sixb/core/i
 import { createTestSixb } from "@sixb/core/testing"
 import { createTestingScope } from "../../core/src/execution/scopes"
 import { createSixbApi, SixbServer } from "../src/server"
-import { createTestBrowserPolicy } from "./helpers"
+import { createTestBrowserPolicy, getFreePort } from "./helpers"
 
 // A branch on a laptop serves every request as the person who copied production's data, and reads
 // the files of its objects through production, as that person.
@@ -72,7 +72,11 @@ function options(storage: InMemoryStorage, blobStorage = new InMemoryBlobStorage
 
 let production: { host: SixbHost; storage: InMemoryStorage; url: string }
 let server: ReturnType<typeof Bun.serve>
-let branch: { app: ReturnType<typeof createSixbApi>; storage: InMemoryStorage }
+let branch: {
+  app: ReturnType<typeof createSixbApi>
+  host: SixbHost
+  storage: InMemoryStorage
+}
 const tokens: Record<string, string> = {}
 let credential: string
 
@@ -163,6 +167,7 @@ beforeAll(async () => {
     app: createSixbApi(
       new SixbServer({ host: branchHost, quiet: true, browser: createTestBrowserPolicy() })
     ),
+    host: branchHost,
     storage: namespace,
   }
 })
@@ -287,3 +292,61 @@ describe("a branch's credential in production", () => {
     expect(response.status).toBe(403)
   })
 })
+
+describe("a branch and the websites a browser opens", () => {
+  // A branch runs every request as Alice, so the browser origin check is all that keeps a page
+  // elsewhere from acting as her: `sixb dev` lets only this machine's origins through on a branch.
+  // Red check: in server.ts, drop `rejectDisallowedBrowserOrigin` from `onRequest`: a page on any
+  // website runs a schedule as Alice, and opens her sockets.
+  test("refuses a request a page elsewhere sends, and takes one this machine's pages send", async () => {
+    const post = (origin: string) =>
+      branch.app.fetch(
+        new Request("http://localhost/api/schedules/nightly/runs", {
+          method: "POST",
+          headers: { origin, "content-type": "text/plain" },
+        })
+      )
+    expect((await post("https://evil.example")).status).toBe(403)
+    expect((await post("null")).status).toBe(403)
+    // Past the origin, the request reaches the route: this project has no such schedule.
+    expect((await post("http://app.localhost")).status).toBe(404)
+  })
+
+  test("opens its sockets to this machine's pages only", async () => {
+    const port = await getFreePort()
+    const server = new SixbServer({
+      host: branch.host,
+      hostname: "127.0.0.1",
+      port,
+      quiet: true,
+      browser: createTestBrowserPolicy({ apiOrigin: `http://127.0.0.1:${port}` }),
+    })
+    await server.start()
+    try {
+      for (const path of ["/ws/events", "/ws/agents", "/ws/logs"]) {
+        const url = `ws://127.0.0.1:${port}${path}`
+        expect(await opens(url, "https://evil.example")).toBe(false)
+        expect(await opens(url, "http://app.localhost")).toBe(true)
+      }
+    } finally {
+      await server.stop()
+    }
+  })
+})
+
+/** Whether a socket to `url` opens for a page of `origin`: it opens, or it closes unopened. */
+function opens(url: string, origin: string): Promise<boolean> {
+  const TestWebSocket = WebSocket as unknown as new (
+    url: string,
+    options: { readonly headers: Record<string, string> }
+  ) => WebSocket
+  const ws = new TestWebSocket(url, { headers: { origin } })
+
+  return new Promise((resolve) => {
+    ws.addEventListener("open", () => {
+      ws.close()
+      resolve(true)
+    })
+    ws.addEventListener("close", () => resolve(false))
+  })
+}
