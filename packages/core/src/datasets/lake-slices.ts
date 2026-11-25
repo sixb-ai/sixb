@@ -340,6 +340,22 @@ export async function dropLakeSlice(host: LakeSliceHost, sliceId: string): Promi
 }
 
 /**
+ * Whether the person reads a version of a dataset in full, as a slice decides it: a snapshot
+ * takes a projection's source over only then.
+ */
+export async function readsVersionInFull(
+  reader: LakeSliceReader,
+  datasetId: string,
+  versionId: string
+): Promise<boolean> {
+  const dataset = reader.datasets.list().find((candidate) => candidate.id === datasetId)
+  if (!dataset) return false
+
+  const hidden = await hiddenColumns(reader, dataset, versionId)
+  return hidden !== null && hidden.length === 0
+}
+
+/**
  * The columns of a version its reader cannot read, or null when the version does not exist.
  * This is the reader's own `readRows`, so a slice never decides access otherwise than a read; it
  * reads no row, since its rows are never iterated.

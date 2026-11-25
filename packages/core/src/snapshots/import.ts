@@ -3,12 +3,14 @@ import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execu
 import { createKernelScope } from "../execution/scopes"
 import type { JsonValue } from "../json"
 import { sha256Canonical } from "../materialization/identity"
+import { projectionEntityKey } from "../materialization/refs"
 import { vectorConfiguration } from "../objects/vectors/profile"
 import type { OntologyRegistry } from "../ontology"
 import { collectArtifactRefIds } from "../ontology/artifact-ref"
 import type { ObjectType, Property } from "../ontology/types"
 import { UNIQUE_VALUE_KEY_VERSION, uniqueValueKey } from "../ontology/unique-values"
 import type { UserRef } from "../ontology/user-ref"
+import type { ProjectionDefinitionCatalog } from "../projections"
 import { computeOntologyRevision } from "../projections/revision"
 import {
   type OntologyCommitRecord,
@@ -26,12 +28,14 @@ import {
   type SnapshotLoader,
   type SnapshotLoadStorage,
   type SnapshotObjectWrite,
+  type SnapshotSourceWrite,
 } from "../storage/snapshots"
 import type { Storage } from "../storage/types"
-import { checkTypeFits } from "./definitions"
+import { checkTypeFits, type TypeFit } from "./definitions"
 import {
   decodeSnapshot,
   fromColumns,
+  type SnapshotEdits,
   type SnapshotEnd,
   type SnapshotLinks,
   type SnapshotManifest,
@@ -39,6 +43,7 @@ import {
   type SnapshotObjects,
   type SnapshotPoints,
   type SnapshotRecord,
+  type SnapshotSourceRoots,
   type SnapshotTypeManifest,
   type SnapshotVectors,
 } from "./format"
@@ -50,6 +55,11 @@ export interface ImportSnapshotInput {
   readonly storage: Storage
   /** The branch's definitions: each type is checked against them, and imported if it fits. */
   readonly ontology: OntologyRegistry
+  /**
+   * The branch's projections. A type whose source travels is loaded as that source when the
+   * branch's projection of the same id still feeds it; otherwise as created objects.
+   */
+  readonly projections?: ProjectionDefinitionCatalog
 }
 
 export interface SnapshotImportReport {
@@ -84,8 +94,15 @@ export interface ImportedSnapshotType {
   readonly droppedLinks: number
   /** Vector profiles left out, and why. */
   readonly skippedVectors: readonly { readonly profile: string; readonly reason: string }[]
-  /** Set for a type a projection feeds in production, which cannot run on the branch yet. */
+  /** Set for a type a projection feeds in production. */
   readonly projectionId?: string
+  /**
+   * Whether the branch's projection continues from production's source, so a new version of its
+   * dataset on the branch updates the objects. Set with `projectionId`.
+   */
+  readonly reprojectable?: boolean
+  /** Why it cannot, when it cannot: the type was loaded as created objects. */
+  readonly notReprojectable?: string
 }
 
 /**
@@ -108,7 +125,7 @@ export async function importSnapshot(input: ImportSnapshotInput): Promise<Snapsh
     const manifest = await expectRecord(records, "manifest")
     const members = await expectRecord(records, "members")
 
-    const plan = new ImportPlan(manifest, input.ontology)
+    const plan = new ImportPlan(manifest, input.ontology, input.projections)
     const users = await importMembers(storage, manifest.projectId, members)
     const commit = await baseCommit(storage, manifest, members, plan, input.ontology)
 
@@ -121,6 +138,9 @@ export async function importSnapshot(input: ImportSnapshotInput): Promise<Snapsh
         objectTypeIds: plan.objectTypeIds(),
       },
       async (loader) => {
+        const sources = plan.sources()
+        if (sources.length > 0) await loader.write({ sources })
+
         const end = await loadRecords(records, plan, loader, commit.id)
         assertComplete(end, plan, members.users.length)
       }
@@ -267,6 +287,11 @@ interface TypePlan {
     droppedLinks: number
   }
   readonly skippedVectors: Map<string, string>
+  /** The source the type loads as, when it travelled as one and the branch can continue it. */
+  readonly source?: SnapshotSourceWrite
+  readonly notReprojectable?: string
+  /** The next root's place among the source's roots. */
+  nextOrdinal: number
 }
 
 /** What each type of the snapshot becomes on the branch. */
@@ -275,9 +300,14 @@ class ImportPlan {
   readonly #ontology: OntologyRegistry
   readonly skipped: { objectTypeId: string; reason: string }[] = []
   /** What the snapshot held, skipped types included, to check against its end. */
-  readonly read = { objects: 0, links: 0, points: 0, vectors: 0 }
+  readonly read = { objects: 0, links: 0, points: 0, vectors: 0, sourceRoots: 0, edits: 0 }
+  readonly #byProjection = new Map<string, TypePlan>()
 
-  constructor(manifest: SnapshotManifest, ontology: OntologyRegistry) {
+  constructor(
+    manifest: SnapshotManifest,
+    ontology: OntologyRegistry,
+    projections: ProjectionDefinitionCatalog | undefined
+  ) {
     this.#ontology = ontology
 
     for (const objectTypeId of manifest.unreadableTypeIds) {
@@ -292,7 +322,8 @@ class ImportPlan {
       }
 
       const objectType = ontology.resolveObjectType(type.objectTypeId)
-      this.#types.set(type.objectTypeId, {
+      const travel = sourceTravel(type, fit, projections)
+      const typePlan: TypePlan = {
         manifest: type,
         objectType,
         droppedPropertyIds: new Set(fit.droppedPropertyIds),
@@ -312,8 +343,22 @@ class ImportPlan {
         artifactRefs: ontology.listArtifactRefProperties(type.objectTypeId),
         counts: { objects: 0, links: 0, points: 0, vectors: 0, droppedLinks: 0 },
         skippedVectors: new Map(),
-      })
+        ...travel,
+        nextOrdinal: 0,
+      }
+      this.#types.set(type.objectTypeId, typePlan)
+      if (typePlan.source) this.#byProjection.set(typePlan.source.projectionId, typePlan)
     }
+  }
+
+  /** The sources the load takes over, written before any of their roots. */
+  sources(): readonly SnapshotSourceWrite[] {
+    return [...this.#byProjection.values()].flatMap((plan) => (plan.source ? [plan.source] : []))
+  }
+
+  /** The type a projection's roots load into, when its source is taken over. */
+  sourceType(projectionId: string): TypePlan | undefined {
+    return this.#byProjection.get(projectionId)
   }
 
   get valueTypes() {
@@ -371,7 +416,15 @@ class ImportPlan {
       droppedPropertyIds: [...plan.droppedPropertyIds],
       droppedLinks: plan.counts.droppedLinks,
       skippedVectors: [...plan.skippedVectors].map(([profile, reason]) => ({ profile, reason })),
-      ...(plan.manifest.projection ? { projectionId: plan.manifest.projection.projectionId } : {}),
+      ...(plan.manifest.projection
+        ? {
+            projectionId: plan.manifest.projection.projectionId,
+            reprojectable: plan.source !== undefined,
+            ...(plan.notReprojectable === undefined
+              ? {}
+              : { notReprojectable: plan.notReprojectable }),
+          }
+        : {}),
     }))
   }
 }
@@ -410,6 +463,14 @@ async function loadRecords(
       case "vectors":
         plan.read.vectors += record.ids.length
         await loadVectors(plan, loader, record, commitId)
+        break
+      case "sourceRoots":
+        plan.read.sourceRoots += record.roots.length
+        await loadSourceRoots(plan, loader, record)
+        break
+      case "edits":
+        plan.read.edits += record.objects.length + record.links.length + record.slots.length
+        await loadEdits(plan, loader, record)
         break
       case "end":
         // What was read ahead is what follows the end: the stream must close there.
@@ -450,7 +511,8 @@ async function loadObjects(plan: ImportPlan, loader: SnapshotLoader, record: Sna
       objectTypeId,
       primaryId,
       properties,
-      override: { kind: "create", properties: edited },
+      // An object its source asserts is its source's, with the edits over it.
+      ...(type.source ? {} : { override: { kind: "create" as const, properties: edited } }),
       createdAt: new Date(record.createdAt[index]!).toISOString(),
       updatedAt: new Date(record.updatedAt[index]!).toISOString(),
     })
@@ -513,7 +575,7 @@ async function loadLinks(plan: ImportPlan, loader: SnapshotLoader, record: Snaps
       targetTypeId,
       targetId,
       ...(properties === null ? {} : { properties }),
-      identity: cardinality === "one" ? "slot" : "edge",
+      identity: type.source ? "source" : cardinality === "one" ? "slot" : "edge",
       createdAt: new Date(createdAt).toISOString(),
       updatedAt: new Date(updatedAt).toISOString(),
     })
@@ -579,6 +641,95 @@ async function loadVectors(
 
   type.counts.vectors += vectors.length
   await loader.write({ vectors })
+}
+
+async function loadSourceRoots(
+  plan: ImportPlan,
+  loader: SnapshotLoader,
+  record: SnapshotSourceRoots
+) {
+  const type = plan.sourceType(record.projectionId)
+  const source = type?.source
+  if (!type || !source) return
+
+  const sourceRoots = record.roots.map(([root, assertions]) => ({
+    projectionId: source.projectionId,
+    materializationId: source.materializationId,
+    rootKey: projectionEntityKey(root),
+    root,
+    stagingOrdinal: type.nextOrdinal++,
+    assertions,
+  }))
+  await loader.write({ sourceRoots })
+}
+
+/** The edits over a type that loads as its source; one loaded as created objects needs none. */
+async function loadEdits(plan: ImportPlan, loader: SnapshotLoader, record: SnapshotEdits) {
+  const type = plan.type(record.objectTypeId)
+  if (!type?.source) return
+
+  const objectTypeId = record.objectTypeId
+  await loader.write({
+    edits: {
+      objects: record.objects.map(([primaryId, value, editedAt, updatedAt]) => ({
+        ref: { objectTypeId, primaryId },
+        value,
+        ...(editedAt === null ? {} : { editedAt }),
+        updatedAt: new Date(updatedAt).toISOString(),
+      })),
+      links: record.links
+        .filter(([ref]) => plan.keepsLink(type, ref.linkId, ref.target.objectTypeId))
+        .map(([ref, value, updatedAt]) => ({
+          ref,
+          value,
+          updatedAt: new Date(updatedAt).toISOString(),
+        })),
+      slots: record.slots.map(([primaryId, linkId, value, updatedAt]) => ({
+        source: { objectTypeId, primaryId },
+        linkId,
+        value,
+        updatedAt: new Date(updatedAt).toISOString(),
+      })),
+    },
+  })
+}
+
+/**
+ * A type travels as its source when the branch can continue it: the branch still defines it
+ * whole, and its projection of the same id still feeds it from the same dataset.
+ */
+function sourceTravel(
+  type: SnapshotTypeManifest,
+  fit: Extract<TypeFit, { fits: true }>,
+  projections: ProjectionDefinitionCatalog | undefined
+): Pick<TypePlan, "source" | "notReprojectable"> {
+  const projection = type.projection
+  if (!projection) return {}
+  if (!projection.source) {
+    return { notReprojectable: projection.notReprojectable ?? "its source did not travel" }
+  }
+
+  const branch = projections
+    ?.listObjects()
+    .find((definition) => definition.id === projection.projectionId)
+  if (
+    !branch ||
+    branch.objectTypeId !== type.objectTypeId ||
+    branch.datasetId !== projection.datasetId
+  ) {
+    return { notReprojectable: "the branch's projection no longer feeds it from that dataset" }
+  }
+  if (fit.droppedPropertyIds.length > 0 || fit.droppedLinkIds.length > 0) {
+    return { notReprojectable: "the branch dropped some of its properties or links" }
+  }
+
+  return {
+    source: {
+      projectionId: projection.projectionId,
+      materializationId: `snapshot_${randomUUID()}`,
+      ...projection.source,
+    },
+  }
 }
 
 /**

@@ -274,3 +274,46 @@ test("a long branch name keeps a schema of its own", async () => {
     await disposeTestStorage(created)
   }
 }, 60_000)
+
+// Reproduce: drop the roots' flush before a flush of `ontology_source_rows` in PgSnapshotLoad:
+// the rows' 8 MB fill first, and their COPY reaches roots not copied yet.
+test("a source whose rows pass a COPY batch before its roots do loads whole", async () => {
+  const storage = await testStorage()
+  try {
+    const branch = await storage.createBranchNamespace("large-source")
+    // Each root asserts one object with a long note: its row is about 8 times its root.
+    const note = "n".repeat(800)
+    const roots = Array.from({ length: 12_000 }, (_, index) => {
+      const ref = { objectTypeId: "Thing", primaryId: `t-${String(index).padStart(6, "0")}` }
+      return {
+        projectionId: "things",
+        materializationId: "snapshot_things",
+        rootKey: JSON.stringify(["object", ref.objectTypeId, ref.primaryId]),
+        root: { kind: "object" as const, ref },
+        stagingOrdinal: index,
+        assertions: [{ kind: "object" as const, ref, properties: { note } }],
+      }
+    })
+    await load(branch, {
+      sources: [
+        {
+          projectionId: "things",
+          materializationId: "snapshot_things",
+          datasetVersion: { datasetId: "things", versionId: "v1", createdAt: at },
+          projectionRevision: "revision",
+          ownershipHash: "ownership",
+          ontologyRevision: "ontology",
+        },
+      ],
+      sourceRoots: roots,
+    })
+
+    const active = await branch.ontology.sources.getActive({
+      projectId: PROJECT,
+      source: { projectionId: "things" },
+    })
+    expect(active).toMatchObject({ status: "active", rootCount: 12_000, assertionCount: 12_000 })
+  } finally {
+    await disposeTestStorage(storage)
+  }
+}, 60_000)

@@ -1,5 +1,20 @@
 import type { Database } from "bun:sqlite"
-import type { GroupMembershipRecord, StoredObjectVector, TimeseriesPoint } from "@sixb/core/storage"
+import type {
+  LinkOverride,
+  LinkSlotOverride,
+  ObjectOverride,
+} from "@sixb/core/internal/materialization"
+import {
+  sourceAssertionFromColumns,
+  sourceEntityFromKey,
+} from "@sixb/core/internal/ontology-storage-provider"
+import type {
+  GroupMembershipRecord,
+  SnapshotSourceRoot,
+  SnapshotTypeEdits,
+  StoredObjectVector,
+  TimeseriesPoint,
+} from "@sixb/core/storage"
 
 // What a snapshot's view reads beside the object reader, in its read transaction.
 
@@ -129,4 +144,140 @@ export function readSqliteVectors(
       lastCommitId: row.last_commit_id,
     }
   })
+}
+
+interface SourceRowColumns {
+  readonly root_key: string
+  readonly entity_kind: "object" | "link"
+  readonly object_type_id: string | null
+  readonly primary_id: string | null
+  readonly source_type_id: string | null
+  readonly source_primary_id: string | null
+  readonly link_id: string | null
+  readonly target_type_id: string | null
+  readonly target_primary_id: string | null
+  readonly payload: string | null
+}
+
+/**
+ * Live roots of a projection's source after `afterRootKey`, in root key order (BINARY, so by
+ * UTF-8 bytes), each with what it asserts.
+ */
+export function readSqliteSourceRoots(
+  db: Database,
+  input: {
+    readonly projectId: string
+    readonly projectionId: string
+    readonly afterRootKey?: string
+    readonly limit: number
+  }
+): SnapshotSourceRoot[] {
+  const rows = db
+    .query<SourceRowColumns, [string, string, string, number]>(
+      `WITH page AS (
+         SELECT roots.id, roots.root_key
+         FROM ontology_source_roots AS roots
+         JOIN ontology_sources AS versions ON versions.version_id = roots.version_id
+         WHERE roots.project_id = ?1 AND versions.project_id = ?1 AND versions.source_id = ?2
+           AND versions.status IN ('active', 'superseded')
+           AND roots.retired_at IS NULL AND roots.deleted = 0 AND roots.root_key > ?3
+         ORDER BY roots.root_key
+         LIMIT ?4
+       )
+       SELECT page.root_key, rows.entity_kind, rows.object_type_id, rows.primary_id,
+         rows.source_type_id, rows.source_primary_id, rows.link_id, rows.target_type_id,
+         rows.target_primary_id, rows.payload
+       FROM page JOIN ontology_source_rows AS rows ON rows.root_id = page.id
+       ORDER BY page.root_key`
+    )
+    .all(input.projectId, input.projectionId, input.afterRootKey ?? "", input.limit)
+
+  const roots = new Map<string, SnapshotSourceRoot>()
+  for (const row of rows) {
+    const root = roots.get(row.root_key) ?? {
+      rootKey: row.root_key,
+      root: sourceEntityFromKey(row.root_key),
+      assertions: [],
+    }
+    const payload = row.payload === null ? null : JSON.parse(row.payload)
+    roots.set(row.root_key, {
+      ...root,
+      assertions: [...root.assertions, sourceAssertionFromColumns(row, payload)],
+    })
+  }
+  return [...roots.values()]
+}
+
+/** Every edit over a type's objects and the links from them. */
+export function readSqliteEdits(
+  db: Database,
+  input: { readonly projectId: string; readonly objectTypeId: string }
+): SnapshotTypeEdits {
+  const objectTypeId = input.objectTypeId
+  const objects = db
+    .query<
+      { primary_id: string; value: string; edited_at: string; updated_at: string },
+      [string, string]
+    >(
+      `SELECT primary_id, value, edited_at, updated_at FROM ontology_object_overrides
+       WHERE project_id = ? AND object_type_id = ? ORDER BY primary_id`
+    )
+    .all(input.projectId, objectTypeId)
+  const links = db
+    .query<
+      {
+        identity_kind: "edge" | "slot"
+        source_primary_id: string
+        link_id: string
+        target_type_id: string
+        target_primary_id: string
+        value: string
+        updated_at: string
+      },
+      [string, string]
+    >(
+      `SELECT identity_kind, source_primary_id, link_id, target_type_id, target_primary_id,
+         value, updated_at
+       FROM ontology_link_overrides
+       WHERE project_id = ? AND source_type_id = ? ORDER BY identity_key`
+    )
+    .all(input.projectId, objectTypeId)
+
+  return {
+    objects: objects.map((row) => ({
+      ref: { objectTypeId, primaryId: row.primary_id },
+      value: JSON.parse(row.value) as ObjectOverride,
+      editedAt: JSON.parse(row.edited_at) as Record<string, string>,
+      updatedAt: row.updated_at,
+    })),
+    links: links.flatMap((row) =>
+      row.identity_kind === "edge"
+        ? [
+            {
+              ref: {
+                source: { objectTypeId, primaryId: row.source_primary_id },
+                linkId: row.link_id,
+                target: { objectTypeId: row.target_type_id, primaryId: row.target_primary_id },
+              },
+              value: JSON.parse(row.value) as LinkOverride,
+              updatedAt: row.updated_at,
+            },
+          ]
+        : []
+    ),
+    // A slot left in conflict by an old migration is no edit a branch can take over.
+    slots: links.flatMap((row) => {
+      const value = JSON.parse(row.value) as LinkSlotOverride | { readonly kind: "legacy-conflict" }
+      return row.identity_kind === "slot" && value.kind !== "legacy-conflict"
+        ? [
+            {
+              source: { objectTypeId, primaryId: row.source_primary_id },
+              linkId: row.link_id,
+              value,
+              updatedAt: row.updated_at,
+            },
+          ]
+        : []
+    }),
+  }
 }

@@ -105,8 +105,8 @@ describe("a snapshot holds what one person reads", () => {
     expect(manifest?.kind === "manifest" && manifest.unreadableTypeIds).toEqual(["invoice"])
   })
 
-  // The version applied is absent here: no projection ran. A branch reading the dataset in place
-  // takes the rest from the version production applied, which the manifest carries when it is.
+  // The version applied is absent here: no projection ran, and the snapshot cut no lake slice, so
+  // the type travels as created objects, which its projection cannot update on the branch.
   test("a type a projection feeds says so, and whether the person reads its dataset", async () => {
     const { host, optionsFor } = await deploy()
     const manager = await readAll(
@@ -124,6 +124,7 @@ describe("a snapshot holds what one person reads", () => {
       projectionId: "snapshot_invoices",
       datasetId: "snapshot_books",
       datasetView: true,
+      notReprojectable: "the branch does not read production's datasets in place",
     })
   })
 

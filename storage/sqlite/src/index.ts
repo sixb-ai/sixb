@@ -70,7 +70,13 @@ import { SqliteRulesStorage } from "./rules-storage"
 import { SqliteShareGrantStorage } from "./share-grant-storage"
 import { SqliteShareSessionStorage } from "./share-session-storage"
 import { SqliteSnapshotLoad } from "./snapshot-load"
-import { readSqliteLatestPoints, readSqliteMemberships, readSqliteVectors } from "./snapshot-read"
+import {
+  readSqliteEdits,
+  readSqliteLatestPoints,
+  readSqliteMemberships,
+  readSqliteSourceRoots,
+  readSqliteVectors,
+} from "./snapshot-read"
 import { SqliteSyncRunStorage } from "./sync-run-storage"
 import { registerSqliteStorageTestingAdapter } from "./testing"
 import { SqliteTimeseriesStorage } from "./timeseries-storage"
@@ -333,6 +339,8 @@ export class SqliteStorage
             readSqliteVectors(connection.db, projectId, refs),
           readLatestPoints: async (input) => readSqliteLatestPoints(connection.db, input),
           readMemberships: async ({ projectId }) => readSqliteMemberships(connection.db, projectId),
+          readSourceRoots: async (input) => readSqliteSourceRoots(connection.db, input),
+          readEdits: async (input) => readSqliteEdits(connection.db, input),
         },
       ])
     } finally {

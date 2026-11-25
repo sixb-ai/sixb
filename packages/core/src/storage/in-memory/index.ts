@@ -329,6 +329,15 @@ export class InMemoryStorage
           const points = await Promise.all(series.map((one) => copy.timeseries.getLatest(one)))
           return points.filter((point) => point !== null)
         },
+        readSourceRoots: async ({ projectId, projectionId, afterRootKey, limit }) =>
+          copy.ontologyStorage.snapshots.readSourceRoots(
+            projectId,
+            projectionId,
+            afterRootKey,
+            limit
+          ),
+        readEdits: async ({ projectId, objectTypeId }) =>
+          copy.ontologyStorage.snapshots.readEdits(projectId, objectTypeId),
         readMemberships: async ({ projectId }) => {
           const users = await copy.auth.users.list({ projectId, limit: Number.MAX_SAFE_INTEGER })
           const memberships = await Promise.all(

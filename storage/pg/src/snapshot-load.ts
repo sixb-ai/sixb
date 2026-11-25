@@ -1,10 +1,16 @@
 import { createHash } from "node:crypto"
 import { once } from "node:events"
+import {
+  sourceAssertionPayload,
+  sourceEntityColumns,
+} from "@sixb/core/internal/ontology-storage-provider"
 import { snapshotEditedAt, snapshotTargetNotEmpty } from "@sixb/core/internal/storage"
 import type {
   SnapshotLoadBatch,
   SnapshotLoadInput,
   SnapshotObjectWrite,
+  SnapshotSourceRootWrite,
+  SnapshotTypeEdits,
   StoredObjectVector,
 } from "@sixb/core/storage"
 import { objectPartitionName } from "./objects/partitions"
@@ -25,6 +31,13 @@ const LANES = [
   ["ontology_link_overrides"],
   ["timeseries", "timeseries_latest"],
   ["object_unique_values", "object_artifact_refs"],
+  // A replacement plan references a source version: the four truncate together.
+  [
+    "ontology_replacement_plans",
+    "ontology_sources",
+    "ontology_source_roots",
+    "ontology_source_rows",
+  ],
 ] as const
 
 export const SNAPSHOT_LANES = LANES.length
@@ -73,6 +86,8 @@ export class PgSnapshotLoad {
   readonly #input: SnapshotLoadInput
   readonly #lanes: readonly Lane[]
   readonly #pending = new Map<string, Pending>()
+  /** Each source taken over, by projection: its version id, and how many roots it holds. */
+  readonly #sources = new Map<string, { readonly versionId: string; roots: number }>()
 
   private constructor(input: SnapshotLoadInput, lanes: readonly Lane[]) {
     this.#input = input
@@ -134,6 +149,10 @@ export class PgSnapshotLoad {
     const links = batch.links ?? []
     const points = batch.points ?? []
 
+    for (const source of batch.sources ?? []) await this.#writeSource(source)
+    if (batch.sourceRoots?.length) await this.#writeSourceRoots(batch.sourceRoots)
+    if (batch.edits) await this.#writeEdits(batch.edits)
+
     // Into each type's own partition: COPY FREEZE does not reach a partitioned table.
     for (const [objectTypeId, rows] of byType(objects)) {
       await this.#copy(
@@ -151,16 +170,22 @@ export class PgSnapshotLoad {
       )
     }
     await this.#copy(
-      "ontology_object_overrides (project_id, object_type_id, primary_id, value, last_commit_id, updated_at, edited_at)",
-      objects.map((row) => [
-        projectId,
-        row.objectTypeId,
-        row.primaryId,
-        JSON.stringify(row.override),
-        commitId,
-        row.updatedAt,
-        JSON.stringify(snapshotEditedAt(row.override.properties, row.updatedAt)),
-      ])
+      OBJECT_OVERRIDE_COLUMNS,
+      objects.flatMap((row) =>
+        row.override
+          ? [
+              [
+                projectId,
+                row.objectTypeId,
+                row.primaryId,
+                JSON.stringify(row.override),
+                commitId,
+                row.updatedAt,
+                JSON.stringify(snapshotEditedAt(row.override.properties, row.updatedAt)),
+              ],
+            ]
+          : []
+      )
     )
 
     await this.#copy(
@@ -179,29 +204,32 @@ export class PgSnapshotLoad {
       ])
     )
     await this.#copy(
-      "ontology_link_overrides (project_id, identity_kind, identity_key, source_type_id, source_primary_id, link_id, target_type_id, target_primary_id, value, last_commit_id, updated_at)",
-      links.map((row) => {
-        const slot = row.identity === "slot"
-        const target = { objectTypeId: row.targetTypeId, primaryId: row.targetId }
-        const extra = row.properties === undefined ? {} : { properties: row.properties }
-        return [
-          projectId,
-          row.identity,
-          JSON.stringify(
-            slot
-              ? [row.sourceTypeId, row.sourceId, row.linkId]
-              : [row.sourceTypeId, row.sourceId, row.linkId, row.targetTypeId, row.targetId]
-          ),
-          row.sourceTypeId,
-          row.sourceId,
-          row.linkId,
-          row.targetTypeId,
-          row.targetId,
-          JSON.stringify(slot ? { kind: "set", target, ...extra } : { kind: "upsert", ...extra }),
-          commitId,
-          row.updatedAt,
-        ]
-      })
+      LINK_OVERRIDE_COLUMNS,
+      // A link its source asserts is its source's: no edit creates it.
+      links
+        .filter((row) => row.identity !== "source")
+        .map((row) => {
+          const slot = row.identity === "slot"
+          const target = { objectTypeId: row.targetTypeId, primaryId: row.targetId }
+          const extra = row.properties === undefined ? {} : { properties: row.properties }
+          return [
+            projectId,
+            row.identity,
+            JSON.stringify(
+              slot
+                ? [row.sourceTypeId, row.sourceId, row.linkId]
+                : [row.sourceTypeId, row.sourceId, row.linkId, row.targetTypeId, row.targetId]
+            ),
+            row.sourceTypeId,
+            row.sourceId,
+            row.linkId,
+            row.targetTypeId,
+            row.targetId,
+            JSON.stringify(slot ? { kind: "set", target, ...extra } : { kind: "upsert", ...extra }),
+            commitId,
+            row.updatedAt,
+          ]
+        })
     )
 
     // The latest point is the whole of each series a snapshot carries: history and latest agree.
@@ -248,9 +276,168 @@ export class PgSnapshotLoad {
     )
   }
 
+  /**
+   * A source taken over: its version, active as of the base commit, inserted at once on its lane,
+   * since its roots name its id. It counts its roots and assertions once they are in.
+   */
+  async #writeSource(source: NonNullable<SnapshotLoadBatch["sources"]>[number]): Promise<void> {
+    const { commit, projectId } = this.#input
+    const lane = this.#laneOf("ontology_sources")
+    await lane.tail
+
+    const [row] = await lane.connection<{ version_id: string }[]>`
+      INSERT INTO ontology_sources (
+        project_id, source_id, materialization_id, projection_run_id, projection_kind, protocol,
+        status, execution_token, dataset_id, dataset_version_id, dataset_version_created_at,
+        projection_revision, ownership_hash, ontology_revision, root_count, assertion_count,
+        created_at, ready_at, activated_at, last_commit_id, updated_at
+      ) VALUES (
+        ${projectId}, ${source.projectionId}, ${source.materializationId}, ${commit.id}, 'object',
+        'replacement', 'active', NULL, ${source.datasetVersion.datasetId},
+        ${source.datasetVersion.versionId}, ${source.datasetVersion.createdAt},
+        ${source.projectionRevision}, ${source.ownershipHash}, ${source.ontologyRevision}, 0, 0,
+        ${commit.committedAt}, ${commit.committedAt}, ${commit.committedAt}, ${commit.id},
+        ${commit.committedAt}
+      )
+      RETURNING version_id
+    `
+    if (!row) throw new Error("[SixbPg] PostgreSQL returned no source version.")
+    this.#sources.set(source.projectionId, { versionId: String(row.version_id), roots: 0 })
+  }
+
+  /** Roots with the ids their rows reference, taken from the table's own sequence. */
+  async #writeSourceRoots(roots: readonly SnapshotSourceRootWrite[]): Promise<void> {
+    const projectId = this.#input.projectId
+    const lane = this.#laneOf("ontology_source_roots")
+    await lane.tail
+    const ids = await lane.connection<{ id: string }[]>`
+      SELECT nextval(pg_get_serial_sequence('ontology_source_roots', 'id'))::text AS id
+      FROM generate_series(1, ${roots.length})
+    `
+
+    const rootRows: (string | null)[][] = []
+    const assertionRows: (string | null)[][] = []
+    roots.forEach((root, index) => {
+      const source = this.#sources.get(root.projectionId)
+      if (!source) throw new Error(`[SixbPg] Source '${root.projectionId}' was not loaded first.`)
+      source.roots += 1
+
+      const id = ids[index]!.id
+      rootRows.push([id, source.versionId, projectId, root.rootKey, String(root.stagingOrdinal)])
+      for (const assertion of root.assertions) {
+        const entity = sourceEntityColumns(assertion)
+        const payload = sourceAssertionPayload(assertion)
+        assertionRows.push([
+          id,
+          assertion.kind,
+          entity.objectTypeId,
+          entity.primaryId,
+          entity.sourceTypeId,
+          entity.sourcePrimaryId,
+          entity.linkId,
+          entity.targetTypeId,
+          entity.targetPrimaryId,
+          payload === null ? null : JSON.stringify(payload),
+        ])
+      }
+    })
+
+    await this.#copy(
+      "ontology_source_roots (id, version_id, project_id, root_key, staging_ordinal)",
+      rootRows
+    )
+    await this.#copy(
+      "ontology_source_rows (root_id, entity_kind, object_type_id, primary_id, source_type_id, source_primary_id, link_id, target_type_id, target_primary_id, payload)",
+      assertionRows
+    )
+  }
+
+  /** The edits over types loaded as their sources, as production stored them. */
+  async #writeEdits(edits: SnapshotTypeEdits): Promise<void> {
+    const { projectId } = this.#input
+    const commitId = this.#input.commit.id
+
+    await this.#copy(
+      OBJECT_OVERRIDE_COLUMNS,
+      edits.objects.map((edit) => [
+        projectId,
+        edit.ref.objectTypeId,
+        edit.ref.primaryId,
+        JSON.stringify(edit.value),
+        commitId,
+        edit.updatedAt,
+        JSON.stringify(edit.editedAt ?? {}),
+      ])
+    )
+    await this.#copy(LINK_OVERRIDE_COLUMNS, [
+      ...edits.links.map((edit) => {
+        const { source, linkId, target } = edit.ref
+        return [
+          projectId,
+          "edge",
+          JSON.stringify([
+            source.objectTypeId,
+            source.primaryId,
+            linkId,
+            target.objectTypeId,
+            target.primaryId,
+          ]),
+          source.objectTypeId,
+          source.primaryId,
+          linkId,
+          target.objectTypeId,
+          target.primaryId,
+          JSON.stringify(edit.value),
+          commitId,
+          edit.updatedAt,
+        ]
+      }),
+      ...edits.slots.map((edit) => {
+        // A cleared slot keeps the target it cleared, as production stores it.
+        const target = edit.value.target
+        return [
+          projectId,
+          "slot",
+          JSON.stringify([edit.source.objectTypeId, edit.source.primaryId, edit.linkId]),
+          edit.source.objectTypeId,
+          edit.source.primaryId,
+          edit.linkId,
+          target.objectTypeId,
+          target.primaryId,
+          JSON.stringify(edit.value),
+          commitId,
+          edit.updatedAt,
+        ]
+      }),
+    ])
+  }
+
+  #laneOf(table: string): Lane {
+    const lane = this.#lanes.find((candidate) => candidate.tables.includes(table))
+    if (!lane) throw new Error(`[SixbPg] No snapshot lane loads '${table}'.`)
+    return lane
+  }
+
   /** Copy what waits, then build each lane's indexes and statistics, and commit the lanes. */
   async #finish(open: Lane[], state: BranchSchemaState): Promise<void> {
     for (const target of [...this.#pending.keys()]) await this.#flush(target)
+
+    // Each source counts what the load wrote of it, as a ready version does.
+    if (this.#sources.size > 0) {
+      const lane = this.#laneOf("ontology_sources")
+      await lane.tail
+      await lane.connection`
+        UPDATE ontology_sources AS versions
+        SET root_count = counted.roots, assertion_count = counted.assertions
+        FROM (
+          SELECT roots.version_id, count(DISTINCT roots.id) AS roots, count(rows.root_id) AS assertions
+          FROM ontology_source_roots AS roots
+          LEFT JOIN ontology_source_rows AS rows ON rows.root_id = roots.id
+          GROUP BY roots.version_id
+        ) AS counted
+        WHERE versions.version_id = counted.version_id
+      `
+    }
 
     await Promise.all(
       this.#lanes.map(async (lane) => {
@@ -305,10 +492,16 @@ export class PgSnapshotLoad {
     const lane = this.#lanes.find((candidate) => candidate.tables.includes(laneTable))
     if (!lane) throw new Error(`[SixbPg] No snapshot lane loads '${table}'.`)
 
-    // A vector references its object: the lane copies the objects waiting before it.
+    // A vector references its object, and a source's row its root: the lane copies the objects,
+    // or the roots, waiting before it.
     if (table === "object_vectors") {
       for (const other of [...this.#pending.keys()]) {
         if (other.startsWith("objects_")) await this.#flush(other)
+      }
+    }
+    if (table === "ontology_source_rows") {
+      for (const other of [...this.#pending.keys()]) {
+        if (other.startsWith("ontology_source_roots ")) await this.#flush(other)
       }
     }
 
@@ -488,6 +681,11 @@ function copyText(value: string): string {
     .replace(/\n/g, "\\n")
     .replace(/\r/g, "\\r")
 }
+
+const OBJECT_OVERRIDE_COLUMNS =
+  "ontology_object_overrides (project_id, object_type_id, primary_id, value, last_commit_id, updated_at, edited_at)"
+const LINK_OVERRIDE_COLUMNS =
+  "ontology_link_overrides (project_id, identity_kind, identity_key, source_type_id, source_primary_id, link_id, target_type_id, target_primary_id, value, last_commit_id, updated_at)"
 
 // Vectors load with COPY in its binary format. In text, each of the 1,536 floats of a vector is
 // written and parsed as a decimal, which bound a load at a few thousand vectors a second; in
