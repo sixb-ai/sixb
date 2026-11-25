@@ -10,11 +10,12 @@ export type { SealedConnectorCredential } from "../connectors/credentials"
 export type { MergeChange } from "../datasets/changes"
 export type { SixbFailure } from "../errors/types"
 export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
-export type { ReadonlyJsonObject, ReadonlyJsonValue } from "../json"
+export type { JsonValue, ReadonlyJsonObject, ReadonlyJsonValue } from "../json"
 export { stableJsonStringify } from "../json"
 export type { DatasetRow } from "../lake-storage/types"
 export type {
   EffectiveChangeCounts,
+  ObjectOverride,
   OntologyObjectRef,
   PinnedDatasetVersion,
   ProjectionEntityRef,
@@ -941,6 +942,15 @@ export type {
 } from "./share-sessions"
 export { InMemoryShareSessionStorage, ShareSessionStorageError } from "./share-sessions"
 export type {
+  BranchNamespace,
+  BranchNamespaceStorage,
+  SnapshotLinkWrite,
+  SnapshotLoadBatch,
+  SnapshotLoader,
+  SnapshotLoadInput,
+  SnapshotLoadStorage,
+  SnapshotObjectWrite,
+  SnapshotPointWrite,
   SnapshotRange,
   SnapshotReadOptions,
   SnapshotReadStorage,

@@ -30,7 +30,7 @@ import {
   type MaintenanceHeartbeatStorage,
 } from "../maintenance-heartbeats"
 import type { ObjectStorage } from "../objects"
-import { InMemoryObjectStorage } from "../objects/in-memory"
+import { getInMemoryObjectMaterializerAdapter, InMemoryObjectStorage } from "../objects/in-memory"
 import type { OntologyStorage } from "../ontology"
 import { InMemoryOntologyStorage } from "../ontology/in-memory"
 import { ProviderMaterializationTransactionLifecycle } from "../ontology/provider"
@@ -48,7 +48,19 @@ import { InMemoryProjectionRunStorage } from "../projection-runs"
 import { InMemoryRulesStorage, type RulesStorage } from "../rules"
 import { InMemoryShareGrantStorage, type ShareGrantStorage } from "../share-grants"
 import { InMemoryShareSessionStorage, type ShareSessionStorage } from "../share-sessions"
-import type { SnapshotReadOptions, SnapshotReadStorage, SnapshotReadView } from "../snapshots"
+import {
+  assertBranchNamespaceName,
+  type BranchNamespace,
+  type BranchNamespaceStorage,
+  branchNamespaceExists,
+  type SnapshotLoader,
+  type SnapshotLoadInput,
+  type SnapshotLoadStorage,
+  type SnapshotReadOptions,
+  type SnapshotReadStorage,
+  type SnapshotReadView,
+  snapshotTargetNotEmpty,
+} from "../snapshots"
 import { InMemorySyncRunStorage, type SyncRunStorage } from "../sync-runs"
 import type { TimeseriesStorage } from "../timeseries"
 import { InMemoryTimeseriesStorage } from "../timeseries/store"
@@ -78,7 +90,9 @@ export interface InMemoryStorageOptions {
   }
 }
 
-export class InMemoryStorage implements SnapshotReadStorage {
+export class InMemoryStorage
+  implements SnapshotReadStorage, SnapshotLoadStorage, BranchNamespaceStorage
+{
   readonly objects: ObjectStorage
   readonly timeseries: TimeseriesStorage
   readonly ontology: OntologyStorage
@@ -288,6 +302,9 @@ export class InMemoryStorage implements SnapshotReadStorage {
     }
   }
 
+  /** Each branch is an instance of its own, kept as long as this one. */
+  private readonly branches = new Map<string, InMemoryStorage>()
+
   /** One view of a copy of this storage, taken under its lock: later writes never reach it. */
   async readSnapshot<T>(
     _options: SnapshotReadOptions,
@@ -319,6 +336,54 @@ export class InMemoryStorage implements SnapshotReadStorage {
         },
       },
     ])
+  }
+
+  async loadSnapshot<T>(
+    input: SnapshotLoadInput,
+    run: (loader: SnapshotLoader) => Promise<T>
+  ): Promise<T> {
+    return this.transaction(async () => {
+      const existing = await this.objectStorage.list({ projectId: input.projectId, limit: 1 })
+      if (existing.total > 0) throw snapshotTargetNotEmpty()
+
+      const objects = getInMemoryObjectMaterializerAdapter(this.objectStorage)
+      for (const property of input.uniqueProperties) {
+        objects.markUniquePropertyPrepared({
+          projectId: input.projectId,
+          ...property,
+          preparedAt: input.commit.committedAt,
+        })
+      }
+      this.ontologyStorage.snapshots.commit(input.commit)
+
+      return run({
+        write: async (batch) =>
+          this.ontologyStorage.snapshots.write(input.projectId, input.commit, batch),
+      })
+    })
+  }
+
+  async createBranchNamespace(name: string): Promise<BranchNamespace> {
+    assertBranchNamespaceName(name)
+    if (this.branches.has(name)) throw branchNamespaceExists(name)
+
+    const branch = new InMemoryStorage()
+    this.branches.set(name, branch)
+    return branch
+  }
+
+  async openBranchNamespace(name: string): Promise<BranchNamespace | null> {
+    assertBranchNamespaceName(name)
+    return this.branches.get(name) ?? null
+  }
+
+  async listBranchNamespaces(): Promise<readonly string[]> {
+    return [...this.branches.keys()].sort()
+  }
+
+  async dropBranchNamespace(name: string): Promise<void> {
+    assertBranchNamespaceName(name)
+    this.branches.delete(name)
   }
 
   private readonly transactionScope = new AsyncLocalStorage<object>()

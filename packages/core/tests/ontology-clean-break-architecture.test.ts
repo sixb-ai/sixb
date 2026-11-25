@@ -9,7 +9,7 @@ const workspaceRoot = join(import.meta.dir, "../../..")
 const coreSource = join(workspaceRoot, "packages/core/src")
 const reservedEventType = /["'`](?:object|link|telemetry)\./
 const materializerAuthorityWrite =
-  /(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:ontology_(?:overrides|object_overrides|link_overrides)|objects|links|timeseries|timeseries_latest)\b/i
+  /(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|COPY)\s+(?:ontology_(?:overrides|object_overrides|link_overrides)|objects|links|timeseries|timeseries_latest)\b/i
 
 async function typescriptFiles(directory: string): Promise<string[]> {
   const files: string[] = []
@@ -53,14 +53,17 @@ function propertyName(name: ts.PropertyName): string | undefined {
 async function expectSqlWritesOwnedBy(
   files: readonly string[],
   pattern: RegExp,
-  allowedBasenames: readonly string[]
+  allowedBasenames: readonly string[],
+  allowedPaths: readonly string[] = []
 ): Promise<void> {
   for (const file of files) {
     const contents = await readFile(file, "utf8")
     if (!pattern.test(contents)) continue
+    const path = relative(workspaceRoot, file)
     expect(
-      allowedBasenames.some((basename) => file.endsWith(`/${basename}`)),
-      relative(workspaceRoot, file)
+      allowedBasenames.some((basename) => file.endsWith(`/${basename}`)) ||
+        allowedPaths.includes(path),
+      path
     ).toBe(true)
   }
 }
@@ -91,6 +94,7 @@ describe("materializer write ownership", () => {
   test("keeps ontology writes behind the materialization capability", async () => {
     // Remove a table alternative from materializerAuthorityWrite to verify this guard fails.
     for (const statement of [
+      "COPY links",
       "INSERT INTO ontology_overrides",
       "UPDATE ontology_object_overrides",
       "DELETE FROM ontology_link_overrides",
@@ -106,13 +110,21 @@ describe("materializer write ownership", () => {
       )
     ).flat()
 
-    await expectSqlWritesOwnedBy(providerFiles, /INSERT\s+INTO\s+ontology_(?:commits|outbox)\b/i, [
-      "materializations.ts",
-      "materialization-writer.ts",
-    ])
-    await expectSqlWritesOwnedBy(providerFiles, materializerAuthorityWrite, [
-      "materialization-writer.ts",
-    ])
+    // A snapshot's load is the one other writer: it fills an empty branch namespace with one base
+    // commit, which no event announces, so there is no materialization to go through.
+    const snapshotLoads = ["storage/pg/src/snapshot-load.ts", "storage/sqlite/src/snapshot-load.ts"]
+    await expectSqlWritesOwnedBy(
+      providerFiles,
+      /INSERT\s+INTO\s+ontology_(?:commits|outbox)\b/i,
+      ["materializations.ts", "materialization-writer.ts"],
+      snapshotLoads
+    )
+    await expectSqlWritesOwnedBy(
+      providerFiles,
+      materializerAuthorityWrite,
+      ["materialization-writer.ts"],
+      snapshotLoads
+    )
     await expectSqlWritesOwnedBy(providerFiles, /SET\s+status\s*=\s*'active'/i, [
       "materializations.ts",
     ])
