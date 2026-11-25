@@ -224,6 +224,8 @@ class AuthorizedObjectReaderImpl {
       canViewUsers: isRuntimeAllowed(security.runtime, { kind: "users.view" }),
       canViewDataset: (datasetId) =>
         isRuntimeAllowed(security.runtime, { kind: "dataset.view", datasetId }),
+      readsLink: (sourceTypeId, linkId, targetTypeId) =>
+        security.isLinkViewable({ sourceTypeId, linkId, targetTypeId } as ObjectLinkRow, clearance),
       ...(security.requestingUser ? { user: security.requestingUser } : {}),
     }
   }
@@ -1035,6 +1037,12 @@ export interface ReaderSnapshotScope {
   /** Whether the reader may view the project's members: `can.view(project.users)`. */
   readonly canViewUsers: boolean
   readonly canViewDataset: (datasetId: string) => boolean
+  /**
+   * Whether the reader reads links of this definition between these types at all, as every read
+   * of links decides it: both types and the link itself. Each object it reaches is the reader's
+   * to decide.
+   */
+  readonly readsLink: (sourceTypeId: string, linkId: string, targetTypeId: string) => boolean
   /** The person the snapshot is taken as, when the reader is a user's. */
   readonly user?: UserRef
 }

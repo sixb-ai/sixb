@@ -115,13 +115,18 @@ A type a projection feeds travels as its projection's source when a branch can c
 | The export cuts a lake slice, so the branch reads the dataset in place | `travellingSources` |
 | The projection applied a version, and no other projection of the dataset applied another | " |
 | The person reads every object and property of the type: the edits over it hide nothing | " |
+| No link projection feeds links from the type: their source does not travel, so the branch could not tell them from the type's own | " |
 | The person reads the dataset in full at that version (`readsVersionInFull`, the slice's rule) | " |
 | The slice holds the dataset at that version (`pinned`), or the export fails | `cutLakeSlice` |
 | The branch's projection of the same id still feeds the type from that dataset, and the branch drops none of its properties or links | `import.ts` `sourceTravel` |
 
 Then the manifest carries the active source's identity (version, revisions), and the stream its
-live roots (`sourceRoots`, in root key order) and every edit over the type and the links from it
-(`edits`). The import writes the source as active as of the base commit, its roots and
+live roots (`sourceRoots`, in root key order) and the edits over the type and the links from it
+(`edits`), each paged by key inside the consistent read. Every edit over an object travels, a
+masked one (superseded under `mostRecent`) included. A link edit travels as the link would: the
+person reads links of its definition (`readsLink`) and the object it reaches, which was exported
+or belongs to a type that travels as its source, whose roots hold even objects an edit deleted.
+A cleared slot's anchor is such an object too, or the clear stays in production. The import writes the source as active as of the base commit, its roots and
 assertions, the objects without a creating edit, their links without one, and production's edits
 as they are. The branch's projection then reads the changes from that version to the branch's
 (`prepareIncrementalReplacement`) and updates only what changed; when its revisions differ from

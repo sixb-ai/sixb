@@ -71,9 +71,10 @@ import { SqliteShareGrantStorage } from "./share-grant-storage"
 import { SqliteShareSessionStorage } from "./share-session-storage"
 import { SqliteSnapshotLoad } from "./snapshot-load"
 import {
-  readSqliteEdits,
   readSqliteLatestPoints,
+  readSqliteLinkEdits,
   readSqliteMemberships,
+  readSqliteObjectEdits,
   readSqliteSourceRoots,
   readSqliteVectors,
 } from "./snapshot-read"
@@ -340,7 +341,8 @@ export class SqliteStorage
           readLatestPoints: async (input) => readSqliteLatestPoints(connection.db, input),
           readMemberships: async ({ projectId }) => readSqliteMemberships(connection.db, projectId),
           readSourceRoots: async (input) => readSqliteSourceRoots(connection.db, input),
-          readEdits: async (input) => readSqliteEdits(connection.db, input),
+          readObjectEdits: async (input) => readSqliteObjectEdits(connection.db, input),
+          readLinkEdits: async (input) => readSqliteLinkEdits(connection.db, input),
         },
       ])
     } finally {

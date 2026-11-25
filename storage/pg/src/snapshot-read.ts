@@ -9,14 +9,16 @@ import {
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
   GroupMembershipRecord,
+  SnapshotLinkEditRow,
+  SnapshotObjectEdit,
   SnapshotRange,
   SnapshotSourceRoot,
-  SnapshotTypeEdits,
   StoredObjectVector,
   TimeseriesPoint,
 } from "@sixb/core/storage"
 import { objectPartitionName } from "./objects/partitions"
 import { identityPageToken } from "./objects/query-compiler"
+import { jsonParameter as json } from "./ontology-storage/shared"
 import { PUBLISHED } from "./ontology-storage/source-roots"
 import type { SQLClient } from "./pg-client"
 
@@ -251,78 +253,104 @@ export async function readPgSourceRoots(
   return [...roots.values()]
 }
 
-/** Every edit over a type's objects and the links from them. */
-export async function readPgEdits(
+/** A page of the edits over a type's objects, in primary id order: its primary key's. */
+export async function readPgObjectEdits(
   sql: SQLClient,
-  input: { readonly projectId: string; readonly objectTypeId: string }
-): Promise<SnapshotTypeEdits> {
-  const [objects, links] = await Promise.all([
-    sql<
-      {
-        primary_id: string
-        value: ObjectOverride
-        edited_at: Record<string, string> | null
-        updated_at: Date
-      }[]
-    >`
-      SELECT primary_id, value, edited_at, updated_at FROM ontology_object_overrides
-      WHERE project_id = ${input.projectId} AND object_type_id = ${input.objectTypeId}
-      ORDER BY primary_id
-    `,
-    sql<
-      {
-        identity_kind: "edge" | "slot"
-        source_primary_id: string
-        link_id: string
-        target_type_id: string
-        target_primary_id: string
-        value: LinkOverride | LinkSlotOverride | { readonly kind: "legacy-conflict" }
-        updated_at: Date
-      }[]
-    >`
-      SELECT identity_kind, source_primary_id, link_id, target_type_id, target_primary_id,
-        value, updated_at
-      FROM ontology_link_overrides
-      WHERE project_id = ${input.projectId} AND source_type_id = ${input.objectTypeId}
-      ORDER BY identity_key
-    `,
-  ])
-
-  const objectTypeId = input.objectTypeId
-  return {
-    objects: objects.map((row) => ({
-      ref: { objectTypeId, primaryId: row.primary_id },
-      value: row.value,
-      ...(row.edited_at === null ? {} : { editedAt: row.edited_at }),
-      updatedAt: row.updated_at.toISOString(),
-    })),
-    links: links.flatMap((row) =>
-      row.identity_kind === "edge"
-        ? [
-            {
-              ref: {
-                source: { objectTypeId, primaryId: row.source_primary_id },
-                linkId: row.link_id,
-                target: { objectTypeId: row.target_type_id, primaryId: row.target_primary_id },
-              },
-              value: row.value as LinkOverride,
-              updatedAt: row.updated_at.toISOString(),
-            },
-          ]
-        : []
-    ),
-    // A slot left in conflict by an old migration is no edit a branch can take over.
-    slots: links.flatMap((row) =>
-      row.identity_kind === "slot" && row.value.kind !== "legacy-conflict"
-        ? [
-            {
-              source: { objectTypeId, primaryId: row.source_primary_id },
-              linkId: row.link_id,
-              value: row.value as LinkSlotOverride,
-              updatedAt: row.updated_at.toISOString(),
-            },
-          ]
-        : []
-    ),
+  input: {
+    readonly projectId: string
+    readonly objectTypeId: string
+    readonly afterPrimaryId?: string
+    readonly limit: number
   }
+): Promise<SnapshotObjectEdit[]> {
+  const rows = await sql<
+    {
+      primary_id: string
+      value: ObjectOverride
+      edited_at: Record<string, string> | null
+      updated_at: Date
+    }[]
+  >`
+    SELECT primary_id, value, edited_at, updated_at FROM ontology_object_overrides
+    WHERE project_id = ${input.projectId} AND object_type_id = ${input.objectTypeId}
+      AND primary_id > ${input.afterPrimaryId ?? ""}
+    ORDER BY primary_id
+    LIMIT ${input.limit}
+  `
+
+  return rows.map((row) => ({
+    ref: { objectTypeId: input.objectTypeId, primaryId: row.primary_id },
+    value: row.value,
+    ...(row.edited_at === null ? {} : { editedAt: row.edited_at }),
+    updatedAt: row.updated_at.toISOString(),
+  }))
+}
+
+/**
+ * A page of the edits over links from a type's objects, in their primary key's order: edges, then
+ * slots, by identity. A slot an old migration left in conflict is no edit a branch takes over.
+ */
+export async function readPgLinkEdits(
+  sql: SQLClient,
+  input: {
+    readonly projectId: string
+    readonly sourceTypeId: string
+    readonly afterKey?: string
+    readonly limit: number
+  }
+): Promise<SnapshotLinkEditRow[]> {
+  const after = input.afterKey === undefined ? undefined : linkEditCursor(input.afterKey)
+  const rows = await sql<
+    {
+      identity_kind: "edge" | "slot"
+      identity_key: string[]
+      source_primary_id: string
+      link_id: string
+      target_type_id: string
+      target_primary_id: string
+      value: LinkOverride | LinkSlotOverride | { readonly kind: "legacy-conflict" }
+      updated_at: Date
+    }[]
+  >`
+    SELECT identity_kind, identity_key, source_primary_id, link_id, target_type_id,
+      target_primary_id, value, updated_at
+    FROM ontology_link_overrides
+    WHERE project_id = ${input.projectId} AND source_type_id = ${input.sourceTypeId}
+      ${after ? sql`AND (identity_kind, identity_key) > (${after.kind}, ${json(sql, after.identity)}::jsonb)` : sql``}
+    ORDER BY identity_kind, identity_key
+    LIMIT ${input.limit}
+  `
+
+  const source = (row: (typeof rows)[number]) => ({
+    objectTypeId: input.sourceTypeId,
+    primaryId: row.source_primary_id,
+  })
+  return rows.flatMap((row): SnapshotLinkEditRow[] => {
+    const key = JSON.stringify([row.identity_kind, row.identity_key])
+    const updatedAt = row.updated_at.toISOString()
+    if (row.identity_kind === "edge") {
+      const ref = {
+        source: source(row),
+        linkId: row.link_id,
+        target: { objectTypeId: row.target_type_id, primaryId: row.target_primary_id },
+      }
+      return [{ kind: "edge", key, ref, value: row.value as LinkOverride, updatedAt }]
+    }
+    if (row.value.kind === "legacy-conflict") return []
+    return [
+      {
+        kind: "slot",
+        key,
+        source: source(row),
+        linkId: row.link_id,
+        value: row.value as LinkSlotOverride,
+        updatedAt,
+      },
+    ]
+  })
+}
+
+function linkEditCursor(key: string): { kind: string; identity: readonly string[] } {
+  const [kind, identity] = JSON.parse(key) as [string, string[]]
+  return { kind, identity }
 }

@@ -954,6 +954,7 @@ export type {
   BranchNamespace,
   BranchNamespaceStorage,
   SnapshotLinkEdit,
+  SnapshotLinkEditRow,
   SnapshotLinkSlotEdit,
   SnapshotLinkWrite,
   SnapshotLoadBatch,

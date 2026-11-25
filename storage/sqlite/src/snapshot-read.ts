@@ -10,8 +10,9 @@ import {
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
   GroupMembershipRecord,
+  SnapshotLinkEditRow,
+  SnapshotObjectEdit,
   SnapshotSourceRoot,
-  SnapshotTypeEdits,
   StoredObjectVector,
   TimeseriesPoint,
 } from "@sixb/core/storage"
@@ -208,25 +209,56 @@ export function readSqliteSourceRoots(
   return [...roots.values()]
 }
 
-/** Every edit over a type's objects and the links from them. */
-export function readSqliteEdits(
+/** A page of the edits over a type's objects, in primary id order: its primary key's. */
+export function readSqliteObjectEdits(
   db: Database,
-  input: { readonly projectId: string; readonly objectTypeId: string }
-): SnapshotTypeEdits {
-  const objectTypeId = input.objectTypeId
-  const objects = db
+  input: {
+    readonly projectId: string
+    readonly objectTypeId: string
+    readonly afterPrimaryId?: string
+    readonly limit: number
+  }
+): SnapshotObjectEdit[] {
+  const rows = db
     .query<
       { primary_id: string; value: string; edited_at: string; updated_at: string },
-      [string, string]
+      [string, string, string, number]
     >(
       `SELECT primary_id, value, edited_at, updated_at FROM ontology_object_overrides
-       WHERE project_id = ? AND object_type_id = ? ORDER BY primary_id`
+       WHERE project_id = ? AND object_type_id = ? AND primary_id > ?
+       ORDER BY primary_id LIMIT ?`
     )
-    .all(input.projectId, objectTypeId)
-  const links = db
+    .all(input.projectId, input.objectTypeId, input.afterPrimaryId ?? "", input.limit)
+
+  return rows.map((row) => ({
+    ref: { objectTypeId: input.objectTypeId, primaryId: row.primary_id },
+    value: JSON.parse(row.value) as ObjectOverride,
+    editedAt: JSON.parse(row.edited_at) as Record<string, string>,
+    updatedAt: row.updated_at,
+  }))
+}
+
+/**
+ * A page of the edits over links from a type's objects, in their primary key's order: edges, then
+ * slots, by identity. A slot an old migration left in conflict is no edit a branch takes over.
+ */
+export function readSqliteLinkEdits(
+  db: Database,
+  input: {
+    readonly projectId: string
+    readonly sourceTypeId: string
+    readonly afterKey?: string
+    readonly limit: number
+  }
+): SnapshotLinkEditRow[] {
+  const [afterKind, afterIdentity] = input.afterKey
+    ? (JSON.parse(input.afterKey) as [string, string])
+    : ["", ""]
+  const rows = db
     .query<
       {
         identity_kind: "edge" | "slot"
+        identity_key: string
         source_primary_id: string
         link_id: string
         target_type_id: string
@@ -234,50 +266,41 @@ export function readSqliteEdits(
         value: string
         updated_at: string
       },
-      [string, string]
+      [string, string, string, string, number]
     >(
-      `SELECT identity_kind, source_primary_id, link_id, target_type_id, target_primary_id,
-         value, updated_at
+      `SELECT identity_kind, identity_key, source_primary_id, link_id, target_type_id,
+         target_primary_id, value, updated_at
        FROM ontology_link_overrides
-       WHERE project_id = ? AND source_type_id = ? ORDER BY identity_key`
+       WHERE project_id = ? AND source_type_id = ? AND (identity_kind, identity_key) > (?, ?)
+       ORDER BY identity_kind, identity_key LIMIT ?`
     )
-    .all(input.projectId, objectTypeId)
+    .all(input.projectId, input.sourceTypeId, afterKind, afterIdentity, input.limit)
 
-  return {
-    objects: objects.map((row) => ({
-      ref: { objectTypeId, primaryId: row.primary_id },
-      value: JSON.parse(row.value) as ObjectOverride,
-      editedAt: JSON.parse(row.edited_at) as Record<string, string>,
-      updatedAt: row.updated_at,
-    })),
-    links: links.flatMap((row) =>
-      row.identity_kind === "edge"
-        ? [
-            {
-              ref: {
-                source: { objectTypeId, primaryId: row.source_primary_id },
-                linkId: row.link_id,
-                target: { objectTypeId: row.target_type_id, primaryId: row.target_primary_id },
-              },
-              value: JSON.parse(row.value) as LinkOverride,
-              updatedAt: row.updated_at,
-            },
-          ]
-        : []
-    ),
-    // A slot left in conflict by an old migration is no edit a branch can take over.
-    slots: links.flatMap((row) => {
-      const value = JSON.parse(row.value) as LinkSlotOverride | { readonly kind: "legacy-conflict" }
-      return row.identity_kind === "slot" && value.kind !== "legacy-conflict"
-        ? [
-            {
-              source: { objectTypeId, primaryId: row.source_primary_id },
-              linkId: row.link_id,
-              value,
-              updatedAt: row.updated_at,
-            },
-          ]
-        : []
-    }),
-  }
+  return rows.flatMap((row): SnapshotLinkEditRow[] => {
+    const key = JSON.stringify([row.identity_kind, row.identity_key])
+    const source = { objectTypeId: input.sourceTypeId, primaryId: row.source_primary_id }
+    const value = JSON.parse(row.value) as
+      | LinkOverride
+      | LinkSlotOverride
+      | { readonly kind: "legacy-conflict" }
+    if (row.identity_kind === "edge") {
+      const ref = {
+        source,
+        linkId: row.link_id,
+        target: { objectTypeId: row.target_type_id, primaryId: row.target_primary_id },
+      }
+      return [{ kind: "edge", key, ref, value: value as LinkOverride, updatedAt: row.updated_at }]
+    }
+    if (value.kind === "legacy-conflict") return []
+    return [
+      {
+        kind: "slot",
+        key,
+        source,
+        linkId: row.link_id,
+        value: value as LinkSlotOverride,
+        updatedAt: row.updated_at,
+      },
+    ]
+  })
 }

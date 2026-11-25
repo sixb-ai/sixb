@@ -76,20 +76,31 @@ export interface SnapshotReadView {
    */
   /**
    * Live roots of a projection's active source, in root key order after `afterRootKey`, each with
-   * what it asserts. Optional, with `readEdits`: without both, a type a projection feeds travels
-   * as created objects.
+   * what it asserts.
    */
-  readSourceRoots?(input: {
+  readSourceRoots(input: {
     readonly projectId: string
     readonly projectionId: string
     readonly afterRootKey?: string
     readonly limit: number
   }): Promise<readonly SnapshotSourceRoot[]>
-  /** Every edit over a type's objects and over the links from them, in one read. */
-  readEdits?(input: {
+  /** A page of the edits over a type's objects, in primary id order after `afterPrimaryId`. */
+  readObjectEdits(input: {
     readonly projectId: string
     readonly objectTypeId: string
-  }): Promise<SnapshotTypeEdits>
+    readonly afterPrimaryId?: string
+    readonly limit: number
+  }): Promise<readonly SnapshotObjectEdit[]>
+  /**
+   * A page of the edits over links from a type's objects, edges and cardinality-one slots, in
+   * `key` order after `afterKey`.
+   */
+  readLinkEdits(input: {
+    readonly projectId: string
+    readonly sourceTypeId: string
+    readonly afterKey?: string
+    readonly limit: number
+  }): Promise<readonly SnapshotLinkEditRow[]>
   readRanges?(input: {
     readonly projectId: string
     readonly objectTypeId: string
@@ -120,6 +131,11 @@ export interface SnapshotTypeEdits {
   readonly links: readonly SnapshotLinkEdit[]
   readonly slots: readonly SnapshotLinkSlotEdit[]
 }
+
+/** A link edit as a page reads it: `key` orders the pages, and means nothing else. */
+export type SnapshotLinkEditRow =
+  | ({ readonly kind: "edge"; readonly key: string } & SnapshotLinkEdit)
+  | ({ readonly kind: "slot"; readonly key: string } & SnapshotLinkSlotEdit)
 
 export interface SnapshotObjectEdit {
   readonly ref: OntologyObjectRef

@@ -336,8 +336,15 @@ export class InMemoryStorage
             afterRootKey,
             limit
           ),
-        readEdits: async ({ projectId, objectTypeId }) =>
-          copy.ontologyStorage.snapshots.readEdits(projectId, objectTypeId),
+        readObjectEdits: async ({ projectId, objectTypeId, afterPrimaryId, limit }) =>
+          copy.ontologyStorage.snapshots.readObjectEdits(
+            projectId,
+            objectTypeId,
+            afterPrimaryId,
+            limit
+          ),
+        readLinkEdits: async ({ projectId, sourceTypeId, afterKey, limit }) =>
+          copy.ontologyStorage.snapshots.readLinkEdits(projectId, sourceTypeId, afterKey, limit),
         readMemberships: async ({ projectId }) => {
           const users = await copy.auth.users.list({ projectId, limit: Number.MAX_SAFE_INTEGER })
           const memberships = await Promise.all(

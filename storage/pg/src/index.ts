@@ -86,9 +86,10 @@ import { PgShareGrantStorage } from "./share-grant-storage"
 import { PgShareSessionStorage } from "./share-session-storage"
 import { type BranchSchemaState, PgSnapshotLoad, SNAPSHOT_LANES } from "./snapshot-load"
 import {
-  readPgEdits,
   readPgLatestPoints,
+  readPgLinkEdits,
   readPgMemberships,
+  readPgObjectEdits,
   readPgRanges,
   readPgSourceRoots,
   readPgVectors,
@@ -482,7 +483,8 @@ export class PostgresStorage
       readMemberships: ({ projectId }) => readPgMemberships(connection, projectId),
       readRanges: (input) => readPgRanges(connection, input),
       readSourceRoots: (input) => readPgSourceRoots(connection, input),
-      readEdits: (input) => readPgEdits(connection, input),
+      readObjectEdits: (input) => readPgObjectEdits(connection, input),
+      readLinkEdits: (input) => readPgLinkEdits(connection, input),
     }
   }
 

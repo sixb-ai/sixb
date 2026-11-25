@@ -10,6 +10,7 @@ import {
   writeLakeSlice,
 } from "../datasets/lake-slices"
 import {
+  type AuthorizedObjectReader,
   createAuthorizedObjectReader,
   objectReadersIn,
   type ReaderSnapshotScope,
@@ -19,6 +20,7 @@ import {
 } from "../execution/authorized-object-reader"
 import type { ExecutionScope } from "../execution/types"
 import type { DatasetVersionRef } from "../lake-storage/types"
+import type { OntologyObjectRef } from "../materialization/model"
 import { vectorConfiguration, vectorSources } from "../objects/vectors/profile"
 import { OntologyRegistry } from "../ontology"
 import type { ObjectType } from "../ontology/types"
@@ -34,6 +36,7 @@ import type { ObjectRow } from "../storage/objects/types"
 import type { ActiveOntologySource } from "../storage/ontology"
 import {
   isSnapshotReadStorage,
+  type SnapshotLinkEditRow,
   type SnapshotRange,
   type SnapshotReadStorage,
   type SnapshotReadView,
@@ -47,7 +50,6 @@ import {
   SNAPSHOT_FORMAT,
   SNAPSHOT_SIGNATURE,
   type SnapshotCounts,
-  type SnapshotEdits,
   SnapshotFrameTooLarge,
   type SnapshotManifest,
   type SnapshotMembers,
@@ -338,6 +340,9 @@ async function takeSnapshot(
             ...(await exportTasks(source, manifest.types, first, views.length, settings)),
             ...sourceTasks(manifest.types),
           ]
+          const travelling = new Set(
+            manifest.types.flatMap((type) => (type.projection?.source ? [type.objectTypeId] : []))
+          )
           // Every view settles before the provider ends the read, the failed ones included.
           const settled = await Promise.allSettled(
             views.map(async (view) => {
@@ -346,8 +351,11 @@ async function takeSnapshot(
               try {
                 for (let task = tasks.shift(); task; task = tasks.shift()) {
                   if (task.part === "sourceRoots") await exportSourceRoots({ ...work, ...task })
-                  else if (task.part === "edits") await exportEdits({ ...work, ...task }, scope)
-                  else {
+                  else if (task.part === "objectEdits") {
+                    await exportObjectEdits({ ...work, ...task })
+                  } else if (task.part === "linkEdits") {
+                    await exportLinkEdits({ ...work, ...task }, scope, typeReader, travelling)
+                  } else {
                     await exportType({ ...work, ...task }, (input) =>
                       readSnapshotPage(typeReader, input)
                     )
@@ -455,6 +463,11 @@ async function travellingSources(input: {
   const travels = new Map<string, SourceTravel>()
   const definitions = source.projections?.listObjects() ?? []
   const applied = new Map(input.active.map((entry) => [entry.source.projectionId, entry]))
+  // Links a link projection feeds have no edit that makes them: their source does not travel, so
+  // the branch could not tell them from the type's own. Such a type travels as created objects.
+  const linkSources = new Set(
+    (source.projections?.listLinks() ?? []).map((definition) => definition.sourceObjectTypeId)
+  )
 
   // A slice holds one version of a dataset: projections that applied two of one go as objects.
   const versionsByDataset = new Map<string, Set<string>>()
@@ -474,10 +487,10 @@ async function travellingSources(input: {
     const version = applied.get(definition.id)
 
     if (!reader) objects("the branch does not read production's datasets in place")
-    else if (!view.readSourceRoots || !view.readEdits) {
-      objects("this storage provider does not read a projection's source")
-    } else if (!version) objects("its projection has not applied a version yet")
-    else if (access.throughCondition || access.hiddenPropertyIds.length > 0) {
+    else if (!version) objects(NOT_APPLIED)
+    else if (linkSources.has(definition.objectTypeId)) {
+      objects("a link projection feeds links from it, and its source does not travel")
+    } else if (access.throughCondition || access.hiddenPropertyIds.length > 0) {
       objects("the person does not read every object and property of the type")
     } else if ((versionsByDataset.get(definition.datasetId)?.size ?? 0) > 1) {
       objects("its dataset feeds projections that applied different versions of it")
@@ -490,7 +503,7 @@ async function travellingSources(input: {
         projectId: source.projectId,
         source: { projectionId: definition.id },
       })
-      if (!record) objects("its projection has not applied a version yet")
+      if (!record) objects(NOT_APPLIED)
       else {
         travels.set(definition.objectTypeId, {
           kind: "source",
@@ -510,13 +523,16 @@ async function travellingSources(input: {
   return travels
 }
 
+const NOT_APPLIED = "its projection has not applied a version yet"
+
 /** A type that travels as its source sends its roots and its edits after its objects. */
 function sourceTasks(types: readonly SnapshotTypeManifest[]): ExportTask[] {
   return types.flatMap((type) =>
     type.projection?.source
       ? [
           { type, range: {}, part: "sourceRoots" as const },
-          { type, range: {}, part: "edits" as const },
+          { type, range: {}, part: "objectEdits" as const },
+          { type, range: {}, part: "linkEdits" as const },
         ]
       : []
   )
@@ -525,12 +541,11 @@ function sourceTasks(types: readonly SnapshotTypeManifest[]): ExportTask[] {
 /** Every live root of the type's source, a page a frame. */
 async function exportSourceRoots(work: TypeExport): Promise<void> {
   const projectionId = work.type.projection?.projectionId
-  const readSourceRoots = work.view.readSourceRoots
-  if (projectionId === undefined || !readSourceRoots) return
+  if (projectionId === undefined) return
 
   for (let after: string | undefined; ; ) {
     work.stop.throwIfAborted()
-    const roots = await readSourceRoots.call(work.view, {
+    const roots = await work.view.readSourceRoots({
       projectId: work.source.projectId,
       projectionId,
       limit: work.settings.pageSize,
@@ -548,66 +563,110 @@ async function exportSourceRoots(work: TypeExport): Promise<void> {
   }
 }
 
-/**
- * The edits over the type's objects and the links from them. A link edit to a type the person
- * does not read whole stays in production, as the link itself would.
- */
-async function exportEdits(work: TypeExport, scope: ReaderSnapshotScope): Promise<void> {
-  const readEdits = work.view.readEdits
-  if (!readEdits) return
+/** The edits over the type's objects, a page a frame, in primary id order. */
+async function exportObjectEdits(work: TypeExport): Promise<void> {
+  const objectTypeId = work.type.objectTypeId
 
-  work.stop.throwIfAborted()
-  const edits = await readEdits.call(work.view, {
-    projectId: work.source.projectId,
-    objectTypeId: work.type.objectTypeId,
-  })
-  const readsWhole = (objectTypeId: string) => {
-    const access = scope.types.get(objectTypeId)
-    return access !== undefined && !access.throughCondition
-  }
+  for (let after: string | undefined; ; ) {
+    work.stop.throwIfAborted()
+    const edits = await work.view.readObjectEdits({
+      projectId: work.source.projectId,
+      objectTypeId,
+      limit: work.settings.pageSize,
+      ...(after === undefined ? {} : { afterPrimaryId: after }),
+    })
+    if (edits.length === 0) return
 
-  const rows: SnapshotEditRow[] = [
-    ...edits.objects.map(
-      (edit): SnapshotEditRow => ({
-        kind: "object",
-        row: [edit.ref.primaryId, edit.value, edit.editedAt ?? null, Date.parse(edit.updatedAt)],
-      })
-    ),
-    ...edits.links
-      .filter((edit) => readsWhole(edit.ref.target.objectTypeId))
-      .map(
-        (edit): SnapshotEditRow => ({
-          kind: "link",
-          row: [edit.ref, edit.value, Date.parse(edit.updatedAt)],
-        })
-      ),
-    ...edits.slots
-      .filter((edit) => edit.value.kind !== "set" || readsWhole(edit.value.target.objectTypeId))
-      .map(
-        (edit): SnapshotEditRow => ({
-          kind: "slot",
-          row: [edit.source.primaryId, edit.linkId, edit.value, Date.parse(edit.updatedAt)],
-        })
-      ),
-  ]
-
-  for (let start = 0; start < rows.length; start += work.settings.pageSize) {
-    const page = rows.slice(start, start + work.settings.pageSize)
-    await pushInHalves(work, page, (part) => ({
+    await pushInHalves(work, edits, (part) => ({
       kind: "edits",
-      objectTypeId: work.type.objectTypeId,
-      objects: part.flatMap((edit) => (edit.kind === "object" ? [edit.row] : [])),
-      links: part.flatMap((edit) => (edit.kind === "link" ? [edit.row] : [])),
-      slots: part.flatMap((edit) => (edit.kind === "slot" ? [edit.row] : [])),
+      objectTypeId,
+      objects: part.map((edit) => [
+        edit.ref.primaryId,
+        edit.value,
+        edit.editedAt ?? null,
+        Date.parse(edit.updatedAt),
+      ]),
+      links: [],
+      slots: [],
     }))
-    work.counts.edits += page.length
+    work.counts.edits += edits.length
+    after = edits.at(-1)?.ref.primaryId
   }
 }
 
-type SnapshotEditRow =
-  | { readonly kind: "object"; readonly row: SnapshotEdits["objects"][number] }
-  | { readonly kind: "link"; readonly row: SnapshotEdits["links"][number] }
-  | { readonly kind: "slot"; readonly row: SnapshotEdits["slots"][number] }
+/**
+ * The edits over links from the type's objects, a page a frame. An edit leaves only as the link it
+ * edits would: the person reads links of its definition, and the object it reaches. That object
+ * was exported, or its type travels as its source, whose roots hold even the objects an edit
+ * deleted. A cleared slot's anchor is such an object too, or the clear stays in production.
+ */
+async function exportLinkEdits(
+  work: TypeExport,
+  scope: ReaderSnapshotScope,
+  reader: AuthorizedObjectReader,
+  travelling: ReadonlySet<string>
+): Promise<void> {
+  const sourceTypeId = work.type.objectTypeId
+
+  for (let after: string | undefined; ; ) {
+    work.stop.throwIfAborted()
+    const page = await work.view.readLinkEdits({
+      projectId: work.source.projectId,
+      sourceTypeId,
+      limit: work.settings.pageSize,
+      ...(after === undefined ? {} : { afterKey: after }),
+    })
+    if (page.length === 0) return
+    after = page.at(-1)?.key
+
+    const targetOf = (edit: SnapshotLinkEditRow) =>
+      edit.kind === "edge" ? edit.ref.target : edit.value.target
+    const linkOf = (edit: SnapshotLinkEditRow) =>
+      edit.kind === "edge" ? edit.ref.linkId : edit.linkId
+    const readable = page.filter((edit) =>
+      scope.readsLink(sourceTypeId, linkOf(edit), targetOf(edit).objectTypeId)
+    )
+    const reached = await reachedTargets(
+      reader,
+      readable.map(targetOf).filter((target) => !travelling.has(target.objectTypeId))
+    )
+    const kept = readable.filter((edit) => {
+      const target = targetOf(edit)
+      return travelling.has(target.objectTypeId) || reached.has(objectKey(target))
+    })
+    if (kept.length === 0) continue
+
+    await pushInHalves(work, kept, (part) => ({
+      kind: "edits",
+      objectTypeId: sourceTypeId,
+      objects: [],
+      links: part.flatMap((edit) =>
+        edit.kind === "edge" ? [[edit.ref, edit.value, Date.parse(edit.updatedAt)] as const] : []
+      ),
+      slots: part.flatMap((edit) =>
+        edit.kind === "slot"
+          ? [[edit.source.primaryId, edit.linkId, edit.value, Date.parse(edit.updatedAt)] as const]
+          : []
+      ),
+    }))
+    work.counts.edits += kept.length
+  }
+}
+
+/** The objects among these the reader reads at the snapshot's moment. */
+async function reachedTargets(
+  reader: AuthorizedObjectReader,
+  targets: readonly OntologyObjectRef[]
+): Promise<ReadonlySet<string>> {
+  if (targets.length === 0) return new Set()
+
+  const rows = await reader.getByPrimaryIdBatch({ items: targets })
+  return new Set([...rows.values()].map((row) => objectKey(row)))
+}
+
+function objectKey(ref: { readonly objectTypeId: string; readonly primaryId: string }): string {
+  return JSON.stringify([ref.objectTypeId, ref.primaryId])
+}
 
 /** Encode rows as one record, or in halves when they pass a frame's limit. */
 async function pushInHalves<T>(
@@ -866,7 +925,7 @@ interface ExportTask {
   readonly type: SnapshotTypeManifest
   readonly range: SnapshotRange
   /** What of the type the task sends: its objects by default. */
-  readonly part?: "sourceRoots" | "edits"
+  readonly part?: "sourceRoots" | "objectEdits" | "linkEdits"
 }
 
 /** What one page reads from storage: its objects and links, their latest points, their vectors. */

@@ -11,7 +11,9 @@ import {
   type InMemoryObjectStorage,
 } from "../../objects/in-memory"
 import {
+  type SnapshotLinkEditRow,
   type SnapshotLoadBatch,
+  type SnapshotObjectEdit,
   type SnapshotSourceRoot,
   type SnapshotSourceRootWrite,
   type SnapshotSourceWrite,
@@ -181,32 +183,75 @@ export class InMemorySnapshots {
     })
   }
 
-  /** Every edit over a type's objects and the links from them. */
-  readEdits(projectId: string, objectTypeId: string): SnapshotTypeEdits {
-    const own = <T extends { readonly projectId: string }>(rows: Iterable<T>) =>
-      [...rows].filter((row) => row.projectId === projectId)
+  /** A page of the edits over a type's objects, in primary id order as bytes compare. */
+  readObjectEdits(
+    projectId: string,
+    objectTypeId: string,
+    afterPrimaryId: string | undefined,
+    limit: number
+  ): SnapshotObjectEdit[] {
+    const after = afterPrimaryId === undefined ? undefined : Buffer.from(afterPrimaryId)
+    const rows = [...this.state.objectOverrides.values()]
+      .filter((row) => row.projectId === projectId && row.ref.objectTypeId === objectTypeId)
+      .map((row) => ({ row, bytes: Buffer.from(row.ref.primaryId) }))
+      .filter(({ bytes }) => after === undefined || Buffer.compare(bytes, after) > 0)
+      .sort((left, right) => Buffer.compare(left.bytes, right.bytes))
+      .slice(0, limit)
 
-    return structuredClone({
-      objects: own(this.state.objectOverrides.values())
-        .filter((row) => row.ref.objectTypeId === objectTypeId)
-        .map(({ ref, value, editedAt, updatedAt }) => ({
+    return structuredClone(
+      rows.map(({ row: { ref, value, editedAt, updatedAt } }) => ({
+        ref,
+        value,
+        ...(editedAt === undefined ? {} : { editedAt }),
+        updatedAt,
+      }))
+    )
+  }
+
+  /** A page of the edits over links from a type's objects: edges, then slots, by identity. */
+  readLinkEdits(
+    projectId: string,
+    sourceTypeId: string,
+    afterKey: string | undefined,
+    limit: number
+  ): SnapshotLinkEditRow[] {
+    const edges = [...this.state.linkOverrides.values()]
+      .filter((row) => row.projectId === projectId && row.ref.source.objectTypeId === sourceTypeId)
+      .map(
+        ({ ref, value, updatedAt }): SnapshotLinkEditRow => ({
+          kind: "edge",
+          key: linkEditKey("edge", [
+            ref.source.objectTypeId,
+            ref.source.primaryId,
+            ref.linkId,
+            ref.target.objectTypeId,
+            ref.target.primaryId,
+          ]),
           ref,
           value,
-          ...(editedAt === undefined ? {} : { editedAt }),
           updatedAt,
-        })),
-      links: own(this.state.linkOverrides.values())
-        .filter((row) => row.ref.source.objectTypeId === objectTypeId)
-        .map(({ ref, value, updatedAt }) => ({ ref, value, updatedAt })),
-      slots: own(this.state.linkSlotOverrides.values())
-        .filter((row) => row.ref.source.objectTypeId === objectTypeId)
-        .map(({ ref, value, updatedAt }) => ({
+        })
+      )
+    const slots = [...this.state.linkSlotOverrides.values()]
+      .filter((row) => row.projectId === projectId && row.ref.source.objectTypeId === sourceTypeId)
+      .map(
+        ({ ref, value, updatedAt }): SnapshotLinkEditRow => ({
+          kind: "slot",
+          key: linkEditKey("slot", [ref.source.objectTypeId, ref.source.primaryId, ref.linkId]),
           source: ref.source,
           linkId: ref.linkId,
           value,
           updatedAt,
-        })),
-    })
+        })
+      )
+
+    const after = afterKey === undefined ? undefined : Buffer.from(afterKey)
+    return structuredClone(
+      [...edges, ...slots]
+        .filter((row) => after === undefined || Buffer.compare(Buffer.from(row.key), after) > 0)
+        .sort((left, right) => Buffer.compare(Buffer.from(left.key), Buffer.from(right.key)))
+        .slice(0, limit)
+    )
   }
 
   /** A source taken over from production: active as of the base commit, with no root yet. */
@@ -344,4 +389,9 @@ export class InMemorySnapshots {
       ...(this.state.vectors.get(vectorObjectKey(projectId, ref))?.values() ?? []),
     ])
   }
+}
+
+/** Orders a type's link edits: edges before slots, each by its identity. */
+function linkEditKey(kind: "edge" | "slot", identity: readonly string[]): string {
+  return JSON.stringify([kind === "edge" ? 0 : 1, identity])
 }

@@ -305,7 +305,7 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
         })
 
         await branchStorage.readSnapshot({ views: 1, maxDurationMs: 60_000 }, async ([view]) => {
-          const roots = await view!.readSourceRoots!({
+          const roots = await view!.readSourceRoots({
             projectId: PROJECT,
             projectionId: fromDevices.id,
             limit: 10,
@@ -313,7 +313,7 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
           expect(roots.map(({ root, assertions }) => [root, assertions] as const)).toEqual([
             ...DEVICE_ROOTS,
           ])
-          const later = await view!.readSourceRoots!({
+          const later = await view!.readSourceRoots({
             projectId: PROJECT,
             projectionId: fromDevices.id,
             afterRootKey: roots[0]!.rootKey,
@@ -322,11 +322,12 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
           expect(later.map(({ root }) => root)).toEqual([DEVICE_ROOTS[1]![0]])
 
           // The link d-2 asserts is its source's: no edit holds it.
-          expect(await view!.readEdits!({ projectId: PROJECT, objectTypeId: Device.id })).toEqual({
-            objects: [DEVICE_EDIT],
-            links: [],
-            slots: [],
-          })
+          expect(
+            await view!.readObjectEdits({ projectId: PROJECT, objectTypeId: Device.id, limit: 10 })
+          ).toEqual([DEVICE_EDIT])
+          expect(
+            await view!.readLinkEdits({ projectId: PROJECT, sourceTypeId: Device.id, limit: 10 })
+          ).toEqual([])
         })
       })
     },

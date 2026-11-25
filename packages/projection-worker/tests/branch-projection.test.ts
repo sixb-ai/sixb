@@ -1,4 +1,7 @@
-import { expect, test } from "bun:test"
+import { afterEach, beforeEach, expect, setSystemTime, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   can,
   col,
@@ -48,11 +51,24 @@ import { runProjectionJob } from "../src/run-projection-job"
 // continues on the branch from the version production applied, and a new version of its dataset
 // updates the objects it changes, nothing else.
 
+const Site = defineObjectType({
+  id: "BranchSite",
+  name: "Site",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("status", "string", { query: { searchable: true, filterable: true } }),
+  ],
+})
 const Device = defineObjectType({
   id: "BranchDevice",
   name: "Device",
   properties: [prop("id", "string", { primary: true, required: true }), prop("name", "string")],
-  links: [link.self("parent", { cardinality: "one" })],
+  // `parent` is the projection's; `site` and `peers` are edited by hand, or by a link projection.
+  links: [
+    link.self("parent", { cardinality: "one" }),
+    link("site", Site, { cardinality: "many" }),
+    link.self("peers", { cardinality: "many" }),
+  ],
 })
 const devices = defineDataset("branch_devices", {
   schema: [col("id", "string"), col("name", "string"), col("parent", "string", { nullable: true })],
@@ -61,12 +77,38 @@ const projection = defineProjection("branch_devices", Device)
   .fromDataset(devices)
   .properties({ id: "id", name: "name" })
   .withLinks({ parent: { link: Device.l.parent, sourceField: "parent", target: Device } })
+const peerPairs = defineDataset("branch_device_peers", {
+  schema: [col("from", "string"), col("to", "string")],
+})
+const peers = defineProjection("branch_device_peers", Device.l.peers)
+  .fromDataset(peerPairs)
+  .sourceField("from")
+  .targetField("to")
 const fleet = defineGroup("fleet")
 const viewers = defineGroup("viewers")
+// The fleet reads open sites only: an edit linking a device to a closed one stays in production.
 const roles = [
-  defineRole("fleet", { grantedTo: [fleet], grants: [can.view(Device), can.view(devices)] }),
+  defineRole("fleet", {
+    grantedTo: [fleet],
+    grants: [
+      can.view(Device),
+      can.view(devices),
+      can.view(Site).where((site) => site.p.status.eq("open")),
+    ],
+  }),
   defineRole("viewers", { grantedTo: [viewers], grants: [can.view(Device)] }),
 ]
+
+let rootDir: string
+let clock: number
+beforeEach(async () => {
+  rootDir = await mkdtemp(join(tmpdir(), "sixb-branch-projection-"))
+  clock = Date.parse("2026-11-01T00:00:00.000Z")
+})
+afterEach(async () => {
+  setSystemTime()
+  await rm(rootDir, { recursive: true, force: true })
+})
 
 /** Production's lake, which the branch reads in place: here the same lake, slices recorded. */
 class Lake extends InMemoryLakeStorage {
@@ -98,12 +140,12 @@ class Lake extends InMemoryLakeStorage {
   }
 }
 
-function hostOn(storage: InMemoryStorage, lake: Lake) {
+function hostOn(storage: InMemoryStorage, lake: Lake, withPeers = false) {
   return new SixbHost({
     id: "branch-projection",
-    ontology: [Device],
-    datasets: [devices],
-    projections: [projection],
+    ontology: [Site, Device],
+    datasets: withPeers ? [devices, peerPairs] : [devices],
+    projections: withPeers ? [projection, peers] : [projection],
     groups: [fleet, viewers],
     roles,
     broker: new InMemoryBroker(),
@@ -114,10 +156,11 @@ function hostOn(storage: InMemoryStorage, lake: Lake) {
   })
 }
 
+/** A version of the devices, a second after the last: versions are ordered by when they land. */
 async function write(lake: Lake, rows: readonly DatasetRow[]) {
+  clock += 1_000
+  setSystemTime(new Date(clock))
   await lake.createDataset(devices)
-  const latest = await lake.getLatestVersion(devices.id)
-  while (latest && Date.now() <= latest.createdAt.getTime()) await Bun.sleep(1)
   const writer = await lake.beginWrite({ dataset: devices, mode: "snapshot" })
   await writer.writeRows(rows)
   return writer.commit({ commitMessage: "devices" })
@@ -166,25 +209,50 @@ async function projectionCommitCounts(storage: InMemoryStorage, projectId: strin
   return last?.result.kind === "projection" ? last.result.counts : undefined
 }
 
-const rows = (count: number, name = (index: number) => `device ${index}`) =>
-  Array.from({ length: count }, (_, index) => ({
-    id: `d-${index}`,
-    name: name(index),
-    parent: index === 0 ? null : "d-0",
-  }))
+const device = (index: number) => ({
+  id: `d-${index}`,
+  name: `device ${index}`,
+  parent: index === 0 ? null : "d-0",
+})
+const rows = (count: number) => Array.from({ length: count }, (_, index) => device(index))
 
-async function production() {
+async function production(withPeers = false) {
   const lake = new Lake()
   const storage = new InMemoryStorage()
-  const host = hostOn(storage, lake)
+  const host = hostOn(storage, lake, withPeers)
   const applied = await write(lake, rows(100))
   await project(host, storage, lake, applied.versionId)
 
-  // A person's edit over a projected object.
-  await createTestSixb(host)
+  // People's edits over what the projection made: a name, a cleared parent, and two sites, one of
+  // which the fleet cannot read.
+  const trusted = createTestSixb(host)
+  await trusted.objects(Site).upsert({ properties: { id: "site-open", status: "open" } })
+  await trusted.objects(Site).upsert({ properties: { id: "site-closed", status: "closed" } })
+  await trusted.objects(Device).upsert({ properties: { id: "d-7", name: "renamed by hand" } })
+  await trusted
     .objects(Device)
-    .upsert({ properties: { id: "d-7", name: "renamed by hand" } })
+    .byId("d-9")
+    .unlink(Device.l.parent, { objectTypeId: Device.id, primaryId: "d-0" })
+  await trusted
+    .objects(Device)
+    .byId("d-1")
+    .link(Device.l.site, { objectTypeId: Site.id, primaryId: "site-open" })
+  await trusted
+    .objects(Device)
+    .byId("d-2")
+    .link(Device.l.site, { objectTypeId: Site.id, primaryId: "site-closed" })
   return { lake, storage, host, applied }
+}
+
+/** The ids a device links to through `linkId`, on a storage. */
+async function linked(storage: InMemoryStorage, primaryId: string, linkId: string) {
+  const links = await storage.objects.listLinks({
+    projectId: "branch-projection",
+    objectTypeId: Device.id,
+    objectId: primaryId,
+    linkId,
+  })
+  return links.map((row) => row.targetId)
 }
 
 async function branchOf(
@@ -199,24 +267,32 @@ async function branchOf(
       roles: prod.host.definitions.security.listResolvedRoles(),
     }),
   })
-  const snapshot = exportSnapshot(hostSnapshotSource(prod.host), {
+  const frames: Uint8Array[] = []
+  for await (const frame of exportSnapshot(hostSnapshotSource(prod.host), {
     scope,
-    lake: { path: "/tmp/branch-projection.ducklake", branch: "fleet", onSlice: () => undefined },
-  })
+    compress: false,
+    lake: { path: join(rootDir, "slice.ducklake"), branch: "fleet", onSlice: () => undefined },
+  })) {
+    frames.push(frame)
+  }
 
   const storage = (await prod.storage.createBranchNamespace("fleet")) as InMemoryStorage
   const report: SnapshotImportReport = await importSnapshot({
-    snapshot,
+    snapshot: (async function* () {
+      yield* frames
+    })(),
     storage,
     ontology: prod.host.definitions.ontology as OntologyRegistry,
     projections: prod.host.definitions.projections,
   })
-  return { storage, host: hostOn(storage, prod.lake), report }
+  const text = Buffer.concat(frames).toString("latin1")
+  return { storage, host: hostOn(storage, prod.lake), report, text }
 }
 
-// Red check: in snapshots/export.ts `travellingSources`, send every type as objects (return an
+// Red checks: in snapshots/export.ts `travellingSources`, send every type as objects (return an
 // empty map): the type loads as created objects, the branch's projection reads the dataset in
-// full and finds every object its own, and the edit over d-7 is lost.
+// full, and d-9's parent comes back. In `exportLinkEdits`, keep only edits whose target type is
+// read without a condition, as before: d-1's site edit is lost.
 test("a branch's projection updates only what a new version changed", async () => {
   const prod = await production()
   const branch = await branchOf(prod)
@@ -228,26 +304,45 @@ test("a branch's projection updates only what a new version changed", async () =
       projectionId: projection.id,
       reprojectable: true,
     }),
+    expect.objectContaining({ objectTypeId: Site.id, objects: 1 }),
   ])
-
-  // A pipeline on the branch changes three devices.
-  const changed = await write(
-    prod.lake,
-    rows(100, (index) => ([3, 7, 42].includes(index) ? `device ${index} v2` : `device ${index}`))
+  // The edit to a closed site leaves nothing of it; the others travel.
+  expect(branch.text.includes("site-closed")).toBe(false)
+  expect(await linked(branch.storage, "d-1", "site")).toEqual(["site-open"])
+  expect(await linked(branch.storage, "d-2", "site")).toEqual([])
+  expect(await linked(branch.storage, "d-9", "parent")).toEqual([])
+  // The edits themselves travel: the site d-1 was linked to by hand, and d-9's cleared parent.
+  const edits = await branch.storage.readSnapshot({ views: 1, maxDurationMs: 60_000 }, ([view]) =>
+    view!.readLinkEdits({ projectId: branch.host.id, sourceTypeId: Device.id, limit: 10 })
   )
+  expect(
+    edits.map((edit) => (edit.kind === "edge" ? edit.ref.target.primaryId : edit.linkId))
+  ).toEqual(["site-open", "parent"])
+
+  // A pipeline on the branch renames d-1, d-3, d-7 and d-9, deletes d-5, moves d-11 and orphans
+  // d-12. Renaming d-1 and d-9 touches the objects whose links people edited.
+  const next = rows(100)
+    .filter((row) => row.id !== "d-5")
+    .map((row) => {
+      if (["d-1", "d-3", "d-7", "d-9"].includes(row.id)) return { ...row, name: `${row.name} v2` }
+      if (row.id === "d-11") return { ...row, parent: "d-2" }
+      if (row.id === "d-12") return { ...row, parent: null }
+      return row
+    })
+  const changed = await write(prod.lake, next)
   const fullReads = prod.lake.fullReads
   const result = await project(branch.host, branch.storage, prod.lake, changed.versionId)
 
   expect(result.run.status).toBe("succeeded")
-  expect(result.run.progress).toMatchObject({ sourceRowsRead: 0, sourceChangesRead: 3 })
+  expect(result.run.progress).toMatchObject({ sourceRowsRead: 0, sourceChangesRead: 7 })
   expect(prod.lake.fullReads).toBe(fullReads)
-  // d-7's edit wins over its new name: two objects change, no object is created.
+  // d-7's edit wins over its new name, and d-9's cleared parent stays cleared: d-11's new parent
+  // is the one link made, and no object is.
   expect(await projectionCommitCounts(branch.storage, branch.host.id)).toMatchObject({
     objectsCreated: 0,
-    objectsUpdated: 2,
-    objectsDeleted: 0,
-    linksCreated: 0,
-    linksDeleted: 0,
+    objectsUpdated: 3,
+    objectsDeleted: 1,
+    linksCreated: 1,
   })
 
   const read = (primaryId: string) =>
@@ -258,7 +353,26 @@ test("a branch's projection updates only what a new version changed", async () =
     })
   expect((await read("d-3"))?.properties.name).toBe("device 3 v2")
   expect((await read("d-7"))?.properties.name).toBe("renamed by hand")
-  expect((await read("d-8"))?.properties.name).toBe("device 8")
+  expect(await read("d-5")).toBeNull()
+  expect(await linked(branch.storage, "d-9", "parent")).toEqual([])
+  expect(await linked(branch.storage, "d-11", "parent")).toEqual(["d-2"])
+  expect(await linked(branch.storage, "d-12", "parent")).toEqual([])
+  expect(await linked(branch.storage, "d-1", "site")).toEqual(["site-open"])
+})
+
+// Red check: in snapshots/export.ts `travellingSources`, drop the link projections' check: the
+// devices travel as their source, and the peers the link projection made lose their maker.
+test("a type a link projection also feeds travels as created objects", async () => {
+  const prod = await production(true)
+  const branch = await branchOf(prod)
+
+  expect(branch.report.types).toContainEqual(
+    expect.objectContaining({
+      objectTypeId: Device.id,
+      reprojectable: false,
+      notReprojectable: "a link projection feeds links from it, and its source does not travel",
+    })
+  )
 })
 
 // Red check: in snapshots/export.ts `travellingSources`, drop the full-read check: a person who
@@ -267,12 +381,12 @@ test("a type whose dataset the person cannot read in full travels as created obj
   const prod = await production()
   const branch = await branchOf(prod, [viewers.id])
 
-  expect(branch.report.types).toEqual([
+  expect(branch.report.types).toContainEqual(
     expect.objectContaining({
       objectTypeId: Device.id,
       objects: 100,
       reprojectable: false,
       notReprojectable: "the person does not read its dataset in full",
-    }),
-  ])
+    })
+  )
 })

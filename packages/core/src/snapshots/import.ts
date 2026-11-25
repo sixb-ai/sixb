@@ -684,12 +684,14 @@ async function loadEdits(plan: ImportPlan, loader: SnapshotLoader, record: Snaps
           value,
           updatedAt: new Date(updatedAt).toISOString(),
         })),
-      slots: record.slots.map(([primaryId, linkId, value, updatedAt]) => ({
-        source: { objectTypeId, primaryId },
-        linkId,
-        value,
-        updatedAt: new Date(updatedAt).toISOString(),
-      })),
+      slots: record.slots
+        .filter(([, linkId, value]) => plan.keepsLink(type, linkId, value.target.objectTypeId))
+        .map(([primaryId, linkId, value, updatedAt]) => ({
+          source: { objectTypeId, primaryId },
+          linkId,
+          value,
+          updatedAt: new Date(updatedAt).toISOString(),
+        })),
     },
   })
 }
