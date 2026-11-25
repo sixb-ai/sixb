@@ -2,7 +2,7 @@ import type { LakeStorage } from "../lake-storage/types"
 import type { OntologyDefinitionCatalog } from "../ontology/registry"
 import type { PipelineDefinition } from "../pipelines/types"
 import type { ProjectionDefinitionCatalog } from "../projections/registry"
-import type { OntologySourceStorage } from "../storage/ontology"
+import type { ActiveOntologySource, OntologySourceStorage } from "../storage/ontology"
 import {
   type AppliedVersionRead,
   appliedContribution,
@@ -69,6 +69,31 @@ export interface AppliedMarkings {
    * marks nothing.
    */
   forEarlierValues(snapshot: AppliedMarkingsSnapshot, objectTypeId: string): AppliedMarkingsSnapshot
+  /**
+   * The versions the current snapshot was built from, as {@link appliedSourcesKey} writes them:
+   * what a snapshot taken later compares with the versions applied at its moment. Absent before
+   * the first read.
+   */
+  appliedSources?(): string | undefined
+}
+
+/** The applied version and revision of each declared projection, as one comparable string. */
+export function appliedSourcesKey(
+  active: readonly ActiveOntologySource[],
+  projectionIds: readonly string[]
+): string {
+  const declared = new Set(projectionIds)
+  return JSON.stringify(
+    active
+      .filter((source) => declared.has(source.source.projectionId))
+      .map((source) => [
+        source.source.projectionId,
+        source.datasetVersion.datasetId,
+        source.datasetVersion.versionId,
+        source.projectionRevision,
+      ])
+      .sort((left, right) => (left[0]! < right[0]! ? -1 : left[0]! > right[0]! ? 1 : 0))
+  )
 }
 
 export interface AppliedMarkingsOptions {
@@ -112,6 +137,7 @@ export function createAppliedMarkings(options: AppliedMarkingsOptions): AppliedM
 
   let snapshot: AppliedMarkingsSnapshot | undefined
   let fingerprint: string | undefined
+  let sources: string | undefined
   let refreshedAt = 0
   let states = new Map<string, ProjectionState>()
   let generation = 0
@@ -202,6 +228,10 @@ export function createAppliedMarkings(options: AppliedMarkingsOptions): AppliedM
     if (run !== latestRun) return
 
     states = next
+    sources = appliedSourcesKey(
+      active,
+      projections.map((projection) => projection.id)
+    )
     failing = false
     publish(next)
     refreshedAt = startedAt
@@ -388,6 +418,7 @@ export function createAppliedMarkings(options: AppliedMarkingsOptions): AppliedM
       return false
     },
     current,
+    appliedSources: () => sources,
     // Also before the first snapshot: a read in flight may have listed the sources before it.
     invalidate: () => {
       generation += 1

@@ -48,17 +48,23 @@ import {
   type TelemetryHistoryReadWorkloadInput,
 } from "../objects/telemetry/workload"
 import type { OntologyRegistry } from "../ontology"
+import type { UserRef } from "../ontology/user-ref"
 import type { AppliedMarkings } from "../security/applied-markings"
 import type {
   AuthUserStore,
   LinkBatchKey,
   ObjectFacetRequest,
+  ObjectLinkCursor,
   ObjectLinkRow,
   ObjectReadStorage,
   ObjectRow,
   ObjectStorage,
 } from "../storage"
-import { assertObjectReadOutputWithinLimit, MAX_OBJECT_READ_FACETS } from "../storage"
+import {
+  assertObjectReadOutputWithinLimit,
+  MAX_OBJECT_READ_FACETS,
+  objectLinkCursor,
+} from "../storage"
 import { captureExecutionScope, resolveExecutionScopeAuthorization } from "./authorization"
 import type { Clearance, EventSources } from "./object-reader-clearance"
 import { ObjectReaderOntology } from "./object-reader-ontology"
@@ -190,6 +196,102 @@ class AuthorizedObjectReaderImpl {
         },
       ])
     )
+  }
+
+  /** What a snapshot taken through this reader reads: see {@link readerSnapshotScope}. */
+  static async snapshotScope(reader: AuthorizedObjectReaderImpl): Promise<ReaderSnapshotScope> {
+    const security = reader.#security
+    if (security.authority.type !== "principal") {
+      throw new Error("[Sixb] A snapshot is taken as one person: use a principal's reader.")
+    }
+
+    const clearance = await security.clearance.current()
+    const types = new Map<string, ReaderSnapshotType>()
+
+    for (const objectType of reader.#ontology.registry.listObjectTypes()) {
+      const objectTypeId = objectType.id
+      if (!security.isObjectTypeViewable(objectTypeId, clearance)) continue
+
+      const hidden = clearance?.hiddenProperties(objectTypeId)
+      types.set(objectTypeId, {
+        hiddenPropertyIds: hidden ? [...hidden.ids].sort() : [],
+        throughCondition: security.viewsThroughCondition(objectTypeId),
+      })
+    }
+
+    return {
+      types,
+      canViewUsers: isRuntimeAllowed(security.runtime, { kind: "users.view" }),
+      canViewDataset: (datasetId) =>
+        isRuntimeAllowed(security.runtime, { kind: "dataset.view", datasetId }),
+      ...(security.requestingUser ? { user: security.requestingUser } : {}),
+    }
+  }
+
+  /** One page of a snapshot: see {@link readSnapshotPage}. */
+  static async snapshotPage(
+    reader: AuthorizedObjectReaderImpl,
+    input: SnapshotPageInput
+  ): Promise<SnapshotPage> {
+    const security = reader.#security
+    const projectId = security.runtime.projectId
+    const clearance = await security.clearance.current()
+    security.assertObjectTypesViewable([input.objectTypeId], clearance)
+
+    const page = await executeObjectQuery(
+      {
+        projectId,
+        // A total would count the whole type again on every page.
+        includeTotal: false,
+        query: {
+          kind: "page",
+          pageSize: input.limit,
+          ...(input.pageToken === undefined ? {} : { pageToken: input.pageToken }),
+          input: { kind: "start", objectTypeId: input.objectTypeId, includeSubtypes: false },
+        },
+      },
+      { ...reader.#queryExecutorOptions(clearance), maxPageSize: input.limit }
+    )
+    const objects = clearance
+      ? page.objects.map((row) => redactObjectRow(row, clearance))
+      : page.objects
+
+    const links: ObjectLinkRow[] = []
+    const objectRefs = objects.map((row) => ({
+      objectTypeId: row.objectTypeId,
+      primaryId: row.primaryId,
+    }))
+    const endpointObjectTypeIds = reader.#ontology.registry
+      .listObjectTypes()
+      .map((objectType) => objectType.id)
+      .filter((objectTypeId) => security.isObjectTypeViewable(objectTypeId, clearance))
+
+    // The objects are this reader's already, so only the links' targets remain to be checked: the
+    // storage applies the conditions they are viewed through, the security their grants and marks.
+    for (let after: ObjectLinkCursor | undefined, more = objectRefs.length > 0; more; ) {
+      const linkPage = await reader.#storage.queryLinks({
+        projectId,
+        objectRefs,
+        direction: "outgoing",
+        endpointObjectTypeIds,
+        ...(after === undefined ? {} : { after }),
+        limit: SNAPSHOT_LINK_PAGE_SIZE,
+      })
+
+      for (const link of linkPage.links) {
+        if (security.isLinkViewable(link, clearance)) links.push(link)
+      }
+
+      const last = linkPage.links.at(-1)
+      more = linkPage.hasMore && last !== undefined
+      if (last) after = objectLinkCursor(last)
+    }
+
+    return {
+      objects,
+      links,
+      ...(page.nextPageToken === undefined ? {} : { nextPageToken: page.nextPageToken }),
+    }
   }
 
   static ontologyView(reader: AuthorizedObjectReaderImpl): AuthorizedOntologyView {
@@ -914,6 +1016,61 @@ export function readerEventClearance(
   sources: EventSources
 ): Clearance | Promise<Clearance> {
   return AuthorizedObjectReaderImpl.eventClearance(reader, sources)
+}
+
+const SNAPSHOT_LINK_PAGE_SIZE = 5_000
+
+/** How a snapshot reads one object type through a reader. */
+export interface ReaderSnapshotType {
+  /** The properties the reader's clearance hides: no value of theirs leaves production. */
+  readonly hiddenPropertyIds: readonly string[]
+  /** Whether a condition decides which objects of the type the reader sees. */
+  readonly throughCondition: boolean
+}
+
+/** What a snapshot taken through a reader holds. */
+export interface ReaderSnapshotScope {
+  /** Every object type the reader can read; a type absent here leaves nothing in the snapshot. */
+  readonly types: ReadonlyMap<string, ReaderSnapshotType>
+  /** Whether the reader may view the project's members: `can.view(project.users)`. */
+  readonly canViewUsers: boolean
+  readonly canViewDataset: (datasetId: string) => boolean
+  /** The person the snapshot is taken as, when the reader is a user's. */
+  readonly user?: UserRef
+}
+
+export interface SnapshotPageInput {
+  readonly objectTypeId: string
+  readonly limit: number
+  /** The previous page's `nextPageToken`. */
+  readonly pageToken?: string
+}
+
+export interface SnapshotPage {
+  readonly objects: readonly ObjectRow[]
+  /** Every link from these objects the reader can read. */
+  readonly links: readonly ObjectLinkRow[]
+  readonly nextPageToken?: string
+}
+
+/**
+ * What a snapshot taken through this reader holds, decided as every other read of it is: the
+ * types its grants and clearance let it read, and the properties its clearance hides.
+ */
+export function readerSnapshotScope(reader: AuthorizedObjectReader): Promise<ReaderSnapshotScope> {
+  return AuthorizedObjectReaderImpl.snapshotScope(reader)
+}
+
+/**
+ * One keyset page of an object type in primary id order, exactly as this reader reads it, with
+ * every link from those objects it can read. The objects are not detached: a snapshot serializes
+ * them before anything else runs, and never modifies them.
+ */
+export function readSnapshotPage(
+  reader: AuthorizedObjectReader,
+  input: SnapshotPageInput
+): Promise<SnapshotPage> {
+  return AuthorizedObjectReaderImpl.snapshotPage(reader, input)
 }
 
 /** A condition a reader views an object type through, for a surface that decides per object. */
