@@ -62,8 +62,7 @@ export interface FetchBranchCopyInput {
  * Reusing a copy needs no network, and refuses one taken under another CLI profile.
  */
 export async function fetchBranchCopy(input: FetchBranchCopyInput): Promise<boolean> {
-  const directory = branchesDirectory(input.projectRoot)
-  await mkdir(directory, { recursive: true })
+  const directory = await branchesDirectory(input.projectRoot)
   const name = await namespaceOf(input.projectRoot, input.gitBranch)
   const record = (await readIndex(directory))[name]
 
@@ -97,8 +96,9 @@ export async function fetchBranchCopy(input: FetchBranchCopyInput): Promise<bool
   const spool = join(directory, `${name}.copy`)
   const partial = `${spool}.${randomUUID()}.partial`
   try {
+    // Production's data, readable by its owner only from its first byte.
+    await writeFile(partial, "", { mode: 0o600, flag: "wx" })
     await Bun.write(partial, response)
-    await chmod(partial, 0o600)
     await rename(partial, spool)
   } finally {
     await rm(partial, { force: true })
@@ -108,7 +108,7 @@ export async function fetchBranchCopy(input: FetchBranchCopyInput): Promise<bool
     apiUrl: production.apiUrl,
     profile: input.profile,
   }
-  await writeFile(`${spool}.json`, JSON.stringify(pending))
+  await writeFile(`${spool}.json`, JSON.stringify(pending), { mode: 0o600 })
   return true
 }
 
@@ -145,8 +145,7 @@ export async function branchFromProduction(
 ): Promise<BranchFromProduction> {
   // A storage that cannot keep the branch apart is refused: the copy is real data.
   const storage = branchNamespaces(input.host.storage)
-  const directory = branchesDirectory(input.projectRoot)
-  await mkdir(directory, { recursive: true })
+  const directory = await branchesDirectory(input.projectRoot)
   const index = await readIndex(directory)
   const name = await namespaceOf(input.projectRoot, input.gitBranch)
 
@@ -213,13 +212,12 @@ export function namespaceFor(gitBranch: string, checkout: string): string {
 
 /** This checkout's namespace for a git branch. */
 export async function namespaceOf(projectRoot: string, gitBranch: string): Promise<string> {
-  const directory = branchesDirectory(projectRoot)
-  await mkdir(directory, { recursive: true })
+  const directory = await branchesDirectory(projectRoot)
   const file = join(directory, "checkout")
   let checkout = (await readFile(file, "utf8").catch(() => "")).trim()
   if (!checkout) {
     checkout = randomUUID()
-    await writeFile(file, `${checkout}\n`)
+    await writeFile(file, `${checkout}\n`, { mode: 0o600 })
   }
   return namespaceFor(gitBranch, checkout)
 }
@@ -255,8 +253,10 @@ async function loadCopy(input: {
 
     const branchDirectory = join(input.directory, input.name)
     await rm(branchDirectory, { recursive: true, force: true })
-    await mkdir(branchDirectory, { recursive: true })
-    if (rest) await writeFile(join(branchDirectory, "lake.ducklake"), rest.catalog)
+    await mkdir(branchDirectory, { mode: 0o700 })
+    if (rest) {
+      await writeFile(join(branchDirectory, "lake.ducklake"), rest.catalog, { mode: 0o600 })
+    }
 
     input.index[input.name] = {
       gitBranch: pending.gitBranch,
@@ -372,8 +372,15 @@ async function deleteSlice(apiUrl: string, credential: string, sliceId: string):
   })
 }
 
-function branchesDirectory(projectRoot: string): string {
-  return join(projectRoot, ".sixb", "branches")
+/**
+ * Where this checkout keeps its branches: copies of production's data, their catalogs and caches,
+ * and each branch's credential. Its owner's only, whatever the umask or an older run left.
+ */
+async function branchesDirectory(projectRoot: string): Promise<string> {
+  const directory = join(projectRoot, ".sixb", "branches")
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  await chmod(directory, 0o700)
+  return directory
 }
 
 async function readIndex(directory: string): Promise<BranchIndex> {

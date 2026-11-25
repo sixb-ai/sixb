@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite"
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import {
@@ -294,6 +294,39 @@ describe.each(laptops)("a laptop branch on %s", (_name, localStorage) => {
     await onMain.host.lakeStorage.close?.()
     await local.lake.close()
     await local.storage.close?.()
+  }, 120_000)
+
+  // Red check: in branch-from-production.ts, make `branchesDirectory` a plain `mkdir` and drop
+  // the modes the files are written with: the umask leaves the copy readable by everyone.
+  test("keeps production's data readable by its owner only, from its first byte", async () => {
+    const local = await laptop()
+    const alice = await signedIn("usr_alice")
+    const previous = process.umask(0o022)
+    try {
+      await fetchBranchCopy({
+        projectRoot: local.projectRoot,
+        gitBranch: "feature/x",
+        refresh: false,
+        profile: "alice",
+        connect: async () => alice,
+      })
+      const branches = join(local.projectRoot, ".sixb/branches")
+      expect(await modesOpenToOthers(branches)).toEqual([])
+
+      const opened = await branchFromProduction({
+        host: local.host,
+        projectRoot: local.projectRoot,
+        gitBranch: "feature/x",
+        gitBranches: ["feature/x"],
+      })
+      expect((await readdir(branches, { recursive: true })).length).toBeGreaterThan(3)
+      expect(await modesOpenToOthers(branches)).toEqual([])
+      await opened.host.lakeStorage.close?.()
+    } finally {
+      process.umask(previous)
+      await local.lake.close()
+      await local.storage.close?.()
+    }
   }, 120_000)
 
   // Red check: in `fetchBranchCopy`, reuse whatever copy exists, whoever is signed in.
@@ -591,3 +624,14 @@ describe("production's copy route", () => {
     expect(await live()).toBe(before + 1)
   }, 60_000)
 })
+
+/** The directory and every entry under it that its owner's group or anyone else may open. */
+async function modesOpenToOthers(directory: string): Promise<string[]> {
+  const entries = ["", ...(await readdir(directory, { recursive: true }))]
+  const open: string[] = []
+  for (const entry of entries) {
+    const mode = (await stat(join(directory, entry))).mode & 0o777
+    if (mode & 0o077) open.push(`${entry || "."} ${mode.toString(8)}`)
+  }
+  return open
+}
