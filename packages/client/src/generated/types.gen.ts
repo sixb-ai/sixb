@@ -847,7 +847,7 @@ export type GetAuthSessionResponses = {
            */
           logs: boolean
           /**
-           * Console › Branches: they hold can.manage(project.source), in production
+           * Branches: they hold can.manage(project.source)
            */
           branches: boolean
         }

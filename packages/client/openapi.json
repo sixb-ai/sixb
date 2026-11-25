@@ -2527,7 +2527,7 @@
                             },
                             "branches": {
                               "type": "boolean",
-                              "description": "Console › Branches: they hold can.manage(project.source), in production"
+                              "description": "Branches: they hold can.manage(project.source)"
                             }
                           },
                           "required": [

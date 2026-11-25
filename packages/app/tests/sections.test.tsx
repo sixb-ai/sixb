@@ -276,6 +276,15 @@ describe("who sees each section", () => {
     expect(pagesOf({ signedIn, access, enabled: true }, section)).toEqual([...pages])
   })
 
+  // Branches are started in production: a branch's own app leaves the page out.
+  test("a branch's app leaves out what only production has", () => {
+    const access = { ...nobody, console: true, branches: true }
+    expect(pagesOf({ signedIn: true, access, enabled: true }, "console")).toContain("branches")
+    expect(
+      pagesOf({ signedIn: true, access, enabled: true, onBranch: true }, "console")
+    ).not.toContain("branches")
+  })
+
   test("shared links get no sections", () => {
     expect(
       resolveOpenSections({
@@ -448,15 +457,18 @@ describe("section navigation", () => {
 
 describe("who may open a section page", () => {
   // Regression proof: delete the `closed` redirect in SectionPage and this renders the members page.
-  test("a project page someone may not use sends its URL home", () => {
+  // Someone signed in reads which page it is and who can give access, rather than land on Home
+  // without knowing why. Removal proof: return the redirect from `NotAllowed` for everyone.
+  test("a project page someone may not use says they don't have access", () => {
     const view = renderApp(<SettingsMembersPage />, {
       path: "/settings/members",
       session: sessionFor(["staff"], nobody),
     })
-    expect(view.getByText("Home page")).toBeDefined()
+    expect(view.getByText("You don't have access to Members. Ask a project admin.")).toBeDefined()
+    expect(view.queryByText("Home page")).toBeNull()
   })
 
-  test("a Console page sends someone without the grant home, detail pages included", () => {
+  test("a Console page says so to someone without the grant, detail pages included", () => {
     for (const [page, path] of [
       [<ConsoleSyncsPage key="list" />, "/console/syncs"],
       [<ConsoleSyncPage key="detail" />, "/console/syncs/sync-orbit"],
@@ -465,9 +477,14 @@ describe("who may open a section page", () => {
         path,
         session: sessionFor(["staff"], { ...manager, console: false }),
       })
-      expect(view.getByText("Home page")).toBeDefined()
+      expect(view.getByText("You don't have access to Syncs. Ask a project admin.")).toBeDefined()
       cleanup()
     }
+  })
+
+  test("signed out, a page sends its URL home", () => {
+    const view = renderApp(<SettingsMembersPage />, { path: "/settings/members", session: null })
+    expect(view.getByText("Home page")).toBeDefined()
   })
 
   test("a page about yourself stays open to someone who may manage nothing", () => {

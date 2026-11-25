@@ -1,4 +1,4 @@
-import type { ListBranchesResponse } from "@sixb/client"
+import { isSixbApiError, type ListBranchesResponse } from "@sixb/client"
 import {
   deleteBranchMutation,
   listBranchesOptions,
@@ -40,9 +40,12 @@ import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowUpRight,
+  BookOpen,
   Check,
   ChevronRight,
   CircleAlert,
+  CircleStop,
+  Clock,
   GitFork,
   Info,
   Loader2,
@@ -50,7 +53,6 @@ import {
   Play,
   Plus,
   RefreshCw,
-  Square,
   Trash2,
 } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
@@ -84,25 +86,41 @@ export type BranchStep = "preparing" | "copying" | "starting"
 
 const STEPS: readonly BranchStep[] = ["preparing", "copying", "starting"]
 
-/** How long a branch waits for a worker before the page says nobody has picked it up. */
-const WORKER_WAIT_MS = 60_000
+/** How long a branch waits for a worker before the page says nothing is running branches. */
+export const WORKER_WAIT_MS = 60_000
 
 /** How often the list is read while a branch moves, and while none does. */
 export const BRANCHES_POLL_MS = { moving: 2_000, settled: 15_000 } as const
 
+/** What setting each setup state asks for, as a line of sixb.config.ts. */
+const SETUP_SNIPPETS: Partial<Record<Unavailable["code"], string>> = {
+  storage: "storage: new PostgresStorage({ connectionString: process.env.DATABASE_URL }),",
+  source: 'source: { repository: "your-org/your-repo" },',
+  sandboxes: "sandboxes: new VercelSandboxFactory({ credentials }),",
+  "sandbox-shares-host": "sandboxes: new VercelSandboxFactory({ credentials }),",
+}
+
+const SETUP_GUIDE = "https://docs.sixb.ai/deployment/branches"
+
+/** The command that runs branches next to production. */
+const WORKER_COMMAND = "sixb worker branches"
+
 /** The pill a branch shows: what a person can do with it now. */
-export function branchStatus(branch: Branch): BranchStatus {
+export function branchStatus(branch: Branch, now = Date.now()): BranchStatus {
   if (branch.wanted === "deleted") return "deleting"
   if (branch.state === "failed") return "attention"
   if (branch.wanted === "stopped") return branch.state === "stopped" ? "stopped" : "stopping"
   if (refreshPending(branch)) return "refreshing"
-  return branch.state === "ready" ? "ready" : "starting"
+  if (branch.state === "ready") return "ready"
+  // Nothing has picked it up: no worker runs branches on production.
+  const unclaimed = branch.state === "stopped" && now - Date.parse(branch.openedAt) > WORKER_WAIT_MS
+  return unclaimed ? "waiting" : "starting"
 }
 
 /** The step a branch on its way up is on, or null when it isn't on its way. */
-export function branchStep(branch: Branch): BranchStep | null {
-  const status = branchStatus(branch)
-  if (status !== "starting" && status !== "refreshing") return null
+export function branchStep(branch: Branch, now = Date.now()): BranchStep | null {
+  const status = branchStatus(branch, now)
+  if (status !== "starting" && status !== "refreshing" && status !== "waiting") return null
   if (branch.state === "copying") return "copying"
   if (branch.state === "starting") return "starting"
   return "preparing"
@@ -134,9 +152,13 @@ function refreshPending(branch: Branch): boolean {
   return Date.parse(branch.refreshRequestedAt) > Date.parse(branch.data.takenAt)
 }
 
+/** Statuses on the way to Ready: one that reaches it says so. */
+const ON_THE_WAY: ReadonlySet<BranchStatus> = new Set(["starting", "refreshing", "waiting"])
+
 const statusTones: Record<BranchStatus, Tone> = {
   ready: "ok",
   starting: "info",
+  waiting: "muted",
   refreshing: "info",
   stopping: "muted",
   stopped: "muted",
@@ -157,6 +179,7 @@ export function ConsoleBranchesPage() {
   const [confirm, setConfirm] = useState<Confirm | null>(null)
   const [creating, setCreating] = useState(false)
   const [opening, setOpening] = useState<string | null>(null)
+  const [announcement, setAnnouncement] = useState("")
   const highlighted = searchParams.get("branch")
 
   const branchesQuery = useQuery({
@@ -239,8 +262,32 @@ export function ConsoleBranchesPage() {
     )
   }
 
-  const canOpenNew = branchesQuery.isSuccess && unavailable === null
-  const newButton = canOpenNew ? (
+  // What changes while the page is open is said aloud, and a branch that becomes ready offers to
+  // open it. The first read only sets what was there. Read through a ref: the effect follows the
+  // list alone.
+  const latest = useRef({ messages, openInTab })
+  latest.current = { messages, openInTab }
+  const seen = useRef<Map<string, BranchStatus> | null>(null)
+  useEffect(() => {
+    if (!branches) return
+    const statuses = new Map(branches.map((branch) => [branch.name, branchStatus(branch)]))
+    const before = seen.current
+    seen.current = statuses
+    if (!before) return
+
+    const { messages: text, openInTab: open } = latest.current
+    for (const [name, status] of statuses) {
+      const was = before.get(name)
+      if (was === undefined || was === status) continue
+      setAnnouncement(text.announce(name, text.status[status]))
+      if (status === "ready" && ON_THE_WAY.has(was)) {
+        notify.success(text.ready(name), { label: text.actions.open, onClick: () => open(name) })
+      }
+    }
+  }, [branches])
+
+  const canStartNew = branchesQuery.isSuccess && unavailable === null
+  const newButton = canStartNew ? (
     <Button type="button" size="sm" onClick={() => setCreating(true)}>
       <Plus />
       {messages.newBranch}
@@ -253,8 +300,18 @@ export function ConsoleBranchesPage() {
       page="branches"
       title={messages.title}
       description={messages.description}
-      actions={branches && branches.length > 0 ? newButton : undefined}
+      actions={
+        branchesQuery.isPending ? (
+          // Where New branch appears, so the header doesn't move when it does.
+          <SkeletonBlock className="h-8 w-[7.25rem] rounded-md" />
+        ) : branches && branches.length > 0 ? (
+          newButton
+        ) : undefined
+      }
     >
+      <div aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
       <Panel>
         {branchesQuery.isPending ? (
           <PanelSkeleton rows={2} trailing={<SkeletonBlock className="h-8 w-16 rounded-md" />} />
@@ -308,21 +365,27 @@ export function ConsoleBranchesPage() {
   )
 }
 
-/** The list could not be read: why, in a sentence, and a way to try again. */
+/** The list could not be read: what happened, and a way to try again unless access is missing. */
 function LoadFailed({ error, onRetry }: { readonly error: unknown; readonly onRetry: () => void }) {
   const messages = useBranchesMessages()
-  const failure = useLoadFailure(error, { denied: messages.denied })
+  const denied = isSixbApiError(error) && error.status === 403
+  const failure = useLoadFailure(error, {
+    denied: messages.denied,
+    fallback: messages.checkConnection,
+  })
   return (
     <PanelEmpty
       tone="error"
       icon={GitFork}
-      title={messages.loadFailed}
+      title={denied ? failure.title : messages.loadFailed}
       description={failure.description}
       action={
-        <Button type="button" size="sm" variant="outline" onClick={onRetry}>
-          <RefreshCw />
-          {messages.tryAgain}
-        </Button>
+        denied ? undefined : (
+          <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+            <RefreshCw />
+            {messages.tryAgain}
+          </Button>
+        )
       }
     />
   )
@@ -345,9 +408,22 @@ function showSigningIn(tab: Window, text: string) {
   }
 }
 
-/** What production lacks to run branches: one sentence, and the one thing to do. */
+/** A line of configuration or a command, with a way to copy it. */
+function Snippet({ value }: { readonly value: string }) {
+  return (
+    <div className="flex max-w-full items-center gap-1 rounded-lg border border-border bg-muted/40 py-1 pr-1 pl-3.5">
+      <code className="min-w-0 overflow-x-auto py-1.5 font-mono text-xs leading-5 whitespace-pre">
+        {value}
+      </code>
+      <CopyButton value={value} />
+    </div>
+  )
+}
+
+/** What production lacks to run branches: one sentence, the setting, and the guide. */
 function SetupNeeded({ unavailable }: { readonly unavailable: Unavailable }) {
   const messages = useBranchesMessages()
+  const snippet = SETUP_SNIPPETS[unavailable.code]
   return (
     <div className="flex flex-col items-center px-6 py-12 text-center">
       <IconTile icon={GitFork} size="lg" />
@@ -355,11 +431,17 @@ function SetupNeeded({ unavailable }: { readonly unavailable: Unavailable }) {
       <p className="mt-1 max-w-[46ch] text-[0.8125rem] leading-5 text-muted-foreground">
         {messages.setup[unavailable.code]}
       </p>
-      {unavailable.code === "source" ? (
-        <pre className="mt-4 rounded-lg border border-border bg-muted/40 px-3.5 py-2.5 text-left font-mono text-xs leading-5">
-          {'source: { repository: "acme/shop" }'}
-        </pre>
+      {snippet ? (
+        <div className="mt-4 max-w-full text-left">
+          <Snippet value={snippet} />
+        </div>
       ) : null}
+      <Button asChild variant="link" size="sm" className="mt-3 text-muted-foreground">
+        <a href={SETUP_GUIDE} target="_blank" rel="noopener noreferrer">
+          <BookOpen />
+          {messages.setup.guide}
+        </a>
+      </Button>
     </div>
   )
 }
@@ -392,13 +474,16 @@ function BranchRow({
     if (highlighted) ref.current?.scrollIntoView({ block: "center" })
   }, [highlighted])
 
-  const busy = status === "deleting"
+  const deleting = status === "deleting"
+  const onTheWay = ON_THE_WAY.has(status)
   const running = branch.wanted === "running" && status !== "attention"
-  // Each status has one thing to do, which the row's button does.
+  const pill = <Pill tone={statusTones[status]}>{messages.status[status]}</Pill>
+  // Each status has one thing to do, which the row's button does: Open a ready branch, Start a
+  // stopped one, Try again one whose machine failed.
   const primary =
     status === "ready" ? (
       <Button type="button" size="sm" onClick={onOpen} disabled={opening}>
-        {opening ? <Loader2 className="animate-spin" /> : <ArrowUpRight />}
+        {opening ? <Loader2 className="motion-safe:animate-spin" /> : <ArrowUpRight />}
         {messages.actions.open}
       </Button>
     ) : status === "stopped" ? (
@@ -427,43 +512,53 @@ function BranchRow({
         <span className="hidden sm:block">
           <IconTile icon={GitFork} />
         </span>
-        <div className={cn("min-w-0 flex-1", busy && "opacity-60")}>
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
-            <span className="min-w-0 font-mono text-[0.8125rem] break-all sm:truncate">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-x-2 text-sm font-medium">
+            <span
+              title={branch.name}
+              className={cn(
+                "min-w-0 font-mono text-[0.8125rem] break-all sm:truncate",
+                deleting && "text-muted-foreground"
+              )}
+            >
               {branch.name}
             </span>
-            <Pill tone={statusTones[status]}>{messages.status[status]}</Pill>
+            <span className="hidden sm:inline-flex">{pill}</span>
           </div>
-          <BranchMeta branch={branch} />
+          <BranchMeta branch={branch} pill={<span className="sm:hidden">{pill}</span>} />
         </div>
         {primary ? (
           <div className="col-start-1 row-start-2 mt-2.5 sm:mt-0 sm:shrink-0">{primary}</div>
         ) : null}
-        <div className="col-start-2 row-start-1 -mt-1 -mr-1 sm:m-0 sm:shrink-0">
+        <div className="col-start-2 row-start-1 -mt-1.5 -mr-1.5 sm:m-0 sm:shrink-0">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-sm"
+                className="max-sm:size-9"
                 aria-label={messages.actions.more(branch.name)}
-                disabled={busy}
+                disabled={deleting}
               >
                 <MoreHorizontal />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={onRefresh}>
-                <RefreshCw />
-                {messages.actions.refresh}
-              </DropdownMenuItem>
+              {/* A branch on its way up already takes a copy. */}
+              {onTheWay ? null : (
+                <DropdownMenuItem onSelect={onRefresh}>
+                  <RefreshCw />
+                  {messages.actions.refresh}
+                </DropdownMenuItem>
+              )}
               {running ? (
                 <DropdownMenuItem onSelect={onStop}>
-                  <Square />
+                  <CircleStop />
                   {messages.actions.stop}
                 </DropdownMenuItem>
               ) : null}
-              <DropdownMenuSeparator />
+              {onTheWay && !running ? null : <DropdownMenuSeparator />}
               <DropdownMenuItem variant="destructive" onSelect={onDelete}>
                 <Trash2 />
                 {messages.actions.delete}
@@ -475,7 +570,8 @@ function BranchRow({
 
       {step || status === "attention" || branch.notices.length > 0 || hasSkips(branch) ? (
         <div className="flex flex-col gap-2 sm:pl-[3.125rem]">
-          {step ? <Progress branch={branch} step={step} /> : null}
+          {step ? <Progress step={step} waiting={status === "waiting"} /> : null}
+          {status === "waiting" ? <WaitingForWorker /> : null}
           {status === "attention" ? <NeedsAttention branch={branch} /> : null}
           {branch.notices.map((notice) => (
             <Callout key={notice.code} icon={Info}>
@@ -489,97 +585,112 @@ function BranchRow({
   )
 }
 
-/** Data age, who opened it, and when it was last used: the facts that tell branches apart. */
-function BranchMeta({ branch }: { readonly branch: Branch }) {
+/**
+ * Data age, who started it, and when it was last opened: the facts that tell branches apart. One
+ * line on a wide screen, cut short rather than wrapped, so no separator is left alone at a line's
+ * start; one fact a line on a phone, after the status.
+ */
+function BranchMeta({ branch, pill }: { readonly branch: Branch; readonly pill: ReactNode }) {
   const messages = useBranchesMessages()
   const format = useFormat()
-  const age = (timestamp: string) =>
-    Date.now() - Date.parse(timestamp) < 60_000 ? null : format.relative(timestamp)
-  const dataAge = branch.data ? age(branch.data.takenAt) : undefined
+  const data = !branch.data
+    ? branch.state === "copying"
+      ? messages.copyingData
+      : messages.noData
+    : Date.now() - Date.parse(branch.data.takenAt) < 60_000
+      ? messages.dataJustNow
+      : messages.dataFrom(format.relative(branch.data.takenAt))
 
   return (
-    // One fact a line on a phone, where a wrapped line would strand its separator.
-    <div className="mt-0.5 flex min-w-0 flex-col text-[0.8125rem] text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-1.5">
-      <span>
-        {dataAge === undefined
-          ? messages.noData
-          : dataAge === null
-            ? messages.dataJustNow
-            : messages.dataFrom(dataAge)}
-      </span>
+    <div className="mt-0.5 flex min-w-0 flex-col items-start gap-y-0.5 text-[0.8125rem] text-muted-foreground sm:mt-0.5 sm:flex-row sm:items-center sm:gap-x-1.5 sm:whitespace-nowrap">
+      {pill}
+      <span className="shrink-0">{data}</span>
       <span className="hidden sm:inline">
         <MetaDot />
       </span>
-      <OpenedBy userId={branch.createdBy} />
+      <span className="shrink-0">
+        <StartedBy userId={branch.createdBy} />
+      </span>
       {branch.state === "ready" && branch.wanted === "running" ? (
-        <span className="hidden sm:inline-flex sm:items-center sm:gap-x-1.5">
+        <span className="hidden min-w-0 sm:flex sm:items-center sm:gap-x-1.5">
           <MetaDot />
-          {messages.lastUsed(format.relative(branch.lastSeenAt))}
+          <span className="truncate">
+            {messages.lastOpened(format.relative(branch.lastSeenAt))}
+          </span>
         </span>
       ) : null}
     </div>
   )
 }
 
-function OpenedBy({ userId }: { readonly userId: string }) {
+function StartedBy({ userId }: { readonly userId: string }) {
   const messages = useBranchesMessages()
   const me = useCurrentUser()
   const person = useUser(userId, { enabled: me?.id !== userId, retry: false }).data
-  if (me?.id === userId) return <span>{messages.openedByYou}</span>
-  return <span>{messages.openedBy(person?.displayName || person?.email || userId)}</span>
+  if (me?.id === userId) return <>{messages.startedByYou}</>
+  return <>{messages.startedBy(person?.displayName || person?.email || userId)}</>
 }
 
 /** The steps a branch takes on its way up, the current one live, the rest done or waiting. */
-function Progress({ branch, step }: { readonly branch: Branch; readonly step: BranchStep }) {
+function Progress({ step, waiting }: { readonly step: BranchStep; readonly waiting: boolean }) {
   const messages = useBranchesMessages()
   const current = STEPS.indexOf(step)
-  const waitingForWorker =
-    step === "preparing" &&
-    branch.state === "stopped" &&
-    Date.now() - Date.parse(branch.openedAt) > WORKER_WAIT_MS
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <ol
-        aria-label={messages.steps.label}
-        className="flex flex-col gap-1 text-[0.8125rem] sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2"
-      >
-        {STEPS.map((name, index) => {
-          const state = index < current ? "done" : index === current ? "current" : "waiting"
-          return (
-            <li key={name} className="flex items-center gap-2">
-              {index > 0 ? (
-                <ChevronRight
-                  aria-hidden
-                  className="hidden size-3.5 text-muted-foreground/50 sm:block"
-                />
-              ) : null}
-              <span
-                className={cn(
-                  "flex items-center gap-1.5",
-                  state === "current" && "font-medium text-foreground",
-                  state !== "current" && "text-muted-foreground"
-                )}
-                aria-current={state === "current" ? "step" : undefined}
-              >
+    <ol
+      aria-label={messages.steps.label}
+      className="flex flex-col gap-1 text-[0.8125rem] sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2"
+    >
+      {STEPS.map((name, index) => {
+        const state = index < current ? "done" : index === current ? "current" : "waiting"
+        return (
+          <li key={name} className="flex items-center gap-2">
+            {index > 0 ? (
+              <ChevronRight
+                aria-hidden
+                className="hidden size-3.5 text-muted-foreground/50 sm:block"
+              />
+            ) : null}
+            <span
+              className={cn(
+                "flex items-center gap-1.5",
+                state === "current" && "font-medium text-foreground",
+                state !== "current" && "text-muted-foreground"
+              )}
+              aria-current={state === "current" ? "step" : undefined}
+            >
+              {/* Every marker in one box, so the labels line up whatever the marker. */}
+              <span aria-hidden className="grid size-3.5 shrink-0 place-items-center">
                 {state === "done" ? (
-                  <Check aria-hidden className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                ) : state === "current" && waiting ? (
+                  <Clock className="size-3.5 text-muted-foreground" />
                 ) : state === "current" ? (
-                  <Loader2 aria-hidden className="size-3.5 animate-spin text-sky-600" />
+                  <Loader2 className="size-3.5 text-sky-600 motion-safe:animate-spin dark:text-sky-400" />
                 ) : (
-                  <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/40" />
+                  <span className="size-1.5 rounded-full bg-muted-foreground/40" />
                 )}
-                {messages.steps[name]}
-                <span className="sr-only">({messages.steps[state]})</span>
               </span>
-            </li>
-          )
-        })}
-      </ol>
-      {waitingForWorker ? (
-        <p className="text-xs text-muted-foreground">{messages.waitingForWorker}</p>
-      ) : null}
-    </div>
+              {messages.steps[name]}
+              <span className="sr-only">({messages.steps[state]})</span>
+            </span>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+/** No worker has picked the branch up: who can fix it, and the command they run. */
+function WaitingForWorker() {
+  const messages = useBranchesMessages()
+  return (
+    <Callout icon={Clock}>
+      <span className="block">{messages.waitingForWorker}</span>
+      <span className="mt-2 inline-flex max-w-full">
+        <Snippet value={WORKER_COMMAND} />
+      </span>
+    </Callout>
   )
 }
 
@@ -592,7 +703,7 @@ function NeedsAttention({ branch }: { readonly branch: Branch }) {
   const file = error?.file
 
   return (
-    <div className="rounded-lg border border-red-200 bg-red-50/60 px-3.5 py-2.5 dark:border-red-900/60 dark:bg-red-950/30">
+    <div className="rounded-lg border border-border bg-muted/30 px-3.5 py-2.5">
       <div className="flex items-start gap-2.5">
         <CircleAlert
           aria-hidden
@@ -604,15 +715,7 @@ function NeedsAttention({ branch }: { readonly branch: Branch }) {
           </p>
           {code ? (
             <p className="mt-0.5 text-[0.8125rem] text-muted-foreground">
-              {file ? (
-                <>
-                  {messages.codeHint(file).split(file)[0]}
-                  <code className="font-mono text-xs text-foreground">{file}</code>
-                  {messages.codeHint(file).split(file)[1]}
-                </>
-              ) : (
-                messages.codeHintNoFile
-              )}
+              {file ? withCode(messages.codeHint(file), file) : messages.codeHintNoFile}
             </p>
           ) : null}
           {error ? (
@@ -625,7 +728,7 @@ function NeedsAttention({ branch }: { readonly branch: Branch }) {
                 {messages.details}
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-border bg-background p-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap">
+                <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-border bg-background p-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap text-red-700 dark:text-red-300">
                   {error.message}
                 </pre>
                 <div className="mt-1.5">
@@ -640,6 +743,19 @@ function NeedsAttention({ branch }: { readonly branch: Branch }) {
   )
 }
 
+/** `text` with `code`, a name it holds, set as code. */
+function withCode(text: string, code: string): ReactNode {
+  const at = text.indexOf(code)
+  if (at < 0) return text
+  return (
+    <>
+      {text.slice(0, at)}
+      <code className="font-mono text-[0.92em] text-foreground">{code}</code>
+      {text.slice(at + code.length)}
+    </>
+  )
+}
+
 /** A calm line about the branch, such as its data having been reset. */
 function Callout({
   icon: Icon,
@@ -651,7 +767,7 @@ function Callout({
   return (
     <div className="flex items-start gap-2.5 rounded-lg bg-muted/60 px-3.5 py-2.5 text-[0.8125rem] text-muted-foreground">
       <Icon aria-hidden className="mt-0.5 size-4 shrink-0" />
-      <p className="min-w-0">{children}</p>
+      <div className="min-w-0">{children}</div>
     </div>
   )
 }
@@ -724,9 +840,7 @@ function SkipRow({
     <li className="px-3.5 py-2.5 text-[0.8125rem]">
       <span className="font-mono text-xs font-medium">{name}</span>
       <p className="mt-0.5 text-muted-foreground">{reason}</p>
-      {detail ? (
-        <p className="mt-0.5 font-mono text-xs text-muted-foreground/80">{detail}</p>
-      ) : null}
+      {detail ? <p className="mt-0.5 font-mono text-xs text-muted-foreground">{detail}</p> : null}
     </li>
   )
 }
@@ -748,13 +862,14 @@ function ConfirmDialog({
     if (confirm) setShown(confirm)
   }, [confirm])
   const text = shown?.kind === "delete" ? messages.remove : messages.refresh
+  const name = shown?.name ?? ""
 
   return (
     <AlertDialog open={confirm !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle className="break-words">
-            {text.title(shown?.name ?? "")}
+            {withCode(text.title(name), name)}
           </AlertDialogTitle>
           <AlertDialogDescription>{text.description}</AlertDialogDescription>
         </AlertDialogHeader>
@@ -775,6 +890,12 @@ function ConfirmDialog({
 // What git accepts closely enough to catch a typo before production does.
 const GIT_BRANCH = /^(?!\/|.*\/$|.*\.\.|.*\/\/)[^\s~^:?*[\\]+$/
 
+/** What is wrong with a branch name, in the words a person fixes it with, or null. */
+export function branchNameProblem(name: string): "spaces" | "invalid" | null {
+  if (/\s/.test(name)) return "spaces"
+  return GIT_BRANCH.test(name) ? null : "invalid"
+}
+
 function NewBranchDialog({
   open,
   onOpenChange,
@@ -788,22 +909,23 @@ function NewBranchDialog({
 }) {
   const messages = useBranchesMessages()
   const [name, setName] = useState("")
-  const [invalid, setInvalid] = useState(false)
+  const [problem, setProblem] = useState<"spaces" | "invalid" | null>(null)
   const inputId = useId()
   const errorId = useId()
 
   useEffect(() => {
     if (!open) {
       setName("")
-      setInvalid(false)
+      setProblem(null)
     }
   }, [open])
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
     const trimmed = name.trim()
-    if (!GIT_BRANCH.test(trimmed)) {
-      setInvalid(true)
+    const found = branchNameProblem(trimmed)
+    if (found) {
+      setProblem(found)
       return
     }
     onSubmit(trimmed)
@@ -828,16 +950,16 @@ function NewBranchDialog({
               spellCheck={false}
               placeholder={messages.create.placeholder}
               className="font-mono text-sm"
-              aria-invalid={invalid || undefined}
-              aria-describedby={invalid ? errorId : undefined}
+              aria-invalid={problem ? true : undefined}
+              aria-describedby={problem ? errorId : undefined}
               onChange={(event) => {
                 setName(event.target.value)
-                setInvalid(false)
+                setProblem(null)
               }}
             />
-            {invalid ? (
+            {problem ? (
               <p id={errorId} className="text-xs text-red-600 dark:text-red-400">
-                {messages.create.invalid}
+                {messages.create[problem]}
               </p>
             ) : null}
           </div>
@@ -846,7 +968,7 @@ function NewBranchDialog({
               {messages.cancel}
             </Button>
             <Button type="submit" disabled={pending || name.trim() === ""}>
-              {pending ? <Loader2 className="animate-spin" /> : null}
+              {pending ? <Loader2 className="motion-safe:animate-spin" /> : null}
               {messages.create.submit}
             </Button>
           </DialogFooter>

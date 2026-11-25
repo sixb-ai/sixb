@@ -370,7 +370,7 @@ export const developerAccess = defineRole("developer.access", {
 
 The grant only opens the Console. Each of its pages shows what the person's other grants allow,
 such as `can.observe(project.logs)` for Logs and `can.manage(project.source)` for Branches. Someone without it doesn't see the Console in the
-user menu, and its URLs lead to `/`. Object pages stay open either way.
+user menu, and its pages say they need access. Object pages stay open either way.
 
 With authentication off nobody is signed in, and the Console is open.
 

@@ -32,6 +32,8 @@ export interface SectionPageDefinition {
   readonly details?: readonly { readonly path: string; readonly exportName: string }[]
   /** Paths outside the section that open from this page and keep the section around them. */
   readonly activeFor?: readonly string[]
+  /** Only in production: a branch's app leaves it out. */
+  readonly productionOnly?: boolean
 }
 
 export interface SectionDefinition {
@@ -155,6 +157,8 @@ export const sectionCatalog: readonly SectionDefinition[] = [
         path: "/console/branches",
         exportName: "ConsoleBranchesPage",
         requires: ["branches"],
+        // Branches are started in production, never from another branch.
+        productionOnly: true,
       },
     ],
   },

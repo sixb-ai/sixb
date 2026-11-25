@@ -15,7 +15,7 @@ import {
 } from "@sixb/ui/components"
 import { defineMessages, type MessageTree, type Translation, useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { Check, CircleAlert, Copy, DatabaseZap } from "lucide-react"
+import { Check, CircleAlert, Copy, DatabaseZap, Lock } from "lucide-react"
 import { type ComponentType, type ReactNode, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 
@@ -31,6 +31,7 @@ export const en = {
   unavailableTitle: "Could not load",
   deniedTitle: "No access",
   denied: "Your role does not allow this. Ask an admin if you should have it.",
+  noAccess: (page: string) => `You don't have access to ${page}. Ask a project admin.`,
   tryAgain: "Try again in a moment.",
   status: {
     queued: "Queued",
@@ -69,6 +70,8 @@ export const fr: Translation<typeof en> = {
   notFound: (id: string) => `Rien ne s’appelle « ${id} ». Il a peut-être été renommé ou supprimé.`,
   unavailableTitle: "Chargement impossible",
   deniedTitle: "Accès refusé",
+  noAccess: (page: string) =>
+    `Vous n’avez pas accès à « ${page} ». Demandez à un administrateur du projet.`,
   denied:
     "Votre rôle ne le permet pas. Demandez à un administrateur si vous devriez y avoir accès.",
   tryAgain: "Réessayez dans un instant.",
@@ -927,5 +930,15 @@ export function Facts({
         </div>
       ))}
     </>
+  )
+}
+
+/** A page this person may not open: what it is, and who can give access. */
+export function NoAccessPanel({ page }: { readonly page: string }) {
+  const messages = useSectionUiMessages()
+  return (
+    <Panel>
+      <PanelEmpty icon={Lock} title={messages.deniedTitle} description={messages.noAccess(page)} />
+    </Panel>
   )
 }

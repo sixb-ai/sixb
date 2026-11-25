@@ -3,17 +3,26 @@ import { cn } from "@sixb/ui/lib/utils"
 import { ChevronLeft } from "lucide-react"
 import type { ComponentType, ReactNode } from "react"
 import { Link, Navigate, useLocation } from "react-router-dom"
+import { useAppMessages } from "../locale"
 import type { AppSectionId } from "../sections/catalog"
-import { useOpenSections, useSectionNavMounted, useSections } from "../sections/sections"
+import {
+  useOpenSections,
+  useSectionNavMounted,
+  useSections,
+  useSectionsEnabled,
+} from "../sections/sections"
+import { useCurrentUser } from "../session"
 import { isCurrentItem } from "../shell/nav-items"
-import { Panel, PanelEmpty, PanelSkeleton, useLoadFailure } from "./section-ui"
+import { NoAccessPanel, Panel, PanelEmpty, PanelSkeleton, useLoadFailure } from "./section-ui"
 
 // Section pages draw their own toasts so they never double up with a toaster of the project's.
 const SECTION_TOASTER = "sixb-sections"
 
 /** Toasts shown by built-in section pages. */
 export const notify = {
-  success: (message: string) => toast.success(message, { toasterId: SECTION_TOASTER }),
+  /** With `action`, the toast offers the next step, such as opening what just became ready. */
+  success: (message: string, action?: { readonly label: string; readonly onClick: () => void }) =>
+    toast.success(message, { toasterId: SECTION_TOASTER, ...(action ? { action } : {}) }),
   error: (message: string) => toast.error(message, { toasterId: SECTION_TOASTER }),
   /** A done change with a way to take it back, such as a deleted entry, shown long enough to. */
   undoable: (message: string, undo: { readonly label: string; readonly onUndo: () => void }) =>
@@ -45,13 +54,14 @@ export interface SectionPageProps {
 
 /**
  * The frame of every built-in section page: its title and description, its section's pages as
- * tabs when the shell has no `SectionNav`, and a redirect home for a page this person may not see.
+ * tabs when the shell has no `SectionNav`, and, for a page this person may not see, a panel that
+ * says so to someone signed in and a redirect home otherwise.
  */
 export function SectionPage({ section, page, ...frame }: SectionPageProps) {
   const allowed = usePageAllowed(section, page)
   const showTabs = !useSectionNavMounted()
 
-  if (!allowed) return <Navigate to="/" replace />
+  if (!allowed) return <NotAllowed section={section} page={page} />
 
   return <PageFrame {...frame} tabs={showTabs ? <SectionTabs section={section} /> : undefined} />
 }
@@ -136,7 +146,7 @@ export function SectionWorkspace({ section, page, children }: SectionWorkspacePr
   const allowed = usePageAllowed(section, page)
   const showTabs = !useSectionNavMounted()
 
-  if (!allowed) return <Navigate to="/" replace />
+  if (!allowed) return <NotAllowed section={section} page={page} />
 
   return (
     <div className="flex h-full min-h-[calc(100dvh-7rem)] w-full min-w-0 flex-col overflow-hidden">
@@ -188,6 +198,26 @@ export function WorkspaceHeader({ back, icon, title, meta, actions }: WorkspaceH
       </div>
       {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
     </header>
+  )
+}
+
+/**
+ * A page this person may not open. Signed in, they read which page it is and that an admin can
+ * give access, rather than land somewhere else without knowing why. Signed out, or on a shared
+ * link without sections, home takes over.
+ */
+function NotAllowed({ section, page }: { readonly section: AppSectionId; readonly page: string }) {
+  const signedIn = useCurrentUser() !== null
+  const enabled = useSectionsEnabled()
+  const labels = useAppMessages().sections[section]
+  const pageLabels: Record<string, string> = labels.pages
+  const label = pageLabels[page] ?? labels.label
+
+  if (!signedIn || !enabled) return <Navigate to="/" replace />
+  return (
+    <PageFrame title={label}>
+      <NoAccessPanel page={label} />
+    </PageFrame>
   )
 }
 

@@ -1,3 +1,5 @@
+import { getProjectInfoOptions } from "@sixb/client/hooks"
+import { useQuery } from "@tanstack/react-query"
 import {
   Bolt,
   Box,
@@ -84,6 +86,8 @@ export function resolveOpenSections(input: {
   readonly signedIn: boolean
   readonly access: Readonly<Record<SectionAccess, boolean>> | null
   readonly enabled: boolean
+  /** The app runs as a branch: pages only production has are left out. */
+  readonly onBranch?: boolean
 }): readonly OpenSection[] {
   if (!input.enabled) return []
   return sectionCatalog.flatMap((definition) => {
@@ -91,7 +95,9 @@ export function resolveOpenSections(input: {
     const allows = (requires: readonly SectionAccess[] | undefined) =>
       !input.signedIn || !requires || requires.some((need) => input.access?.[need] === true)
     if (!allows(definition.requires)) return []
-    const pages = definition.pages.filter((page) => allows(page.requires))
+    const pages = definition.pages.filter(
+      (page) => allows(page.requires) && !(input.onBranch && page.productionOnly)
+    )
     return pages.length > 0 ? [{ definition, pages }] : []
   })
 }
@@ -111,9 +117,12 @@ export function useOpenSections(): readonly OpenSection[] {
   const enabled = useContext(SectionsContext)
   const signedIn = useCurrentUser() !== null
   const access = useSessionAccess()
+  // Read from what the app loaded when it started, never fetched for this.
+  const onBranch =
+    useQuery({ ...getProjectInfoOptions(), enabled: false }).data?.branch !== undefined
   return useMemo(
-    () => resolveOpenSections({ signedIn, access, enabled }),
-    [signedIn, access, enabled]
+    () => resolveOpenSections({ signedIn, access, enabled, onBranch }),
+    [signedIn, access, enabled, onBranch]
   )
 }
 

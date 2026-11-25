@@ -3,32 +3,33 @@ import { defineMessages, type MessageTree, plural, type Translation } from "@six
 /** Source catalog of Console › Branches. */
 export const en = {
   title: "Branches",
-  description:
-    "Try a git branch on a copy of production's data before you merge it. Production stays untouched.",
+  description: "Try changes to your project on a copy of production's data before they go live.",
   newBranch: "New branch",
   loadFailed: "Branches couldn't be loaded",
+  checkConnection: "Check your connection, then try again.",
   tryAgain: "Try again",
-  denied:
-    "Branches take the right to manage the project's code. Ask an admin if you should have it.",
+  denied: "You don't have access to Branches. Ask a project admin.",
   empty: {
     title: "No branches yet",
     description:
-      "Open a git branch to run its code on a copy of what you see in production. Nothing it does reaches production.",
+      "Start a git branch to run its code on a copy of what you see in production. Nothing it does reaches production.",
   },
   setup: {
     title: "Branches aren't set up yet",
-    storage: "Branches run next to production's database. Use @sixb/pg for production's storage.",
-    source: "Branches run your project's code from its repository. Name it in sixb.config.ts:",
-    sandboxes:
-      "Each branch runs in a sandbox of its own. Add a sandbox provider in sixb.config.ts, such as @sixb/sandboxes-vercel.",
+    guide: "Setup guide",
+    storage:
+      "Branches live next to production's database. Use PostgreSQL for production's storage:",
+    source: "Branches run your project's code from its git repository. Name it in sixb.config.ts:",
+    sandboxes: "Each branch runs on a machine of its own. Add one in sixb.config.ts:",
     "sandbox-shares-host":
-      "The local sandbox would run branches on production's own machine. Use @sixb/sandboxes-vercel or @sixb/sandboxes-smolvm.",
+      "The local machine setting would run branches on production's own server. Use separate machines instead:",
     "sandbox-env":
-      "The sandbox recipe sets environment variables, which every branch would get. Remove its env: branches run with your project's dev values.",
+      "The machine setup gives every branch its own environment variables. Remove them: branches use your project's development settings.",
   },
   status: {
     ready: "Ready",
     starting: "Starting",
+    waiting: "Waiting",
     refreshing: "Refreshing",
     stopping: "Stopping",
     stopped: "Stopped",
@@ -39,19 +40,20 @@ export const en = {
     label: "Progress",
     preparing: "Preparing machine",
     copying: "Copying data",
-    starting: "Starting",
+    starting: "Starting the app",
     done: "Done",
     current: "In progress",
     waiting: "Not started",
   },
   waitingForWorker:
-    "No branch worker has picked it up yet. Production runs branches with sixb worker branches.",
+    "Nothing is running branches on production yet. Ask a developer to start the branch worker:",
   dataFrom: (age: string) => `Production data from ${age}`,
   dataJustNow: "Production data from just now",
+  copyingData: "Copying production data…",
   noData: "No data copied yet",
-  openedBy: (name: string) => `Opened by ${name}`,
-  openedByYou: "Opened by you",
-  lastUsed: (age: string) => `Used ${age}`,
+  startedBy: (name: string) => `Started by ${name}`,
+  startedByYou: "Started by you",
+  lastOpened: (age: string) => `Last opened ${age}`,
   actions: {
     open: "Open",
     start: "Start",
@@ -60,15 +62,16 @@ export const en = {
     refresh: "Refresh from production…",
     stop: "Stop",
     delete: "Delete…",
-    copyError: "Copy error",
   },
   opening: "Signing you in…",
-  openFailed: "The branch could not be opened.",
+  openFailed: "The branch couldn't be opened.",
   popupBlocked: "Your browser blocked the new tab. Allow pop-ups for this site and try again.",
   started: (name: string) => `Starting ${name}`,
-  stopped: (name: string) => `${name} stopped`,
+  ready: (name: string) => `${name} is ready`,
+  stopped: (name: string) => `Stopping ${name}`,
   refreshed: (name: string) => `Refreshing ${name} from production`,
   deleted: (name: string) => `Deleting ${name}`,
+  announce: (name: string, status: string) => `${name}: ${status}`,
   actionFailed: "That didn't work. Try again in a moment.",
   attention: {
     code: "The branch's code didn't start.",
@@ -76,13 +79,13 @@ export const en = {
     codeHintNoFile: "Fix the error and push: the branch reloads by itself.",
     machine: "The branch couldn't start.",
     details: "Details",
-    file: "File",
   },
   notices: {
     "data-reset":
-      "Its machine was replaced, so it took a new copy of production. Changes made on the branch are gone.",
-    "no-dev-env": "It runs without your project's dev values: production couldn't read them.",
-    "machine-ended": "Its machine reached the provider's time limit and stopped.",
+      "This branch's machine was replaced, so it took a new copy of production. Changes made on the branch are gone.",
+    "no-dev-env":
+      "Some connected services may not work here: production can't read your project's development settings. Ask a developer to give production access to them.",
+    "machine-ended": "This branch stopped at its time limit. Start it to keep going.",
     "temp-files-uncapped":
       "A heavy query on this branch could fill production's database disk. Ask whoever runs production's database to let Sixb cap it (SET on temp_file_limit).",
   },
@@ -101,7 +104,7 @@ export const en = {
     changed: "Its definition changed on this branch, so production's rows no longer fit.",
     hiddenColumns: (name: string, columns: string) =>
       `${name} can't read every column (${columns}), so none of it was copied.`,
-    someone: "The person who opened it",
+    someone: "The person who started it",
   },
   refresh: {
     title: (name: string) => `Refresh ${name} from production?`,
@@ -112,17 +115,18 @@ export const en = {
   remove: {
     title: (name: string) => `Delete ${name}?`,
     description:
-      "Its machine and its copy of production's data are deleted. Your git branch and your code stay as they are.",
-    confirm: "Delete",
+      "Changes made on this branch's data are lost. The git branch and its code aren't touched.",
+    confirm: "Delete branch",
   },
   create: {
-    title: "Open a branch",
+    title: "New branch",
     description:
       "Production runs the branch's code on a copy of what you see now. Push the branch first.",
     label: "Git branch",
-    placeholder: "feature/invoices",
-    submit: "Open branch",
-    invalid: "Enter the name of a git branch, such as feature/invoices.",
+    placeholder: "feature/route-planner",
+    submit: "Start branch",
+    spaces: "Branch names can't contain spaces, for example feature/route-planner.",
+    invalid: "That isn't a git branch name. Try one like feature/route-planner.",
   },
   cancel: "Cancel",
 } satisfies MessageTree
@@ -132,33 +136,34 @@ export type BranchesMessages = typeof en
 export const fr: Translation<BranchesMessages> = {
   title: "Branches",
   description:
-    "Essayez une branche git sur une copie des données de production avant de la fusionner. La production n’est pas touchée.",
+    "Essayez les changements de votre projet sur une copie des données de production avant leur mise en ligne.",
   newBranch: "Nouvelle branche",
   loadFailed: "Les branches n’ont pas pu être chargées",
+  checkConnection: "Vérifiez votre connexion, puis réessayez.",
   tryAgain: "Réessayer",
-  denied:
-    "Les branches demandent le droit de gérer le code du projet. Demandez à un administrateur si vous devriez l’avoir.",
+  denied: "Vous n’avez pas accès aux branches. Demandez à un administrateur du projet.",
   empty: {
     title: "Aucune branche pour l’instant",
     description:
-      "Ouvrez une branche git pour exécuter son code sur une copie de ce que vous voyez en production. Rien de ce qu’elle fait n’atteint la production.",
+      "Démarrez une branche git pour exécuter son code sur une copie de ce que vous voyez en production. Rien de ce qu’elle fait n’atteint la production.",
   },
   setup: {
     title: "Les branches ne sont pas encore configurées",
+    guide: "Guide de configuration",
     storage:
-      "Les branches tournent à côté de la base de données de production. Utilisez @sixb/pg pour le stockage de production.",
+      "Les branches vivent à côté de la base de données de production. Utilisez PostgreSQL pour le stockage de production :",
     source:
-      "Les branches exécutent le code de votre projet depuis son dépôt. Indiquez-le dans sixb.config.ts :",
-    sandboxes:
-      "Chaque branche tourne dans son propre bac à sable. Ajoutez un fournisseur dans sixb.config.ts, par exemple @sixb/sandboxes-vercel.",
+      "Les branches exécutent le code de votre projet depuis son dépôt git. Indiquez-le dans sixb.config.ts :",
+    sandboxes: "Chaque branche tourne sur sa propre machine. Ajoutez-en une dans sixb.config.ts :",
     "sandbox-shares-host":
-      "Le bac à sable local exécuterait les branches sur la machine de production. Utilisez @sixb/sandboxes-vercel ou @sixb/sandboxes-smolvm.",
+      "Le réglage de machine locale exécuterait les branches sur le serveur de production. Utilisez plutôt des machines séparées :",
     "sandbox-env":
-      "La recette du bac à sable définit des variables d’environnement, que chaque branche recevrait. Retirez son env : les branches utilisent les valeurs dev de votre projet.",
+      "La configuration des machines donne à chaque branche ses propres variables d’environnement. Retirez-les : les branches utilisent les paramètres de développement de votre projet.",
   },
   status: {
     ready: "Prête",
     starting: "Démarrage",
+    waiting: "En attente",
     refreshing: "Actualisation",
     stopping: "Arrêt en cours",
     stopped: "Arrêtée",
@@ -169,19 +174,20 @@ export const fr: Translation<BranchesMessages> = {
     label: "Progression",
     preparing: "Préparation de la machine",
     copying: "Copie des données",
-    starting: "Démarrage",
+    starting: "Lancement de l’app",
     done: "Terminé",
     current: "En cours",
     waiting: "Pas encore commencé",
   },
   waitingForWorker:
-    "Aucun worker de branches ne l’a encore prise en charge. La production exécute les branches avec sixb worker branches.",
+    "Rien n’exécute encore les branches en production. Demandez à un développeur de lancer le worker de branches :",
   dataFrom: (age: string) => `Données de production copiées ${age}`,
   dataJustNow: "Données de production copiées à l’instant",
+  copyingData: "Copie des données de production…",
   noData: "Aucune donnée copiée pour l’instant",
-  openedBy: (name: string) => `Ouverte par ${name}`,
-  openedByYou: "Ouverte par vous",
-  lastUsed: (age: string) => `Utilisée ${age}`,
+  startedBy: (name: string) => `Démarrée par ${name}`,
+  startedByYou: "Démarrée par vous",
+  lastOpened: (age: string) => `Ouverte ${age}`,
   actions: {
     open: "Ouvrir",
     start: "Démarrer",
@@ -190,16 +196,17 @@ export const fr: Translation<BranchesMessages> = {
     refresh: "Actualiser depuis la production…",
     stop: "Arrêter",
     delete: "Supprimer…",
-    copyError: "Copier l’erreur",
   },
   opening: "Connexion en cours…",
   openFailed: "La branche n’a pas pu être ouverte.",
   popupBlocked:
     "Votre navigateur a bloqué le nouvel onglet. Autorisez les fenêtres pour ce site et réessayez.",
   started: (name: string) => `Démarrage de ${name}`,
-  stopped: (name: string) => `${name} est arrêtée`,
+  ready: (name: string) => `${name} est prête`,
+  stopped: (name: string) => `Arrêt de ${name}`,
   refreshed: (name: string) => `Actualisation de ${name} depuis la production`,
   deleted: (name: string) => `Suppression de ${name}`,
+  announce: (name: string, status: string) => `${name} : ${status}`,
   actionFailed: "Cela n’a pas fonctionné. Réessayez dans un instant.",
   attention: {
     code: "Le code de la branche n’a pas démarré.",
@@ -207,14 +214,14 @@ export const fr: Translation<BranchesMessages> = {
     codeHintNoFile: "Corrigez l’erreur et poussez : la branche se recharge seule.",
     machine: "La branche n’a pas pu démarrer.",
     details: "Détails",
-    file: "Fichier",
   },
   notices: {
     "data-reset":
-      "Sa machine a été remplacée, elle a donc repris une copie de la production. Les modifications faites sur la branche sont perdues.",
+      "La machine de cette branche a été remplacée : elle a repris une copie de la production. Les modifications faites sur la branche sont perdues.",
     "no-dev-env":
-      "Elle tourne sans les valeurs dev de votre projet : la production n’a pas pu les lire.",
-    "machine-ended": "Sa machine a atteint la limite de durée du fournisseur et s’est arrêtée.",
+      "Certains services connectés peuvent ne pas fonctionner ici : la production ne peut pas lire les paramètres de développement de votre projet. Demandez à un développeur de lui en donner l’accès.",
+    "machine-ended":
+      "Cette branche s’est arrêtée à sa limite de durée. Démarrez-la pour continuer.",
     "temp-files-uncapped":
       "Une requête lourde sur cette branche pourrait remplir le disque de la base de production. Demandez à qui gère cette base de laisser Sixb la plafonner (SET sur temp_file_limit).",
   },
@@ -239,7 +246,7 @@ export const fr: Translation<BranchesMessages> = {
       "Sa définition a changé sur cette branche : les lignes de production n’y correspondent plus.",
     hiddenColumns: (name: string, columns: string) =>
       `${name} ne peut pas lire toutes ses colonnes (${columns}) : rien n’en a été copié.`,
-    someone: "La personne qui l’a ouverte",
+    someone: "La personne qui l’a démarrée",
   },
   refresh: {
     title: (name: string) => `Actualiser ${name} depuis la production ?`,
@@ -250,17 +257,18 @@ export const fr: Translation<BranchesMessages> = {
   remove: {
     title: (name: string) => `Supprimer ${name} ?`,
     description:
-      "Sa machine et sa copie des données de production sont supprimées. Votre branche git et votre code restent tels quels.",
-    confirm: "Supprimer",
+      "Les modifications faites sur les données de cette branche sont perdues. La branche git et son code ne sont pas touchés.",
+    confirm: "Supprimer la branche",
   },
   create: {
-    title: "Ouvrir une branche",
+    title: "Nouvelle branche",
     description:
       "La production exécute le code de la branche sur une copie de ce que vous voyez maintenant. Poussez d’abord la branche.",
     label: "Branche git",
-    placeholder: "feature/invoices",
-    submit: "Ouvrir la branche",
-    invalid: "Saisissez le nom d’une branche git, par exemple feature/invoices.",
+    placeholder: "feature/route-planner",
+    submit: "Démarrer la branche",
+    spaces: "Un nom de branche ne contient pas d’espaces, par exemple feature/route-planner.",
+    invalid: "Ce n’est pas un nom de branche git. Essayez par exemple feature/route-planner.",
   },
   cancel: "Annuler",
 }

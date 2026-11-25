@@ -14,8 +14,10 @@ import {
   BRANCHES_POLL_MS,
   type Branch,
   branchesPollInterval,
+  branchNameProblem,
   branchStatus,
   branchStep,
+  WORKER_WAIT_MS,
 } from "../src/pages/console/branches/branches"
 import { installDom } from "./helpers/dom"
 
@@ -111,7 +113,11 @@ function answerWith(answer: (request: Request) => Response | Promise<Response>) 
   return seen
 }
 
-function renderPage(list: ListBranchesResponse | null, path = "/console/branches") {
+function renderPage(
+  list: ListBranchesResponse | null,
+  path = "/console/branches",
+  access: { readonly branches: boolean } = { branches: true }
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY, retry: false } },
   })
@@ -125,7 +131,7 @@ function renderPage(list: ListBranchesResponse | null, path = "/console/branches
       activity: false,
       console: true,
       logs: false,
-      branches: true,
+      branches: access.branches,
     },
     session: { id: "ses_1", expiresAt: ago(-60 * 60_000) },
   })
@@ -147,7 +153,11 @@ function renderPage(list: ListBranchesResponse | null, path = "/console/branches
 describe("a branch's status", () => {
   test("says in plain words what a person can do with it", () => {
     expect(branchStatus(branch())).toBe("ready")
-    expect(branchStatus(branch({ state: "stopped" }))).toBe("starting")
+    expect(branchStatus(branch({ state: "stopped", openedAt: ago(10_000) }))).toBe("starting")
+    // A minute on, nothing has picked it up: no worker runs branches.
+    expect(branchStatus(branch({ state: "stopped", openedAt: ago(WORKER_WAIT_MS + 1) }))).toBe(
+      "waiting"
+    )
     expect(branchStatus(branch({ state: "copying" }))).toBe("starting")
     expect(branchStatus(branch({ wanted: "stopped", state: "stopped" }))).toBe("stopped")
     expect(branchStatus(branch({ wanted: "stopped" }))).toBe("stopping")
@@ -163,6 +173,13 @@ describe("a branch's status", () => {
     expect(branchStep(branch({ state: "copying" }))).toBe("copying")
     expect(branchStep(branch({ state: "starting" }))).toBe("starting")
     expect(branchStep(branch())).toBeNull()
+  })
+
+  test("names what is wrong with a branch name", () => {
+    expect(branchNameProblem("feature/route-planner")).toBeNull()
+    expect(branchNameProblem("route planner")).toBe("spaces")
+    expect(branchNameProblem("feature/")).toBe("invalid")
+    expect(branchNameProblem("fix..hours")).toBe("invalid")
   })
 
   // Removal proof: return the settled interval always, and a starting branch waits 15 s a step.
@@ -191,8 +208,39 @@ describe("Console › Branches", () => {
     })
 
     expect(view.getByText("Branches aren't set up yet")).toBeDefined()
-    expect(view.getByText('source: { repository: "acme/shop" }')).toBeDefined()
+    expect(view.getByText('source: { repository: "your-org/your-repo" },')).toBeDefined()
+    expect(view.getByRole("link", { name: "Setup guide" }).getAttribute("href")).toBe(
+      "https://docs.sixb.ai/deployment/branches"
+    )
     expect(view.queryByRole("button", { name: "New branch" })).toBeNull()
+  })
+
+  // Hiding the page protects no data: the page says why there is nothing, rather than leave.
+  test("tells someone without the grant that they don't have access", () => {
+    const { view } = renderPage({ branches: [branch()], unavailable: null }, "/console/branches", {
+      branches: false,
+    })
+
+    expect(view.getByText("You don't have access to Branches. Ask a project admin.")).toBeDefined()
+    expect(view.queryByText("feature/route-planner")).toBeNull()
+  })
+
+  // A refusal is no outage: nothing to try again.
+  test("offers to try again after a failure, never after a refusal", async () => {
+    answerWith(() => Response.json({ error: "Forbidden" }, { status: 403 }))
+    const denied = renderPage(null)
+    expect(
+      await denied.view.findByText("You don't have access to Branches. Ask a project admin.")
+    ).toBeDefined()
+    expect(denied.view.queryByRole("button", { name: "Try again" })).toBeNull()
+    denied.view.unmount()
+
+    answerWith(() =>
+      Response.json({ error: "The database didn't answer in time." }, { status: 500 })
+    )
+    const failed = renderPage(null)
+    expect(await failed.view.findByText("The database didn't answer in time.")).toBeDefined()
+    expect(failed.view.getByRole("button", { name: "Try again" })).toBeDefined()
   })
 
   test("lists each branch with its status, data age and who opened it", () => {
@@ -204,28 +252,72 @@ describe("Console › Branches", () => {
       unavailable: null,
     })
 
+    // The pill is drawn twice, beside the name and, on a phone, before the facts: CSS shows one.
     const ready = within(rowOf(view, "feature/route-planner"))
-    expect(ready.getByText("Ready")).toBeDefined()
+    expect(ready.getAllByText("Ready")).toHaveLength(2)
     expect(ready.getByText("Production data from 2 hours ago")).toBeDefined()
-    expect(ready.getByText("Opened by you")).toBeDefined()
+    expect(ready.getByText("Started by you")).toBeDefined()
+    expect(ready.getByText("Last opened 5 minutes ago")).toBeDefined()
     expect(ready.getByRole("button", { name: "Open" })).toBeDefined()
 
     const stopped = within(rowOf(view, "fix/driver-hours"))
-    expect(stopped.getByText("Stopped")).toBeDefined()
+    expect(stopped.getAllByText("Stopped")).toHaveLength(2)
     expect(stopped.getByRole("button", { name: "Start" })).toBeDefined()
   })
 
   test("shows the steps of a branch starting, the current one marked", () => {
-    const { view } = renderPage({ branches: [branch({ state: "copying" })], unavailable: null })
+    const { view } = renderPage({
+      branches: [branch({ state: "copying", data: null, openedAt: ago(10_000) })],
+      unavailable: null,
+    })
 
     const steps = view.getByRole("list", { name: "Progress" })
     expect(
       within(steps)
         .getAllByRole("listitem")
         .map((item) => item.textContent)
-    ).toEqual(["Preparing machine(Done)", "Copying data(In progress)", "Starting(Not started)"])
+    ).toEqual([
+      "Preparing machine(Done)",
+      "Copying data(In progress)",
+      "Starting the app(Not started)",
+    ])
+    expect(view.getByText("Copying production data…")).toBeDefined()
     // Nothing to open yet: the steps say how far it is.
     expect(view.queryByRole("button", { name: "Open" })).toBeNull()
+  })
+
+  // A branch nothing picks up would otherwise spin forever. Removal proof: drop "waiting" from
+  // `branchStatus`, and the page spins on with no word on why.
+  test("says when nothing runs branches, who can fix it, and the command", () => {
+    const { view } = renderPage({
+      branches: [branch({ state: "stopped", data: null, openedAt: ago(5 * 60_000) })],
+      unavailable: null,
+    })
+
+    expect(view.getAllByText("Waiting")).toHaveLength(2)
+    expect(
+      view.getByText(
+        "Nothing is running branches on production yet. Ask a developer to start the branch worker:"
+      )
+    ).toBeDefined()
+    expect(view.getByText("sixb worker branches")).toBeDefined()
+    expect(view.container.querySelector("[class*='animate-spin']")).toBeNull()
+  })
+
+  // Removal proof: drop the toast from the status effect, and a branch turns ready unseen.
+  test("says when a branch it was watching is ready, and offers to open it", async () => {
+    const starting = branch({ state: "starting", openedAt: ago(10_000) })
+    const { view, queryClient } = renderPage({ branches: [starting], unavailable: null })
+
+    act(() => {
+      queryClient.setQueryData(listBranchesQueryKey(), {
+        branches: [{ ...starting, state: "ready" }],
+        unavailable: null,
+      })
+    })
+
+    expect(await view.findByText("feature/route-planner: Ready")).toBeDefined()
+    expect(await view.findByText("feature/route-planner is ready")).toBeDefined()
   })
 
   test("says what needs attention first, with the error folded under Details", () => {
@@ -239,7 +331,7 @@ describe("Console › Branches", () => {
       unavailable: null,
     })
 
-    expect(view.getByText("Needs attention")).toBeDefined()
+    expect(view.getAllByText("Needs attention")).toHaveLength(2)
     expect(view.getByText("The branch's code didn't start.")).toBeDefined()
     expect(view.getByText("ontology/route.ts")).toBeDefined()
     expect(view.queryByText("SyntaxError: Unexpected token '}'")).toBeNull()
@@ -272,7 +364,9 @@ describe("Console › Branches", () => {
     })
 
     expect(
-      view.getByText("It runs without your project's dev values: production couldn't read them.")
+      view.getByText(
+        "Some connected services may not work here: production can't read your project's development settings. Ask a developer to give production access to them."
+      )
     ).toBeDefined()
     fireEvent.click(view.getByRole("button", { name: "2 types and 1 dataset weren't copied" }))
     expect(view.getByText("Ada Laurent can't read it in production.")).toBeDefined()
@@ -297,7 +391,9 @@ describe("Console › Branches", () => {
     )
 
     const dialog = await view.findByRole("alertdialog")
-    expect(within(dialog).getByText("Refresh feature/route-planner from production?")).toBeDefined()
+    expect(within(dialog).getByRole("heading").textContent).toBe(
+      "Refresh feature/route-planner from production?"
+    )
     expect(
       within(dialog).getByText(
         "It takes a new copy of what you see in production now. Changes made on this branch are discarded."
@@ -355,11 +451,28 @@ describe("Console › Branches", () => {
 })
 
 describe("the branch bar", () => {
-  function renderBanner(project: unknown) {
+  function renderBanner(
+    project: unknown,
+    access: { readonly branches: boolean } = { branches: true }
+  ) {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY, retry: false } },
     })
     queryClient.setQueryData(getProjectInfoQueryKey(), project)
+    queryClient.setQueryData(getAuthSessionQueryKey(), {
+      authenticated: true,
+      user: ada,
+      access: {
+        members: false,
+        serviceAccounts: false,
+        usage: false,
+        activity: false,
+        console: true,
+        logs: false,
+        branches: access.branches,
+      },
+      session: { id: "ses_1", expiresAt: ago(-60 * 60_000) },
+    })
     return render(
       <QueryClientProvider client={queryClient}>
         <BranchBanner />
@@ -385,7 +498,9 @@ describe("the branch bar", () => {
     })
 
     const bar = view.getByRole("complementary", { name: "Branch feature/route-planner" })
-    expect(within(bar).getByText("production data from 2 hours ago")).toBeDefined()
+    expect(within(bar).getByText("Production data from 2 hours ago")).toBeDefined()
+    // A phone's bar says it shorter.
+    expect(within(bar).getByText("Data · 2 h ago")).toBeDefined()
     expect(
       within(bar)
         .getByRole("link", { name: "Refresh feature/route-planner from production" })
@@ -394,6 +509,27 @@ describe("the branch bar", () => {
     expect(within(bar).getByRole("link", { name: "Back to production" }).getAttribute("href")).toBe(
       "https://app.northline.test"
     )
+  })
+
+  // Refreshing takes the grant in production: the bar offers it to those who hold it alone.
+  // Removal proof: drop `canRefresh` from `refreshUrl` (`branch-banner.tsx`).
+  test("offers Refresh only to those who may refresh the branch", () => {
+    const view = renderBanner(
+      {
+        id: "northline",
+        locale: "en",
+        timeZone: "UTC",
+        branch: {
+          name: "feature/route-planner",
+          dataTakenAt: ago(2 * 60 * 60_000),
+          productionUrl: "https://app.northline.test",
+        },
+      },
+      { branches: false }
+    )
+
+    expect(view.queryByRole("link", { name: /Refresh/ })).toBeNull()
+    expect(view.getByRole("link", { name: "Back to production" })).toBeDefined()
   })
 
   // A branch on a laptop has no production to refresh it from here: it says what it is, alone.
@@ -405,7 +541,7 @@ describe("the branch bar", () => {
       branch: { name: "feature/route-planner", dataTakenAt: null, productionUrl: null },
     })
 
-    expect(view.getByText("feature/route-planner")).toBeDefined()
+    expect(view.getAllByText("feature/route-planner").length).toBeGreaterThan(0)
     expect(view.queryAllByRole("link")).toEqual([])
   })
 

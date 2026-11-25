@@ -2358,8 +2358,8 @@ function authSessionBody(
       activity: isAllowed(authorization, { kind: "activity.observe" }),
       console: isAllowed(authorization, { kind: "console.observe" }),
       logs: isAllowed(authorization, { kind: "logs.observe" }),
-      // Branches are opened in production only.
-      branches: !host.branch && isAllowed(authorization, { kind: "source.manage" }),
+      // On a branch's app too: its bar offers Refresh to those who may refresh it in production.
+      branches: isAllowed(authorization, { kind: "source.manage" }),
     },
     session: { id: session.session.id, expiresAt: toIsoString(session.session.expiresAt) },
   }

@@ -73,8 +73,9 @@ const { url } = await sixb.branches.signIn("feature/invoices") // POST /api/bran
 // open `url` within a minute: you land on the branch's app, signed in as yourself
 ```
 
-Every page of a branch's app opens under a thin bar: the branch, how old its data is, **Refresh**
-and **Back to production** (`SIXB_APP_PUBLIC_ORIGIN` on the branch worker says where production is).
+Every page of a branch's app opens under a thin bar: the branch, how old its data is, **Back to
+production** and, for whoever may refresh the branch, **Refresh…** (`SIXB_APP_PUBLIC_ORIGIN` on the
+branch worker says where production is).
 The app's shell leaves room for it; a layout that sizes itself to the screen subtracts
 `var(--app-top-inset, 0px)`.
 
