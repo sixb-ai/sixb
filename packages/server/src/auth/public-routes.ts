@@ -1,6 +1,7 @@
 import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
 import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
 import { FILE_DOWNLOAD_ROUTE_PREFIX } from "@sixb/core/internal/blob-storage"
+import { LAKE_SLICE_FILES_ROUTE_PREFIX } from "@sixb/core/internal/lake-slices"
 import { isSharedAccessPublicPath } from "./shared-access"
 
 const CONNECTOR_OAUTH_CALLBACK_PATH = "/auth/connectors/callback"
@@ -61,6 +62,15 @@ export function isPublicRoute(pathname: string, method: string): boolean {
   // fetching media to publish. The signed token in the path is the credential.
   if (
     pathname.startsWith(FILE_DOWNLOAD_ROUTE_PREFIX) &&
+    (normalizedMethod === "GET" || normalizedMethod === "HEAD")
+  ) {
+    return true
+  }
+
+  // A branch holds no session in production: it reads its slice's lake files with the slice token
+  // it sends as a bearer, which the route checks itself and which reads nothing else.
+  if (
+    pathname.startsWith(LAKE_SLICE_FILES_ROUTE_PREFIX) &&
     (normalizedMethod === "GET" || normalizedMethod === "HEAD")
   ) {
     return true
