@@ -14,6 +14,7 @@ import type {
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import { captureSixbFailure, createSixbError, toSixbFailure } from "@sixb/core/internal/errors"
 import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
+import { branchRefusals } from "@sixb/core/internal/runtime"
 import {
   type AdmitWebhookRunResult,
   admitWebhookRun,
@@ -86,6 +87,15 @@ export function registerWebhookRoutes(app: Elysia, host: SixbHostView) {
         set.status = 404
         return { error: "Webhook not found" }
       }
+
+      // Providers call production. A branch admits no delivery, records no run, runs no handler.
+      if (host.branch) {
+        set.status = 409
+        return {
+          error: branchRefusals.webhook(host.branch, params.connectorId, params.webhookId).message,
+        }
+      }
+
       return dispatchWebhook({ host, registered, request, set })
     },
     { detail: { hide: true } }
