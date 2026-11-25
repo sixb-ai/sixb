@@ -1,5 +1,7 @@
 import type { DatasetDefinition } from "@sixb/core"
 import type { DuckLakeStorageOptions } from "../types"
+import { PRODUCTION_FILES_ROOT } from "./catalog-slice"
+import { getBigIntLike } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import { type DatasetTableRef, resolveDatasetTableRef } from "./ducklake-dataset-table-ref"
@@ -13,7 +15,13 @@ import {
 } from "./ducklake-storage-stats"
 import { CatalogMovedError, commitVersionTransaction } from "./ducklake-version-transaction"
 import { encodeDatasetSequenceTableName, encodeDatasetTableName } from "./names"
-import { buildDatasetLockSql, duckLakeAlias, quoteIdentifier, quoteSqlString } from "./sql"
+import {
+  buildDatasetLockSql,
+  duckLakeAlias,
+  duckLakeMetadataTableName,
+  quoteIdentifier,
+  quoteSqlString,
+} from "./sql"
 import type { SixbCommitMetadata } from "./versions"
 
 /**
@@ -194,9 +202,10 @@ export class DuckLakeCompaction {
   private async plan(dataset: DatasetDefinition): Promise<CompactionPlan | null> {
     const found = await this.connections.withAttachedRuntime(async (runtime) => {
       const table = await resolveDatasetTableRef(this.options, runtime, dataset.id)
-      return table === null
-        ? null
-        : { table, storage: await readTableStorage(this.options, runtime, [table]) }
+      if (table === null) return null
+
+      const storage = await readTableStorage(this.options, runtime, [table])
+      return { table, storage, readsProduction: await this.readsProduction(runtime, storage) }
     })
     if (found === null) {
       return null
@@ -211,16 +220,31 @@ export class DuckLakeCompaction {
 
     const inlinedDeletes = sum((storage) => storage.inlinedDeletes)
     const flush = sum((storage) => storage.inlinedRows) + inlinedDeletes >= FLUSH_INLINED_ROWS
-    // A branch's tables hold production's files: rewriting or merging them would copy production's
-    // rows into the branch. A branch only flushes what it keeps in its own catalog.
+    // Rewriting or merging a branch's table that still reads production's files would copy
+    // production's rows into the branch: such a table only flushes what the branch's catalog holds.
     const compact =
-      this.options.productionFiles === undefined &&
+      !found.readsProduction &&
       (sum((storage) => storage.filesToRewrite) > 0 ||
         sum((storage) => storage.smallDataFiles) >= MERGE_SMALL_FILES)
 
     return flush || compact
       ? { table: found.table, flush, flushesDeletes: flush && inlinedDeletes > 0, compact }
       : null
+  }
+
+  /** Whether a branch's dataset still reads one of production's files. Never, in production. */
+  private async readsProduction(
+    runtime: DuckDbQueryRuntime,
+    storage: ReadonlyMap<bigint, DuckLakeTableStorage>
+  ): Promise<boolean> {
+    if (this.options.productionFiles === undefined || storage.size === 0) return false
+
+    const [row] = await runtime.query(`
+      SELECT count(*) AS files FROM ${duckLakeMetadataTableName(this.options, "ducklake_data_file")}
+      WHERE table_id IN (${[...storage.keys()].join(", ")}) AND end_snapshot IS NULL
+        AND path LIKE ${quoteSqlString(`${PRODUCTION_FILES_ROOT}%`)}
+    `)
+    return getBigIntLike(row ?? {}, "files") > 0n
   }
 
   private flushCalls(table: DatasetTableRef): readonly string[] {

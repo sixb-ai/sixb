@@ -37,6 +37,7 @@ import {
 } from "../../section-ui"
 import { MetaSkeleton, SkeletonBlock, StatsSkeleton, TrailingSkeleton } from "../skeletons"
 import { useDataMessages } from "./messages"
+import { shortVersionId } from "./producer"
 
 type Projection =
   | ListProjectionsResponse["objectProjections"][number]
@@ -378,7 +379,7 @@ export function ConsoleProjectionPage() {
                       to={`${datasetHref}?version=${encodeURIComponent(run.identity.datasetVersion.versionId)}`}
                       className="font-mono text-xs hover:text-foreground hover:underline"
                     >
-                      {run.identity.datasetVersion.versionId.slice(0, 12)}
+                      {shortVersionId(run.identity.datasetVersion.versionId)}
                     </Link>
                     <MetaDot />
                     <span className="tabular-nums">

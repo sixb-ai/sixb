@@ -16,6 +16,18 @@ describe("DuckLake version metadata", () => {
     expect(() => parseVersionId("ducklake:not-a-number")).toThrow("Invalid DuckLake version id")
   })
 
+  // Red check: in parseVersionId, accept any digits after either prefix.
+  test("give each snapshot one id: a branch's own above 2^40, production's below", () => {
+    const base = 2n ** 40n
+    expect(parseVersionId("ducklake:branch:1")).toBe(`${base + 1n}`)
+    expect(toVersionId(`${base + 1n}`)).toBe("ducklake:branch:1")
+    expect(parseVersionId(`ducklake:${base - 1n}`)).toBe(`${base - 1n}`)
+
+    for (const other of ["ducklake:branch:01", `ducklake:${base + 1n}`, `ducklake:${base}`]) {
+      expect(() => parseVersionId(other)).toThrow("Invalid DuckLake version id")
+    }
+  })
+
   test("parses Sixb commit metadata from DuckLake extra info", () => {
     expect(
       parseCommitMetadata(

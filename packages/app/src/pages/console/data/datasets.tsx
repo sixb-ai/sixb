@@ -59,7 +59,7 @@ import {
 import { MetaSkeleton, SkeletonBlock, TrailingSkeleton } from "../skeletons"
 import { useDatasetLiveUpdates } from "./live-updates"
 import { useDataMessages } from "./messages"
-import { DatasetProducerLabel, DatasetVersionInputs } from "./producer"
+import { DatasetProducerLabel, DatasetVersionInputs, shortVersionId } from "./producer"
 import { SchemaPanel } from "./schema"
 
 const pageSize = 100
@@ -412,7 +412,7 @@ function DatasetDetail({ datasetId }: { readonly datasetId: string }) {
                       value={version.versionId}
                       className="text-xs"
                     >
-                      <span className="font-mono">{version.versionId.slice(0, 12)}</span>
+                      <span className="font-mono">{shortVersionId(version.versionId)}</span>
                       <span className="text-muted-foreground">
                         {version.versionId === latestVersionId
                           ? messages.datasets.latest

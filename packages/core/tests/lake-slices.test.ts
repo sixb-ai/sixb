@@ -265,8 +265,9 @@ describe("lake slices", () => {
 
     expect(String(twice)).toContain(`pins '${orders.id}' at both`)
     expect(String(gone)).toContain("which no longer exists")
-    expect(await host.storage.lakeSlices.listLive({ projectId: host.id, liveAfter: new Date(0) }))
-      .toEqual([])
+    expect(
+      await host.storage.lakeSlices?.listLive({ projectId: host.id, liveAfter: new Date(0) })
+    ).toEqual([])
   })
 
   test("only a person's own request cuts a slice or reads with it", async () => {

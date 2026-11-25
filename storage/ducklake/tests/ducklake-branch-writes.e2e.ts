@@ -5,9 +5,11 @@ import { join } from "node:path"
 import { change, col, type DatasetDefinition, defineDataset } from "@sixb/core"
 import type { DatasetVersionRef } from "@sixb/core/lake-storage"
 import { DuckLakeStorage } from "../src"
+import { PRODUCTION_FILES_ROOT } from "../src/internal/catalog-slice"
 import type { DuckLakeConnectionManager } from "../src/internal/ducklake-connection-manager"
 import { resolveDatasetTableRef } from "../src/internal/ducklake-dataset-table-ref"
 import type { DuckLakeSnapshotReader } from "../src/internal/ducklake-snapshot-reader"
+import { duckLakeAlias, duckLakeMetadataTableName, quoteSqlString } from "../src/internal/sql"
 import { parseVersionId } from "../src/internal/versions"
 import { collectRows, createLocalDuckLakeStorage, localDuckLakeOptions } from "./test-utils"
 
@@ -17,6 +19,11 @@ import { collectRows, createLocalDuckLakeStorage, localDuckLakeOptions } from ".
 const orders = defineDataset("branch.writes.orders", {
   schema: [col("id", "string"), col("customer", "string"), col("total", "float64")],
   primaryKey: "id",
+})
+
+// A dataset only the branch writes.
+const drafts = defineDataset("branch.writes.drafts", {
+  schema: [col("id", "string"), col("customer", "string"), col("total", "float64")],
 })
 
 let rootDir: string
@@ -150,6 +157,63 @@ describe("a branch writing over its slice", () => {
       await branch.close()
     }
   })
+
+  // Red check: in DuckLakeMaintenance.applyRetention, drop the DELETE of production's paths from
+  // the branch's deletion schedule: DuckLake then deletes them through the proxy, which answers
+  // 405 to every DELETE.
+  test("never deletes production's files, even once a merge on the branch replaced them", async () => {
+    await writeSmallFiles(orders, 4)
+    const { branch, version } = await openBranch()
+    try {
+      // The merge compaction never runs on such a table, run by hand: it schedules production's
+      // files for deletion in the branch's catalog.
+      await runOn(branch, (catalog) => `CALL ducklake_merge_adjacent_files(${catalog})`)
+      expect(await currentFiles(branch, orders)).toEqual({ production: 0, own: 1 })
+
+      setSystemTime(new Date(Date.now() + 4 * 60 * 60_000))
+      await branch.maintenance.applyRetention({
+        keepVersionsForMs: 60 * 60_000,
+        deleteFilesAfterMs: 60 * 60_000,
+      })
+
+      expect(route?.writes()).toBe(0)
+      expect((await collectRows(branch.readRows(version))).length).toBe(400)
+    } finally {
+      await branch.close()
+    }
+  })
+
+  // Red check: in DuckLakeCompaction.plan, drop `readsProduction`: the branch merges production's
+  // files into one of its own, a copy of production's rows.
+  test("compacts the tables it alone wrote, and only flushes the ones reading production's", async () => {
+    await writeSmallFiles(orders, 20)
+    const { branch } = await openBranch()
+    const sliced = await currentFiles(branch, orders)
+    try {
+      await branch.createDataset(drafts)
+      for (let file = 0; file < 20; file += 1) {
+        const appended = await branch.beginWrite({ dataset: drafts, mode: "append" })
+        await appended.writeRows(rows(2_000).slice(file * 100, file * 100 + 100))
+        await appended.commit()
+
+        const added = await branch.beginWrite({ dataset: orders, mode: "append" })
+        await added.writeRows(rows(4_000).slice(2_000 + file * 100, 2_100 + file * 100))
+        await added.commit()
+      }
+    } finally {
+      // Closing waits for the compaction in flight.
+      await branch.close()
+    }
+
+    const reopened = reopen("cache")
+    try {
+      expect(sliced.production).toBeGreaterThan(0)
+      expect((await currentFiles(reopened, orders)).production).toBe(sliced.production)
+      expect((await currentFiles(reopened, drafts)).own).toBeLessThan(20)
+    } finally {
+      await reopened.close()
+    }
+  })
 })
 
 // Values that compress poorly, so reading them shows in the bytes production serves.
@@ -159,6 +223,39 @@ function rows(count: number) {
     customer: `customer-${Bun.hash(`customer-${index}`).toString(36)}`,
     total: Number(Bun.hash(`total-${index}`) % 1_000_000n) / 7,
   }))
+}
+
+/** Production's dataset in one small file per commit, none of whose rows is deleted. */
+async function writeSmallFiles(dataset: DatasetDefinition, files: number) {
+  await production.createDataset(dataset)
+  for (let file = 0; file < files; file += 1) {
+    const session = await production.beginWrite({ dataset, mode: "append" })
+    await session.writeRows(rows(2_000).slice(file * 100, file * 100 + 100))
+    await session.commit()
+  }
+}
+
+/** Runs DuckLake SQL on a lake's own attachment, as maintenance a provider never runs would. */
+async function runOn(lake: DuckLakeStorage, sql: (catalog: string) => string) {
+  const { connections } = lake as unknown as { readonly connections: DuckLakeConnectionManager }
+  await connections.withAttachedRuntime(async (runtime) => {
+    await runtime.run(sql(quoteSqlString(duckLakeAlias(localDuckLakeOptions(rootDir)))))
+  })
+}
+
+/** The dataset's current data files on a lake, by whether they are production's. */
+async function currentFiles(lake: DuckLakeStorage, dataset: DatasetDefinition) {
+  const { connections } = lake as unknown as { readonly connections: DuckLakeConnectionManager }
+  return connections.withAttachedRuntime(async (runtime) => {
+    const options = localDuckLakeOptions(rootDir)
+    const table = await resolveDatasetTableRef(options, runtime, dataset.id)
+    if (!table) throw new Error(`No table for '${dataset.id}'`)
+    const files = await runtime.query(
+      `SELECT path FROM ${duckLakeMetadataTableName(options, "ducklake_data_file")} WHERE table_id = ${table.tableId} AND end_snapshot IS NULL`
+    )
+    const production = files.filter((row) => String(row.path).startsWith(PRODUCTION_FILES_ROOT))
+    return { production: production.length, own: files.length - production.length }
+  })
 }
 
 async function write(dataset: DatasetDefinition, values: Record<string, unknown>[]) {
@@ -176,9 +273,14 @@ async function openBranch(): Promise<{ branch: DuckLakeStorage; version: Dataset
   const at = await production.forks.versionsAt({ point, datasetIds: [orders.id] })
   const version = { datasetId: orders.id, versionId: `${at.get(orders.id)?.versionId}` }
   const slicePath = join(rootDir, "slice.ducklake")
-  await production.forks.writeSlice({ point, versions: [version], path: slicePath })
+  const files = await production.forks.writeSlice({
+    point,
+    versions: [version],
+    path: slicePath,
+    record: async () => undefined,
+  })
 
-  route = serve(await production.forks.listFiles([version]))
+  route = serve(files)
   return { branch: reopen("cache"), version }
 }
 

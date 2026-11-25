@@ -841,7 +841,8 @@ The slice is attached with `OVERRIDE_DATA_PATH`, so the branch writes under its 
 - **Its versions are its own.** A slice ends with a snapshot `BRANCH_SNAPSHOT_BASE` (2^40) that
   changes nothing, so every commit on the branch takes an id above it, and its version id reads
   `ducklake:branch:<n>`, the branch's n-th commit. Production's ids stay `ducklake:<snapshot>`,
-  below: a branch's id is never taken for one of production's. `lakeStorage.fork.ownsVersion(id)`
+  below: a branch's id is never taken for one of production's, and each snapshot has one id
+  (`ducklake:branch:01` or `ducklake:<2^40 + 1>` is refused). `lakeStorage.fork.ownsVersion(id)`
   tells them apart; core projects only the versions a branch owns (`projectionsPass`), so a
   branch's first pass re-derives nothing from production's data. Pipelines need nothing more: a
   trigger with no run on the branch waits for the branch's own commits.
@@ -849,15 +850,15 @@ The slice is attached with `OVERRIDE_DATA_PATH`, so the branch writes under its 
   a branch version uses DuckLake's change feed: the snapshots the slice left out never changed
   its tables in this catalog, so they are not counted as expired. A slice can hold the version a
   projection applied rather than the latest (`writeLakeSlice({ pinned })`), so a branch's
-  projection continues from it incrementally once the branch has its source rows.
-- **Its maintenance keeps production's files.** Automatic compaction only flushes what the branch
-  keeps in its catalog, and never rewrites or merges a table's files, which would copy production's
-  rows into the branch. Retention never expires the snapshots the slice was cut with, and never
+  projection continues from it incrementally once the branch has its source rows. A slice holds
+  one version per dataset: two different pins of one dataset, or a pinned version that no longer
+  exists, refuse the cut.
+- **Its maintenance keeps production's files.** A table that still reads one of production's
+  files only flushes what the branch keeps in its catalog: rewriting or merging it would copy
+  production's rows into the branch. A table the branch alone wrote compacts as in production. Retention never expires the snapshots the slice was cut with, and never
   deletes a file under `http://sixb-production-lake.invalid/`: those leave the deletion schedule
   before DuckLake reads it.
 
-In production, retention keeps every version of every slice a branch may still open, as it keeps
-the versions projections applied (`LakeRetention.protect`).
 
 ## Blob Storage
 

@@ -44,28 +44,29 @@ export const BRANCH_SNAPSHOT_BASE = 2n ** 40n
 
 const BRANCH_VERSION_PREFIX = "ducklake:branch:"
 
+/** A number without leading zeros. */
+const CANONICAL_NUMBER = /^(0|[1-9]\d*)$/
+
 /**
  * The snapshot a version id names. A branch's own versions read `ducklake:branch:<n>`, the n-th
  * commit after the slice: such an id is never taken for one of production's, which are
- * `ducklake:<snapshot>`.
+ * `ducklake:<snapshot>` below BRANCH_SNAPSHOT_BASE. Each snapshot has one id: `ducklake:branch:01`
+ * and `ducklake:<2^40 + 1>` name none.
  */
 export function parseVersionId(versionId: string): string {
+  const invalid = () =>
+    new LakeStorageError(`[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`)
+
   if (versionId.startsWith(BRANCH_VERSION_PREFIX)) {
     const commit = versionId.slice(BRANCH_VERSION_PREFIX.length)
-    if (!/^\d+$/.test(commit)) {
-      throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`)
-    }
+    if (!CANONICAL_NUMBER.test(commit)) throw invalid()
     return (BRANCH_SNAPSHOT_BASE + BigInt(commit)).toString()
   }
 
-  if (!versionId.startsWith("ducklake:")) {
-    throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`)
-  }
+  if (!versionId.startsWith("ducklake:")) throw invalid()
 
   const snapshotId = versionId.slice("ducklake:".length)
-  if (!/^\d+$/.test(snapshotId)) {
-    throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`)
-  }
+  if (!/^\d+$/.test(snapshotId) || BigInt(snapshotId) >= BRANCH_SNAPSHOT_BASE) throw invalid()
 
   return snapshotId
 }
