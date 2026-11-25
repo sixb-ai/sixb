@@ -5,6 +5,7 @@ import type {
   ObjectProjectionDefinition,
   ObjectProjectionTarget,
   ProjectionDefinition,
+  SixbBranch,
   TelemetryProjectionDefinition,
 } from "@sixb/core"
 import {
@@ -222,8 +223,12 @@ function validatePinnedMarkings(input: {
   }
 }
 
-export function assertProjectionJobId(projectId: string, job: ProjectionJob): void {
-  const expected = createProjectionRunId(projectId, job)
+export function assertProjectionJobId(
+  projectId: string,
+  job: ProjectionJob,
+  branch?: SixbBranch | null
+): void {
+  const expected = createProjectionRunId(projectId, job, branch)
   if (job.id === expected) return
   throw createSixbError(
     "projection.run_identity_mismatch",

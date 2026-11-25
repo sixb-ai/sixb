@@ -173,6 +173,38 @@ describe("ProjectionWorker", () => {
     }
   })
 
+  // Guard check: stop passing the branch to `assertProjectionJobId` in `runProjectionJob`, or to
+  // the context in `buildProjectionContext`: the worker no longer recognizes the branch's run id.
+  test("on a branch, runs a projection under the branch's own run id", async () => {
+    process.env.SIXB_BRANCH = "feature/rooms"
+    process.env.SIXB_BRANCH_DATA_FROM = "production"
+    let sixb: SixbHost
+    try {
+      sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] })
+    } finally {
+      delete process.env.SIXB_BRANCH
+      delete process.env.SIXB_BRANCH_DATA_FROM
+    }
+
+    const version = await commitDatasetVersion(sixb.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen" },
+    ])
+    const { runId } = await dispatchProjectionRun(sixb, roomProjection.id, version)
+
+    const worker = new ProjectionWorker(sixb)
+    await worker.start()
+
+    try {
+      const run = await waitFor(
+        () => requireProjectionRunsStorage(sixb).getById({ projectId: sixb.id, id: runId }),
+        (value) => value?.status === "succeeded" || value?.status === "failed"
+      )
+      expect(run?.status).toBe("succeeded")
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("reports once and fails the queue job without retrying when a claimed run fails", async () => {
     const reports: { error: Error; context: SixbErrorContext }[] = []
     const sixb = createSixb({
