@@ -47,11 +47,24 @@ import {
 import { PgAgentStorage } from "./agents"
 import { PgAuthStorage } from "./auth-storage"
 import { PgConnectorConnectionStorage } from "./connector-connection-storage"
-import { createPostgresStorageMigrators, dropSchema, quoteIdent } from "./migrations"
+import {
+  type HostedBranchConnection,
+  type HostedBranchLimits,
+  type HostedBranchLogin,
+  hostedBranchLoginUrl,
+  PgHostedBranches,
+} from "./hosted-branches"
+import {
+  createPostgresStorageMigrators,
+  dropSchema,
+  postgresMigrationLock,
+  quoteIdent,
+} from "./migrations"
 import { PgObjectStorage, PgSortIndexCatalog } from "./objects"
 import { ensureObjectPartition } from "./objects/partitions"
-import { preparePgObjectQueries } from "./objects/prepare-queries"
+import { preparePgObjectQueries, TRIGRAM_EXTENSION_LOCK } from "./objects/prepare-queries"
 import { ensurePgObjectQueryIndexes, type PgObjectQueryIndex } from "./objects/query-indexes"
+import { PgBranchStorage } from "./pg-branch-storage"
 
 export type { PgObjectQueryIndex, PgObjectQueryIndexScope } from "./objects/query-indexes"
 
@@ -226,6 +239,7 @@ export class PostgresStorage
   readonly datasetIngest: PgDatasetIngestStorage
   readonly fileDownloadGrants: PgFileDownloadGrantStorage
   readonly lakeSlices: PgLakeSliceStorage
+  readonly hostedBranches: PgBranchStorage
   readonly activity: PgActivityStorage
   readonly maintenanceHeartbeats: PgMaintenanceHeartbeatStorage
   readonly lakeRetentionRuns: PgLakeRetentionRunStorage
@@ -326,6 +340,7 @@ export class PostgresStorage
     this.datasetIngest = createOperationScopedFacade(stores.datasetIngest, scope)
     this.fileDownloadGrants = createOperationScopedFacade(stores.fileDownloadGrants, scope)
     this.lakeSlices = createOperationScopedFacade(stores.lakeSlices, scope)
+    this.hostedBranches = createOperationScopedFacade(stores.hostedBranches, scope)
     this.activity = createOperationScopedFacade(stores.activity, scope)
     this.maintenanceHeartbeats = createOperationScopedFacade(stores.maintenanceHeartbeats, scope)
     this.lakeRetentionRuns = createOperationScopedFacade(stores.lakeRetentionRuns, scope)
@@ -598,6 +613,61 @@ export class PostgresStorage
     )
   }
 
+  /**
+   * A hosted branch's empty schema on this instance, owned by a role of its own, which logs in
+   * once `openHostedBranch` gives it a password. See `hosted-branches.ts`.
+   */
+  createHostedBranch(
+    name: string,
+    limits: HostedBranchLimits = {}
+  ): Promise<{ readonly tempFileLimit: boolean }> {
+    return this.branchHosting.create(name, limits)
+  }
+
+  /** A new login for a hosted branch's role, for one start of its runtime. */
+  openHostedBranch(name: string): Promise<HostedBranchLogin> {
+    return this.branchHosting.open(name)
+  }
+
+  /** Drops a hosted branch's schema, with everything in it, and its role. */
+  dropHostedBranch(name: string): Promise<void> {
+    return this.branchHosting.drop(name)
+  }
+
+  /** Stops a hosted branch's statements and transactions past their limits. */
+  enforceHostedBranchLimits(name: string, limits: HostedBranchLimits = {}): Promise<number> {
+    return this.branchHosting.enforce(name, limits)
+  }
+
+  /** Where a hosted branch reaches this instance: production's own host and port. */
+  hostedBranchDatabaseAddress(): { readonly host: string; readonly port: number } {
+    const url = new URL(hostedBranchLoginUrl(this.connection(), { user: "branch", password: "" }))
+    return { host: url.hostname, port: Number(url.port || 5432) }
+  }
+
+  /** The role, and the schema it owns, a hosted branch of this namespace runs as. */
+  hostedBranchRole(name: string): Promise<string> {
+    return this.branchHosting.roleName(name)
+  }
+
+  private connection(): HostedBranchConnection {
+    const { connectionString, host, port, database, ssl } = this.options
+    return { connectionString, host, port, database, ssl }
+  }
+
+  private get branchHosting(): PgHostedBranches {
+    return new PgHostedBranches(this.sql, {
+      productionSchema: this.schemaName,
+      connection: this.connection(),
+      productionLocks: [
+        ...this.migrators.map((migrator) => ({
+          pair: postgresMigrationLock(this.schemaName, migrator.adapterId),
+        })),
+        { text: TRIGRAM_EXTENSION_LOCK },
+      ],
+    })
+  }
+
   private async openBranch(name: string): Promise<PostgresStorage> {
     const opened = this.branches.get(name)
     if (opened) return opened
@@ -715,6 +785,7 @@ function createPostgresStores(
     datasetIngest: new PgDatasetIngestStorage(sql),
     fileDownloadGrants: new PgFileDownloadGrantStorage(sql),
     lakeSlices: new PgLakeSliceStorage(sql),
+    hostedBranches: new PgBranchStorage(sql),
     activity: new PgActivityStorage(sql),
     maintenanceHeartbeats: new PgMaintenanceHeartbeatStorage(sql),
     lakeRetentionRuns: new PgLakeRetentionRunStorage(sql),
@@ -747,6 +818,7 @@ interface PostgresStoreSet {
   readonly datasetIngest: PgDatasetIngestStorage
   readonly fileDownloadGrants: PgFileDownloadGrantStorage
   readonly lakeSlices: PgLakeSliceStorage
+  readonly hostedBranches: PgBranchStorage
   readonly activity: PgActivityStorage
   readonly maintenanceHeartbeats: PgMaintenanceHeartbeatStorage
   readonly lakeRetentionRuns: PgLakeRetentionRunStorage
@@ -783,4 +855,5 @@ function isDuplicateSchema(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === "42P06"
 }
 
+export type { HostedBranchLimits, HostedBranchLogin } from "./hosted-branches"
 export { migratePostgresStorage } from "./migrations"

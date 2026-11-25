@@ -6,6 +6,7 @@ import type { AiLimitStorage } from "./ai-limits"
 import type { AiUsageStorage } from "./ai-usage"
 import type { ArtifactStorage } from "./artifacts"
 import type { AuthStorage } from "./auth"
+import type { BranchStorage } from "./branches"
 import type { ConnectorConnectionStorage } from "./connector-connections"
 import type { DatasetIngestStorage } from "./dataset-ingest"
 import type { ExecutionStorage } from "./executions"
@@ -386,6 +387,8 @@ export interface Storage {
   datasetIngest?: DatasetIngestStorage
   fileDownloadGrants?: FileDownloadGrantStorage
   lakeSlices?: LakeSliceStorage
+  /** The branches that run next to production, hosted by a branch worker. */
+  hostedBranches?: BranchStorage
   maintenanceHeartbeats?: MaintenanceHeartbeatStorage
   lakeRetentionRuns?: LakeRetentionRunStorage
   connectorConnections?: ConnectorConnectionStorage

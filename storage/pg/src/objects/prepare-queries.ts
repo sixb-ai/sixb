@@ -223,10 +223,13 @@ function compilePreparationPlan(plan: ObjectQueryPreparationPlan) {
   return { indexes, textCounts, warnings }
 }
 
-// Extension creation is database-wide, whereas index preparation is schema-scoped.
+/** Extension creation is database-wide, whereas index preparation is schema-scoped. */
+export const TRIGRAM_EXTENSION_LOCK = "sixb.extension.pg_trgm"
+
 async function ensureTrigrams(sql: ReservedSQL): Promise<void> {
-  await lockPgPreparation(sql, "sixb.extension.pg_trgm")
-  const unlock = () => sql`SELECT pg_advisory_unlock(hashtextextended('sixb.extension.pg_trgm', 0))`
+  await lockPgPreparation(sql, TRIGRAM_EXTENSION_LOCK)
+  const unlock = () =>
+    sql`SELECT pg_advisory_unlock(hashtextextended(${TRIGRAM_EXTENSION_LOCK}, 0))`
   await undoOnFailure(async () => {
     await sql.unsafe("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public")
   }, unlock)

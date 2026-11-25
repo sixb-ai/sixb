@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto"
 import type { ReservedSQL, SQL, SQLClient } from "./pg-client"
 import { explainPgError, isConnectionLost } from "./storage-errors"
 
@@ -207,23 +206,20 @@ export function authLockKey(kind: string, ...parts: readonly string[]): string {
   return ["auth", kind, ...parts].join(":")
 }
 
+/**
+ * Takes each key's transaction lock, in one order. Keys are the schema's own: advisory locks span
+ * the database, and a branch hosted beside production runs the same code on the same project's
+ * keys in a schema of its own, so it never waits on production's locks, nor production on its.
+ */
 export async function lockAdvisoryKeys(sql: SQLClient, keys: readonly string[]): Promise<void> {
-  const locks = [...new Set(keys)].sort().map(advisoryLockParts)
-  if (locks.length === 0) return
+  const sorted = [...new Set(keys)].sort()
+  if (sorted.length === 0) return
 
   await sql`
-    SELECT pg_advisory_xact_lock(locks.first_key, locks.second_key)
-    FROM unnest(
-      ${locks.map(([first]) => first)}::integer[],
-      ${locks.map(([, second]) => second)}::integer[]
-    ) WITH ORDINALITY AS locks(first_key, second_key, lock_order)
+    SELECT pg_advisory_xact_lock(hashtextextended(current_schema() || ':' || locks.key, 0))
+    FROM unnest(${sorted}::text[]) WITH ORDINALITY AS locks(key, lock_order)
     ORDER BY locks.lock_order
   `
-}
-
-function advisoryLockParts(key: string): readonly [number, number] {
-  const hash = createHash("sha256").update(key).digest()
-  return [hash.readInt32BE(0), hash.readInt32BE(4)]
 }
 
 /** Whether `sql` already runs within a transaction, provider-owned or external. */
