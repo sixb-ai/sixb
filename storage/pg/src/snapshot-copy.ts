@@ -118,6 +118,8 @@ export async function copySnapshotInPg(input: {
   work.sort((left, right) => weight(right) - weight(left))
 
   const open: ReservedSQL[] = []
+  // What the finish added again already, which a failure after it must not add twice.
+  const added = new Set<string>()
   try {
     for (const sql of connections) {
       await sql.unsafe("BEGIN ISOLATION LEVEL REPEATABLE READ")
@@ -137,7 +139,7 @@ export async function copySnapshotInPg(input: {
       open.splice(open.indexOf(sql), 1)
     }
 
-    await finish(connections, keys, indexes)
+    await finish(connections, keys, indexes, added)
     await markState(first, state)
   } catch (error) {
     work.length = 0
@@ -147,7 +149,7 @@ export async function copySnapshotInPg(input: {
       await first`DELETE FROM object_unique_properties WHERE project_id = ${projectId}`
       await first`DELETE FROM ontology_commits WHERE project_id = ${projectId} AND id = ${plan.commit.id}`
       for (const definition of [...keys.tables, ...keys.partitioned, ...indexes, ...keys.foreign]) {
-        await first.unsafe(definition)
+        if (!added.has(definition)) await first.unsafe(definition)
       }
       await markState(first, state)
     })
@@ -223,7 +225,8 @@ async function isPartition(sql: SQLClient, table: string): Promise<boolean> {
 async function finish(
   connections: readonly ReservedSQL[],
   keys: DroppedKeys,
-  indexes: readonly string[]
+  indexes: readonly string[],
+  added: Set<string>
 ) {
   const tables = [...LOADED_TABLES]
   await Promise.all(
@@ -234,21 +237,25 @@ async function finish(
     })
   )
 
-  const first = connections[0]!
-  await sideBySide(connections, keys.tables)
-  for (const key of keys.partitioned) await first.unsafe(key)
-  await sideBySide(connections, indexes)
-  for (const key of keys.foreign) await first.unsafe(key)
+  await sideBySide(connections, keys.tables, added)
+  await sideBySide(connections.slice(0, 1), keys.partitioned, added)
+  await sideBySide(connections, indexes, added)
+  await sideBySide(connections.slice(0, 1), keys.foreign, added)
 }
 
 /** Run `statements` across the connections, each taking the next as it ends one. */
-async function sideBySide(connections: readonly ReservedSQL[], statements: readonly string[]) {
+async function sideBySide(
+  connections: readonly ReservedSQL[],
+  statements: readonly string[],
+  added: Set<string>
+) {
   const pending = [...statements]
   await Promise.all(
     connections.map(async (sql) => {
       await sql.unsafe("SET maintenance_work_mem = '256MB'")
       for (let statement = pending.shift(); statement; statement = pending.shift()) {
         await sql.unsafe(statement)
+        added.add(statement)
       }
       await sql.unsafe("RESET maintenance_work_mem")
     })

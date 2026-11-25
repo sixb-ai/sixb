@@ -169,8 +169,8 @@ runSnapshotLoadContractSuite("PostgreSQL storage", {
 const PROJECT = "pg-load"
 const at = "2026-01-01T00:00:00.000Z"
 
-/** Load `batch` into a branch through its loader, with the execution its commit needs. */
-async function load(branch: BranchNamespace, batch: SnapshotLoadBatch, id = "snapshot_pg") {
+/** A base commit for a branch, with the execution it needs. */
+async function baseCommit(branch: BranchNamespace, id: string) {
   const operation = { type: "ontology.loadSnapshot", snapshotId: id } as const
   await branch.executions.create({
     id: `exec_${id}`,
@@ -181,29 +181,34 @@ async function load(branch: BranchNamespace, batch: SnapshotLoadBatch, id = "sna
     authorizationRef: { type: "kernel", operation },
   })
 
+  return {
+    projectId: PROJECT,
+    id,
+    idempotencyKey: id,
+    requestHash: id,
+    executionId: `exec_${id}`,
+    origin: { kind: "runtime", requestId: id },
+    ontologyRevision: "revision",
+    committedAt: at,
+    intent: { kind: "edit", mode: "atomic", operationCount: 0 },
+    result: {
+      kind: "edit",
+      commitId: id,
+      created: true,
+      eventCount: 0,
+      committedAt: at,
+      outcomes: [],
+      changes: { objects: [], links: [] },
+    },
+  } as const
+}
+
+/** Load `batch` into a branch through its loader. */
+async function load(branch: BranchNamespace, batch: SnapshotLoadBatch, id = "snapshot_pg") {
   return branch.loadSnapshot(
     {
       projectId: PROJECT,
-      commit: {
-        projectId: PROJECT,
-        id,
-        idempotencyKey: id,
-        requestHash: id,
-        executionId: `exec_${id}`,
-        origin: { kind: "runtime", requestId: id },
-        ontologyRevision: "revision",
-        committedAt: at,
-        intent: { kind: "edit", mode: "atomic", operationCount: 0 },
-        result: {
-          kind: "edit",
-          commitId: id,
-          created: true,
-          eventCount: 0,
-          committedAt: at,
-          outcomes: [],
-          changes: { objects: [], links: [] },
-        },
-      },
+      commit: await baseCommit(branch, id),
       uniqueProperties: [],
       objectTypeIds: ["Thing"],
     },
@@ -235,7 +240,7 @@ const things: SnapshotLoadBatch = {
   })),
 }
 
-/** What a branch schema holds: its indexes, its objects and its comment. */
+/** What a branch schema holds: its indexes and keys, its objects and its comment. */
 async function schemaState(storage: PostgresStorage, schema: string) {
   return withClient(storage, "public", async (sql) => {
     const indexes = await sql<{ name: string }[]>`
@@ -246,11 +251,15 @@ async function schemaState(storage: PostgresStorage, schema: string) {
     const [comment] = await sql<{ comment: string | null }[]>`
       SELECT obj_description(oid, 'pg_namespace') AS comment FROM pg_namespace
       WHERE nspname = ${schema}`
-    // A load lays out each type's partition first, and keeps it: it holds no row.
-    const kept = indexes
-      .map((row) => row.name)
-      .filter((name) => !/^objects_[0-9a-f]{20}/.test(name))
-    return { indexes: kept, objects: objects?.count, ...comment }
+    const keys = await sql<{ name: string }[]>`
+      SELECT conrelid::regclass::text || ' ' || conname AS name FROM pg_constraint
+      WHERE connamespace = ${schema}::regnamespace AND (contype <> 'f' OR conparentid = 0)
+      ORDER BY 1`
+    // A load lays out each type's partition first, and keeps it: it holds no row. A foreign key
+    // to the partitioned objects has a copy per partition.
+    const kept = (rows: { name: string }[]) =>
+      rows.map((row) => row.name).filter((name) => !/objects_[0-9a-f]{20}/.test(name))
+    return { indexes: kept(indexes), keys: kept(keys), objects: objects?.count, ...comment }
   })
 }
 
@@ -276,6 +285,62 @@ test("a load whose index build fails leaves the namespace as it was", async () =
     })
     await load(branch, things, "snapshot_again")
     expect((await schemaState(storage, schema)).objects).toBe(2)
+  } finally {
+    await disposeTestStorage(storage)
+  }
+}, 60_000)
+
+// Reproduce: let the copy's failure add again what its finish added already, and the cleanup fails
+// on a key that exists, leaving the namespace marked and without its indexes.
+test("a copy whose index build fails leaves the namespace as it was", async () => {
+  const storage = await testStorage()
+  try {
+    const branch = (await storage.createBranchNamespace("failing-copy")) as PostgresStorage
+    const schema = "sixb_test_branch_failing_copy"
+    await withClient(storage, undefined, async (sql) => {
+      for (const [sourceId, targetId] of [
+        ["a", "b"],
+        ["b", "a"],
+      ]) {
+        await sql`
+          INSERT INTO links (project_id, source_type_id, source_id, link_id, target_type_id,
+            target_id, created_at, updated_at, last_commit_id)
+          VALUES (${PROJECT}, 'Thing', ${sourceId!}, 'next', 'Thing', ${targetId!}, ${at}, ${at},
+            'production')`
+      }
+    })
+    // An index no copy can build: both links share a link id. The keys are built before it.
+    await withClient(storage, schema, async (sql) => {
+      await sql`CREATE UNIQUE INDEX sixb_test_one_link ON links (link_id)`
+    })
+    const before = await schemaState(storage, schema)
+    const commit = await baseCommit(branch, "snapshot_copy")
+
+    const refused = await branch
+      .copySnapshot({
+        source: storage,
+        projectId: PROJECT,
+        maxDurationMs: 60_000,
+        prepare: async () => ({
+          commit,
+          uniqueProperties: [],
+          members: [],
+          types: [
+            {
+              objectTypeId: "Thing",
+              droppedPropertyIds: [],
+              telemetryPropertyIds: [],
+              uniquePropertyIds: [],
+              artifactPropertyIds: [],
+              links: [{ linkId: "next", targetTypeId: "Thing", identity: "edge" }],
+              vectors: [],
+            },
+          ],
+        }),
+      })
+      .catch((error: unknown) => error)
+    expect(String(refused)).toContain("sixb_test_one_link")
+    expect(await schemaState(storage, schema)).toEqual(before)
   } finally {
     await disposeTestStorage(storage)
   }
