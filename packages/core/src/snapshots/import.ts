@@ -3,13 +3,10 @@ import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execu
 import { createKernelScope } from "../execution/scopes"
 import type { JsonValue } from "../json"
 import { sha256Canonical } from "../materialization/identity"
-import { vectorConfiguration } from "../objects/vectors/profile"
 import type { OntologyRegistry } from "../ontology"
 import { collectArtifactRefIds } from "../ontology/artifact-ref"
-import type { ObjectType, Property } from "../ontology/types"
 import { UNIQUE_VALUE_KEY_VERSION, uniqueValueKey } from "../ontology/unique-values"
 import type { UserRef } from "../ontology/user-ref"
-import { computeOntologyRevision } from "../projections/revision"
 import type { OntologyCommitRecord } from "../storage/ontology/commits"
 import type {
   ExactArtifactHolderWrite,
@@ -24,7 +21,12 @@ import {
   type SnapshotObjectWrite,
 } from "../storage/snapshots"
 import type { Storage } from "../storage/types"
-import { checkTypeFits } from "./definitions"
+import {
+  type BranchDefinitions,
+  type BranchTypeDefinition,
+  branchDefinitions,
+  checkTypeFits,
+} from "./definitions"
 import {
   decodeSnapshot,
   fromColumns,
@@ -99,9 +101,10 @@ export async function importSnapshot(input: ImportSnapshotInput): Promise<Snapsh
     const manifest = await expectRecord(records, "manifest")
     const members = await expectRecord(records, "members")
 
-    const plan = new ImportPlan(manifest, input.ontology)
+    const definitions = branchDefinitions(input.ontology)
+    const plan = new ImportPlan(manifest, definitions)
     const users = await importMembers(storage, manifest.projectId, members)
-    const commit = await baseCommit(storage, manifest, input.ontology)
+    const commit = await baseCommit(storage, manifest, definitions)
 
     const end = await storage.loadSnapshot(
       {
@@ -110,7 +113,8 @@ export async function importSnapshot(input: ImportSnapshotInput): Promise<Snapsh
         uniqueProperties: plan.uniqueProperties(),
         objectTypeIds: plan.objectTypeIds(),
       },
-      (loader) => loadRecords(records, plan, loader, commit.id)
+      (loader) =>
+        loadRecords(records, plan, loader, { commitId: commit.id, ontology: input.ontology })
     )
     assertComplete(end, plan, members.users.length)
 
@@ -142,7 +146,7 @@ function assertComplete(end: SnapshotEnd, plan: ImportPlan, users: number): void
   }
 }
 
-function report(
+export function report(
   manifest: SnapshotManifest,
   plan: ImportPlan,
   commitId: string,
@@ -175,10 +179,10 @@ async function expectRecord<K extends SnapshotRecord["kind"]>(
  * The load's execution, the kernel operation `ontology.loadSnapshot`, and its commit, which lists
  * no change: its rows are what it holds.
  */
-async function baseCommit(
-  storage: SnapshotLoadStorage,
+export async function baseCommit(
+  storage: Pick<Storage, "executions">,
   manifest: SnapshotManifest,
-  ontology: OntologyRegistry
+  definitions: BranchDefinitions
 ): Promise<OntologyCommitRecord> {
   const id = `snapshot_${randomUUID()}`
   const scope = createKernelScope({
@@ -203,7 +207,7 @@ async function baseCommit(
     requestHash: sha256Canonical({ snapshot: manifest.takenAt, takenBy: manifest.takenBy }),
     executionId: scope.execution.id,
     origin: { kind: "runtime", requestId: id },
-    ontologyRevision: computeOntologyRevision(ontology),
+    ontologyRevision: definitions.ontologyRevision,
     committedAt,
     intent: { kind: "edit", mode: "atomic", operationCount: 0 },
     result: {
@@ -218,17 +222,14 @@ async function baseCommit(
   }
 }
 
-interface TypePlan {
+export interface TypePlan {
   readonly manifest: SnapshotTypeManifest
-  readonly objectType: ObjectType
+  /** The branch's definition of the type. */
+  readonly definition: BranchTypeDefinition
   readonly droppedPropertyIds: ReadonlySet<string>
   readonly droppedLinkIds: ReadonlySet<string>
   readonly telemetryPropertyIds: ReadonlySet<string>
-  readonly unique: readonly {
-    readonly propertyId: string
-    readonly kind: PreparedUniqueProperty["keyKind"]
-  }[]
-  readonly artifactRefs: readonly Property[]
+  readonly unique: BranchTypeDefinition["unique"]
   readonly counts: {
     objects: number
     links: number
@@ -239,51 +240,47 @@ interface TypePlan {
   readonly skippedVectors: Map<string, string>
 }
 
-/** What each type of the snapshot becomes on the branch. */
-class ImportPlan {
+/**
+ * What each type of the snapshot becomes on the branch, decided from the branch's definitions as
+ * data: a copy production takes plans it without the branch's code.
+ */
+export class ImportPlan {
   readonly #types = new Map<string, TypePlan>()
-  readonly #ontology: OntologyRegistry
   readonly skipped: { objectTypeId: string; reason: string }[] = []
   /** What the snapshot held, skipped types included, to check against its end. */
   readonly read = { objects: 0, links: 0, points: 0, vectors: 0 }
 
-  constructor(manifest: SnapshotManifest, ontology: OntologyRegistry) {
-    this.#ontology = ontology
-
+  constructor(manifest: SnapshotManifest, definitions: BranchDefinitions) {
     for (const objectTypeId of manifest.unreadableTypeIds) {
       this.skipped.push({ objectTypeId, reason: "the person who took it cannot read this type" })
     }
 
     for (const type of manifest.types) {
-      const fit = checkTypeFits(type, ontology)
-      if (!fit.fits) {
-        this.skipped.push({ objectTypeId: type.objectTypeId, reason: fit.reason })
+      const definition = definitions.types[type.objectTypeId]
+      const fit = checkTypeFits(type, definition)
+      if (!definition || !fit.fits) {
+        this.skipped.push({
+          objectTypeId: type.objectTypeId,
+          reason: fit.fits ? "the branch no longer defines this type" : fit.reason,
+        })
         continue
       }
 
-      const objectType = ontology.resolveObjectType(type.objectTypeId)
       this.#types.set(type.objectTypeId, {
         manifest: type,
-        objectType,
+        definition,
         droppedPropertyIds: new Set(fit.droppedPropertyIds),
         droppedLinkIds: new Set(fit.droppedLinkIds),
-        telemetryPropertyIds: new Set(
-          objectType.properties.filter((p) => p.mode === "telemetry").map((p) => p.id)
-        ),
+        telemetryPropertyIds: new Set(definition.telemetryPropertyIds),
         // A property production did not hold unique may hold one value twice: the branch's own
         // preparation backfills it, and refuses the duplicates as it would anywhere else.
-        unique: ontology
-          .listUniqueProperties(type.objectTypeId)
-          .filter((property) => type.uniquePropertyIds.includes(property.propertyId)),
-        artifactRefs: ontology.listArtifactRefProperties(type.objectTypeId),
+        unique: definition.unique.filter((property) =>
+          type.uniquePropertyIds.includes(property.propertyId)
+        ),
         counts: { objects: 0, links: 0, points: 0, vectors: 0, droppedLinks: 0 },
         skippedVectors: new Map(),
       })
     }
-  }
-
-  get valueTypes() {
-    return this.#ontology.getValueTypesById()
   }
 
   type(objectTypeId: string): TypePlan | undefined {
@@ -309,10 +306,22 @@ class ImportPlan {
   keepsLink(plan: TypePlan, linkId: string, targetTypeId: string): boolean {
     if (plan.droppedLinkIds.has(linkId) || !this.#types.has(targetTypeId)) return false
 
-    const link = plan.objectType.links.find((candidate) => candidate.id === linkId)
-    return (
-      link !== undefined && this.#ontology.isValidLinkTarget(link.targetObjectTypeId, targetTypeId)
-    )
+    return plan.definition.linkTargets[linkId]?.typeIds.includes(targetTypeId) === true
+  }
+
+  /** How the branch keys a link's row: one per source for a single link, one per edge otherwise. */
+  linkIdentity(plan: TypePlan, linkId: string): "slot" | "edge" {
+    return plan.definition.linkTargets[linkId]?.cardinality === "one" ? "slot" : "edge"
+  }
+
+  /** Why the branch leaves out a profile's vectors, or `undefined` when it keeps them. */
+  skipsVectors(plan: TypePlan, profile: string, configuration: string): string | undefined {
+    const branch = plan.definition.vectors[profile]
+    if (branch === undefined) return "the branch no longer defines this profile"
+    if (branch !== configuration) {
+      return "the branch embeds it differently: its vectors are computed again"
+    }
+    return undefined
   }
 
   report(): readonly ImportedSnapshotType[] {
@@ -336,7 +345,7 @@ async function loadRecords(
   records: AsyncIterator<SnapshotRecord>,
   plan: ImportPlan,
   loader: SnapshotLoader,
-  commitId: string
+  load: LoadContext
 ): Promise<SnapshotEnd> {
   // The next frame is read and decompressed while the provider writes this one.
   const ahead = () => {
@@ -352,7 +361,7 @@ async function loadRecords(
     switch (record.kind) {
       case "objects":
         plan.read.objects += record.ids.length
-        await loadObjects(plan, loader, record)
+        await loadObjects(plan, loader, record, load.ontology)
         break
       case "links":
         plan.read.links += record.rows.length
@@ -364,7 +373,7 @@ async function loadRecords(
         break
       case "vectors":
         plan.read.vectors += record.ids.length
-        await loadVectors(plan, loader, record, commitId)
+        await loadVectors(plan, loader, record, load.commitId)
         break
       case "end":
         return record
@@ -378,12 +387,24 @@ async function loadRecords(
   throw new Error("[Sixb] The snapshot cannot be read: its end is missing.")
 }
 
-async function loadObjects(plan: ImportPlan, loader: SnapshotLoader, record: SnapshotObjects) {
+/** What the load reads beyond the plan: the commit, and the schemas artifact references are in. */
+interface LoadContext {
+  readonly commitId: string
+  readonly ontology: OntologyRegistry
+}
+
+async function loadObjects(
+  plan: ImportPlan,
+  loader: SnapshotLoader,
+  record: SnapshotObjects,
+  ontology: OntologyRegistry
+) {
   const type = plan.type(record.objectTypeId)
   if (!type) return
 
   const objectTypeId = record.objectTypeId
-  const valueTypes = plan.valueTypes
+  const valueTypes = ontology.getValueTypesById()
+  const artifactRefs = ontology.listArtifactRefProperties(objectTypeId)
   const objects: SnapshotObjectWrite[] = []
   const uniqueValues: ExactUniqueValueClaim[] = []
   const artifactHolders: ExactArtifactHolderWrite[] = []
@@ -419,7 +440,7 @@ async function loadObjects(plan: ImportPlan, loader: SnapshotLoader, record: Sna
       })
     }
 
-    for (const property of type.artifactRefs) {
+    for (const property of artifactRefs) {
       const value = properties[property.id]
       if (value === undefined) continue
       for (const artifactId of collectArtifactRefIds(
@@ -456,7 +477,6 @@ async function loadLinks(plan: ImportPlan, loader: SnapshotLoader, record: Snaps
       continue
     }
 
-    const cardinality = type.objectType.links.find((link) => link.id === linkId)?.cardinality
     links.push({
       sourceTypeId: record.sourceTypeId,
       sourceId,
@@ -464,7 +484,7 @@ async function loadLinks(plan: ImportPlan, loader: SnapshotLoader, record: Snaps
       targetTypeId,
       targetId,
       ...(properties === null ? {} : { properties }),
-      identity: cardinality === "one" ? "slot" : "edge",
+      identity: plan.linkIdentity(type, linkId),
       createdAt: new Date(createdAt).toISOString(),
       updatedAt: new Date(updatedAt).toISOString(),
     })
@@ -503,16 +523,9 @@ async function loadVectors(
   const type = plan.type(record.objectTypeId)
   if (!type) return
 
-  const profile = type.objectType.search?.vectors?.[record.profile]
-  if (!profile) {
-    type.skippedVectors.set(record.profile, "the branch no longer defines this profile")
-    return
-  }
-  if (vectorConfiguration(profile) !== record.configuration) {
-    type.skippedVectors.set(
-      record.profile,
-      "the branch embeds it differently: its vectors are computed again"
-    )
+  const skipped = plan.skipsVectors(type, record.profile, record.configuration)
+  if (skipped) {
+    type.skippedVectors.set(record.profile, skipped)
     return
   }
 

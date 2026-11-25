@@ -1,6 +1,9 @@
 import { sha256Canonical } from "../materialization/identity"
-import type { OntologyDefinitionCatalog } from "../ontology/registry"
+import { vectorConfiguration } from "../objects/vectors/profile"
+import type { OntologyDefinitionCatalog, OntologyRegistry } from "../ontology/registry"
 import type { ObjectLink, ObjectType, Property, ValueType } from "../ontology/types"
+import type { UniqueValueKind } from "../ontology/unique-values"
+import { computeOntologyRevision } from "../projections/revision"
 import type { SnapshotTypeManifest } from "./format"
 
 /** What the manifest records of a type's definition, for {@link checkTypeFits} to compare. */
@@ -31,6 +34,76 @@ export function typeDefinitionManifest(
   }
 }
 
+/**
+ * A branch's definitions, as data: what a snapshot is checked against and loaded by. The branch's
+ * runtime computes it from its code; production copies into a branch from it alone, so production
+ * never loads the branch's code. It is JSON.
+ */
+export interface BranchDefinitions {
+  /** The revision of the branch's ontology, which its base commit records. */
+  readonly ontologyRevision: string
+  readonly types: Readonly<Record<string, BranchTypeDefinition>>
+}
+
+export interface BranchTypeDefinition extends TypeDefinitionManifest {
+  readonly telemetryPropertyIds: readonly string[]
+  /** The unique properties, with the kind their keys are written as. */
+  readonly unique: readonly { readonly propertyId: string; readonly kind: UniqueValueKind }[]
+  /** The properties that hold artifact references. */
+  readonly artifactPropertyIds: readonly string[]
+  /** Each link's cardinality, and every type it may point to, subtypes included. */
+  readonly linkTargets: Readonly<
+    Record<string, { readonly cardinality: "one" | "many"; readonly typeIds: readonly string[] }>
+  >
+  /** The configuration of each vector profile. */
+  readonly vectors: Readonly<Record<string, string>>
+}
+
+export function branchDefinitions(ontology: OntologyRegistry): BranchDefinitions {
+  const types = [...ontology.getObjectTypesById().values()]
+
+  return {
+    ontologyRevision: computeOntologyRevision(ontology),
+    types: Object.fromEntries(
+      types.map((objectType) => [
+        objectType.id,
+        {
+          ...typeDefinitionManifest(objectType, ontology),
+          telemetryPropertyIds: objectType.properties
+            .filter((property) => property.mode === "telemetry")
+            .map((property) => property.id),
+          unique: ontology.listUniqueProperties(objectType.id).map(({ propertyId, kind }) => ({
+            propertyId,
+            kind,
+          })),
+          artifactPropertyIds: ontology
+            .listArtifactRefProperties(objectType.id)
+            .map((property) => property.id),
+          linkTargets: Object.fromEntries(
+            objectType.links.map((link) => [
+              link.id,
+              {
+                cardinality: link.cardinality ?? "many",
+                typeIds: types
+                  .filter((target) =>
+                    ontology.isValidLinkTarget(link.targetObjectTypeId, target.id)
+                  )
+                  .map((target) => target.id),
+              },
+            ])
+          ),
+          vectors: Object.fromEntries(
+            Object.entries(objectType.search?.vectors ?? {}).map(([profile, definition]) => [
+              profile,
+              vectorConfiguration(definition),
+            ])
+          ),
+        },
+      ])
+    ),
+  }
+}
+
 /** How a type of the snapshot fits the importing runtime's definition of it. */
 export type TypeFit =
   | {
@@ -49,12 +122,10 @@ export type TypeFit =
  */
 export function checkTypeFits(
   manifest: SnapshotTypeManifest,
-  ontology: OntologyDefinitionCatalog
+  branch: TypeDefinitionManifest | undefined
 ): TypeFit {
-  const objectType = ontology.getObjectTypeById(manifest.objectTypeId)
-  if (!objectType) return { fits: false, reason: "the branch no longer defines this type" }
+  if (!branch) return { fits: false, reason: "the branch no longer defines this type" }
 
-  const branch = typeDefinitionManifest(objectType, ontology)
   if (branch.primaryPropertyId !== manifest.primaryPropertyId) {
     return {
       fits: false,
