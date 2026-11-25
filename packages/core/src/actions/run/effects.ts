@@ -1,4 +1,3 @@
-import type { SixbBranch } from "../../branch-mode"
 import { reportActionPhaseFailure } from "../../error-reporting/capability"
 import type { Logger } from "../../logging"
 import { resolveLoggingService } from "../../logging/service"
@@ -41,7 +40,7 @@ export async function runActionEffects(input: RunActionEffectsInput): Promise<vo
   try {
     const logger = logSession.withContext({ phase: "effects" })
     const outcome = runtime.branch
-      ? skipEffects(input, runtime.branch, logger)
+      ? skipEffects(input)
       : await callEffects(input, deadline.signal, logger)
 
     try {
@@ -59,19 +58,11 @@ export async function runActionEffects(input: RunActionEffectsInput): Promise<vo
 }
 
 /**
- * Effects notify people and systems, and a branch sends nothing: they are recorded as skipped, and
- * the run's logs say why, so the run reads the same as in production but for what it sent.
+ * Effects notify people and systems, and a branch sends nothing: the run records them as skipped,
+ * so it reads as in production but for what it sent. The run's logs are the project's: the
+ * framework writes nothing there.
  */
-function skipEffects(
-  input: RunActionEffectsInput,
-  branch: SixbBranch,
-  logger: Logger
-): RecordActionEffectsInput {
-  logger.info(
-    `[Sixb] Branch "${branch.name}": the effects of action '${input.action.id}' were skipped. ` +
-      "A branch notifies no one; they run in production."
-  )
-
+function skipEffects(input: RunActionEffectsInput): RecordActionEffectsInput {
   return {
     id: input.state.run.id,
     projectId: input.runtime.id,
