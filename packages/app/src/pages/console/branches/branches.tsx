@@ -593,6 +593,7 @@ function BranchRow({
 function BranchMeta({ branch, pill }: { readonly branch: Branch; readonly pill: ReactNode }) {
   const messages = useBranchesMessages()
   const format = useFormat()
+  const startedBy = useStartedBy(branch.createdBy)
   const data = !branch.data
     ? branch.state === "copying"
       ? messages.copyingData
@@ -600,35 +601,42 @@ function BranchMeta({ branch, pill }: { readonly branch: Branch; readonly pill: 
     : Date.now() - Date.parse(branch.data.takenAt) < 60_000
       ? messages.dataJustNow
       : messages.dataFrom(format.relative(branch.data.takenAt))
+  const lastOpened =
+    branch.state === "ready" && branch.wanted === "running"
+      ? messages.lastOpened(format.relative(branch.lastSeenAt))
+      : null
 
   return (
-    <div className="mt-0.5 flex min-w-0 flex-col items-start gap-y-0.5 text-[0.8125rem] text-muted-foreground sm:mt-0.5 sm:flex-row sm:items-center sm:gap-x-1.5 sm:whitespace-nowrap">
+    // On a wide screen the facts keep to one line: one that doesn't fit wraps onto a second line
+    // the row never shows, whole, rather than cut mid-word. The tooltip still says them all.
+    <div
+      title={[data, startedBy, lastOpened].filter(Boolean).join(" · ")}
+      className="mt-0.5 flex min-w-0 flex-col items-start gap-y-0.5 text-[0.8125rem] text-muted-foreground sm:h-5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-1.5 sm:overflow-hidden sm:whitespace-nowrap"
+    >
       {pill}
       <span className="shrink-0">{data}</span>
-      <span className="hidden sm:inline">
+      <span className="hidden shrink-0 items-center gap-x-1.5 sm:flex">
         <MetaDot />
+        {startedBy}
       </span>
-      <span className="shrink-0">
-        <StartedBy userId={branch.createdBy} />
-      </span>
-      {branch.state === "ready" && branch.wanted === "running" ? (
-        <span className="hidden min-w-0 sm:flex sm:items-center sm:gap-x-1.5">
+      <span className="shrink-0 sm:hidden">{startedBy}</span>
+      {lastOpened ? (
+        <span className="hidden shrink-0 items-center gap-x-1.5 sm:flex">
           <MetaDot />
-          <span className="truncate">
-            {messages.lastOpened(format.relative(branch.lastSeenAt))}
-          </span>
+          {lastOpened}
         </span>
       ) : null}
     </div>
   )
 }
 
-function StartedBy({ userId }: { readonly userId: string }) {
+/** "Started by you", or by whoever started the branch, by name when the directory says. */
+function useStartedBy(userId: string): string {
   const messages = useBranchesMessages()
   const me = useCurrentUser()
   const person = useUser(userId, { enabled: me?.id !== userId, retry: false }).data
-  if (me?.id === userId) return <>{messages.startedByYou}</>
-  return <>{messages.startedBy(person?.displayName || person?.email || userId)}</>
+  if (me?.id === userId) return messages.startedByYou
+  return messages.startedBy(person?.displayName || person?.email || userId)
 }
 
 /** The steps a branch takes on its way up, the current one live, the rest done or waiting. */

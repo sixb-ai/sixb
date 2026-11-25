@@ -256,8 +256,14 @@ describe("Console › Branches", () => {
     const ready = within(rowOf(view, "feature/route-planner"))
     expect(ready.getAllByText("Ready")).toHaveLength(2)
     expect(ready.getByText("Production data from 2 hours ago")).toBeDefined()
-    expect(ready.getByText("Started by you")).toBeDefined()
+    expect(ready.getAllByText("Started by you").length).toBeGreaterThan(0)
     expect(ready.getByText("Last opened 5 minutes ago")).toBeDefined()
+    // A fact that doesn't fit on a wide screen drops out whole: the tooltip keeps them all.
+    expect(
+      rowOf(view, "feature/route-planner")
+        .querySelector("[title*='Last opened']")
+        ?.getAttribute("title")
+    ).toBe("Production data from 2 hours ago · Started by you · Last opened 5 minutes ago")
     expect(ready.getByRole("button", { name: "Open" })).toBeDefined()
 
     const stopped = within(rowOf(view, "fix/driver-hours"))
