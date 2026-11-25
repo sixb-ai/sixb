@@ -19,6 +19,7 @@ import type {
   StoredSourceAssertion,
   StoredSourceLinkAssertion,
 } from "../sources"
+import type { StoredTypeShape } from "../type-shapes"
 import type { VectorIndexingWork } from "../vector-indexing"
 import type { StoredObjectVector } from "../vectors"
 import type { InMemoryCommitTouches, InMemoryReplacementPlan } from "./replacement-plans"
@@ -73,6 +74,7 @@ export interface InMemoryOntologyState {
   readonly replacementPlans: Map<string, InMemoryReplacementPlan>
   /** What each commit touched among the inputs plans read, keyed by its `commitsById` ordinal. */
   readonly commitTouches: Map<number, InMemoryCommitTouches>
+  readonly typeShapes: Map<string, StoredTypeShape & { readonly projectId: string }>
 }
 
 /** Reads one execution of the same storage, the record an ontology commit references. */
@@ -116,6 +118,7 @@ export function createInMemoryOntologyState(): InMemoryOntologyState {
     outbox: new Map(),
     replacementPlans: new Map(),
     commitTouches: new Map(),
+    typeShapes: new Map(),
   }
 }
 

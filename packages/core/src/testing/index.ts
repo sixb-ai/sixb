@@ -246,6 +246,10 @@ export {
   startTestSyncRun,
 } from "./sync-execution"
 export {
+  runTypeShapesContractSuite,
+  type TypeShapesContractProvider,
+} from "./type-shapes-contract"
+export {
   runUniqueValuesContractSuite,
   type UniqueValuesContractProvider,
 } from "./unique-values-contract"

@@ -25,6 +25,15 @@ export type {
 } from "../materialization/model"
 export type { ModelProviderIds } from "../models/events"
 export type { ObjectRef } from "../ontology"
+export type {
+  FieldShape,
+  LinkShape,
+  PropertyShape,
+  SchemaShape,
+  TypeShape,
+  TypeShapeChange,
+  TypeShapeEffect,
+} from "../ontology/type-shapes"
 export type { UniqueValueKind } from "../ontology/unique-values"
 export type { RedactionReason, Redactions } from "../security/types"
 export type {
@@ -760,6 +769,7 @@ export type {
   GetOntologyCommitByIdInput,
   GetOntologyCommitByOriginInput,
   ListActiveOntologySourcesInput,
+  ListObjectEditsInput,
   ListOntologyCommitsInput,
   ListOntologyCommitsResult,
   MarkSourceMaterializationReadyInput,
@@ -806,6 +816,7 @@ export type {
   OntologySourceRecord,
   OntologySourceStorage,
   OntologyStorage,
+  OntologyTypeShapeStorage,
   OntologyUniqueValueStorage,
   OntologyVectorStorage,
   OpenedReplacementPlan,
@@ -833,17 +844,21 @@ export type {
   StageSourceRowsResult,
   StoredLinkOverride,
   StoredLinkSlotOverride,
+  StoredObjectEdit,
   StoredObjectOverride,
   StoredObjectVector,
   StoredSourceAssertion,
   StoredSourceLinkAssertion,
   StoredSourceObjectAssertion,
   StoredTelemetryPoint,
+  StoredTypeShape,
   StreamMaterializationStateInput,
   StreamMaterializationVectorChangesInput,
   StreamReplacementPlanStateInput,
   SummarizeOntologyOutboxInput,
   TelemetryOntologyCommitIntent,
+  TypeShapeProbe,
+  TypeShapeProbeInput,
   UniqueValueEntry,
   UniqueValueRef,
 } from "./ontology"

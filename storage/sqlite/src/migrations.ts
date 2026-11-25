@@ -348,6 +348,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("114-lake-slices", lakeSlicesSql),
     sqliteSql("115-skipped-action-effects", skippedActionEffectsSql),
     sqliteSql("116-lake-slice-credentials", lakeSliceCredentialsSql),
+    sqliteSql("117-ontology-type-shapes", ontologyTypeShapesSql),
   ],
 })
 
@@ -813,3 +814,4 @@ import skippedActionEffectsSql from "./migrations/115-skipped-action-effects.sql
 import lakeSliceCredentialsSql from "./migrations/116-lake-slice-credentials.sql" with {
   type: "text",
 }
+import ontologyTypeShapesSql from "./migrations/117-ontology-type-shapes.sql" with { type: "text" }
