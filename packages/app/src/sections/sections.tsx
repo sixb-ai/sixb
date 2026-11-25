@@ -7,6 +7,7 @@ import {
   ChartNoAxesCombined,
   Database,
   GitBranch,
+  GitFork,
   HeartPulse,
   Layers,
   LayoutGrid,
@@ -141,6 +142,7 @@ const pageIcons: Record<string, ComponentType<{ readonly className?: string }>> 
   actions: Bolt,
   workflows: GitBranch,
   rules: ListChecks,
+  branches: GitFork,
 }
 
 /**

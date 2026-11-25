@@ -98,6 +98,7 @@ const allConsolePages = [
   "workflows",
   "rules",
   "logs",
+  "branches",
 ]
 
 function sessionFor(
@@ -252,14 +253,22 @@ describe("who sees each section", () => {
       section: "console",
       signedIn: true,
       access: { ...nobody, console: true },
-      pages: allConsolePages.filter((page) => page !== "logs"),
+      pages: allConsolePages.filter((page) => page !== "logs" && page !== "branches"),
     },
     {
       name: "Console, signed in with the grant and logs",
       section: "console",
       signedIn: true,
       access: { ...nobody, console: true, logs: true },
-      pages: allConsolePages,
+      pages: allConsolePages.filter((page) => page !== "branches"),
+    },
+    // Branches open to whoever manages the project's code: can.manage(project.source).
+    {
+      name: "Console, signed in with the grant and branches",
+      section: "console",
+      signedIn: true,
+      access: { ...nobody, console: true, branches: true },
+      pages: allConsolePages.filter((page) => page !== "logs"),
     },
   ]
 

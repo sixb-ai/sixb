@@ -561,6 +561,7 @@ import {
 } from "@sixb/client/hooks"
 import { LocaleProvider, useAppMessages } from "@sixb/app/locale"
 import {
+  BranchBanner,
   keepSharedSession,
   PhoneFoundations,
   refreshOnReturn,
@@ -1032,6 +1033,8 @@ function App({ basename }: StartAppOptions) {
         ${sectionsStart}
         <BrowserRouter basename={basename}>
           <PhoneFoundations />
+          {/* On a branch's app, its bar above every page; nothing in production. */}
+          {basename ? null : <BranchBanner />}
           <ActivityPageView />
           <RefusedFrameReporter />
           <SharedDocumentLinkInterceptor basename={basename} />

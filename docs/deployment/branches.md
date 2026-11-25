@@ -64,10 +64,19 @@ project.
 
 ## Use a branch in the browser
 
+**Console › Branches** lists the branches with their state, how old their data is and who opened
+each, and updates as they start. **Open** signs you into a branch in a new tab; the menu refreshes
+it from production, stops or deletes it. From code:
+
 ```ts
 const { url } = await sixb.branches.signIn("feature/invoices") // POST /api/branches/sign-in
 // open `url` within a minute: you land on the branch's app, signed in as yourself
 ```
+
+Every page of a branch's app opens under a thin bar: the branch, how old its data is, **Refresh**
+and **Back to production** (`SIXB_APP_PUBLIC_ORIGIN` on the branch worker says where production is).
+The app's shell leaves room for it; a layout that sizes itself to the screen subtracts
+`var(--app-top-inset, 0px)`.
 
 A branch has an origin of its own, never production's: `<branch>.<previewDomain>` when the
 project names one, else its sandbox's URL (Vercel's own domain). smolvm serves branches on its

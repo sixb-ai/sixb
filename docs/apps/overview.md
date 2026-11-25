@@ -223,7 +223,7 @@ Settings needs a signed-in person, so it is absent when authentication is off.
 
 Every app includes the Console, in the user menu for [those granted it](#choose-who-sees-the-console):
 how data reaches the project, what the project models, and the logs its runs write. The sidebar lists Data and Ontology under their own headings,
-counting what each holds, then Logs.
+counting what each holds, then Logs and Branches.
 
 | Group | Page | Path | Shows |
 | --- | --- | --- | --- |
@@ -239,6 +239,7 @@ counting what each holds, then Logs.
 | Ontology | Workflows | `/console/workflows` | Each workflow with its latest run |
 | Ontology | Rules | `/console/rules` | Each rule, what it watches, and how many objects it holds active |
 | | Logs | `/console/logs` | Logs as runs write them, filtered by kind and level and searchable |
+| | Branches | `/console/branches` | The [git branches production runs](../deployment/branches.md), live: **Open** one signed in, refresh it from production, stop or delete it |
 
 Each item opens a page under its list, such as `/console/syncs/crm-accounts`. As with Settings, a
 page of your own at the same path replaces the built-in one.
@@ -368,7 +369,7 @@ export const developerAccess = defineRole("developer.access", {
 ```
 
 The grant only opens the Console. Each of its pages shows what the person's other grants allow,
-such as `can.observe(project.logs)` for Logs. Someone without it doesn't see the Console in the
+such as `can.observe(project.logs)` for Logs and `can.manage(project.source)` for Branches. Someone without it doesn't see the Console in the
 user menu, and its URLs lead to `/`. Object pages stay open either way.
 
 With authentication off nobody is signed in, and the Console is open.

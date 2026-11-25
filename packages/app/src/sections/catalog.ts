@@ -17,6 +17,7 @@ export type SectionAccess =
   | "serviceAccounts"
   | "usage"
   | "activity"
+  | "branches"
 
 export interface SectionPageDefinition {
   readonly id: string
@@ -147,6 +148,13 @@ export const sectionCatalog: readonly SectionDefinition[] = [
         path: "/console/logs",
         exportName: "ConsoleLogsPage",
         requires: ["logs"],
+      },
+      // The git branches production runs next to itself: for whoever manages the project's code.
+      {
+        id: "branches",
+        path: "/console/branches",
+        exportName: "ConsoleBranchesPage",
+        requires: ["branches"],
       },
     ],
   },

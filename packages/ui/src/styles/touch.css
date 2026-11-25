@@ -124,9 +124,11 @@ html[data-keyboard] {
 
 /* Under the status bar iOS reports 100svh and 100dvh short by its height, so the fixed sidebar takes
    the corrected height and reaches the bottom of the screen. Outside a layer, to win over the
-   sidebar's own `h-svh`. */
+   sidebar's own `h-svh`. A bar above the app, such as an environment's, sets `--app-top-inset`:
+   the sidebar starts below it. */
 :where([data-slot="sidebar-container"]) {
-  height: var(--viewport-height);
+  top: var(--app-top-inset, 0px);
+  height: calc(var(--viewport-height) - var(--app-top-inset, 0px));
 }
 
 /* Double-tap zoom off everywhere. In the base layer, so `touch-none` and friends still win. */

@@ -71,6 +71,7 @@ export const en = {
         actions: "Actions",
         workflows: "Workflows",
         rules: "Rules",
+        branches: "Branches",
       },
     },
     settings: {
@@ -168,6 +169,7 @@ export const fr: Translation<AppMessages> = {
         actions: "Actions",
         workflows: "Workflows",
         rules: "Règles",
+        branches: "Branches",
       },
     },
     settings: {

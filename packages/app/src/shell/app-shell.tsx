@@ -48,7 +48,11 @@ export function AppShellProvider({ className, children, ...sidebarState }: AppSh
   return (
     <ThemeProvider>
       <SidebarProvider
-        className={cn("h-(--viewport-height) overflow-hidden", className)}
+        // A bar above the app, such as a branch's, sets --app-top-inset: the shell takes the rest.
+        className={cn(
+          "h-[calc(var(--viewport-height)-var(--app-top-inset,0px))] min-h-0 overflow-hidden",
+          className
+        )}
         {...sidebarState}
       >
         {children}
