@@ -846,6 +846,10 @@ export type GetAuthSessionResponses = {
            * Console › Logs: they hold can.observe(project.logs)
            */
           logs: boolean
+          /**
+           * Console › Branches: they hold can.manage(project.source), in production
+           */
+          branches: boolean
         }
         session: {
           id: string
@@ -5122,6 +5126,11 @@ export type GetProjectInfoResponses = {
     id: string
     locale: string
     timeZone: string
+    branch?: {
+      name: string
+      dataTakenAt: string | null
+      productionUrl: string | null
+    }
   }
 }
 
@@ -8479,6 +8488,11 @@ export type DeleteBranchResponses = {
         objectTypeId: string
         reason: string
       }>
+      skippedDatasets: Array<{
+        datasetId: string
+        reason: "missing_clearance"
+        columns: Array<string>
+      }>
       lakeSliceId: string | null
     } | null
     refreshRequestedAt: string | null
@@ -8553,12 +8567,21 @@ export type ListBranchesResponses = {
           objectTypeId: string
           reason: string
         }>
+        skippedDatasets: Array<{
+          datasetId: string
+          reason: "missing_clearance"
+          columns: Array<string>
+        }>
         lakeSliceId: string | null
       } | null
       refreshRequestedAt: string | null
       openedAt: string
       lastSeenAt: string
     }>
+    unavailable: {
+      code: "storage" | "source" | "sandboxes" | "sandbox-shares-host" | "sandbox-env"
+      message: string
+    } | null
   }
 }
 
@@ -8628,6 +8651,11 @@ export type OpenBranchResponses = {
       skipped: Array<{
         objectTypeId: string
         reason: string
+      }>
+      skippedDatasets: Array<{
+        datasetId: string
+        reason: "missing_clearance"
+        columns: Array<string>
       }>
       lakeSliceId: string | null
     } | null
@@ -8704,6 +8732,11 @@ export type RefreshBranchResponses = {
         objectTypeId: string
         reason: string
       }>
+      skippedDatasets: Array<{
+        datasetId: string
+        reason: "missing_clearance"
+        columns: Array<string>
+      }>
       lakeSliceId: string | null
     } | null
     refreshRequestedAt: string | null
@@ -8778,6 +8811,11 @@ export type StopBranchResponses = {
       skipped: Array<{
         objectTypeId: string
         reason: string
+      }>
+      skippedDatasets: Array<{
+        datasetId: string
+        reason: "missing_clearance"
+        columns: Array<string>
       }>
       lakeSliceId: string | null
     } | null

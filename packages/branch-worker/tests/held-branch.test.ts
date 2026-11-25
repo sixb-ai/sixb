@@ -44,7 +44,12 @@ describe("a held branch", () => {
 
     expect(branch).toMatchObject({ generation: 1, commit: lab.head, notices: [] })
     expect(branch?.url).toContain("127.0.0.1")
-    expect(branch?.data).toMatchObject({ objects: 1, skipped: [], lakeSliceId: null })
+    expect(branch?.data).toMatchObject({
+      objects: 1,
+      skipped: [],
+      skippedDatasets: [],
+      lakeSliceId: null,
+    })
     expect(lab.imports).toHaveLength(1)
     expect(lab.started[0]).toMatchObject({
       SIXB_BRANCH: NAME,
@@ -53,6 +58,8 @@ describe("a held branch", () => {
       SIXB_BRANCH_RUNTIME: `hosted-${branch?.namespace}`,
       SIXB_BRANCH_PORT: String(branch?.port),
       SIXB_BRANCH_PUBLIC_ORIGIN: branch?.url,
+      // Where its bar links back to.
+      SIXB_BRANCH_PRODUCTION_ORIGIN: "https://app.shop.test",
       SIXB_BRANCH_DATABASE_SCHEMA: expect.stringContaining("feature-invoices"),
       SIXB_BRANCH_DATABASE_URL: expect.stringMatching(
         /^postgres:\/\/branch:[0-9a-f]{32}@db\/prod$/

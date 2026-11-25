@@ -24,6 +24,7 @@ const signedIn: GetAuthSessionResponse = {
     serviceAccounts: true,
     usage: true,
     activity: true,
+    branches: false,
   },
   session: { id: "session-1", expiresAt: "2026-10-15T00:00:00.000Z" },
 }

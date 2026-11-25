@@ -38,6 +38,14 @@ export const BranchSchema = z.object({
       takenAt: z.string(),
       objects: z.number(),
       skipped: z.array(z.object({ objectTypeId: z.string(), reason: z.string() })),
+      /** Datasets left out: their creator may not read every column. */
+      skippedDatasets: z.array(
+        z.object({
+          datasetId: z.string(),
+          reason: z.enum(["missing_clearance"]),
+          columns: z.array(z.string()),
+        })
+      ),
       lakeSliceId: z.string().nullable(),
     })
     .nullable(),
@@ -46,7 +54,16 @@ export const BranchSchema = z.object({
   lastSeenAt: z.string(),
 })
 
-export const BranchListResponseSchema = z.object({ branches: z.array(BranchSchema) })
+export const BranchListResponseSchema = z.object({
+  branches: z.array(BranchSchema),
+  /** What production lacks to run branches, or null when it can. */
+  unavailable: z
+    .object({
+      code: z.enum(["storage", "source", "sandboxes", "sandbox-shares-host", "sandbox-env"]),
+      message: z.string(),
+    })
+    .nullable(),
+})
 
 export const BranchSignInResponseSchema = z.object({
   /** On the branch's own origin: open it within a minute, once. */

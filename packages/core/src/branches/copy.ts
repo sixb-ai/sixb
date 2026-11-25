@@ -99,6 +99,7 @@ export async function* copyForBranch(
       yield encodeBranchCopyPart("lake", {
         sliceId: slice.slice.id,
         point: slice.slice.point,
+        skipped: slice.slice.skipped,
         token: slice.token.token,
         expiresAt: slice.token.expiresAt.toISOString(),
         credential: branchCredential.credential,

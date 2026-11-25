@@ -129,7 +129,14 @@ export function createBranchesRuntime(
     branch.wanted === "deleted" ? "is being deleted. Open it again once it is gone." : null
 
   return {
-    list: async () => (await store().list({ projectId })).map(toBranchView),
+    list: async () => {
+      // Storage that holds no branches holds none to list: the Console says what is missing.
+      if (!runtime.storage.hostedBranches) {
+        assertMayManageBranches(runtime)
+        return []
+      }
+      return (await store().list({ projectId })).map(toBranchView)
+    },
 
     get: async (name) => {
       const branch = await store().get({ projectId, name })

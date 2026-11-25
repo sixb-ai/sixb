@@ -127,6 +127,20 @@ describe("branch routes", () => {
     expect(await deleted.json()).toMatchObject({ wanted: "deleted" })
   })
 
+  // The Console says what is missing before branches can run, rather than an error.
+  test("say what production lacks to run branches", async () => {
+    const { app, storage } = await createApp()
+    const headers = await signIn(storage, "usr_dev", "developers")
+
+    const listed = await call(app, "/api/branches", "GET", headers)
+    expect(listed.status).toBe(200)
+    // In-memory storage keeps rows, but no branch can run on it: they live on PostgreSQL.
+    expect(await listed.json()).toMatchObject({
+      branches: [],
+      unavailable: { code: "storage", message: expect.stringContaining("@sixb/pg") },
+    })
+  })
+
   // A branch runs code nobody reviewed on its creator's data: who sees one stays a trusted set.
   // Guard check: take `console.observe` again in `assertMayManageBranches` (`branches/execution.ts`).
   test("refuse, on every route, whoever does not manage the project's source", async () => {

@@ -77,6 +77,7 @@ const manager = {
   serviceAccounts: true,
   usage: true,
   activity: true,
+  branches: true,
 }
 const nobody = {
   console: false,
@@ -85,6 +86,7 @@ const nobody = {
   serviceAccounts: false,
   usage: false,
   activity: false,
+  branches: false,
 }
 const dataPages = ["connectors", "syncs", "datasets", "lake-health", "pipelines", "projections"]
 const allConsolePages = [

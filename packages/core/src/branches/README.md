@@ -97,6 +97,7 @@ notice), then its key, its port and branch mode's variables (`SIXB_BRANCH`,
 |---|---|
 | `SIXB_BRANCH_DATABASE_URL`, `SIXB_BRANCH_DATABASE_SCHEMA` | The CLI, which builds the project's own `@sixb/pg` on them: the branch's database, with production's schema name, which it loads its copy into and runs on (`hostOnBranch`) |
 | `SIXB_BRANCH_PUBLIC_ORIGIN` | The project's app, which sends its API requests to the front |
+| `SIXB_BRANCH_PRODUCTION_ORIGIN` | The runtime (`hosted.productionOrigin`), for the bar on every page: production's app, from the worker's `SIXB_APP_PUBLIC_ORIGIN` |
 
 Its copy arrives as a laptop's does: production writes it whole to `.sixb/branches/hosted.copy`
 (0600, in a 0700 folder), and the runtime's first generation loads it into its database, then reads

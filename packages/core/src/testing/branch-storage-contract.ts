@@ -53,6 +53,9 @@ export function runBranchStorageContractSuite<TStorage extends BranchStorage>(
             takenAt: new Date("2026-11-24T12:01:00.000Z"),
             objects: 50_000,
             skipped: [{ objectTypeId: "Payroll", reason: "not readable" }],
+            skippedDatasets: [
+              { datasetId: "salaries", reason: "missing_clearance", columns: ["amount"] },
+            ],
             lakeSliceId: "lakeslice_1",
           },
           refreshRequestedAt: new Date("2026-11-24T12:02:00.000Z"),

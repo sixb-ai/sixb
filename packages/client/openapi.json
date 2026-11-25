@@ -2524,6 +2524,10 @@
                             "logs": {
                               "type": "boolean",
                               "description": "Console › Logs: they hold can.observe(project.logs)"
+                            },
+                            "branches": {
+                              "type": "boolean",
+                              "description": "Console › Branches: they hold can.manage(project.source), in production"
                             }
                           },
                           "required": [
@@ -2532,7 +2536,8 @@
                             "usage",
                             "activity",
                             "console",
-                            "logs"
+                            "logs",
+                            "branches"
                           ],
                           "additionalProperties": false
                         },
@@ -15746,6 +15751,24 @@
                     },
                     "timeZone": {
                       "type": "string"
+                    },
+                    "branch": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "dataTakenAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "productionUrl": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": ["name", "dataTakenAt", "productionUrl"],
+                      "additionalProperties": false
                     }
                   },
                   "required": ["id", "locale", "timeZone"],
@@ -25376,12 +25399,41 @@
                                   "additionalProperties": false
                                 }
                               },
+                              "skippedDatasets": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "datasetId": {
+                                      "type": "string"
+                                    },
+                                    "reason": {
+                                      "type": "string",
+                                      "enum": ["missing_clearance"]
+                                    },
+                                    "columns": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "required": ["datasetId", "reason", "columns"],
+                                  "additionalProperties": false
+                                }
+                              },
                               "lakeSliceId": {
                                 "type": "string",
                                 "nullable": true
                               }
                             },
-                            "required": ["takenAt", "objects", "skipped", "lakeSliceId"],
+                            "required": [
+                              "takenAt",
+                              "objects",
+                              "skipped",
+                              "skippedDatasets",
+                              "lakeSliceId"
+                            ],
                             "additionalProperties": false,
                             "nullable": true
                           },
@@ -25413,9 +25465,30 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "unavailable": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "storage",
+                            "source",
+                            "sandboxes",
+                            "sandbox-shares-host",
+                            "sandbox-env"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["code", "message"],
+                      "additionalProperties": false,
+                      "nullable": true
                     }
                   },
-                  "required": ["branches"],
+                  "required": ["branches", "unavailable"],
                   "additionalProperties": false
                 }
               }
@@ -25630,12 +25703,41 @@
                             "additionalProperties": false
                           }
                         },
+                        "skippedDatasets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "datasetId": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string",
+                                "enum": ["missing_clearance"]
+                              },
+                              "columns": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["datasetId", "reason", "columns"],
+                            "additionalProperties": false
+                          }
+                        },
                         "lakeSliceId": {
                           "type": "string",
                           "nullable": true
                         }
                       },
-                      "required": ["takenAt", "objects", "skipped", "lakeSliceId"],
+                      "required": [
+                        "takenAt",
+                        "objects",
+                        "skipped",
+                        "skippedDatasets",
+                        "lakeSliceId"
+                      ],
                       "additionalProperties": false,
                       "nullable": true
                     },
@@ -25844,12 +25946,41 @@
                             "additionalProperties": false
                           }
                         },
+                        "skippedDatasets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "datasetId": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string",
+                                "enum": ["missing_clearance"]
+                              },
+                              "columns": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["datasetId", "reason", "columns"],
+                            "additionalProperties": false
+                          }
+                        },
                         "lakeSliceId": {
                           "type": "string",
                           "nullable": true
                         }
                       },
-                      "required": ["takenAt", "objects", "skipped", "lakeSliceId"],
+                      "required": [
+                        "takenAt",
+                        "objects",
+                        "skipped",
+                        "skippedDatasets",
+                        "lakeSliceId"
+                      ],
                       "additionalProperties": false,
                       "nullable": true
                     },
@@ -26095,12 +26226,41 @@
                             "additionalProperties": false
                           }
                         },
+                        "skippedDatasets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "datasetId": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string",
+                                "enum": ["missing_clearance"]
+                              },
+                              "columns": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["datasetId", "reason", "columns"],
+                            "additionalProperties": false
+                          }
+                        },
                         "lakeSliceId": {
                           "type": "string",
                           "nullable": true
                         }
                       },
-                      "required": ["takenAt", "objects", "skipped", "lakeSliceId"],
+                      "required": [
+                        "takenAt",
+                        "objects",
+                        "skipped",
+                        "skippedDatasets",
+                        "lakeSliceId"
+                      ],
                       "additionalProperties": false,
                       "nullable": true
                     },
@@ -26346,12 +26506,41 @@
                             "additionalProperties": false
                           }
                         },
+                        "skippedDatasets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "datasetId": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string",
+                                "enum": ["missing_clearance"]
+                              },
+                              "columns": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["datasetId", "reason", "columns"],
+                            "additionalProperties": false
+                          }
+                        },
                         "lakeSliceId": {
                           "type": "string",
                           "nullable": true
                         }
                       },
-                      "required": ["takenAt", "objects", "skipped", "lakeSliceId"],
+                      "required": [
+                        "takenAt",
+                        "objects",
+                        "skipped",
+                        "skippedDatasets",
+                        "lakeSliceId"
+                      ],
                       "additionalProperties": false,
                       "nullable": true
                     },

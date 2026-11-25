@@ -2,7 +2,7 @@ import type { SixbBranch } from "../branch-mode"
 import { putOnBranch } from "../branch-mode"
 import type { LakeStorage } from "../lake-storage/types"
 import { hostOptionsOf, SixbHost, type SixbHostView } from "../runtime/host"
-import type { BranchError, BranchState } from "../storage/branches"
+import type { BranchData, BranchError, BranchState } from "../storage/branches"
 import type { Storage } from "../storage/types"
 import { branchBlobStorage } from "./blobs"
 import { branchHandoverAuth } from "./handover"
@@ -24,9 +24,14 @@ export interface BranchRuntime {
   readonly takenAt: string
   /**
    * Set on a branch production runs: its front answers production with this key, and people at
-   * this origin, where they open the branch.
+   * this origin, where they open the branch. `productionOrigin` is production's app, which the
+   * branch's bar links back to, when the deployment says where.
    */
-  readonly hosted?: { readonly key: string; readonly origin: string }
+  readonly hosted?: {
+    readonly key: string
+    readonly origin: string
+    readonly productionOrigin: string | null
+  }
 }
 
 const runtimes = new WeakMap<object, BranchRuntime>()
@@ -100,6 +105,9 @@ export const BRANCH_PORT_ENV = "SIXB_BRANCH_PORT"
 /** Where the front is reached from outside the sandbox: the app sends its API requests there. */
 export const BRANCH_PUBLIC_ORIGIN_ENV = "SIXB_BRANCH_PUBLIC_ORIGIN"
 
+/** Production's app, when the deployment says where: the branch's banner links back to it. */
+export const BRANCH_PRODUCTION_ORIGIN_ENV = "SIXB_BRANCH_PRODUCTION_ORIGIN"
+
 /**
  * Paths the front sends to the API; everything else goes to the project's app, the app's own
  * `/__sixb/assets/*` and `/__sixb/dev-reload.js` included. The front answers
@@ -137,6 +145,8 @@ export interface BranchLoadedCopy {
   readonly objects: number
   /** Types left out: unreadable in production, or no longer fitting the branch's definitions. */
   readonly skipped: readonly { readonly objectTypeId: string; readonly reason: string }[]
+  /** Datasets its lake slice left out: their creator may not read every column. */
+  readonly skippedDatasets: BranchData["skippedDatasets"]
   readonly lakeSliceId: string | null
 }
 
@@ -201,12 +211,21 @@ export function parseLoadedCopy(value: unknown): BranchLoadedCopy | null {
   if (typeof copy.takenAt !== "string" || typeof copy.objects !== "number") return null
 
   const skipped = Array.isArray(copy.skipped) ? copy.skipped : []
+  const skippedDatasets = Array.isArray(copy.skippedDatasets) ? copy.skippedDatasets : []
   return {
     takenAt: copy.takenAt,
     objects: copy.objects,
     skipped: skipped.map((entry) => {
       const skip = (entry ?? {}) as Record<string, unknown>
       return { objectTypeId: String(skip.objectTypeId), reason: String(skip.reason) }
+    }),
+    skippedDatasets: skippedDatasets.map((entry) => {
+      const skip = (entry ?? {}) as Record<string, unknown>
+      return {
+        datasetId: String(skip.datasetId),
+        reason: "missing_clearance" as const,
+        columns: Array.isArray(skip.columns) ? skip.columns.map(String) : [],
+      }
     }),
     lakeSliceId: typeof copy.lakeSliceId === "string" ? copy.lakeSliceId : null,
   }

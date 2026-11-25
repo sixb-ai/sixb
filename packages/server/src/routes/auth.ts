@@ -127,6 +127,7 @@ type AuthenticatedAuthSessionResponse = {
     readonly usage: boolean
     readonly activity: boolean
     readonly console: boolean
+    readonly branches: boolean
     readonly logs: boolean
   }
   readonly session: {
@@ -2357,6 +2358,8 @@ function authSessionBody(
       activity: isAllowed(authorization, { kind: "activity.observe" }),
       console: isAllowed(authorization, { kind: "console.observe" }),
       logs: isAllowed(authorization, { kind: "logs.observe" }),
+      // Branches are opened in production only.
+      branches: !host.branch && isAllowed(authorization, { kind: "source.manage" }),
     },
     session: { id: session.session.id, expiresAt: toIsoString(session.session.expiresAt) },
   }

@@ -1,4 +1,5 @@
 import type { BranchView, SixbHostView } from "@sixb/core"
+import { branchesUnavailable } from "@sixb/core/internal/branches"
 import type { Elysia } from "elysia"
 import { requireRequestSixb } from "../auth/scope"
 import {
@@ -26,14 +27,17 @@ const errors = {
  * The branches that run next to production. Each call says what is wanted; the branch worker does
  * the work. A branch's name is in the body or the query, since a git branch name holds slashes.
  */
-export function registerHostedBranchRoutes(app: Elysia, _host: SixbHostView) {
+export function registerHostedBranchRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/branches",
       async (context) => {
         try {
           const branches = await requireRequestSixb(context).branches.list()
-          return { branches: branches.map(serializeBranch) }
+          return {
+            branches: branches.map(serializeBranch),
+            unavailable: branchesUnavailable(host),
+          }
         } catch (error) {
           return handleRouteError(error, context.set)
         }
@@ -170,6 +174,10 @@ function serializeBranch(branch: BranchView) {
       ...branch.data,
       takenAt: branch.data.takenAt.toISOString(),
       skipped: branch.data.skipped.map((skip) => ({ ...skip })),
+      skippedDatasets: branch.data.skippedDatasets.map((skip) => ({
+        ...skip,
+        columns: [...skip.columns],
+      })),
     },
     refreshRequestedAt: branch.refreshRequestedAt?.toISOString() ?? null,
     openedAt: branch.openedAt.toISOString(),
