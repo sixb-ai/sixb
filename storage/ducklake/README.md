@@ -196,6 +196,10 @@ is configured.
 - **What.** A first maintenance commit flushes what the catalog holds to files. A second rewrites
   the files with a tenth of their rows deleted, then merges files under 1 MiB, at most 256 per
   pass. A backlog takes several passes, one after the other.
+- **Nothing inlined under a rewrite.** A pass that rewrites a file first flushes the rows the
+  catalog holds, however few. DuckLake `ac7595b0` fails to commit a rewrite over inlined rows
+  written before a column was added, or over inlined floats on a SQLite catalog
+  (duckdb/ducklake#1490, fixed after that build), and every later pass would fail the same way.
 - **Never a version.** DuckLake records these commits as `inline_flush`, `rewrite_delete` and
   `merge_adjacent`, which change no rows: they are not versions, the change feed skips them, and
   every retained version reads the same rows through the new files. Whoever runs them, by hand

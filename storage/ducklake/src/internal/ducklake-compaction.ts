@@ -210,10 +210,17 @@ export class DuckLakeCompaction {
       tables.reduce((total, storage) => total + count(storage), 0)
 
     const inlinedDeletes = sum((storage) => storage.inlinedDeletes)
-    const flush = sum((storage) => storage.inlinedRows) + inlinedDeletes >= FLUSH_INLINED_ROWS
-    const compact =
-      sum((storage) => storage.filesToRewrite) > 0 ||
-      sum((storage) => storage.smallDataFiles) >= MERGE_SMALL_FILES
+    const rewrite = sum((storage) => storage.filesToRewrite) > 0
+    const compact = rewrite || sum((storage) => storage.smallDataFiles) >= MERGE_SMALL_FILES
+
+    // A rewrite flushes the live inlined rows first, however few. Committing a rewrite, DuckLake
+    // (build ac7595b0) merges the inlined rows into the table's stats with one query over the
+    // current columns: rows inlined before a column was added fail it with `Referenced column
+    // not found`, and floats a SQLite catalog inlined as text with `isnan(VARCHAR)`. Every later
+    // pass would fail the same way (duckdb/ducklake#1490, fixed upstream after that build).
+    const flush =
+      sum((storage) => storage.inlinedRows) + inlinedDeletes >= FLUSH_INLINED_ROWS ||
+      (rewrite && sum((storage) => storage.liveInlinedRows) > 0)
 
     return flush || compact
       ? { table: found.table, flush, flushesDeletes: flush && inlinedDeletes > 0, compact }

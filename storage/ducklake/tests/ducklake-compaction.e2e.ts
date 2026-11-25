@@ -40,6 +40,16 @@ const accounts = defineDataset("crm.accounts", {
   primaryKey: "id",
 })
 
+const accountsWithStatus = defineDataset("crm.accounts", {
+  schema: [col("id", "string"), col("score", "int64"), col("status", "string", { nullable: true })],
+  primaryKey: "id",
+})
+
+const readings = defineDataset("iot.readings", {
+  schema: [col("id", "string"), col("value", "float64")],
+  primaryKey: "id",
+})
+
 const events = defineDataset("raw.events", {
   schema: [col("id", "string"), col("batch", "int64")],
 })
@@ -181,6 +191,79 @@ describe("DuckLakeStorage compaction", () => {
   })
 
   for (const catalogType of ["duckdb", "sqlite"] as const) {
+    // Regression proof: in DuckLakeCompaction.plan, flush only past FLUSH_INLINED_ROWS. The rewrite
+    // then fails to commit with `Referenced column "status" not found` (DuckLake build ac7595b0,
+    // duckdb/ducklake#1490), the warning fires, and the seed file keeps its deletes.
+    test(`${catalogType}: rewrites a file after a column is added while older rows are inlined`, async () => {
+      await useCatalog(catalogType)
+      await storage.createDataset(accounts)
+      await merge(
+        accounts,
+        rows(100, (i) => ({ id: `a${i}`, score: 0 }))
+      )
+
+      // One row inlined in the catalog with the schema before `status`.
+      await merge(accounts, [{ id: "inlined", score: 0 }])
+      await storage.createDataset(accountsWithStatus)
+
+      // A new provider checks its first commit: ten of the hundred seed rows replaced, a tenth of
+      // the file.
+      await reopen()
+      const warn = spyOn(console, "warn")
+      await merge(
+        accountsWithStatus,
+        rows(10, (i) => ({ id: `a${i}`, score: 1, status: "active" }))
+      )
+      const before = await history([accountsWithStatus])
+
+      try {
+        expect(await settled(accountsWithStatus)).toMatchObject({
+          deleteFiles: 0,
+          inlinedRows: 0,
+          rowCount: 101,
+        })
+        expect(warn).not.toHaveBeenCalled()
+      } finally {
+        warn.mockRestore()
+      }
+
+      // The rows inlined before and after `status`, flushed to a file each, and the seed file
+      // rewritten without the ten rows replaced.
+      expect(await liveFileRows(accountsWithStatus)).toEqual([1, 10, 90])
+      expect(await history([accountsWithStatus])).toEqual(before)
+    }, 30_000)
+  }
+
+  // Regression proof: in DuckLakeCompaction.plan, flush only past FLUSH_INLINED_ROWS. On a SQLite
+  // catalog, DuckLake build ac7595b0 then fails to commit the rewrite with `isnan(VARCHAR)`: the
+  // catalog stores the inlined floats as text (fixed upstream with duckdb/ducklake#1490).
+  test("sqlite: rewrites a file while float rows are inlined", async () => {
+    await useCatalog("sqlite")
+    await storage.createDataset(readings)
+    await merge(
+      readings,
+      rows(100, (i) => ({ id: `r${i}`, value: i + 0.5 }))
+    )
+
+    // A new provider checks its first commit: ten of the hundred seed rows replaced, inlined.
+    await reopen()
+    const warn = spyOn(console, "warn")
+    await merge(
+      readings,
+      rows(10, (i) => ({ id: `r${i}`, value: i + 0.25 }))
+    )
+
+    try {
+      expect(await settled(readings)).toMatchObject({ inlinedRows: 0, rowCount: 100 })
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+
+    expect(await liveFileRows(readings)).toEqual([10, 90])
+  }, 30_000)
+
+  for (const catalogType of ["duckdb", "sqlite"] as const) {
     // Regression proof: in readTableStorage, pass no inlined-delete tables to queryFiles. The
     // dataset then reads 100 rows but counts 110, and compaction leaves the seed file as it is.
     test(`${catalogType}: counts the deletes DuckLake keeps in the catalog, and rewrites the file they reach`, async () => {
@@ -207,8 +290,10 @@ describe("DuckLakeStorage compaction", () => {
       await merge(accounts, [{ id: "a10", score: 2 }])
       const before = await history([accounts])
 
+      // The eleven rows inlined, flushed before the rewrite, and the seed file without the rows
+      // they replaced.
       expect(await settled(accounts)).toMatchObject({ deleteFiles: 0, rowCount: 100 })
-      expect(await liveFileRows(accounts)).toEqual([89])
+      expect(await liveFileRows(accounts)).toEqual([11, 89])
       expect(await history([accounts])).toEqual(before)
     }, 30_000)
   }
@@ -544,7 +629,10 @@ describe("DuckLakeStorage compaction", () => {
     return write.commit()
   }
 
-  /** The rows each live data file of the dataset was written with, deleted ones included. */
+  /**
+   * The rows each live data file of the dataset was written with, deleted ones included, fewest
+   * first.
+   */
   async function liveFileRows(dataset: DatasetDefinition): Promise<number[]> {
     const files = await internals(storage).connections.withExclusiveAttached((runtime) =>
       runtime.query(`
@@ -552,7 +640,7 @@ describe("DuckLakeStorage compaction", () => {
         FROM __ducklake_metadata_sixb_lake.main.ducklake_data_file file
         JOIN __ducklake_metadata_sixb_lake.main.ducklake_table t ON t.table_id = file.table_id
         WHERE file.end_snapshot IS NULL AND t.end_snapshot IS NULL AND t.table_name = ${table(dataset)}
-        ORDER BY file.data_file_id
+        ORDER BY file.record_count
       `)
     )
 
