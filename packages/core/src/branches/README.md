@@ -4,17 +4,69 @@ A git branch of the project, run next to production. Production makes the branch
 its own on production's PostgreSQL instance, owned by a role limited to it. The branch's own
 `sixb dev` runs in a sandbox, behind a front that answers only production, as the same runtime
 `sixb dev --from production` runs on a laptop: it loads its copy of what its creator reads into its
-database, and serves.
+database, and serves. Branch mode (`branch-mode/README.md`) holds the branch to its gates: nothing it
+does reaches production.
+
+```txt
+sixb.branches.open(name)        branches row (wanted: running)
+        │
+sixb worker branches            reads the remote's heads (git ls-remote, every 10 s)
+  │                             claims the row once the remote has the branch (lease, revision)
+  ├─ every 20 s   renew the lease; past it unrenewed, let the branch go
+  ├─ every 3 s    hold the role to its limits, a load or a checkout included
+  ├─ sandbox      restricted network; clone the branch, install
+  ├─ copy         empty database + role ◄── production
+  │               copyForBranch as the creator ──► sandbox .sixb/branches/hosted.copy
+  ├─ runtime      `sixb dev` in branch mode: loads the copy as the role, on its own definitions;
+  │               its front, its API, the project's app
+  ├─ every 3 s    keep-alive, pull remoteCommit, refresh, status and use from the front
+  └─ stop         unused 20 min → stopped; deleted, or gone from the remote → sandbox, database, role, row
+```
 
 | Where | What |
 |---|---|
+| `execution.ts` | `sixb.branches`: list, open, refresh, stop, delete. They only say what is wanted, over the row as read |
 | `data.ts` | Production's side: the database made anew for each copy, the role's login and limits |
-| `copy.ts`, `wire.ts`, `credential.ts` | The copy production sends a branch, and the credential it reads production with |
+| `copy.ts`, `wire.ts`, `credential.ts`, `copy-slots.ts` | The copy production sends a branch, the credential it reads production with, and how many run at once |
 | `runtime.ts` | The branch runtime, laptop and hosted: what it is started with, and its front's status |
-| `source.ts` | `createSixb({ source })` and the checkout recipe |
+| `source.ts` | `createSixb({ source })`, the checkout recipe and the install |
+| `@sixb/branch-worker` | The worker: the read of the remote, the lease, the copy, the runtime |
 | `@sixb/pg` `hosted-branches.ts` | The database and its role |
 | `storage/branches` | Each branch's row: what is wanted of it, and what its worker found |
 | CLI `dev-branch.ts`, `branch-providers.ts`, `branch-from-production.ts` | The runtime's front, the database it runs on, and its copy's load |
+
+## Lifecycle
+
+| Event | What happens |
+|---|---|
+| Open | A row, with its namespace and key. The worker claims it once the remote has the branch; a branch the remote never had fails, and says so |
+| Claim | Ports drawn, sandbox made, copy taken, runtime started |
+| Push | The read of the remote writes the head to `remoteCommit`; the worker holding the branch resets its checkout to it, and the runtime's watcher reloads the code. A push that changes `package.json` or a lockfile stops the runtime, installs, then starts it. The data stays |
+| Refresh | A new copy: the database and its role are made anew, so what the branch wrote goes. The row has no copy until the new one is loaded |
+| Stop, or 20 min unused | The runtime stops; a provider that persists sandboxes keeps its state |
+| Reopen | A resumed sandbox runs on its copy. One made anew takes a whole new copy, with a `data-reset` notice: what the branch wrote is gone |
+| Machine ended | A provider that ends a session at its limit (Vercel's plan maximum) stops the branch, with a `machine-ended` notice |
+| 14 days unopened | Its copy, database and role go; the next open takes a new copy |
+| Delete, or its remote branch deleted | Sandbox, database, role and row go. A delete that fails stays wanted, and the next claim tries again |
+
+A merge ends nothing by itself: a branch reset to the default branch looks the same, and would
+lose its data. A branch ends when its remote branch is deleted, as a merged one usually is.
+
+Use is what the runtime's front forwards: production's status reads don't count. Until preview
+URLs forward people's requests, only `open` and `refresh` keep a branch from stopping. A copy
+counts as use when it ends, however long it took.
+
+Neither `@sixb/sandboxes-local` nor `@sixb/sandboxes-smolvm` resumes a sandbox: every stop, and
+every restart of the worker (a deploy drains it), means a new copy at the next open there. Vercel
+resumes. Nothing is kept half: the branch's data and its lake slice always
+come from one copy.
+
+## The lease
+
+A worker holds a branch for 60 s at a time and renews it every 20 s, apart from its work: a
+clone, a copy or an install outlasting the lease never lets another worker take the branch. A
+worker that cannot renew in time lets the branch go: it stops the runtime and the sandbox, as
+another worker may hold the branch by then. A worker that begins stopping claims nothing more.
 
 ## The runtime
 
