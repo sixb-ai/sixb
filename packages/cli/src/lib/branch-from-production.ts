@@ -76,6 +76,12 @@ export async function fetchBranchCopy(input: FetchBranchCopyInput): Promise<bool
   }
 
   const production = await input.connect()
+
+  // A copy fetched and never loaded holds a slice in production: this one replaces it.
+  const spool = join(directory, `${name}.copy`)
+  const unloaded = await spooledLake(spool).catch(() => null)
+  if (unloaded) await deleteSlice(production.apiUrl, unloaded.credential, unloaded.sliceId)
+
   const response = await fetch(new URL("api/branches/copy", apiBase(production.apiUrl)), {
     method: "POST",
     headers: {
@@ -93,12 +99,14 @@ export async function fetchBranchCopy(input: FetchBranchCopyInput): Promise<bool
   }
 
   // Whole or not at all: a copy cut short never becomes the branch's.
-  const spool = join(directory, `${name}.copy`)
   const partial = `${spool}.${randomUUID()}.partial`
   try {
     // Production's data, readable by its owner only from its first byte.
     await writeFile(partial, "", { mode: 0o600, flag: "wx" })
     await Bun.write(partial, response)
+    const lake = await spooledLake(partial)
+    // Production keeps the copy's slice once told the copy arrived whole, and lets it lapse else.
+    if (lake) await confirmReceived(production.apiUrl, lake.credential, lake.sliceId)
     await rename(partial, spool)
   } finally {
     await rm(partial, { force: true })
@@ -362,6 +370,28 @@ async function dropBranch(
   // Production keeps a slice two weeks unless told: say it is no longer read.
   if (record?.credential && record.lake) {
     await deleteSlice(record.apiUrl, record.credential, record.lake.sliceId).catch(() => undefined)
+  }
+}
+
+/** The lake part of a spooled copy, read through to its end: a copy cut short throws. */
+async function spooledLake(path: string) {
+  const copy = readBranchCopy(Bun.file(path).stream() as unknown as AsyncIterable<Uint8Array>)
+  for await (const _ of copy.snapshot) {
+    // The snapshot is the branch's to load: only what follows it is read here.
+  }
+  return (await copy.rest())?.lake ?? null
+}
+
+async function confirmReceived(apiUrl: string, credential: string, sliceId: string) {
+  const path = `api/branches/slices/${encodeURIComponent(sliceId)}/received`
+  const response = await fetch(new URL(path, apiBase(apiUrl)), {
+    method: "POST",
+    headers: { authorization: `Bearer ${credential}` },
+  })
+  if (!response.ok) {
+    throw new Error(
+      `[SixbCLI] Production did not take this branch's copy as received (${response.status}). Run \`sixb dev --from production --refresh\`.`
+    )
   }
 }
 

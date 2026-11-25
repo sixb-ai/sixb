@@ -27,8 +27,10 @@ defineRole("developers", { grantedTo: [developers], grants: [can.manage(project.
   lake as you, cached on your disk. What you write to them stays on the branch. Your project's
   local lake must be DuckLake.
 - **You, on this machine.** Every request on the branch runs as you, with your production groups,
-  without signing in; the branch listens on this machine only, and answers no other host name.
-- **Files from production.** Files attached to objects are read from production, as you.
+  without signing in. The branch listens on this machine only, answers no other host name, and
+  refuses requests from web pages it does not serve.
+- **Files from production.** Files attached to objects are read from production, as you, when
+  production's lake can be branched (DuckLake): the branch's credential comes with its datasets.
 - **Types fed by a projection** keep updating: a pipeline you change on the branch updates only
   the objects its new rows change. When a type cannot, `sixb dev` says why.
 
@@ -45,10 +47,12 @@ Not refused: your project's own `fetch` calls and the agent's web tools still re
 
 ## What reaches production
 
-`sixb dev` takes the copy with your `sixb login` session, before the branch's code runs. The
-branch itself holds only its own credential, which reads production as you for its objects' files
-and its datasets, and nothing else; it ends with the copy. Production records each copy in its
-log and your activity.
+`sixb dev` takes the copy with your `sixb login` session (or `SIXB_API_TOKEN`), before the
+branch's code runs, and keeps it under `.sixb/branches/`, readable by you only. The branch's code
+gets none of that sign-in: it holds only its own credential, which reads production as you for its
+objects' files and its datasets, and nothing else, and ends with the copy. Production runs two
+copies at a time per server process, one per person, and records each copy in its log, and in
+your activity when you signed in with `sixb login`.
 
 On your machine, the branch's code runs as your OS user and could read your `sixb login` session
-file: run branches whose code you trust. Hosted branches keep the stricter guarantee.
+file: run branches whose code you trust.

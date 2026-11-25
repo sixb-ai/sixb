@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto"
 import { isAllowed } from "../authorization/decision"
 import { resolveAuthorizationContext } from "../authorization/resolve"
 import type { AuthorizationContext } from "../authorization/types"
-import { LAKE_SLICE_KEEP_MS } from "../datasets/lake-slices"
+import { isUnreceivedCopy, LAKE_SLICE_KEEP_MS } from "../datasets/lake-slices"
 import type { SecurityDefinitionCatalog } from "../security/registry"
 import type { LakeSliceRecord, Storage } from "../storage"
 
@@ -22,18 +22,39 @@ export function branchCredentialHash(credential: string): string {
   return createHash("sha256").update(credential).digest("hex")
 }
 
-/** The routes a branch credential reaches: its objects' files, its lake token, its slice. */
+/**
+ * The routes a branch credential reaches: its objects' files, its lake token, its slice, and
+ * confirming its copy arrived.
+ */
 const BRANCH_CREDENTIAL_ROUTES: readonly (readonly [string, RegExp])[] = [
   ["GET", /^\/api\/objects\/[^/]+\/[^/]+\/files\/content$/],
   ["HEAD", /^\/api\/objects\/[^/]+\/[^/]+\/files\/content$/],
   ["POST", /^\/api\/branches\/lake-token$/],
   ["DELETE", /^\/api\/branches\/slices\/[^/]+$/],
+  ["POST", /^\/api\/branches\/slices\/[^/]+\/received$/],
 ]
 
 export function isBranchCredentialRoute(method: string, pathname: string): boolean {
   return BRANCH_CREDENTIAL_ROUTES.some(
     ([allowed, pattern]) => allowed === method.toUpperCase() && pattern.test(pathname)
   )
+}
+
+/** Releasing a slice reads nothing: its credential may, whatever its person may still read. */
+export function isBranchSliceRelease(method: string, pathname: string): boolean {
+  return method.toUpperCase() === "DELETE" && /^\/api\/branches\/slices\/[^/]+$/.test(pathname)
+}
+
+/** The slice a branch credential belongs to, live or not, whoever its person is now. */
+export async function branchCredentialSlice(
+  host: BranchCredentialHost,
+  credential: string
+): Promise<LakeSliceRecord | null> {
+  if (!host.storage.lakeSlices || !credential.startsWith(BRANCH_CREDENTIAL_PREFIX)) return null
+  return host.storage.lakeSlices.findByCredentialHash({
+    projectId: host.id,
+    credentialHash: branchCredentialHash(credential),
+  })
 }
 
 export interface BranchCredentialHost {
@@ -62,7 +83,7 @@ export async function authorizeBranchCredential(
   })
   if (!slice) return null
   const liveUntil = (slice.lastTokenExpiresAt ?? slice.createdAt).getTime() + LAKE_SLICE_KEEP_MS
-  if (liveUntil <= now.getTime()) return null
+  if (liveUntil <= now.getTime() || isUnreceivedCopy(slice, now)) return null
 
   const user = await auth.users.getById({ projectId: host.id, id: slice.userId })
   if (!user || user.status !== "active") return null

@@ -3,7 +3,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { SixbHostView } from "@sixb/core"
 import { isAllowed } from "@sixb/core/internal/authorization"
-import { authorizeBranchCredential, copyForBranch } from "@sixb/core/internal/branches"
+import {
+  authorizeBranchCredential,
+  branchCredentialSlice,
+  copyForBranch,
+} from "@sixb/core/internal/branches"
 import { dropLakeSlice, issueLakeSliceToken } from "@sixb/core/internal/lake-slices"
 import { resolveBranchMode } from "@sixb/core/internal/runtime"
 import type { Elysia } from "elysia"
@@ -19,8 +23,9 @@ interface BranchRouteContext {
 
 /**
  * What `sixb dev --from production` asks production for. The copy of what the person reads takes
- * the CLI's session or a personal access token: both are the person. The branch then renews its
- * lake token and deletes its slice with the credential the copy gave it, which nothing else takes.
+ * the CLI's session or a personal access token: both are the person. With the credential the copy
+ * gave it, which nothing else takes, the branch confirms it holds the copy whole, renews its lake
+ * token and deletes its slice.
  */
 export function registerBranchRoutes(app: Elysia, host: SixbHostView) {
   const detail = (operationId: string, summary: string) => ({
@@ -45,6 +50,11 @@ export function registerBranchRoutes(app: Elysia, host: SixbHostView) {
       .delete("/api/branches/slices/:sliceId", (context) => dropSliceResponse(host, context), {
         detail: { hide: true },
       })
+      .post(
+        "/api/branches/slices/:sliceId/received",
+        (context) => receivedResponse(host, context),
+        { detail: { hide: true } }
+      )
   )
 }
 
@@ -74,43 +84,53 @@ async function copyResponse(
     return { error: named }
   }
 
-  // A copy holds a consistent read open in production: a few at a time, per project.
-  const running = copiesRunning.get(host.id) ?? 0
-  if (running >= MAX_COPIES_PER_PROJECT) {
+  // A copy holds a consistent read open in production: a few at a time, one per person. Counted
+  // in this process: each server process of a project keeps its own count.
+  const running = copiesRunning.get(host.id) ?? new Set<string>()
+  if (running.size >= MAX_COPIES_PER_PROJECT || running.has(person.principal.id)) {
     set.status = 429
     return {
-      error: `[SixbServer] ${running} copies to branches are running for this project. Try again in a minute.`,
+      error: running.has(person.principal.id)
+        ? "[SixbServer] Your copy to a branch is still running. Try again once it ends."
+        : `[SixbServer] ${running.size} copies to branches are running for this project. Try again in a minute.`,
     }
   }
-  copiesRunning.set(host.id, running + 1)
-  const done = () => copiesRunning.set(host.id, (copiesRunning.get(host.id) ?? 1) - 1)
+  running.add(person.principal.id)
+  copiesRunning.set(host.id, running)
 
-  const directory = await mkdtemp(join(tmpdir(), "sixb-branch-copy-"))
-  const parts = copyForBranch(host, {
-    person,
-    branch: branch as string,
-    requestId: `branch_copy_${crypto.randomUUID()}`,
-    directory,
-    credential:
-      session.credentialSource === "session"
-        ? { type: "session", id: session.session.id }
-        : { type: "accessToken", id: session.accessToken.id },
-  })
+  let directory: string | undefined
   let finished = false
   const finish = async () => {
     if (finished) return
     finished = true
-    done()
-    await rm(directory, { recursive: true, force: true })
+    running.delete(person.principal.id)
+    if (running.size === 0 && copiesRunning.get(host.id) === running) copiesRunning.delete(host.id)
+    if (directory) await rm(directory, { recursive: true, force: true })
   }
+
+  let parts: ReturnType<typeof copyForBranch>
+  try {
+    directory = await mkdtemp(join(tmpdir(), "sixb-branch-copy-"))
+    parts = copyForBranch(host, {
+      person,
+      branch: branch as string,
+      requestId: `branch_copy_${crypto.randomUUID()}`,
+      directory,
+      credential:
+        session.credentialSource === "session"
+          ? { type: "session", id: session.session.id }
+          : { type: "accessToken", id: session.accessToken.id },
+    })
+  } catch (error) {
+    await finish()
+    throw error
+  }
+
   // A branch that goes away mid-copy ends it: its read, its slice and its place in the limit.
-  request.signal.addEventListener(
-    "abort",
-    () => {
-      void parts.return(undefined).finally(finish)
-    },
-    { once: true }
-  )
+  // One that went away before the copy started ends it now: its abort fired already.
+  const abandon = () => void parts.return(undefined).finally(finish)
+  if (request.signal.aborted) abandon()
+  else request.signal.addEventListener("abort", abandon, { once: true })
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
@@ -135,9 +155,12 @@ async function copyResponse(
 
 /** The slice of the branch credential a request carries, or null: these routes take no other. */
 async function credentialSlice(host: SixbHostView, request: Request) {
+  return (await authorizeBranchCredential(host, bearerOf(request)))?.slice ?? null
+}
+
+function bearerOf(request: Request): string {
   const authorization = request.headers.get("authorization") ?? ""
-  const credential = authorization.startsWith("Bearer ") ? authorization.slice(7) : ""
-  return (await authorizeBranchCredential(host, credential))?.slice ?? null
+  return authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : ""
 }
 
 async function lakeTokenResponse(host: SixbHostView, context: BranchRouteContext) {
@@ -160,18 +183,41 @@ async function lakeTokenResponse(host: SixbHostView, context: BranchRouteContext
   }
 }
 
+/** Releasing reads nothing: the slice's credential may, whatever its person may still read. */
 async function dropSliceResponse(
   host: SixbHostView,
   context: BranchRouteContext & { readonly params: { readonly sliceId: string } }
 ) {
+  const slice = await branchCredentialSlice(host, bearerOf(context.request))
+  if (!slice || slice.id !== context.params.sliceId) {
+    context.set.status = 404
+    return { error: "[SixbServer] This branch has no such lake slice." }
+  }
+
+  await dropLakeSlice(host, slice.id)
+  context.set.status = 204
+  return null
+}
+
+/** The branch holds its copy whole: its slice lives on. Unconfirmed, it lapses within the hour. */
+async function receivedResponse(
+  host: SixbHostView,
+  context: BranchRouteContext & { readonly params: { readonly sliceId: string } }
+) {
   const slice = await credentialSlice(host, context.request)
-  if (slice && slice.id === context.params.sliceId) await dropLakeSlice(host, slice.id)
+  if (!slice || slice.id !== context.params.sliceId || !host.storage.lakeSlices) {
+    context.set.status = 404
+    return { error: "[SixbServer] This branch has no such lake slice. Take a new copy." }
+  }
+
+  await host.storage.lakeSlices.markReceived({ projectId: host.id, id: slice.id, at: new Date() })
   context.set.status = 204
   return null
 }
 
 const MAX_COPIES_PER_PROJECT = 2
-const copiesRunning = new Map<string, number>()
+/** The people copying to a branch, per project. */
+const copiesRunning = new Map<string, Set<string>>()
 
 /** Null when `branch` names a git branch as a branch's `SIXB_BRANCH` would, else why not. */
 function branchName(branch: unknown): string | null {

@@ -294,9 +294,21 @@ async function objectFileContentResponse(
   if (range) headers.set("range", range)
 
   const response = await fetch(production, { method: options.head ? "HEAD" : "GET", headers })
+  // `fetch` has already decoded the body: production's encoding and length describe other bytes.
+  const forwarded = new Headers(response.headers)
+  for (const name of PRODUCTION_ONLY_HEADERS) forwarded.delete(name)
   context.set.status = response.status
-  return new Response(response.body, { status: response.status, headers: response.headers })
+  return new Response(response.body, { status: response.status, headers: forwarded })
 }
+
+/** What production answers that holds only between production and the branch. */
+const PRODUCTION_ONLY_HEADERS = [
+  "content-encoding",
+  "content-length",
+  "transfer-encoding",
+  "connection",
+  "set-cookie",
+]
 
 export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
   return app

@@ -15,6 +15,7 @@ import {
   BRANCH_CREDENTIAL_PREFIX,
   branchRuntimeOf,
   isBranchCredentialRoute,
+  isBranchSliceRelease,
 } from "@sixb/core/internal/branches"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { findDatasetIngestRuntime, setApiPublicOrigin } from "@sixb/core/internal/runtime"
@@ -473,12 +474,22 @@ export function createSixbApi(server: SixbServer) {
           sharedSession: null,
           sixb: null,
         })
-        if (!isBranchCredentialRoute(request.method, new URL(request.url).pathname)) {
+        const pathname = new URL(request.url).pathname
+        if (!isBranchCredentialRoute(request.method, pathname)) {
           return denied(
             jsonForbiddenResponse(
               "A branch credential reads only its objects' files and its lake slice"
             )
           )
+        }
+        // Releasing its slice reads nothing: the route checks the credential owns it.
+        if (isBranchSliceRelease(request.method, pathname)) {
+          return {
+            auth: { kind: "allow" as const, session: null },
+            sharedAccessCookies: null,
+            sharedSession: null,
+            sixb: null,
+          }
         }
         const authorized = await authorizeBranchCredential(host, branchCredential)
         if (!authorized) return denied(jsonAuthRequiredResponse())

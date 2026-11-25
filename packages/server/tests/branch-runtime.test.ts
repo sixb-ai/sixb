@@ -70,7 +70,12 @@ function options(storage: InMemoryStorage, blobStorage = new InMemoryBlobStorage
   } satisfies SixbHostOptions
 }
 
-let production: { host: SixbHost; storage: InMemoryStorage; url: string }
+let production: {
+  host: SixbHost
+  storage: InMemoryStorage
+  app: ReturnType<typeof createSixbApi>
+  url: string
+}
 let server: ReturnType<typeof Bun.serve>
 let branch: {
   app: ReturnType<typeof createSixbApi>
@@ -99,6 +104,7 @@ beforeAll(async () => {
   for (const [userId, groupId] of [
     ["usr_alice", developers.id],
     ["usr_bob", readers.id],
+    ["usr_dave", developers.id],
   ] as const) {
     await storage.auth.users.create({ projectId: PROJECT, id: userId, email: `${userId}@x.test` })
     await storage.auth.groupMemberships.upsert({
@@ -118,8 +124,20 @@ beforeAll(async () => {
   const app = createSixbApi(
     new SixbServer({ host, quiet: true, browser: createTestBrowserPolicy() })
   )
-  server = Bun.serve({ port: 0, fetch: (request) => app.fetch(request) })
-  production = { host, storage, url: server.url.toString() }
+  // Behind a proxy that compresses what it serves, as production often is.
+  server = Bun.serve({
+    port: 0,
+    fetch: async (request) => {
+      const response = await app.fetch(request)
+      if (!new URL(request.url).pathname.endsWith("/files/content") || !response.ok) return response
+      const body = Bun.gzipSync(new Uint8Array(await response.arrayBuffer()))
+      const headers = new Headers(response.headers)
+      headers.set("content-encoding", "gzip")
+      headers.set("content-length", String(body.length))
+      return new Response(body, { status: response.status, headers })
+    },
+  })
+  production = { host, storage, app, url: server.url.toString() }
 
   // Alice's copy, on a branch that holds its objects but not their files.
   const laptop = new InMemoryStorage()
@@ -152,6 +170,7 @@ beforeAll(async () => {
     files: [],
     createdAt: new Date(),
     credentialHash: createHash("sha256").update(credential).digest("hex"),
+    receivedAt: new Date(),
   })
   const runtime: BranchRuntime = {
     person: { userId: "usr_alice" },
@@ -211,12 +230,15 @@ describe("a branch from production", () => {
     expect(session.authEnabled).toBe(false)
   })
 
-  // Red check: in routes/objects.ts, drop the read through production: t-1's file is not on the
-  // branch, and its content answers 404.
+  // Red checks: in routes/objects.ts, drop the read through production: t-1's file is not on the
+  // branch, and its content answers 404. Forward production's headers as they are: the branch
+  // says gzip of a body `fetch` already decoded.
   test("reads its objects' files through production, as that person", async () => {
     const path = encodeURIComponent("/properties/attachment")
     const own = await get(`/api/objects/ticket/t-1/files/content?path=${path}`)
     expect(own.status).toBe(200)
+    expect(own.headers.get("content-encoding")).toBeNull()
+    expect(own.headers.get("content-type")).toContain("text/plain")
     expect(await own.text()).toBe("t-1 file")
 
     // t-2 is closed: production refuses Alice its file, though Bob may read it there.
@@ -260,26 +282,73 @@ describe("a branch's credential in production", () => {
   // Red check: in branches/credential.ts, drop the `source.manage` check: Bob reads t-1's file.
   test("reads nothing once its person may no longer copy to a branch", async () => {
     // A slice Bob took when he still could: he reads every ticket, but no longer manages the source.
-    const bobs = `${BRANCH_CREDENTIAL_PREFIX}${"b".repeat(43)}`
-    await production.storage.lakeSlices.create({
-      id: "slice_bob",
-      projectId: PROJECT,
-      userId: "usr_bob",
-      branch: "feature/y",
-      point: "point",
-      versions: [],
-      files: [],
-      createdAt: new Date(),
-      credentialHash: createHash("sha256").update(bobs).digest("hex"),
-    })
-
-    const path = encodeURIComponent("/properties/attachment")
-    const response = await fetch(
-      new URL(`api/objects/ticket/t-1/files/content?path=${path}`, production.url),
-      { headers: { authorization: `Bearer ${bobs}` } }
-    )
+    const bobs = await branchSlice("usr_bob", "slice_bob")
+    const response = await fileAs(bobs)
     expect(response.status).toBe(401)
     expect(await response.text()).not.toContain("t-1 file")
+
+    // Releasing reads nothing: he may still let it go.
+    expect((await releaseAs(bobs, "slice_bob")).status).toBe(204)
+    expect(await production.storage.lakeSlices.get({ projectId: PROJECT, id: "slice_bob" })).toBe(
+      null
+    )
+  })
+
+  // Red checks: in routes/branches.ts, drop the slice id check of `dropSliceResponse`: another
+  // slice is released; of `lakeTokenResponse`: another slice gets a token.
+  test("renews and releases its own slice only, and reads nothing once released", async () => {
+    const own = await branchSlice("usr_alice", "slice_own")
+    await branchSlice("usr_alice", "slice_other")
+
+    const renew = (sliceId: string) =>
+      fetch(new URL("api/branches/lake-token", production.url), {
+        method: "POST",
+        headers: { authorization: `Bearer ${own}`, "content-type": "application/json" },
+        body: JSON.stringify({ sliceId }),
+      })
+    expect((await renew("slice_other")).status).toBe(404)
+    // Its own reaches the token: this in-memory lake cannot be branched (the CLI's e2e renews a
+    // token against DuckLake).
+    const renewed = await renew("slice_own")
+    expect(renewed.status).toBe(403)
+    expect(await renewed.text()).toContain("cannot be read from a branch")
+
+    expect((await releaseAs(own, "slice_other")).status).toBe(404)
+    expect(
+      await production.storage.lakeSlices.get({ projectId: PROJECT, id: "slice_other" })
+    ).not.toBe(null)
+
+    expect((await fileAs(own)).status).toBe(200)
+    expect((await releaseAs(own, "slice_own")).status).toBe(204)
+    expect((await fileAs(own)).status).toBe(401)
+  })
+
+  // Red check: in branches/credential.ts, drop `isUnreceivedCopy` from the credential's check:
+  // a copy its branch never confirmed holding still reads production.
+  test("reads nothing for a copy its branch never confirmed, once the hour is over", async () => {
+    const hourAgo = new Date(Date.now() - 61 * 60_000)
+    const unconfirmed = await branchSlice("usr_alice", "slice_unconfirmed", hourAgo)
+    expect((await fileAs(unconfirmed)).status).toBe(401)
+
+    const confirmed = await branchSlice("usr_alice", "slice_confirmed", hourAgo)
+    await production.storage.lakeSlices.markReceived({
+      projectId: PROJECT,
+      id: "slice_confirmed",
+      at: hourAgo,
+    })
+    expect((await fileAs(confirmed)).status).toBe(200)
+
+    // A copy within its hour confirms it holds it, with its own credential and for its own slice.
+    const fresh = await branchSlice("usr_alice", "slice_fresh")
+    const received = (credential: string, sliceId: string) =>
+      fetch(new URL(`api/branches/slices/${sliceId}/received`, production.url), {
+        method: "POST",
+        headers: { authorization: `Bearer ${credential}` },
+      })
+    expect((await received(fresh, "slice_confirmed")).status).toBe(404)
+    expect((await received(fresh, "slice_fresh")).status).toBe(204)
+    const slice = await production.storage.lakeSlices.get({ projectId: PROJECT, id: "slice_fresh" })
+    expect(slice?.receivedAt).toBeInstanceOf(Date)
   })
 
   // Red check: in server.ts, drop the loopback check of the branch person's binding.
@@ -290,6 +359,51 @@ describe("a branch's credential in production", () => {
       })
     )
     expect(response.status).toBe(403)
+  })
+})
+
+describe("production's copy route", () => {
+  const copy = (userId: string, init: { signal?: AbortSignal } = {}) =>
+    production.app.fetch(
+      new Request("http://api.localhost/api/branches/copy", {
+        method: "POST",
+        headers: { authorization: tokens[userId]!, "content-type": "application/json" },
+        body: JSON.stringify({ branch: "feature/slots" }),
+        ...init,
+      })
+    )
+
+  /** Whether both places are free: two people copy at once, and each reads their copy through. */
+  const bothPlacesFree = async () => {
+    const [alice, dave] = [await copy("usr_alice"), await copy("usr_dave")]
+    await Promise.all([alice.arrayBuffer(), dave.arrayBuffer()])
+    return [alice.status, dave.status]
+  }
+
+  // Red check: in routes/branches.ts, attach the abort listener without checking
+  // `request.signal.aborted` first: the branch that went away keeps its place for good.
+  test("frees the place of a branch that went away before its copy started", async () => {
+    const gone = new AbortController()
+    gone.abort()
+    // Nobody reads this response: only the route can give its place back.
+    await copy("usr_alice", { signal: gone.signal })
+
+    expect(await bothPlacesFree()).toEqual([200, 200])
+  })
+
+  // Red check: in routes/branches.ts, take the place before `mkdtemp` without releasing it when
+  // `mkdtemp` throws: the failed copy keeps its place for good.
+  test("frees the place of a copy that could not start", async () => {
+    const tmp = process.env.TMPDIR
+    process.env.TMPDIR = "/nonexistent/sixb-branch-copy"
+    try {
+      expect((await copy("usr_alice")).status).toBe(500)
+    } finally {
+      if (tmp === undefined) delete process.env.TMPDIR
+      else process.env.TMPDIR = tmp
+    }
+
+    expect(await bothPlacesFree()).toEqual([200, 200])
   })
 })
 
@@ -348,5 +462,36 @@ function opens(url: string, origin: string): Promise<boolean> {
       resolve(true)
     })
     ws.addEventListener("close", () => resolve(false))
+  })
+}
+
+/** A slice a copy cut for `userId`, and the branch credential it records. */
+async function branchSlice(userId: string, id: string, createdAt = new Date()): Promise<string> {
+  const credential = `${BRANCH_CREDENTIAL_PREFIX}${createHash("sha256").update(id).digest("base64url")}`
+  await production.storage.lakeSlices.create({
+    id,
+    projectId: PROJECT,
+    userId,
+    branch: "feature/y",
+    point: "point",
+    versions: [],
+    files: [],
+    createdAt,
+    credentialHash: createHash("sha256").update(credential).digest("hex"),
+  })
+  return credential
+}
+
+function fileAs(credential: string): Promise<Response> {
+  const path = encodeURIComponent("/properties/attachment")
+  return fetch(new URL(`api/objects/ticket/t-1/files/content?path=${path}`, production.url), {
+    headers: { authorization: `Bearer ${credential}` },
+  })
+}
+
+function releaseAs(credential: string, sliceId: string): Promise<Response> {
+  return fetch(new URL(`api/branches/slices/${sliceId}`, production.url), {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${credential}` },
   })
 }

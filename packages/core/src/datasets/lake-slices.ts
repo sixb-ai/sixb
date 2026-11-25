@@ -29,6 +29,21 @@ export const LAKE_SLICE_FILES_ROUTE_PREFIX = "/api/lake/slice-files/"
  */
 export const LAKE_SLICE_KEEP_MS = 14 * 24 * 60 * 60_000
 
+/**
+ * How long a branch's copy may go unconfirmed: long enough to stream and spool the largest copy.
+ * Past it, the slice of a copy its branch never confirmed holding is no longer live.
+ */
+export const UNRECEIVED_COPY_LIVES_MS = 60 * 60_000
+
+/** Whether a slice is a branch's copy that its branch never confirmed, and its grace is over. */
+export function isUnreceivedCopy(slice: LakeSliceRecord, now = new Date()): boolean {
+  return (
+    slice.credentialHash !== undefined &&
+    slice.receivedAt === undefined &&
+    slice.createdAt.getTime() + UNRECEIVED_COPY_LIVES_MS <= now.getTime()
+  )
+}
+
 const DEFAULT_TOKEN_EXPIRY_MS = 15 * 60_000
 const LONGEST_TOKEN_EXPIRY_MS = 24 * 60 * 60_000
 /** 32 random bytes in base64url. */
@@ -286,17 +301,18 @@ export async function openLakeSliceFile(
 
 /**
  * The slices a branch may still open: cut, or holding a token, less than `LAKE_SLICE_KEEP_MS`
- * ago. Production's retention keeps their versions and their files.
+ * ago, less a copy no branch confirmed. Production's retention keeps their versions and files.
  */
 export async function liveLakeSlices(
   host: Pick<LakeSliceHost, "id" | "storage">
 ): Promise<readonly LakeSliceRecord[]> {
-  return (
+  const now = new Date()
+  const live =
     (await host.storage.lakeSlices?.listLive({
       projectId: host.id,
-      liveAfter: new Date(Date.now() - LAKE_SLICE_KEEP_MS),
+      liveAfter: new Date(now.getTime() - LAKE_SLICE_KEEP_MS),
     })) ?? []
-  )
+  return live.filter((slice) => !isUnreceivedCopy(slice, now))
 }
 
 /** Deletes the files production made for slices no branch may still open. Returns how many. */

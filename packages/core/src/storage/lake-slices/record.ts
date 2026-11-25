@@ -30,6 +30,7 @@ export function parseLakeSliceRow(row: { readonly [column: string]: unknown }): 
     ...(row.credentialHash == null
       ? {}
       : { credentialHash: text(row.credentialHash, "credentialHash", id) }),
+    ...(row.receivedAt == null ? {} : { receivedAt: date(row.receivedAt, "receivedAt", id) }),
   }
 }
 

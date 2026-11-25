@@ -148,6 +148,7 @@ beforeAll(async () => {
   for (const [userId, groupId] of [
     ["usr_alice", developers.id],
     ["usr_bob", readers.id],
+    ["usr_dave", developers.id],
   ] as const) {
     await storage.auth.users.create({ projectId: PROJECT, id: userId, email: `${userId}@x.test` })
     await storage.auth.groupMemberships.upsert({
@@ -368,7 +369,8 @@ describe.each(laptops)("a laptop branch on %s", (_name, localStorage) => {
     await local.storage.close?.()
   }, 60_000)
 
-  // Red check: drop the grant check from `copyForBranch` and the route.
+  // Red check: in routes/branches.ts, drop the grant check of the copy route alone: the copy
+  // starts and breaks off. (`copyForBranch`'s own is `packages/core/tests/branch-copy.test.ts`'s.)
   test("refuses a person who may not copy", async () => {
     const local = await laptop()
     const bob = await signedIn("usr_bob")
@@ -587,27 +589,35 @@ await Bun.write(import.meta.dir + "/.sixb/sign-in-seen.json", JSON.stringify(sig
 
 describe("production's copy route", () => {
   // Red check: in routes/branches.ts, drop the copies-running limit. (That a copy cut short leaves
-  // no slice is `packages/core/tests/branch-copy.test.ts`'s.)
-  test("runs two copies at a time, and a branch that goes away frees its place", async () => {
+  // no slice is `packages/core/tests/branch-copy.test.ts`'s; a copy that never started, the
+  // server's `branch-runtime.test.ts`.)
+  test("runs two copies at a time, one per person, and a branch that goes away frees its place", async () => {
     const alice = await signedIn("usr_alice")
+    const dave = await signedIn("usr_dave")
     const live = async () =>
       (await production.storage.lakeSlices.listLive({ projectId: PROJECT, liveAfter: new Date(0) }))
         .length
     const before = await live()
-    const copy = async (signal?: AbortSignal) =>
+    const copy = async (person = alice, signal?: AbortSignal) =>
       fetch(new URL("api/branches/copy", production.url), {
         method: "POST",
-        headers: { authorization: await alice.authorization(), "content-type": "application/json" },
+        headers: {
+          authorization: await person.authorization(),
+          "content-type": "application/json",
+        },
         body: JSON.stringify({ branch: "feature/limit" }),
         ...(signal ? { signal } : {}),
       })
 
     const goneFirst = new AbortController()
     const goneSecond = new AbortController()
-    const first = await copy(goneFirst.signal)
-    const second = await copy(goneSecond.signal)
-    const third = await copy()
-    expect([first.status, second.status, third.status]).toEqual([200, 200, 429])
+    const first = await copy(alice, goneFirst.signal)
+    // Alice's second copy waits for her first, whoever else copies.
+    const again = await copy(alice)
+    const second = await copy(dave, goneSecond.signal)
+    const third = await copy(dave)
+    expect([first.status, again.status, second.status, third.status]).toEqual([200, 429, 200, 429])
+    expect(await again.text()).toContain("Your copy to a branch is still running")
 
     // Both branches go away before reading their copies through: their places come back.
     await first.body!.getReader().read()
@@ -622,6 +632,38 @@ describe("production's copy route", () => {
     await next.arrayBuffer()
 
     expect(await live()).toBe(before + 1)
+  }, 60_000)
+})
+
+describe("a copy the supervisor fetches", () => {
+  // Red checks: in branch-from-production.ts, drop `confirmReceived`: the slice is never confirmed,
+  // and lapses within the hour. Drop the release of the unloaded spool's slice: the first copy's
+  // slice stays live, holding production's files two weeks.
+  test("is confirmed once held whole, and a copy fetched again before loading releases it", async () => {
+    const projectRoot = await mkdtemp(join(rootDir, "supervisor-"))
+    const alice = await signedIn("usr_alice")
+    const slices = async () =>
+      (
+        await production.storage.lakeSlices.listLive({ projectId: PROJECT, liveAfter: new Date(0) })
+      ).filter((slice) => slice.branch === "feature/spooled")
+    const fetchCopy = () =>
+      fetchBranchCopy({
+        projectRoot,
+        gitBranch: "feature/spooled",
+        refresh: true,
+        profile: "alice",
+        connect: async () => alice,
+      })
+
+    await fetchCopy()
+    const [first] = await slices()
+    expect(first?.receivedAt).toBeInstanceOf(Date)
+
+    await fetchCopy()
+    const [second, ...more] = await slices()
+    expect(more).toEqual([])
+    expect(second?.id).not.toBe(first?.id)
+    expect(second?.receivedAt).toBeInstanceOf(Date)
   }, 60_000)
 })
 

@@ -16,11 +16,12 @@ export class PgLakeSliceStorage implements LakeSliceStorage {
     await this.sql`
       INSERT INTO lake_slices (
         project_id, id, user_id, branch, point, versions, files, created_at, last_token_expires_at,
-        credential_hash
+        credential_hash, received_at
       ) VALUES (
         ${record.projectId}, ${record.id}, ${record.userId}, ${record.branch}, ${record.point},
         ${JSON.stringify(record.versions)}::text::jsonb, ${JSON.stringify(record.files)}::text::jsonb,
-        ${record.createdAt}, ${record.lastTokenExpiresAt ?? null}, ${record.credentialHash ?? null}
+        ${record.createdAt}, ${record.lastTokenExpiresAt ?? null}, ${record.credentialHash ?? null},
+        ${record.receivedAt ?? null}
       )
     `
   }
@@ -52,6 +53,13 @@ export class PgLakeSliceStorage implements LakeSliceStorage {
       )
       FROM grant_row
       WHERE lake_slices.project_id = grant_row.project_id AND lake_slices.id = grant_row.slice_id
+    `
+  }
+
+  async markReceived(input: LakeSliceRef & { readonly at: Date }): Promise<void> {
+    await this.sql`
+      UPDATE lake_slices SET received_at = coalesce(received_at, ${input.at})
+      WHERE project_id = ${input.projectId} AND id = ${input.id}
     `
   }
 
@@ -132,5 +140,6 @@ function sliceFromRow(row: PgRow): LakeSliceRecord {
     createdAt: row.created_at,
     lastTokenExpiresAt: row.last_token_expires_at,
     credentialHash: row.credential_hash,
+    receivedAt: row.received_at,
   })
 }

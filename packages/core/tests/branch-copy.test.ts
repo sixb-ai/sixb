@@ -17,6 +17,7 @@ import {
 } from "../src"
 import { copyForBranch } from "../src/branches/copy"
 import { readBranchCopy } from "../src/branches/wire"
+import { liveLakeSlices } from "../src/datasets/lake-slices"
 import type { LakeForks } from "../src/lake-storage"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -141,5 +142,32 @@ describe("a copy for a branch", () => {
 
     expect(String(refused)).toContain("can.manage(project.source)")
     expect(await live()).toEqual([])
+  })
+
+  // Red check: in `liveLakeSlices`, drop the `isUnreceivedCopy` filter: retention keeps the files
+  // of a copy no branch ever held.
+  test("lets the slice of a copy no branch confirmed lapse within the hour", async () => {
+    const { host } = await production()
+    const hourAgo = new Date(Date.now() - 61 * 60_000)
+    const slice = (id: string, extra: object = {}) =>
+      host.storage.lakeSlices!.create({
+        id,
+        projectId: host.id,
+        userId: "usr_alice",
+        branch: "feature/x",
+        point: "point",
+        versions: [],
+        files: [],
+        createdAt: hourAgo,
+        ...extra,
+      })
+    await slice("slice_unconfirmed", { credentialHash: "a".repeat(64) })
+    await slice("slice_confirmed", { credentialHash: "b".repeat(64), receivedAt: hourAgo })
+    // A slice cut for no branch credential keeps its own rule.
+    await slice("slice_plain")
+    await slice("slice_fresh", { credentialHash: "c".repeat(64), createdAt: new Date() })
+
+    const ids = (await liveLakeSlices(host)).map((live) => live.id).sort()
+    expect(ids).toEqual(["slice_confirmed", "slice_fresh", "slice_plain"])
   })
 })

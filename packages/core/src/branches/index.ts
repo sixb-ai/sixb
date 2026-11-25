@@ -4,7 +4,9 @@ export { type CopyForBranchInput, copyForBranch } from "./copy"
 export {
   authorizeBranchCredential,
   BRANCH_CREDENTIAL_PREFIX,
+  branchCredentialSlice,
   isBranchCredentialRoute,
+  isBranchSliceRelease,
 } from "./credential"
 export { type BranchRuntime, branchRuntimeOf, hostOnBranch } from "./runtime"
 export {

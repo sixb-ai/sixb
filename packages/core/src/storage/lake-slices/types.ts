@@ -27,6 +27,11 @@ export interface LakeSliceRecord {
    * branch: its objects' files and its lake. Absent for a slice cut for no branch credential.
    */
   readonly credentialHash?: string
+  /**
+   * When the branch confirmed it holds its copy whole. A slice with a credential that no branch
+   * confirmed is the copy of a branch that never got it: it lives only a short grace.
+   */
+  readonly receivedAt?: Date
 }
 
 /** One token a branch reads a slice's files with. SHA-256 only: the token is never stored. */
@@ -65,6 +70,8 @@ export interface LakeSliceStorage {
   delete(input: LakeSliceRef): Promise<void>
   /** Records a token for the slice and keeps the later of its expiry and the slice's last one. */
   createGrant(record: LakeSliceGrantRecord): Promise<void>
+  /** Records when the branch confirmed it holds its copy, keeping the first time. */
+  markReceived(input: LakeSliceRef & { readonly at: Date }): Promise<void>
   /** The slice a branch credential belongs to, live or not: the caller decides. */
   findByCredentialHash(input: {
     readonly projectId: string

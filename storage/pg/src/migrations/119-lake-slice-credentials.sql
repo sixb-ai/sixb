@@ -5,3 +5,6 @@ ALTER TABLE lake_slices ADD COLUMN credential_hash TEXT
 
 CREATE UNIQUE INDEX idx_lake_slices_credential
   ON lake_slices (project_id, credential_hash) WHERE credential_hash IS NOT NULL;
+
+-- When the branch confirmed it holds its copy whole: a copy no branch confirmed lives a short grace.
+ALTER TABLE lake_slices ADD COLUMN received_at TIMESTAMPTZ;
