@@ -399,6 +399,9 @@ export const sixb = await createSixb({
     defineRole("readers", { grantedTo: [readers], grants: [can.view(Ticket)] }),
   ],
 })
+// What the branch's code is given of the developer's production sign-in.
+const signIn = ["SIXB_API_URL", "SIXB_API_TOKEN", "SIXB_TOKEN", "SIXB_PROFILE"].filter((name) => process.env[name] !== undefined)
+await Bun.write(import.meta.dir + "/.sixb/sign-in-seen.json", JSON.stringify(signIn))
 `
     )
     for (const args of [
@@ -451,7 +454,13 @@ export const sixb = await createSixb({
       {
         cwd: root,
         // The developer's CLI sign-in in production, and a home of its own: no other profile.
-        env: { ...process.env, HOME: root, SIXB_API_URL: production.url, SIXB_API_TOKEN: token },
+        env: {
+          ...process.env,
+          HOME: root,
+          SIXB_API_URL: production.url,
+          SIXB_API_TOKEN: token,
+          SIXB_TOKEN: token,
+        },
         stdout: "pipe",
         stderr: "pipe",
         stdin: "ignore",
@@ -502,7 +511,8 @@ export const sixb = await createSixb({
 
   // Red checks: in commands/dev-runner.ts, start the project's own host instead of the branch's:
   // the API serves the laptop's empty storage. In commands/dev.ts, leave `refresh` out of
-  // `fetchBranchCopy`: --refresh reuses the copy, as it once did before this test found it.
+  // `fetchBranchCopy`: --refresh reuses the copy, as it once did before this test found it; drop
+  // the loop over `PRODUCTION_SIGN_IN_ENV`: the branch's code reads the developer's token.
   test("copies, serves the copy as the person, reuses it, refreshes it, and drops it with its git branch", async () => {
     const root = await checkout()
     const alice = (await signedIn("usr_alice")).authorization
@@ -511,6 +521,7 @@ export const sixb = await createSixb({
       const first = await dev(root, token)
       expect(first.output()).toContain("Branch: production's data as you read it, copied now")
       expect(first.output()).toContain("Off on this branch")
+      expect(await Bun.file(join(root, ".sixb/sign-in-seen.json")).json()).toEqual([])
       // Served as Alice: the closed ticket stays in production.
       expect(await tickets(first.api)).toEqual(["t-1:Ticket t-1", "t-3:Ticket t-3"])
       await first.stop()

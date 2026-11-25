@@ -64,9 +64,16 @@ export async function runDev(options: DevOptions = {}) {
     })
     process.env[BRANCH_NAME_ENV] = gitBranch
     process.env[BRANCH_DATA_FROM_ENV] = "production"
+
+    // Each child inherits this environment: the branch's code gets none of the sign-in that took
+    // the copy, only the branch's own credential.
+    for (const name of PRODUCTION_SIGN_IN_ENV) delete process.env[name]
   }
   await runDevSupervisor(options)
 }
+
+/** What signs the CLI in to production from the environment, as `resolveProfile` reads it. */
+const PRODUCTION_SIGN_IN_ENV = ["SIXB_API_URL", "SIXB_API_TOKEN", "SIXB_TOKEN", "SIXB_PROFILE"]
 
 /** Who the CLI is signed in as, read without the network: a copy is reused only by them. */
 async function profileName(): Promise<string> {
