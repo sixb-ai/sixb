@@ -3,7 +3,12 @@ export { getActivityCaptureRuntime } from "../activity/execution"
 export type { MediaTranscriber } from "../artifacts/media/transcriber"
 export { findMediaTranscriber } from "../artifacts/media/transcriber"
 export type { SixbBranch } from "../branch-mode"
-export { branchRefusals, putOnBranch } from "../branch-mode"
+export {
+  BRANCH_DATA_FROM_ENV,
+  BRANCH_NAME_ENV,
+  branchRefusals,
+  putOnBranch,
+} from "../branch-mode"
 export { getConnectorConnectionsRuntime } from "../connectors/connections/capability"
 export type {
   CompleteConnectorAuthorizationInput,

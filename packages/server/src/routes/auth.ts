@@ -25,6 +25,7 @@ import {
   verifyDoubleSubmitCsrf,
 } from "@sixb/core/internal/auth"
 import { isAllowed } from "@sixb/core/internal/authorization"
+import { branchRuntimeOf } from "@sixb/core/internal/branches"
 import {
   type AccessTokenRecord,
   type AuthStorage,
@@ -2361,9 +2362,13 @@ function authSessionBody(
   }
 }
 
-/** No session. Says whether auth is on, so a browser shell knows whether to ask for sign-in. */
+/**
+ * No session. Says whether auth is on, so a browser shell knows whether to ask for sign-in. On a
+ * branch from production nobody signs in: every request runs as the person who copied it.
+ */
 function signedOutSessionResponse(host: SixbHostView): Response {
-  return jsonResponse({ authenticated: false as const, authEnabled: host.auth.isEnabled() }, 200)
+  const authEnabled = host.auth.isEnabled() && branchRuntimeOf(host) === null
+  return jsonResponse({ authenticated: false as const, authEnabled }, 200)
 }
 
 function authSessionJsonResponse(

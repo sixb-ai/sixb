@@ -26,7 +26,7 @@ import { OntologyRegistry } from "../ontology"
 import type { ObjectType } from "../ontology/types"
 import type { UserRef } from "../ontology/user-ref"
 import type { ProjectionDefinitionCatalog } from "../projections"
-import type { SixbHost } from "../runtime/host"
+import type { SixbHostView } from "../runtime/host"
 import { isBoundSixb } from "../runtime/sixb"
 import type { AppliedMarkings } from "../security/applied-markings"
 import { appliedSourcesKey } from "../security/applied-markings"
@@ -123,7 +123,7 @@ const DEFAULT_PAGE_SIZE = 2_000
 const MAX_PAGE_SIZE = 10_000
 const MEMBER_PAGE_SIZE = 1_000
 
-export function hostSnapshotSource(host: SixbHost): SnapshotSource {
+export function hostSnapshotSource(host: SixbHostView): SnapshotSource {
   const ontology = host.definitions.ontology
   if (!(ontology instanceof OntologyRegistry)) {
     throw new Error("[Sixb] A snapshot reads a host built from an ontology registry.")

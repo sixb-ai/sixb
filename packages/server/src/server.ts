@@ -1,11 +1,16 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
-import type { OntologyMaintenanceHandle, SixbHostView } from "@sixb/core"
+import {
+  type OntologyMaintenanceHandle,
+  resolveAuthorizationContext,
+  type SixbHostView,
+} from "@sixb/core"
 import { MAX_FILE_UPLOAD_BYTES } from "@sixb/core/blob-storage"
 import { ACTION_RUN_DRAIN_TIMEOUT_MS } from "@sixb/core/internal/actions"
 import { bindAgentRunRequestExecution } from "@sixb/core/internal/agent-execution"
 import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
 import { CSRF_HEADER_NAME, setRequestClientAddress } from "@sixb/core/internal/auth"
+import { branchRuntimeOf } from "@sixb/core/internal/branches"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { findDatasetIngestRuntime, setApiPublicOrigin } from "@sixb/core/internal/runtime"
 import { checkPipelineMarkings, warmAppliedMarkings } from "@sixb/core/internal/security"
@@ -452,6 +457,21 @@ export function createSixbApi(server: SixbServer) {
         }
       }
 
+      // A branch from production runs every local request as the person who copied it: its data
+      // is theirs to read, and nobody else signs in to it.
+      const branchPerson = await branchPersonContext(host)
+      if (branchPerson) {
+        return {
+          auth: { kind: "allow" as const, session: null },
+          sharedAccessCookies: null,
+          sharedSession: null,
+          sixb: bindRequestExecution(host, {
+            request,
+            authorization: { type: "principal", context: branchPerson },
+          }),
+        }
+      }
+
       const auth = await guard.resolve(request)
       if (auth.kind === "deny" || !auth.session?.authenticated) {
         return {
@@ -843,4 +863,22 @@ async function stopElysiaHooks(app: SixbApp): Promise<void> {
   const hooks = internal.event?.stop ?? []
   internal.server = null
   await Promise.all(hooks.map((hook) => Promise.resolve(hook.fn(app))))
+}
+
+/**
+ * The person a branch from production runs as, with the groups production gave them, which the
+ * copy carried. Null off such a branch.
+ */
+async function branchPersonContext(host: SixbHostView) {
+  const runtime = branchRuntimeOf(host)
+  if (!runtime) return null
+
+  const userId = runtime.person.userId
+  const memberships =
+    (await host.storage.auth?.groupMemberships.listForUser({ projectId: host.id, userId })) ?? []
+  return resolveAuthorizationContext({
+    principal: { type: "user", id: userId },
+    groupIds: memberships.map((membership) => membership.groupId),
+    roles: host.definitions.security.listResolvedRoles(),
+  })
 }
