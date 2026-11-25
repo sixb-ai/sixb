@@ -221,10 +221,9 @@ describe("background commands", () => {
       command: "sleep 30 & echo $! > child.pid; wait",
     })
     await waitFor(() => existsSync(join(root, "child.pid")))
-    const child = Number(readFileSync(join(root, "child.pid"), "utf8"))
 
     expect(await commands.stop(started.id)).toMatchObject({ status: "stopped" })
-    await waitFor(() => gone(child), { label: "the command's child exits" })
+    await waitFor(() => !groupRunning(groupOf(started)), { label: "the command's group exits" })
   })
 
   // Removal proof: drop the SIGKILL and the abort after the grace period in BackgroundCommands'
@@ -261,11 +260,14 @@ describe("background commands", () => {
       command: `sh -c 'trap "" TERM; echo $$ > child.pid; while true; do sleep 0.05; done' & wait`,
     })
     await waitFor(() => existsSync(join(root, "child.pid")))
-    const child = Number(readFileSync(join(root, "child.pid"), "utf8"))
+    const group = groupOf(started)
 
     try {
       expect(await graced.stop(started.id)).toMatchObject({ status: "stopped" })
-      await waitFor(() => gone(child), { label: "the process that ignores SIGTERM exits" })
+      // The whole group, not the process that ignores SIGTERM alone: its children die with it,
+      // and one the system has not reaped yet still answers for the group. Waiting for that
+      // process only let the leak check below find the group a moment later on Linux runners.
+      await waitFor(() => !groupRunning(group), { label: "every process of its group exits" })
     } finally {
       await graced.stopAll()
     }
@@ -294,10 +296,8 @@ describe("background commands", () => {
 
     const started = await starting
     expect(commands.get(started.id)).toMatchObject({ status: "stopped" })
-    const group = Number(
-      readFileSync(started.outputPath.replace(/\.log$/, ".pid"), "utf8").split(" ")[1]
-    )
-    await waitFor(() => gone(group), { label: "the command's group exits" })
+    const group = groupOf(started)
+    await waitFor(() => !groupRunning(group), { label: "the command's group exits" })
   })
 
   // Removal proof: await `started` without the signal in BackgroundCommands' start; the start
@@ -828,7 +828,7 @@ describe("background commands on the computer", () => {
     runner = newRunner()
     try {
       const second = await open("agt_run_2")
-      await waitFor(() => gone(group), { label: "the command's group exits" })
+      await waitFor(() => !groupRunning(group), { label: "the command's group exits" })
       expect(gone(unrelated)).toBe(false)
       await second.run.release?.(second.acquired)
     } finally {
