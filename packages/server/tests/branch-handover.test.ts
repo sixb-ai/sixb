@@ -437,6 +437,52 @@ describe("signing into a branch from production", () => {
       error: expect.stringContaining("Only production prepares a session here."),
     })
   })
+
+  // The branch's code answers production's request, from production's network: a redirect it
+  // gives must reach nothing there. Red check: drop `redirect: "error"` from `signIn`
+  // (`branches/execution.ts`): production posts the key and Ada to the internal server.
+  test("follows no redirect the branch answers with", async () => {
+    const reached: Request[] = []
+    const internal = Bun.serve({
+      port: 0,
+      fetch: (request) => {
+        reached.push(request)
+        return Response.json({ code: "from-inside" })
+      },
+    })
+    stops.push(async () => internal.stop(true))
+    const branch = Bun.serve({
+      port: 0,
+      fetch: () =>
+        new Response(null, {
+          status: 307,
+          headers: { location: `http://127.0.0.1:${internal.port}/admin` },
+        }),
+    })
+    stops.push(async () => branch.stop(true))
+
+    const storage = new InMemoryStorage()
+    const production = new SixbHost(options(storage, { source: { repository: "acme/shop" } }))
+    const app = createSixbApi(
+      new SixbServer({ host: production, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const headers = await signIn(storage)
+    await storage.hostedBranches.create(readyBranch(`http://127.0.0.1:${branch.port}`))
+
+    const answer = await app.fetch(
+      new Request("http://localhost/api/branches/sign-in", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ name: "feature/invoices" }),
+      })
+    )
+
+    expect(reached).toHaveLength(0)
+    expect(answer.ok).toBe(false)
+    expect(await answer.json()).toMatchObject({
+      error: expect.stringContaining("answered with a redirect, which production never follows"),
+    })
+  })
 })
 
 describe("a branch's server", () => {

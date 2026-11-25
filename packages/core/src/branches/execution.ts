@@ -203,12 +203,22 @@ export function createBranchesRuntime(
       }
 
       const person = await signingIn(runtime, execution)
+
+      // The branch's code answers this request, and production sends it from its own network:
+      // followed, a redirect would carry the key and the person anywhere production reaches.
       const response = await fetch(new URL(BRANCH_HANDOVER_PREPARE_PATH, branch.url), {
         method: "POST",
         headers: { "content-type": "application/json", [BRANCH_KEY_HEADER]: branch.key },
         body: JSON.stringify(person),
+        redirect: "error",
         signal: AbortSignal.timeout(HANDOVER_TIMEOUT_MS),
       }).catch((error: unknown) => {
+        if (isRefusedRedirect(error)) {
+          throw new Error(
+            `[Sixb] Branch '${name}' answered with a redirect, which production never follows. ` +
+              "The branch's code must answer the sign-in itself."
+          )
+        }
         throw new Error(`[Sixb] Branch '${name}' did not answer: ${errorMessage(error)}`)
       })
       const answer = (await response.json().catch(() => null)) as {
@@ -262,6 +272,11 @@ async function signingIn(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** `fetch` refusing a redirect, under `redirect: "error"`. */
+function isRefusedRedirect(error: unknown): boolean {
+  return error instanceof Error && (error as { code?: unknown }).code === "UnexpectedRedirect"
 }
 
 /**
