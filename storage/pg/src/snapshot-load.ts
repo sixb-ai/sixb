@@ -29,7 +29,7 @@ const LANES = [
 
 export const SNAPSHOT_LANES = LANES.length
 
-const LOADED_TABLES: readonly string[] = LANES.flat()
+export const LOADED_TABLES: readonly string[] = LANES.flat()
 
 /** What one lane's index builds may take: six lanes stay within a small instance's memory. */
 const LANE_MAINTENANCE_WORK_MEM = "256MB"
@@ -378,7 +378,7 @@ async function openLane(lane: Lane): Promise<void> {
 }
 
 /** A load fills a schema that holds nothing, for any project: truncating it takes no one's rows. */
-async function assertEmpty(sql: SQLClient): Promise<void> {
+export async function assertEmpty(sql: SQLClient): Promise<void> {
   for (const table of LOADED_TABLES) {
     const [row] = await sql.unsafe(`SELECT 1 FROM ${table} LIMIT 1`)
     if (row) throw snapshotTargetNotEmpty()
@@ -396,7 +396,10 @@ async function currentSchema(sql: SQLClient): Promise<string> {
   return row.schema.replace(/"/g, '""')
 }
 
-async function writeCommit(sql: SQLClient, input: SnapshotLoadInput): Promise<void> {
+export async function writeCommit(
+  sql: SQLClient,
+  input: Pick<SnapshotLoadInput, "commit" | "uniqueProperties" | "projectId">
+): Promise<void> {
   const { commit, uniqueProperties, projectId } = input
 
   await sql`
@@ -446,7 +449,7 @@ async function emptyAgain(
 }
 
 /** Drop every index of these tables that no constraint owns, returning how to build it. */
-async function dropSecondaryIndexes(
+export async function dropSecondaryIndexes(
   sql: SQLClient,
   tables: readonly string[]
 ): Promise<readonly string[]> {

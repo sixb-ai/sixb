@@ -944,6 +944,11 @@ export { InMemoryShareSessionStorage, ShareSessionStorageError } from "./share-s
 export type {
   BranchNamespace,
   BranchNamespaceStorage,
+  SnapshotCopyCounts,
+  SnapshotCopyInput,
+  SnapshotCopyPlan,
+  SnapshotCopyStorage,
+  SnapshotCopyType,
   SnapshotLinkWrite,
   SnapshotLoadBatch,
   SnapshotLoader,

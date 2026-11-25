@@ -191,24 +191,7 @@ async function takeSnapshot(
   frames: FrameQueue
 ): Promise<boolean> {
   const storage = source.storage as SnapshotReadStorage
-  const applied = source.appliedMarkings
-  applied?.invalidate()
-  await applied?.current()
-  const pinnedSources = applied?.appliedSources?.()
-
-  // Resolving the reader's clearance may read storage, which the snapshot's views must not wait
-  // on: it is pinned here, and every view's reader, the scope's included, keeps it.
-  const readersIn = await objectReadersIn(
-    createAuthorizedObjectReader({
-      scope: executionScope,
-      ontology: source.ontology,
-      objectStorage: storage.objects,
-      ...(source.appliedMarkings === undefined ? {} : { appliedMarkings: source.appliedMarkings }),
-    })
-  )
-  const scope = await readerSnapshotScope(readersIn(storage.objects))
-  const user = scope.user
-  if (!user) throw new Error("[Sixb] A snapshot is taken as a user: sign in as one.")
+  const { readersIn, scope, user, pinnedSources } = await pinnedReader(source, executionScope)
 
   const counts = { objects: 0, links: 0, points: 0, vectors: 0, users: 0 }
   const encode = (record: SnapshotRecord) =>
@@ -230,12 +213,7 @@ async function takeSnapshot(
           const active = await first.storage.ontology.sources.listActive({
             projectId: source.projectId,
           })
-          if (
-            pinnedSources !== undefined &&
-            appliedSourcesKey(active, declaredProjectionIds(source)) !== pinnedSources
-          ) {
-            return false
-          }
+          if (appliedMoved(source, pinnedSources, active)) return false
 
           const manifest = snapshotManifest(source, { ...scope, user }, active, settings)
           await push({ ...manifest, takenAt })
@@ -273,7 +251,46 @@ async function takeSnapshot(
   )
 }
 
-const APPLIED_MARKINGS_ATTEMPTS = 3
+export const APPLIED_MARKINGS_ATTEMPTS = 3
+
+/**
+ * The person's reader with its clearance pinned, its scope, and the versions projections had
+ * applied when the clearance was built. Resolving a clearance may read storage, which a
+ * snapshot's views must not wait on: it is pinned before the read opens, and every reader built
+ * from it keeps it.
+ */
+export async function pinnedReader(source: SnapshotSource, executionScope: ExecutionScope) {
+  const applied = source.appliedMarkings
+  applied?.invalidate()
+  await applied?.current()
+  const pinnedSources = applied?.appliedSources?.()
+
+  const readersIn = await objectReadersIn(
+    createAuthorizedObjectReader({
+      scope: executionScope,
+      ontology: source.ontology,
+      objectStorage: source.storage.objects,
+      ...(applied === undefined ? {} : { appliedMarkings: applied }),
+    })
+  )
+  const scope = await readerSnapshotScope(readersIn(source.storage.objects))
+  const user = scope.user
+  if (!user) throw new Error("[Sixb] A snapshot is taken as a user: sign in as one.")
+
+  return { readersIn, scope, user, pinnedSources }
+}
+
+/** Whether projections applied other versions at S than those the clearance was built from. */
+export function appliedMoved(
+  source: SnapshotSource,
+  pinnedSources: string | undefined,
+  active: readonly ActiveOntologySource[]
+): boolean {
+  return (
+    pinnedSources !== undefined &&
+    appliedSourcesKey(active, declaredProjectionIds(source)) !== pinnedSources
+  )
+}
 
 function declaredProjectionIds(source: SnapshotSource): readonly string[] {
   return [
@@ -346,11 +363,11 @@ async function withinDuration<T>(
   }
 }
 
-function snapshotManifest(
+export function snapshotManifest(
   source: SnapshotSource,
   scope: ReaderSnapshotScope & { readonly user: UserRef },
   active: readonly ActiveOntologySource[],
-  settings: ExportSettings
+  settings: Pick<ExportSettings, "vectorConfigurations">
 ): Omit<SnapshotManifest, "takenAt"> {
   const projections = projectionsByType(source, active, scope.canViewDataset)
 
@@ -431,7 +448,7 @@ function projectionsByType(
 function exportedVectorProfiles(
   objectType: ObjectType,
   hiddenPropertyIds: readonly string[],
-  settings: ExportSettings
+  settings: Pick<ExportSettings, "vectorConfigurations">
 ): SnapshotTypeManifest["vectors"] {
   const profiles = Object.entries(objectType.search?.vectors ?? {})
 

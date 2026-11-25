@@ -88,6 +88,23 @@ projection's source rows, comes with the next format version, which this one ref
   leaves the mark, and the namespace refuses to open until it is dropped. Frozen rows are visible
   to all at once, so counts use index-only scans right after the load.
 
+## Copy in place
+
+`copySnapshot` holds exactly what importing the exported snapshot would, without the snapshot: the
+provider copies inside the engine. It applies when the branch's storage copies from production's
+(PostgreSQL: a namespace of the same storage) and the person reads every object, property and
+link of each type they read. Otherwise it returns `undefined`, and the snapshot goes through a
+file the branch imports.
+
+- The branch's definitions arrive as data (`branchDefinitions`, JSON): production plans the copy
+  with the same `ImportPlan` the import uses, and never loads the branch's code.
+- PostgreSQL adopts production's exported snapshot on several lanes, each copying ranges of
+  primary ids with `INSERT … SELECT`, then vacuums and indexes as a load does. The vectors' keys
+  are dropped during the copy and added again after it, which checks every row.
+- `handOverBranchNamespace` gives the schema and everything in it to the branch's role. Production
+  then refuses to open it or copy into it: a trigger the role plants runs as whoever writes, so
+  production's statements must never meet it. A new copy drops the namespace and starts again.
+
 ## Projections
 
 A type fed by a projection is exported and imported as created objects. The manifest records its

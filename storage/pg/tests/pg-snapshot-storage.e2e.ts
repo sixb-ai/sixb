@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { randomBytes } from "node:crypto"
 import type { BranchNamespace, SnapshotLoadBatch } from "@sixb/core/storage"
 import { runSnapshotLoadContractSuite, runSnapshotReadContractSuite } from "@sixb/core/testing"
 import { PostgresStorage } from "../src"
@@ -13,17 +14,23 @@ async function testStorage(): Promise<PostgresStorage> {
   return storage
 }
 
-/** A client on a test storage's database, closed after `run`. */
+/** A client on a test storage's database, closed after `run`: as the role, when one is given. */
 async function withClient<T>(
   storage: PostgresStorage,
   schema: string | undefined,
-  run: (sql: ReturnType<typeof createPgClient>) => Promise<T>
+  run: (sql: ReturnType<typeof createPgClient>) => Promise<T>,
+  role?: { readonly name: string; readonly password: string }
 ): Promise<T> {
   const connection = connections.get(storage)
   if (!connection) throw new Error("Expected a test storage.")
 
+  const url = new URL(connection.url)
+  if (role) {
+    url.username = role.name
+    url.password = role.password
+  }
   const sql = createPgClient({
-    connectionString: connection.url,
+    connectionString: url.toString(),
     schemaName: schema ?? connection.schema,
     max: 1,
   })
@@ -44,9 +51,105 @@ runSnapshotReadContractSuite("PostgreSQL storage", {
     }),
 })
 
+/** The tables a snapshot fills, and the members, each row without its commit's id. */
+const COPIED_TABLES = [
+  "objects",
+  "links",
+  "ontology_object_overrides",
+  "ontology_link_overrides",
+  "timeseries",
+  "timeseries_latest",
+  "object_unique_values",
+  "object_unique_properties",
+  "object_artifact_refs",
+  "object_vectors",
+  "auth_users",
+  "auth_group_memberships",
+]
+
+const branchSchema = (namespace: string) => `sixb_test_branch_${namespace.replaceAll("-", "_")}`
+
+/** The role each test storage's namespaces are handed to, as a hosted branch's would be. */
+const roles = new WeakMap<PostgresStorage, { readonly name: string; readonly password: string }>()
+
+/**
+ * As the role: empty every table, then fail any statement writing to one, naming who ran it. A
+ * trigger runs with the privileges of whoever writes, which is why production writes there no
+ * more.
+ */
+const PLANT = `
+  DO $$ BEGIN
+    EXECUTE (SELECT 'TRUNCATE ' || string_agg(format('%I', tablename), ', ')
+      FROM pg_tables WHERE schemaname = current_schema());
+  END $$;
+  CREATE FUNCTION planted() RETURNS trigger LANGUAGE plpgsql AS $f$
+    BEGIN RAISE EXCEPTION 'planted trigger ran as %', current_user; END
+  $f$;
+  DO $$ DECLARE t record; BEGIN
+    FOR t IN SELECT relname FROM pg_class
+      WHERE relnamespace = current_schema()::regnamespace AND relkind IN ('r', 'p')
+        AND NOT relispartition
+    LOOP
+      EXECUTE format('CREATE TRIGGER planted BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE ON %I '
+        'FOR EACH STATEMENT EXECUTE FUNCTION planted()', t.relname);
+    END LOOP;
+  END $$;
+`
+
 runSnapshotLoadContractSuite("PostgreSQL storage", {
   createStorage: testStorage,
   cleanup: (storage) => disposeTestStorage(storage),
+  roles: {
+    handOver: async (storage, namespace) => {
+      let role = roles.get(storage)
+      if (!role) {
+        role = { name: `sixb_test_role_${randomBytes(6).toString("hex")}`, password: "branch" }
+        roles.set(storage, role)
+        await withClient(storage, "public", async (sql) => {
+          await sql.unsafe(`CREATE ROLE ${role!.name} LOGIN PASSWORD '${role!.password}'`)
+          await sql.unsafe(`GRANT ${role!.name} TO CURRENT_USER`)
+        })
+      }
+      await storage.handOverBranchNamespace(namespace, role.name)
+    },
+    plant: (storage, namespace) =>
+      withClient(
+        storage,
+        branchSchema(namespace),
+        async (sql) => {
+          await sql.unsafe(PLANT)
+        },
+        roles.get(storage)
+      ),
+    write: (storage, namespace) =>
+      withClient(
+        storage,
+        branchSchema(namespace),
+        async (sql) => {
+          await sql`DELETE FROM objects`
+        },
+        roles.get(storage)
+      ),
+    cleanup: async (storage) => {
+      const role = roles.get(storage)
+      if (!role) return
+      await withClient(storage, "public", async (sql) => {
+        await sql.unsafe(`DROP OWNED BY ${role.name}`)
+        await sql.unsafe(`DROP ROLE ${role.name}`)
+      })
+    },
+  },
+  rows: (storage, namespace) =>
+    withClient(storage, branchSchema(namespace), async (sql) => {
+      const rows: Record<string, unknown[]> = {}
+      for (const table of COPIED_TABLES) {
+        const found = await sql.unsafe<{ row: string }[]>(
+          `SELECT (to_jsonb(t) - 'last_commit_id' - 'prepared_at')::text AS row FROM ${table} AS t`
+        )
+        rows[table] = found.map((entry) => entry.row).sort()
+      }
+      return rows
+    }),
 })
 
 const PROJECT = "pg-load"

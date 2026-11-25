@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test"
+import { copySnapshot } from "../snapshots/copy"
+import { branchDefinitions } from "../snapshots/definitions"
 import { exportSnapshot, hostSnapshotSource } from "../snapshots/export"
 import { importSnapshot } from "../snapshots/import"
 import { migrateStorage } from "../storage/migrations"
@@ -11,6 +13,7 @@ import type { Storage } from "../storage/types"
 import { createTestSixb } from "./execution"
 import {
   Customer,
+  clerkOptions,
   createHost,
   Invoice,
   ontology,
@@ -26,6 +29,29 @@ export interface SnapshotLoadContractProvider<TStorage extends Storage> {
     TStorage & SnapshotReadStorage & SnapshotLoadStorage & BranchNamespaceStorage
   >
   readonly cleanup?: (storage: TStorage) => void | Promise<void>
+  /**
+   * Every row a branch namespace holds, comparable across two loads of one snapshot: for a
+   * provider that copies a snapshot in place, which must hold what a load holds. Its commit's
+   * id is left out of every row.
+   */
+  readonly rows?: (storage: TStorage, namespace: string) => Promise<unknown>
+  /**
+   * For a provider that hands a branch namespace to a role of its own, which the branch's runtime
+   * logs in as: what the role does in it.
+   */
+  readonly roles?: {
+    /** Hands the namespace to its role, created the first time. */
+    handOver(storage: TStorage, namespace: string): Promise<void>
+    /**
+     * As the role: empties its namespace, and plants on every table a trigger that fails any
+     * statement writing to it, naming who ran it.
+     */
+    plant(storage: TStorage, namespace: string): Promise<void>
+    /** As the role: writes to its namespace. Fails once the trigger is planted. */
+    write(storage: TStorage, namespace: string): Promise<void>
+    /** Drops the roles the suite created. */
+    cleanup(storage: TStorage): Promise<void>
+  }
 }
 
 /**
@@ -294,6 +320,114 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
           expect((await storage.objects.list({ projectId: PROJECT })).total).toBe(5)
         } finally {
           await production.closeBroker()
+        }
+      })
+    },
+    TIMEOUT_MS
+  )
+
+  // Reproduce on PostgreSQL: drop the fingerprint check from copyVectors, or write edited_at
+  // without its milliseconds, and the copy no longer holds what the load holds; drop the `whole`
+  // check from copySnapshot, and a clerk's snapshot is copied with what they cannot read.
+  test(
+    `${name} copies a snapshot holding exactly what a load of it holds`,
+    async () => {
+      await withStorage(async (storage) => {
+        const production = await seededHost(storage)
+        const source = hostSnapshotSource(production)
+
+        try {
+          for (const [person, options] of [
+            ["owner", ownerOptions(production)],
+            ["clerk", clerkOptions(production)],
+          ] as const) {
+            const copied = await storage.createBranchNamespace(`copied-${person}`)
+            const loaded = await storage.createBranchNamespace(`loaded-${person}`)
+
+            const copy = await copySnapshot({
+              source,
+              scope: options.scope,
+              storage: copied,
+              definitions: branchDefinitions(ontology()),
+            })
+            const load = await importSnapshot({
+              snapshot: exportSnapshot(source, options),
+              storage: loaded,
+              ontology: ontology(),
+            })
+
+            // Only an owner's snapshot is copied in place, and only where the storage can.
+            if (person === "clerk" || !provider.rows) {
+              expect(copy).toBeUndefined()
+              continue
+            }
+            const { commitId: _copied, takenAt: _copiedAt, ...copyReport } = copy!
+            const { commitId: _loaded, takenAt: _loadedAt, ...loadReport } = load
+            expect(copyReport).toEqual(loadReport)
+
+            if (provider.rows) {
+              expect(await provider.rows(storage, `copied-${person}`)).toEqual(
+                await provider.rows(storage, `loaded-${person}`)
+              )
+            }
+          }
+        } finally {
+          await production.closeBroker()
+        }
+      })
+    },
+    TIMEOUT_MS
+  )
+
+  const roles = provider.roles
+  if (!roles) return
+
+  // Reproduce on PostgreSQL: drop the owner check from openBranchNamespace, or the one in
+  // copySnapshot with the handover's closing of production's connections, and the planted trigger
+  // runs as production.
+  test(
+    `${name} never acts in a namespace handed to its role, a new copy included`,
+    async () => {
+      await withStorage(async (storage) => {
+        const production = await seededHost(storage)
+        const source = hostSnapshotSource(production)
+        const copy = (into: Storage) =>
+          copySnapshot({
+            source,
+            scope: ownerOptions(production).scope,
+            storage: into,
+            definitions: branchDefinitions(ontology()),
+          })
+
+        try {
+          const held = await storage.createBranchNamespace("handed")
+          expect((await copy(held))?.types.length).toBeGreaterThan(0)
+          await roles.handOver(storage, "handed")
+
+          // What the role may do once it owns its namespace: a trigger runs as whoever writes.
+          await roles.plant(storage, "handed")
+          expect(String(await roles.write(storage, "handed").catch((error) => error))).toContain(
+            "planted trigger"
+          )
+
+          const opened = await storage.openBranchNamespace("handed").catch((error) => error)
+          expect(String(opened)).toContain("belongs to its role")
+          const copied = await copy(held).catch((error) => error)
+          expect(String(copied)).toContain("belongs to its role")
+          expect(String(copied)).not.toContain("planted trigger")
+
+          // A new copy: the namespace goes, with what the role planted, and a new one is copied.
+          await storage.dropBranchNamespace("handed")
+          const fresh = await storage.createBranchNamespace("handed")
+          expect((await copy(fresh))?.types.length).toBeGreaterThan(0)
+          await roles.handOver(storage, "handed")
+          await roles.write(storage, "handed")
+        } finally {
+          await production.closeBroker()
+          for (const branch of await storage.listBranchNamespaces()) {
+            await storage.dropBranchNamespace(branch)
+          }
+          await roles.cleanup(storage)
         }
       })
     },

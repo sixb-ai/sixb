@@ -36,6 +36,9 @@ import {
   type ObjectQueryPreparationResult,
   type ObjectStorage,
   type QueryPreparationCapableStorage,
+  type SnapshotCopyCounts,
+  type SnapshotCopyInput,
+  type SnapshotCopyStorage,
   type SnapshotLoader,
   type SnapshotLoadInput,
   type SnapshotLoadStorage,
@@ -83,6 +86,7 @@ import { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storag
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
 import { PgShareGrantStorage } from "./share-grant-storage"
 import { PgShareSessionStorage } from "./share-session-storage"
+import { copyBounds, copySnapshotInPg } from "./snapshot-copy"
 import { type BranchSchemaState, PgSnapshotLoad, SNAPSHOT_LANES } from "./snapshot-load"
 import { readPgLatestPoints, readPgMemberships, readPgRanges, readPgVectors } from "./snapshot-read"
 import { isRetryableTransactionConflict } from "./storage-errors"
@@ -190,6 +194,7 @@ export class PostgresStorage
     QueryPreparationCapableStorage,
     SnapshotReadStorage,
     SnapshotLoadStorage,
+    SnapshotCopyStorage,
     BranchNamespaceStorage
 {
   readonly objects: ObjectStorage
@@ -228,6 +233,8 @@ export class PostgresStorage
   private readonly branches = new Map<string, PostgresStorage>()
   /** Set on a branch namespace's storage: the only kind a snapshot loads into. */
   private branchName: string | undefined
+  /** The storage that opened this branch namespace, which it copies snapshots from. */
+  private branchParent: PostgresStorage | undefined
   private readonly shutdownTimeoutSeconds: number
   private readonly transactionScope = new AsyncLocalStorage<boolean>()
   private readonly sortIndexes = new PgSortIndexCatalog()
@@ -474,6 +481,100 @@ export class PostgresStorage
     }
   }
 
+  /** A branch namespace this storage opened copies from it: one database holds both. */
+  copiesFrom(source: Storage): boolean {
+    return this.branchParent !== undefined && this.branchParent === source
+  }
+
+  /**
+   * Copy a snapshot of `source`, the storage that opened this branch namespace, inside
+   * PostgreSQL: see `copySnapshotInPg`. Production's transaction stays open only until every lane
+   * has adopted its snapshot; the lanes keep it while they copy. Production copies only into a
+   * namespace it still owns: once handed to a role, nothing it runs there may meet the role's code.
+   */
+  async copySnapshot(input: SnapshotCopyInput): Promise<SnapshotCopyCounts | undefined> {
+    const branch = this.branchName
+    const source = this.branchParent
+    if (branch === undefined || !source || source !== input.source) {
+      throw new Error(
+        "[SixbPg] A snapshot copies into a branch namespace of the storage it copies from: open the namespace through that storage."
+      )
+    }
+    const owner = await source.branchSchemaOwner(branch)
+    if (owner !== "production") throw branchNamespaceHandedOver(branch)
+    this.assertRootOperationAvailable()
+
+    const production = await source.sql.reserve()
+    let open = true
+    const connections: ReservedSQL[] = []
+    let locked = false
+
+    try {
+      const snapshotId = await beginPgSnapshot(production, { maxDurationMs: input.maxDurationMs })
+      const plan = await input.prepare(
+        source.createTransactionStorage(production, {
+          id: {},
+          materializations: new ProviderMaterializationTransactionLifecycle(),
+          active: true,
+        })
+      )
+      if (!plan) return undefined
+
+      const count = Math.max(1, Math.floor((this.options.max ?? 10) / 2))
+      const bounds = await copyBounds(
+        production,
+        source.schemaName,
+        input.projectId,
+        plan.types,
+        count
+      )
+
+      for (let index = 0; index < count; index += 1) connections.push(await this.sql.reserve())
+      const first = connections[0]!
+      locked = await this.lockLoad(first, branch)
+      for (const type of plan.types) {
+        await ensureObjectPartition(first, this.schemaName, type.objectTypeId)
+      }
+
+      return await copySnapshotInPg({
+        connections,
+        sourceSchema: source.schemaName,
+        snapshotId,
+        projectId: input.projectId,
+        plan,
+        bounds,
+        state: { sixbBranch: branch },
+        adopted: async () => {
+          open = false
+          await endPgSnapshot(production)
+        },
+      })
+    } finally {
+      if (open) await endPgSnapshot(production).catch(() => undefined)
+      production.release()
+      if (locked) await this.unlockLoad(connections[0]!)
+      for (const connection of connections) connection.release()
+    }
+  }
+
+  private async lockLoad(sql: ReservedSQL, branch: string): Promise<boolean> {
+    const [lock] = await sql<{ locked: boolean }[]>`
+      SELECT pg_try_advisory_lock(hashtext(${`${this.schemaName}:snapshot-load`})) AS locked
+    `
+    if (lock?.locked !== true) {
+      throw new Error(
+        `[SixbPg] Branch namespace '${branch}' is loading a snapshot already: wait for that load to end.`
+      )
+    }
+    return true
+  }
+
+  private async unlockLoad(sql: ReservedSQL): Promise<void> {
+    await sql`SELECT pg_advisory_unlock(hashtext(${`${this.schemaName}:snapshot-load`}))`.catch(
+      () => undefined
+    )
+  }
+
   /**
    * Load into this branch schema, and only into one: the load empties the tables it fills. Each
    * type's partition is created first, then the tables load in parallel lanes, one connection
@@ -499,15 +600,7 @@ export class PostgresStorage
       for (let index = 0; index < count; index += 1) connections.push(await this.sql.reserve())
       const first = connections[0]!
 
-      const [lock] = await first<{ locked: boolean }[]>`
-        SELECT pg_try_advisory_lock(hashtext(${`${this.schemaName}:snapshot-load`})) AS locked
-      `
-      locked = lock?.locked === true
-      if (!locked) {
-        throw new Error(
-          `[SixbPg] Branch namespace '${branch}' is loading a snapshot already: wait for that load to end.`
-        )
-      }
+      locked = await this.lockLoad(first, branch)
 
       for (const objectTypeId of input.objectTypeIds) {
         await ensureObjectPartition(first, this.schemaName, objectTypeId)
@@ -517,11 +610,7 @@ export class PostgresStorage
         run({ write: (batch) => load.write(batch) })
       )
     } finally {
-      if (locked) {
-        await connections[0]!`
-          SELECT pg_advisory_unlock(hashtext(${`${this.schemaName}:snapshot-load`}))
-        `.catch(() => undefined)
-      }
+      if (locked) await this.unlockLoad(connections[0]!)
       for (const connection of connections) connection.release()
     }
   }
@@ -557,7 +646,61 @@ export class PostgresStorage
         `[SixbPg] Branch namespace '${name}' stopped while a snapshot was loading into it: drop it and load the snapshot again.`
       )
     }
+    if ((await this.branchSchemaOwner(name)) !== "production") {
+      throw branchNamespaceHandedOver(name)
+    }
     return this.openBranch(name)
+  }
+
+  /**
+   * Hands the namespace to `role`, which then owns its schema and everything in it, for the
+   * branch's runtime to log in as. Production does not act in it again: opening it or copying
+   * into it is refused, so no statement of production's ever meets what the role plants there,
+   * such as a trigger, which would run with production's privileges. Dropping it is all
+   * production still does, and a new copy goes into a new namespace.
+   *
+   * Production must be a member of `role`, as it is of a hosted branch's. Returns the schema, for
+   * the role's `search_path`.
+   */
+  async handOverBranchNamespace(
+    name: string,
+    role: string
+  ): Promise<{ readonly schemaName: string }> {
+    assertBranchNamespaceName(name)
+    const schema = quoteIdent(this.branchSchemaName(name))
+    const state = await this.branchSchemaState(name)
+    if (!state) throw new Error(`[SixbPg] Branch namespace '${name}' does not exist.`)
+    if (state.loading) {
+      throw new Error(
+        `[SixbPg] Branch namespace '${name}' stopped while a snapshot was loading into it: drop it and load the snapshot again.`
+      )
+    }
+    if ((await this.branchSchemaOwner(name)) !== "production") {
+      throw branchNamespaceHandedOver(name)
+    }
+
+    const [member] = await this.sql<{ member: boolean | null }[]>`
+      SELECT CASE WHEN to_regrole(${quoteIdent(role)}) IS NULL THEN NULL
+        ELSE pg_has_role(${role}, 'MEMBER') END AS member
+    `
+    if (member?.member !== true) {
+      throw new Error(
+        `[SixbPg] Branch namespace '${name}' is handed only to a role production is a member of: create role '${role}' and grant it to production's user.`
+      )
+    }
+
+    // Nothing of production's keeps a connection on it.
+    await this.branches.get(name)?.close()
+    this.branches.delete(name)
+
+    const owner = quoteIdent(role)
+    await runPgTransaction(this.sql, async (tx) => {
+      for (const statement of await handOverStatements(tx, this.branchSchemaName(name), owner)) {
+        await tx.unsafe(statement)
+      }
+      await tx.unsafe(`ALTER SCHEMA ${schema} OWNER TO ${owner}`)
+    })
+    return { schemaName: this.branchSchemaName(name) }
   }
 
   async listBranchNamespaces(): Promise<readonly string[]> {
@@ -590,6 +733,7 @@ export class PostgresStorage
 
     const branch = new PostgresStorage({ ...this.options, schemaName: this.branchSchemaName(name) })
     branch.branchName = name
+    branch.branchParent = this
     for (const migrator of branch.migrators) await migrator.migrate()
 
     this.branches.set(name, branch)
@@ -611,6 +755,16 @@ export class PostgresStorage
     const hash = createHash("sha256").update(name).digest("hex").slice(0, 12)
     const kept = Buffer.from(full).subarray(0, MAX_IDENTIFIER_BYTES - hash.length - 1)
     return `${kept.toString("utf8").replace(/\uFFFD$/, "")}_${hash}`
+  }
+
+  /** Who owns the namespace's schema: production, or the role it was handed to. */
+  private async branchSchemaOwner(name: string): Promise<"production" | "role" | null> {
+    const [row] = await this.sql<{ production: boolean }[]>`
+      SELECT nspowner = (SELECT oid FROM pg_roles WHERE rolname = current_user) AS production
+      FROM pg_namespace WHERE nspname = ${this.branchSchemaName(name)}
+    `
+    if (!row) return null
+    return row.production ? "production" : "role"
   }
 
   /** The schema's state, read from its comment; null when the schema is not this branch's. */
@@ -761,6 +915,48 @@ function parseBranchState(comment: string | null): BranchSchemaState | null {
     return null
   }
   return null
+}
+
+function branchNamespaceHandedOver(name: string): Error {
+  return new Error(
+    `[SixbPg] Branch namespace '${name}' belongs to its role: production does not act in it again. Drop it to take a new copy.`
+  )
+}
+
+/**
+ * The statements giving `owner` everything in `schema`: its tables, partitions, views and
+ * sequences (those a column owns follow their table), its routines and its types (a table's row
+ * type and an array type follow their own).
+ */
+async function handOverStatements(
+  tx: SQLClient,
+  schema: string,
+  owner: string
+): Promise<readonly string[]> {
+  const rows = await tx<{ statement: string }[]>`
+    WITH target AS (SELECT oid FROM pg_namespace WHERE nspname = ${schema})
+    SELECT format('ALTER %s %s OWNER TO %s',
+      CASE c.relkind WHEN 'v' THEN 'VIEW' WHEN 'm' THEN 'MATERIALIZED VIEW'
+        WHEN 'S' THEN 'SEQUENCE' WHEN 'f' THEN 'FOREIGN TABLE' ELSE 'TABLE' END,
+      c.oid::regclass, ${owner}::text) AS statement
+    FROM pg_class c
+    WHERE c.relnamespace = (SELECT oid FROM target)
+      AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+      AND NOT (c.relkind = 'S' AND EXISTS (
+        SELECT 1 FROM pg_depend d
+        WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype IN ('a', 'i')
+      ))
+    UNION ALL
+    SELECT format('ALTER ROUTINE %s OWNER TO %s', p.oid::regprocedure, ${owner}::text)
+    FROM pg_proc p WHERE p.pronamespace = (SELECT oid FROM target)
+    UNION ALL
+    SELECT format('ALTER TYPE %s OWNER TO %s', t.oid::regtype, ${owner}::text)
+    FROM pg_type t
+    WHERE t.typnamespace = (SELECT oid FROM target)
+      AND t.typrelid = 0
+      AND NOT EXISTS (SELECT 1 FROM pg_type e WHERE e.typarray = t.oid)
+  `
+  return rows.map((row) => row.statement)
 }
 
 function isDuplicateSchema(error: unknown): boolean {

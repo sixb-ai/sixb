@@ -206,3 +206,77 @@ export function isBranchNamespaceStorage(
 ): storage is Storage & BranchNamespaceStorage {
   return "createBranchNamespace" in storage && typeof storage.createBranchNamespace === "function"
 }
+
+/**
+ * A provider that copies a snapshot from another storage on its own engine, without the rows
+ * crossing into the runtime. Only for a reader that sees every object and every property of what
+ * it reads: the copy applies no condition and no clearance.
+ */
+export interface SnapshotCopyStorage extends Storage {
+  /** Whether this storage can copy from `source` itself: one database holds both. */
+  copiesFrom(source: Storage): boolean
+  /**
+   * Copy at one moment S, all or nothing, as one base commit: what `importSnapshot` would load from
+   * the same snapshot. `undefined` when `prepare` stopped it, to be taken again.
+   */
+  copySnapshot(input: SnapshotCopyInput): Promise<SnapshotCopyCounts | undefined>
+}
+
+export interface SnapshotCopyInput {
+  readonly source: Storage
+  readonly projectId: string
+  readonly maxDurationMs: number
+  /** Called at S with a read-only view of the source: what to copy, or `undefined` to stop. */
+  prepare(at: Storage): Promise<SnapshotCopyPlan | undefined>
+}
+
+export interface SnapshotCopyPlan {
+  readonly commit: OntologyCommitRecord
+  readonly uniqueProperties: readonly PreparedUniqueProperty[]
+  readonly types: readonly SnapshotCopyType[]
+  /** Every member, or these users only. */
+  readonly members: "all" | readonly string[]
+}
+
+/** One type to copy, with what the branch's definition keeps of it. */
+export interface SnapshotCopyType {
+  readonly objectTypeId: string
+  readonly droppedPropertyIds: readonly string[]
+  readonly telemetryPropertyIds: readonly string[]
+  readonly uniquePropertyIds: readonly string[]
+  readonly artifactPropertyIds: readonly string[]
+  /** The links kept, each by target type, as the edge's or the slot's edit. */
+  readonly links: readonly {
+    readonly linkId: string
+    readonly targetTypeId: string
+    readonly identity: "edge" | "slot"
+  }[]
+  /** Profiles whose vectors exist in the source: copied when `copy`, counted otherwise. */
+  readonly vectors: readonly {
+    readonly profile: string
+    readonly configuration: string
+    readonly source: readonly string[]
+    readonly dimensions: number
+    readonly copy: boolean
+  }[]
+}
+
+export interface SnapshotCopyCounts {
+  readonly types: ReadonlyMap<
+    string,
+    {
+      readonly objects: number
+      readonly links: number
+      /** The type's links in the source that the branch does not keep. */
+      readonly droppedLinks: number
+      readonly points: number
+      /** Vectors copied, or counted for a profile not copied, by profile. */
+      readonly vectors: ReadonlyMap<string, number>
+    }
+  >
+  readonly users: number
+}
+
+export function isSnapshotCopyStorage(storage: Storage): storage is SnapshotCopyStorage {
+  return "copySnapshot" in storage && typeof storage.copySnapshot === "function"
+}

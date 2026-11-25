@@ -215,6 +215,9 @@ class AuthorizedObjectReaderImpl {
       const hidden = clearance?.hiddenProperties(objectTypeId)
       types.set(objectTypeId, {
         hiddenPropertyIds: hidden ? [...hidden.ids].sort() : [],
+        hiddenLinkIds: objectType.links
+          .filter((link) => clearance?.unreadableLink(objectTypeId, link.id))
+          .map((link) => link.id),
         throughCondition: security.viewsThroughCondition(objectTypeId),
       })
     }
@@ -1024,6 +1027,8 @@ const SNAPSHOT_LINK_PAGE_SIZE = 5_000
 export interface ReaderSnapshotType {
   /** The properties the reader's clearance hides: no value of theirs leaves production. */
   readonly hiddenPropertyIds: readonly string[]
+  /** The links the reader's clearance hides, by link id. */
+  readonly hiddenLinkIds: readonly string[]
   /** Whether a condition decides which objects of the type the reader sees. */
   readonly throughCondition: boolean
 }
