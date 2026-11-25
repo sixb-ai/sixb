@@ -86,6 +86,7 @@ const peers = defineProjection("branch_device_peers", Device.l.peers)
   .targetField("to")
 const fleet = defineGroup("fleet")
 const viewers = defineGroup("viewers")
+const oneDevice = defineGroup("one-device")
 // The fleet reads open sites only: an edit linking a device to a closed one stays in production.
 const roles = [
   defineRole("fleet", {
@@ -97,6 +98,11 @@ const roles = [
     ],
   }),
   defineRole("viewers", { grantedTo: [viewers], grants: [can.view(Device)] }),
+  // Reads the dataset in full, but one device only.
+  defineRole("one-device", {
+    grantedTo: [oneDevice],
+    grants: [can.view(Device).where((device) => device.p.id.eq("d-1")), can.view(devices)],
+  }),
 ]
 
 let rootDir: string
@@ -146,7 +152,7 @@ function hostOn(storage: InMemoryStorage, lake: Lake, withPeers = false) {
     ontology: [Site, Device],
     datasets: withPeers ? [devices, peerPairs] : [devices],
     projections: withPeers ? [projection, peers] : [projection],
-    groups: [fleet, viewers],
+    groups: [fleet, viewers, oneDevice],
     roles,
     broker: new InMemoryBroker(),
     queues: new InMemoryQueues(),
@@ -389,4 +395,22 @@ test("a type whose dataset the person cannot read in full travels as created obj
       notReprojectable: "the person does not read its dataset in full",
     })
   )
+})
+
+// Red check: in snapshots/export.ts `travellingSources`, drop the condition and hidden properties
+// check: the devices travel as their source, and the edit of d-7, which the person does not see,
+// leaves production with it.
+test("a type the person reads through a condition travels as created objects", async () => {
+  const prod = await production()
+  const branch = await branchOf(prod, [oneDevice.id])
+
+  expect(branch.report.types).toContainEqual(
+    expect.objectContaining({
+      objectTypeId: Device.id,
+      objects: 1,
+      reprojectable: false,
+      notReprojectable: "the person does not read every object and property of the type",
+    })
+  )
+  expect(branch.text).not.toContain("renamed by hand")
 })
