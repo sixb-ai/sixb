@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { type AuthorizationContext, resolveAuthorizationContext } from "../authorization"
 import type { SixbBranch } from "../branch-mode"
 import { branchRefusals } from "../branch-mode/refusals"
+import { BRANCH_HANDOVER_STRATEGY_ID } from "../branches/handover"
 import type { DomainEventLog } from "../events/service"
 import type { EventDraft } from "../events/types"
 import {
@@ -490,7 +491,11 @@ export class AuthRuntime {
       ...(input.userAgent ? { userAgent: input.userAgent } : {}),
       ...(input.ipAddress ? { ipAddress: input.ipAddress } : {}),
     })
-    return { credential, expiresAt: deadlines.expiresAt }
+    // The cookie lasts as long as the session can.
+    const expiresAt = deadlines.absoluteExpiresAt
+      ? new Date(Math.min(deadlines.expiresAt.getTime(), deadlines.absoluteExpiresAt.getTime()))
+      : deadlines.expiresAt
+    return { credential, expiresAt }
   }
 
   /**
@@ -755,6 +760,18 @@ export class AuthRuntime {
     })
   }
 
+  /**
+   * A branch production runs lets people in through production's handover only, for sessions it
+   * caps, so that losing the grant reaches the branch. A token would outlive both: it makes none.
+   */
+  private assertMakesAccessTokens(): void {
+    if (this.strategy?.id !== BRANCH_HANDOVER_STRATEGY_ID) return
+    throw new AuthRuntimeError(
+      "authorization_denied",
+      "[Sixb] A branch production runs makes no access tokens: sign in through production, whose sessions here end within 4 hours."
+    )
+  }
+
   async listPersonalAccessTokens(
     caller: AuthenticatedUserRequestSession
   ): Promise<ListPersonalAccessTokensResult> {
@@ -776,6 +793,7 @@ export class AuthRuntime {
     input: CreatePersonalAccessTokenInput
   ): Promise<CreateAccessTokenResult> {
     assertSessionCaller(caller)
+    this.assertMakesAccessTokens()
     const storage = this.requireAuthStorage()
     // A personal token can only carry groups the caller currently belongs to.
     const groupIds = constrainRequestedGroupIds(input.groupIds, caller.groupIds, {
@@ -940,6 +958,7 @@ export class AuthRuntime {
     input: CreateServiceAccountAccessTokenInput
   ): Promise<CreateServiceAccountAccessTokenResult> {
     assertSessionCaller(caller)
+    this.assertMakesAccessTokens()
     const storage = this.requireAuthStorage()
     const { serviceAccount, groupIds: serviceAccountGroupIds } =
       await this.requireManageableServiceAccount(storage, caller.groupIds, input.serviceAccountId)

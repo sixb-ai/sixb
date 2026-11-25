@@ -22,8 +22,11 @@ export interface BranchRuntime {
   }
   /** When the copy was taken: the branch's data is production's as of then. */
   readonly takenAt: string
-  /** Set on a branch production runs, whose front answers production with this key. */
-  readonly hosted?: { readonly key: string }
+  /**
+   * Set on a branch production runs: its front answers production with this key, and people at
+   * this origin, where they open the branch.
+   */
+  readonly hosted?: { readonly key: string; readonly origin: string }
 }
 
 const runtimes = new WeakMap<object, BranchRuntime>()
@@ -67,7 +70,9 @@ export function hostOnBranch(
         objectTypes: () => host.definitions.ontology.listObjectTypes(),
       }),
       // A branch production runs signs people in only through production's handover.
-      ...(input.runtime.hosted ? { auth: branchHandoverAuth(project.auth) } : {}),
+      ...(input.runtime.hosted
+        ? { auth: branchHandoverAuth(project.auth, input.runtime.hosted.origin) }
+        : {}),
     },
     branch
   )

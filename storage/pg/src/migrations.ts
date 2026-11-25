@@ -491,6 +491,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("118-skipped-action-effects", skippedActionEffectsSql),
     pgSql("119-lake-slice-credentials", lakeSliceCredentialsSql),
     pgSql("120-hosted-branches", hostedBranchesSql),
+    pgSql("121-hosted-branch-namespaces", hostedBranchNamespacesSql),
   ],
 })
 
@@ -623,3 +624,6 @@ import lakeSliceCredentialsSql from "./migrations/119-lake-slice-credentials.sql
   type: "text",
 }
 import hostedBranchesSql from "./migrations/120-hosted-branches.sql" with { type: "text" }
+import hostedBranchNamespacesSql from "./migrations/121-hosted-branch-namespaces.sql" with {
+  type: "text",
+}

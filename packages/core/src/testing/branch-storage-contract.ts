@@ -106,6 +106,19 @@ export function runBranchStorageContractSuite<TStorage extends BranchStorage>(
       })
     })
 
+    test("finds a branch by its namespace, in its project only", async () => {
+      await withStorage(async (storage) => {
+        await storage.create(branch("feature/invoices"))
+        await storage.create(branch("feature/payroll"))
+        await storage.create({ ...branch("feature/invoices"), projectId: "other" })
+
+        const found = await storage.getByNamespace({ projectId, namespace: "feature-invoices" })
+        expect(found?.name).toBe("feature/invoices")
+        expect(found?.projectId).toBe(projectId)
+        expect(await storage.getByNamespace({ projectId, namespace: "feature" })).toBeNull()
+      })
+    })
+
     test("removes a row", async () => {
       await withStorage(async (storage) => {
         await storage.create(branch("feature/invoices"))

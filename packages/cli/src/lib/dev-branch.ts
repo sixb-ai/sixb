@@ -7,7 +7,13 @@ import {
   HOSTED_BRANCH_COPY,
   isBranchApiPath,
 } from "@sixb/core/internal/branches"
-import { type ForwardedSocket, forwardRequest, forwardWebSocket } from "@sixb/core/internal/http"
+import {
+  type ForwardedHandshake,
+  type ForwardedSocket,
+  forwardedHandshake,
+  forwardRequest,
+  forwardWebSocket,
+} from "@sixb/core/internal/http"
 import type { Server, ServerWebSocket } from "bun"
 import { loadedCopyOf } from "./branch-from-production"
 import { type DevChildMessage, loadingLine } from "./dev-messages"
@@ -17,6 +23,8 @@ import { errorMessage } from "./errors"
 interface SocketData {
   readonly path: string
   readonly target: string
+  /** The browser's cookies and origin, which the API checks as it checks any request. */
+  readonly handshake: ForwardedHandshake
   upstream?: ForwardedSocket
 }
 
@@ -25,8 +33,9 @@ interface SocketData {
  * port while the project restarts or fails to load. Its status and the handover's preparation take
  * the branch's key, which only production holds; people reach the rest, signed in by the branch's
  * own sessions. Status is its own. The API's paths go to the API, everything else
- * to the project's app while it runs; both count as someone using the branch: production stops a
- * branch nobody uses.
+ * to the project's app while it runs. What the API accepts from a signed-in browser counts as
+ * someone using the branch: production stops a branch nobody uses, and a crawler, a refused
+ * request or the "starting" page keeps none up.
  */
 export function startBranchFront(input: {
   readonly branch: string
@@ -79,23 +88,29 @@ export function startBranchFront(input: {
       if (production && !authorized(request)) return new Response("Unauthorized", { status: 401 })
       if (url.pathname === BRANCH_STATUS_PATH) return statusResponse()
 
-      status = { ...status, requests: status.requests + 1 }
       if (status.state !== "ready") {
         return production ? statusResponse(503) : startingResponse()
       }
 
       const path = `${url.pathname}${url.search}`
       const target = upstream(url.pathname)
+      const signedIn = request.headers.has("cookie") || request.headers.has("authorization")
       if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
-        return server.upgrade(request, { data: { path, target } })
-          ? undefined
-          : new Response("WebSocket upgrade failed", { status: 400 })
+        const handshake = forwardedHandshake(request, (name) => name !== BRANCH_KEY_HEADER)
+        if (!server.upgrade(request, { data: { path, target, handshake } })) {
+          return new Response("WebSocket upgrade failed", { status: 400 })
+        }
+        if (signedIn) used()
+        return undefined
       }
       try {
-        return await forwardRequest(request, `http://${target}${path}`, {
+        const response = await forwardRequest(request, `http://${target}${path}`, {
           // The key goes on only where the branch checks it again: the handover.
           requestHeaders: (name) => production || name !== BRANCH_KEY_HEADER,
         })
+        const accepted = response.status !== 401 && response.status !== 403
+        if (!production && signedIn && accepted && isBranchApiPath(url.pathname)) used()
+        return response
       } catch {
         // The generation stopped between the state check and the request.
         return production ? statusResponse(503) : startingResponse()
@@ -103,7 +118,11 @@ export function startBranchFront(input: {
     },
     websocket: {
       open(ws: ServerWebSocket<SocketData>) {
-        ws.data.upstream = forwardWebSocket(ws, `ws://${ws.data.target}${ws.data.path}`)
+        ws.data.upstream = forwardWebSocket(
+          ws,
+          `ws://${ws.data.target}${ws.data.path}`,
+          ws.data.handshake
+        )
       },
       message(ws: ServerWebSocket<SocketData>, message) {
         ws.data.upstream?.send(message)
@@ -114,6 +133,9 @@ export function startBranchFront(input: {
     },
   })
 
+  const used = () => {
+    status = { ...status, requests: status.requests + 1 }
+  }
   const update = (next: Partial<BranchRuntimeStatus>) => {
     status = { ...status, ...next }
   }

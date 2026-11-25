@@ -20,7 +20,9 @@ function setup() {
     port: 0,
     fetch: (request) => {
       keys.push(request.headers.get(BRANCH_KEY_HEADER))
-      return new Response("api")
+      // The branch's API refuses a session it does not know.
+      const refused = request.headers.get("cookie") === "sixb_session_app=expired"
+      return new Response("api", { status: refused ? 401 : 200 })
     },
   })
   const app = Bun.serve({ port: 0, fetch: () => new Response("app") })
@@ -39,24 +41,30 @@ function setup() {
   })
   stops.push(() => front.stop())
 
-  const call = (path: string, key: string | null = KEY) =>
+  const call = (path: string, key: string | null = KEY, cookie?: string) =>
     fetch(`http://127.0.0.1:${front.port}${path}`, {
-      headers: key ? { [BRANCH_KEY_HEADER]: key } : {},
+      headers: { ...(key ? { [BRANCH_KEY_HEADER]: key } : {}), ...(cookie ? { cookie } : {}) },
     })
   const status = async () => (await (await call(BRANCH_STATUS_PATH)).json()) as { requests: number }
   return { front, call, status, keys }
 }
 
-// Production stops a branch nobody uses, and learns of its use from this count only.
-// Guard check: drop the `requests` count from `fetch` in `dev-branch.ts`.
-test("counts what it forwards as use, and none of production's status reads", async () => {
+// Production stops a branch nobody uses, and learns of its use from this count only: a crawler,
+// a refused session or the "starting" page keeps no branch up. Guard check: count every request
+// `fetch` forwards in `dev-branch.ts`, or none.
+test("counts what the API accepts from a signed-in browser as use, and nothing else", async () => {
   const { front, call, status } = setup()
-  front.reporter.message({ type: "ready", watchesApp: false, app: null }, undefined)
 
+  expect((await call("/api/objects", null, "sixb_session_app=live")).status).toBe(503)
+  front.reporter.message({ type: "ready", watchesApp: false, app: null }, undefined)
   expect((await status()).requests).toBe(0)
-  expect((await call("/api/objects")).status).toBe(200)
+
   expect((await call("/api/objects", null)).status).toBe(200)
-  expect((await status()).requests).toBe(2)
+  expect((await call("/api/objects", null, "sixb_session_app=expired")).status).toBe(401)
+  expect((await status()).requests).toBe(0)
+
+  expect((await call("/api/objects", null, "sixb_session_app=live")).status).toBe(200)
+  expect((await status()).requests).toBe(1)
 })
 
 // People reach a branch on its own origin now, signed in by its own sessions; its status and the
@@ -119,4 +127,68 @@ test("sends everything to the API when the project has no app", async () => {
   front.reporter.message({ type: "ready", watchesApp: false, app: null }, undefined)
 
   expect(await (await call("/")).text()).toBe("api")
+})
+
+// A page's socket authenticates by its session cookie, and the API checks its origin. Guard check:
+// open the upstream socket without `ws.data.handshake` (`dev-branch.ts`): the API sees no cookie.
+test("passes a page's socket on with its cookie, origin and subprotocol, never the key", async () => {
+  const seen: Record<string, string | null>[] = []
+  const api = Bun.serve<undefined>({
+    port: 0,
+    fetch: (request, server) => {
+      seen.push({
+        cookie: request.headers.get("cookie"),
+        origin: request.headers.get("origin"),
+        key: request.headers.get(BRANCH_KEY_HEADER),
+        protocol: request.headers.get("sec-websocket-protocol"),
+      })
+      return server.upgrade(request, {
+        headers: { "sec-websocket-protocol": "sixb.v1" },
+        data: undefined,
+      })
+        ? undefined
+        : new Response("no", { status: 400 })
+    },
+    websocket: {
+      open: (ws) => {
+        ws.send("open")
+      },
+      message: () => undefined,
+    },
+  })
+  stops.push(async () => api.stop(true))
+  const front = startBranchFront({
+    branch: "feature/invoices",
+    key: KEY,
+    host: "127.0.0.1",
+    port: 0,
+    apiPort: api.port!,
+    appPort: api.port!,
+    root: process.cwd(),
+  })
+  stops.push(() => front.stop())
+  front.reporter.message({ type: "ready", watchesApp: false, app: null }, undefined)
+
+  const socket = new WebSocket(`ws://127.0.0.1:${front.port}/ws/events`, {
+    headers: {
+      cookie: "sixb_session_app=ada",
+      origin: "https://feature-invoices.preview.shop.test",
+      [BRANCH_KEY_HEADER]: KEY,
+    },
+    protocols: ["sixb.v1"],
+  } as never)
+  await new Promise<void>((resolve, reject) => {
+    socket.addEventListener("message", () => resolve())
+    socket.addEventListener("error", () => reject(new Error("socket failed")))
+  })
+  socket.close()
+
+  expect(seen).toEqual([
+    {
+      cookie: "sixb_session_app=ada",
+      origin: "https://feature-invoices.preview.shop.test",
+      key: null,
+      protocol: "sixb.v1",
+    },
+  ])
 })

@@ -24,6 +24,8 @@ export interface ForwardOptions {
   readonly responseHeaders?: (name: string) => boolean
   /** Added to the forwarded request, over any it carried. */
   readonly headers?: Readonly<Record<string, string>>
+  /** Ends the forwarded request. Default: the incoming request's own. */
+  readonly signal?: AbortSignal
 }
 
 /** Sends `request` to `target`, a full URL, and returns its response as it streams. */
@@ -47,7 +49,7 @@ export async function forwardRequest(
     redirect: "manual",
     // Passed through as it came, so content-encoding and content-length stay true.
     decompress: false,
-    signal: request.signal,
+    signal: options.signal ?? request.signal,
     ...(hasBody ? { body: request.body, duplex: "half" } : {}),
   } as RequestInit)
 
@@ -63,6 +65,41 @@ export async function forwardRequest(
     statusText: upstream.statusText,
     headers: responseHeaders,
   })
+}
+
+/** Handshake headers each WebSocket connection makes its own: never passed on. */
+const HANDSHAKE = new Set([
+  "sec-websocket-key",
+  "sec-websocket-version",
+  "sec-websocket-extensions",
+  "sec-websocket-accept",
+  "sec-websocket-protocol",
+])
+
+/** What a forwarded WebSocket opens its upstream side with. */
+export interface ForwardedHandshake {
+  readonly headers: Readonly<Record<string, string>>
+  readonly protocols: readonly string[]
+}
+
+/**
+ * What an upgrade request carries on to the socket it is forwarded to, as `forwardRequest` passes a
+ * request's headers on: its cookies and its origin among them, which the server behind checks as
+ * it checks any request. Its subprotocols go on as such; what belongs to one connection doesn't.
+ */
+export function forwardedHandshake(
+  request: Request,
+  keep: (name: string) => boolean = () => true
+): ForwardedHandshake {
+  const headers: Record<string, string> = {}
+  request.headers.forEach((value, name) => {
+    if (!HOP_BY_HOP.has(name) && !HANDSHAKE.has(name) && keep(name)) headers[name] = value
+  })
+  const protocols = (request.headers.get("sec-websocket-protocol") ?? "")
+    .split(",")
+    .map((protocol) => protocol.trim())
+    .filter(Boolean)
+  return { headers, protocols }
 }
 
 /** The side of a WebSocket this server holds open with its client. */
@@ -87,9 +124,12 @@ export interface ForwardedSocket {
 export function forwardWebSocket(
   client: ForwardedSocketClient,
   target: string,
-  options: { readonly headers?: Readonly<Record<string, string>> } = {}
+  handshake: ForwardedHandshake = { headers: {}, protocols: [] }
 ): ForwardedSocket {
-  const upstream = new WebSocket(target, { headers: { ...options.headers } } as never)
+  const upstream = new WebSocket(target, {
+    headers: { ...handshake.headers },
+    ...(handshake.protocols.length > 0 ? { protocols: [...handshake.protocols] } : {}),
+  } as never)
   upstream.binaryType = "arraybuffer"
   const pending: (string | ArrayBuffer | Uint8Array<ArrayBuffer>)[] = []
   let closed = false

@@ -284,6 +284,19 @@ describe("a branch production runs", () => {
       // A code is good once.
       expect((await fetch(url, { redirect: "manual" })).status).toBe(400)
 
+      // Live updates and agent streams reach the page: its sockets sign in with its session.
+      for (const channel of ["events", "agents"]) {
+        const socket = new WebSocket(`${before.url!.replace(/^http/, "ws")}/ws/${channel}`, {
+          headers: { cookie, origin: new URL(before.url!).origin },
+        } as never)
+        const first = await new Promise<string>((resolve, reject) => {
+          socket.addEventListener("message", (event) => resolve(String(event.data)))
+          socket.addEventListener("close", (event) => reject(new Error(`closed ${event.code}`)))
+        })
+        socket.close()
+        expect(JSON.parse(first)).toMatchObject({ type: "connected", channel })
+      }
+
       // Real traffic on the branch's origin keeps it up: the worker reads it from the front.
       const seen = await until(row, (branch) => branch!.lastSeenAt > before.lastSeenAt)
       expect(seen?.lastSeenAt.getTime()).toBeGreaterThan(before.lastSeenAt.getTime())

@@ -121,6 +121,11 @@ export interface BranchRef {
 
 export interface BranchStorage {
   get(input: BranchRef): Promise<BranchRecord | null>
+  /** The branch whose storage namespace, and preview host, is `namespace`. */
+  getByNamespace(input: {
+    readonly projectId: string
+    readonly namespace: string
+  }): Promise<BranchRecord | null>
   /** Every branch of the project, by name. */
   list(input: { readonly projectId: string }): Promise<readonly BranchRecord[]>
   /** Adds the branch at revision 1. A name already taken returns that branch, unchanged. */

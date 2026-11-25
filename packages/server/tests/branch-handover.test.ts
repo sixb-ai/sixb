@@ -19,10 +19,18 @@ import { createSessionCredential } from "@sixb/core/internal/auth"
 import {
   BRANCH_HANDOVER_CODE_TTL_MS,
   BRANCH_KEY_HEADER,
+  BRANCH_SESSION_MAX_MS,
+  branchHandoverAuth,
   branchNamespaceName,
   hostOnBranch,
+  siteOf,
 } from "@sixb/core/internal/branches"
 import { putOnBranch } from "@sixb/core/internal/runtime"
+import type { BranchRecord } from "@sixb/core/storage"
+import {
+  BRANCH_PREVIEW_HEADERS_TIMEOUT_MS,
+  BRANCH_PREVIEW_MAX_IN_FLIGHT,
+} from "../src/routes/branch-preview"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -94,7 +102,7 @@ function branchApp(
         authorization: async () => "Bearer sixb_branch_x",
       },
       takenAt: "2026-11-25T08:00:00.000Z",
-      hosted: { key: KEY },
+      hosted: { key: KEY, origin },
     },
   })
   const server = new SixbServer({
@@ -155,6 +163,48 @@ describe("a branch's handover", () => {
     })
     const groups = await storage.auth.groupMemberships.listForUser({ projectId, userId: ada.id })
     expect(groups.map((membership) => membership.groupId)).toEqual(["developers"])
+  })
+
+  // Production let Ada in as an active member of "developers" alone: the copy, older, may hold her
+  // suspended and in another group. Guard check: drop the `updateStatus` call, or the `remove`
+  // loop, from `ensureMember` (`branches/handover.ts`).
+  test("lets the person in as production has them now, whatever the copy says", async () => {
+    const { app, storage } = branchApp()
+    await storage.auth.users.create({ projectId, id: ada.id, email: ada.email })
+    await storage.auth.users.updateStatus({ projectId, id: ada.id, status: "suspended" })
+    await storage.auth.groupMemberships.upsert({
+      projectId,
+      userId: ada.id,
+      groupId: "admins",
+      source: "manual",
+    })
+
+    const { code } = (await (await prepare(app)).json()) as { code: string }
+    expect(await sessionOf(app, cookiesOf(await exchange(app, code)))).toMatchObject({
+      authenticated: true,
+      user: { id: ada.id },
+    })
+    expect((await storage.auth.users.getById({ projectId, id: ada.id }))?.status).toBe("active")
+    const groups = await storage.auth.groupMemberships.listForUser({ projectId, userId: ada.id })
+    expect(groups.map((membership) => membership.groupId)).toEqual(["developers"])
+  })
+
+  // Production checks the grant only at the handover: losing it reaches the branch within hours.
+  // Guard check: keep the project's `absoluteTimeoutMs` in `branchHandoverAuth`.
+  test("ends the branch's session within four hours, however active", async () => {
+    const { app, storage } = branchApp()
+    const { code } = (await (await prepare(app)).json()) as { code: string }
+    await exchange(app, code)
+
+    const [session] = await storage.auth.sessions.listActiveByUserId({
+      projectId,
+      userId: ada.id,
+      now: new Date(),
+    })
+    const lifetime =
+      (session?.absoluteExpiresAt?.getTime() ?? Number.POSITIVE_INFINITY) -
+      (session?.createdAt.getTime() ?? 0)
+    expect(lifetime).toBe(BRANCH_SESSION_MAX_MS)
   })
 
   // Guard check: leave the code in `codes` after `exchange` (`branches/handover.ts`).
@@ -257,6 +307,55 @@ describe("a branch's handover", () => {
   })
 })
 
+describe("a branch's credentials", () => {
+  // Red check: drop `assertMakesAccessTokens` from `createPersonalAccessToken` (`auth/runtime.ts`):
+  // the token is made, and outlives the session's 4 hours and the grant.
+  test("makes no access token: nothing outlives a session production let in", async () => {
+    const { app } = branchApp()
+    const { code } = (await (await prepare(app)).json()) as { code: string }
+    const cookie = cookiesOf(await exchange(app, code))
+    const csrf = /sixb_csrf_app=([^;]+)/.exec(cookie)?.[1] ?? ""
+
+    const minted = await app.fetch(
+      new Request("http://branch.localhost/api/auth/access-tokens", {
+        method: "POST",
+        headers: {
+          cookie,
+          origin: "http://branch.localhost",
+          "content-type": "application/json",
+          "x-sixb-csrf": csrf,
+        },
+        body: JSON.stringify({
+          name: "laptop",
+          expiresAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+        }),
+      })
+    )
+
+    expect(minted.status).toBe(403)
+    expect(await minted.text()).toContain("makes no access tokens")
+  })
+
+  // The project lets its sessions last 30 days; a branch's still end at 4 hours.
+  // Red check: return the project's `session` as it is from `branchHandoverAuth`.
+  test("ends a session at 4 hours, whatever the project's session length", async () => {
+    const now = new Date("2026-11-25T08:00:00.000Z")
+    jest.useFakeTimers({ now })
+    const { app } = branchApp("http://branch.localhost", {
+      auth: {
+        strategy: { id: "test", kind: "dev" },
+        session: { absoluteTimeoutMs: 30 * 86_400_000, idleTimeoutMs: 14 * 86_400_000 },
+      },
+    })
+    const { code } = (await (await prepare(app)).json()) as { code: string }
+    const cookie = cookiesOf(await exchange(app, code))
+    expect((await sessionOf(app, cookie)).authenticated).toBe(true)
+
+    jest.setSystemTime(new Date(now.getTime() + BRANCH_SESSION_MAX_MS + 60_000))
+    expect((await sessionOf(app, cookie)).authenticated).not.toBe(true)
+  })
+})
+
 describe("a branch's origin", () => {
   // Guard check: return `policy` whatever the host, in `ownOriginOnBranch` (`server.ts`).
   test("answers browsers on its own origin only, sockets included", async () => {
@@ -310,18 +409,71 @@ describe("signing into a branch from production", () => {
     })
   })
 
-  // A preview host is the branch's: production forwards it whole, and keeps the key to itself.
-  // Guard check: return null from `forwardToPreview` (`routes/branch-preview.ts`).
-  test("forwards a branch's preview host to the branch, without production's key", async () => {
-    const seen: { readonly path: string; readonly key: string | null }[] = []
-    const fake = Bun.serve({
-      port: 0,
-      fetch: (request) => {
-        const url = new URL(request.url)
-        seen.push({ path: url.pathname + url.search, key: request.headers.get(BRANCH_KEY_HEADER) })
-        return new Response("from the branch")
-      },
+  // The branch's refusal is about the person: production says it rather than a status code.
+  test("says why the branch did not let the person in", async () => {
+    const branch = branchApp()
+    await branch.server.start()
+    stops.push(() => branch.server.stop({ timeoutMs: 0 }))
+
+    const storage = new InMemoryStorage()
+    const production = new SixbHost(options(storage, { source: { repository: "acme/shop" } }))
+    const app = createSixbApi(
+      new SixbServer({ host: production, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const headers = await signIn(storage)
+    await storage.hostedBranches.create({
+      ...readyBranch(`http://127.0.0.1:${branch.server.getPort()}`),
+      key: "x".repeat(43),
     })
+
+    const answer = await app.fetch(
+      new Request("http://localhost/api/branches/sign-in", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ name: "feature/invoices" }),
+      })
+    )
+    expect(await answer.json()).toMatchObject({
+      error: expect.stringContaining("Only production prepares a session here."),
+    })
+  })
+})
+
+describe("a branch's server", () => {
+  // Its API sees plain http from the front: the public origin says https.
+  // Guard check: drop `secure` from `branchHandoverAuth`.
+  test("sends its cookies Secure when people reach it over https", () => {
+    const auth = branchHandoverAuth(
+      { id: "test", kind: "dev" },
+      "https://feature-x.shop-preview.dev"
+    )
+    expect("cookies" in auth ? auth.cookies : undefined).toMatchObject({
+      secure: true,
+      cookieDomain: undefined,
+    })
+    const local = branchHandoverAuth({ id: "test", kind: "dev" }, "http://127.0.0.1:20000")
+    expect("cookies" in local ? local.cookies?.secure : undefined).toBeUndefined()
+  })
+})
+
+describe("a branch's preview host", () => {
+  /**
+   * Production with `preview.shop.test` as its preview domain, and a branch answering through
+   * `fetch`. `call` asks production for a host under the preview domain.
+   */
+  async function previewLab(
+    fetchBranch: (
+      request: Request,
+      server: Bun.Server<undefined>
+    ) => Response | Promise<Response> | undefined,
+    branch: Partial<Pick<BranchRecord, "state">> = {},
+    websocket?: Bun.WebSocketHandler<undefined>
+  ) {
+    const fake = Bun.serve<undefined>({
+      port: 0,
+      fetch: fetchBranch,
+      ...(websocket ? { websocket } : {}),
+    } as never)
     stops.push(async () => fake.stop(true))
 
     const storage = new InMemoryStorage()
@@ -337,33 +489,245 @@ describe("signing into a branch from production", () => {
     })
     await server.start()
     stops.push(() => server.stop({ timeoutMs: 0 }))
-    await storage.hostedBranches.create(readyBranch(`http://127.0.0.1:${fake.port}`))
+    await storage.hostedBranches.create({
+      ...readyBranch(`http://127.0.0.1:${fake.port}`),
+      ...branch,
+    })
 
     const namespace = branchNamespaceName("feature/invoices")
-    const answer = await fetch(`http://127.0.0.1:${server.getPort()}/invoices?page=2`, {
-      headers: { host: `${namespace}.preview.shop.test`, [BRANCH_KEY_HEADER]: "forged" },
+    const origin = `http://127.0.0.1:${server.getPort()}`
+    const call = (host: string, path = "/", init: RequestInit = {}) =>
+      fetch(`${origin}${path}`, {
+        ...init,
+        headers: { ...(init.headers as Record<string, string>), host },
+      })
+    return { call, namespace, origin, branchHost: `${namespace}.preview.shop.test` }
+  }
+
+  // Guard check: return null from `BranchPreview.fetch` (`routes/branch-preview.ts`).
+  test("forwards a branch's host to the branch, without production's key", async () => {
+    const seen: { readonly path: string; readonly key: string | null }[] = []
+    const { call, branchHost } = await previewLab((request) => {
+      const url = new URL(request.url)
+      seen.push({ path: url.pathname + url.search, key: request.headers.get(BRANCH_KEY_HEADER) })
+      return new Response("from the branch")
+    })
+
+    const answer = await call(branchHost, "/invoices?page=2", {
+      headers: { [BRANCH_KEY_HEADER]: "forged" },
     })
 
     expect(await answer.text()).toBe("from the branch")
     expect(seen).toEqual([{ path: "/invoices?page=2", key: null }])
   })
 
-  // Guard check: return the domain whatever `cookieDomain` covers in `capturePreviewDomain`.
-  test("refuses a preview domain production's cookies would reach", () => {
-    const storage = new InMemoryStorage()
+  // Nothing under the preview domain is production's, whatever its shape. Guard check: return
+  // null for "other" in `BranchPreview.fetch`.
+  test("answers 404 for any other host under the preview domain, never production", async () => {
+    const { call, namespace } = await previewLab(() => new Response("from the branch"))
 
+    for (const host of [
+      "preview.shop.test",
+      `a.${namespace}.preview.shop.test`,
+      "unknown.preview.shop.test",
+    ]) {
+      const answer = await call(host, "/api/project")
+      expect({ host, status: answer.status }).toEqual({ host, status: 404 })
+    }
+    expect(await (await call(`${namespace}.preview.shop.test.`)).text()).toBe("from the branch")
+  })
+
+  test("says a branch that is starting is starting", async () => {
+    const { call, branchHost } = await previewLab(() => new Response("from the branch"), {
+      state: "starting",
+    })
+
+    const answer = await call(branchHost)
+    expect(answer.status).toBe(503)
+    expect(await answer.text()).toContain("starting")
+  })
+
+  // Branch code answers these, so branches share a bounded number of production's connections.
+  // Guard check: return a slot from `acquire` whatever `inFlight` is.
+  test("holds at most 64 requests for branches at once", async () => {
+    const held: (() => void)[] = []
+    let full!: () => void
+    const allHeld = new Promise<void>((resolve) => {
+      full = resolve
+    })
+    let holding = true
+    const { call, branchHost } = await previewLab((): Response | Promise<Response> => {
+      if (!holding) return new Response("now")
+      return new Promise<Response>((resolve) => {
+        held.push(() => resolve(new Response("late")))
+        if (held.length === BRANCH_PREVIEW_MAX_IN_FLIGHT) full()
+      })
+    })
+
+    const waiting = Array.from({ length: BRANCH_PREVIEW_MAX_IN_FLIGHT }, () => call(branchHost))
+    await allHeld
+
+    expect((await call(branchHost)).status).toBe(503)
+    holding = false
+    for (const release of held) release()
+    await Promise.all(waiting.map(async (answer) => (await answer).text()))
+    expect((await call(branchHost)).status).toBe(200)
+  })
+
+  // Guard check: drop the headers timer from `BranchPreview.forward`.
+  test("gives a branch 30 s to start answering", async () => {
+    let asked!: () => void
+    const reached = new Promise<void>((resolve) => {
+      asked = resolve
+    })
+    const { call, branchHost } = await previewLab(() => {
+      asked()
+      return new Promise<Response>(() => {})
+    })
+    jest.useFakeTimers()
+
+    const answer = call(branchHost)
+    await reached
+    jest.advanceTimersByTime(BRANCH_PREVIEW_HEADERS_TIMEOUT_MS)
+
+    expect((await answer).status).toBe(504)
+  })
+
+  // Agent streaming, live artifacts and logs reach the branch through its socket. Guard check:
+  // drop the upgrade from `BranchPreview.forward`.
+  test("forwards a branch page's WebSocket to the branch", async () => {
+    const { origin, branchHost } = await previewLab(
+      (request, server) =>
+        server.upgrade(request) ? undefined : new Response("no", { status: 400 }),
+      {},
+      {
+        message: (ws, message) => {
+          ws.send(`branch: ${message}`)
+        },
+      }
+    )
+
+    const socket = new WebSocket(`${origin.replace("http", "ws")}/ws/agents`, {
+      headers: { host: branchHost },
+    } as never)
+    const reply = new Promise<string>((resolve, reject) => {
+      socket.addEventListener("message", (event) => resolve(String(event.data)))
+      socket.addEventListener("error", () => reject(new Error("socket failed")))
+    })
+    socket.addEventListener("open", () => socket.send("hello"))
+
+    expect(await reply).toBe("branch: hello")
+    socket.close()
+  })
+
+  // A branch's sockets authenticate as its pages do, by their session cookie, and its API checks
+  // their origin. Guard check: open the upstream socket without `socket.handshake`
+  // (`routes/branch-preview.ts`): the branch sees no cookie, and answers 401.
+  test("passes a page's cookie, origin and subprotocol on to the branch, never the key", async () => {
+    const seen: Record<string, string | null>[] = []
+    const { origin, branchHost } = await previewLab(
+      (request, server) => {
+        seen.push({
+          cookie: request.headers.get("cookie"),
+          origin: request.headers.get("origin"),
+          key: request.headers.get(BRANCH_KEY_HEADER),
+          protocol: request.headers.get("sec-websocket-protocol"),
+        })
+        return server.upgrade(request, {
+          headers: { "sec-websocket-protocol": "sixb.v1" },
+          data: undefined,
+        })
+          ? undefined
+          : new Response("no", { status: 400 })
+      },
+      {},
+      {
+        open: (ws) => {
+          ws.send("open")
+        },
+        message: () => undefined,
+      }
+    )
+
+    const socket = new WebSocket(`${origin.replace("http", "ws")}/ws/events`, {
+      headers: {
+        host: branchHost,
+        cookie: "sixb_session_app=ada",
+        origin: `https://${branchHost}`,
+        [BRANCH_KEY_HEADER]: KEY,
+      },
+      protocols: ["sixb.v1"],
+    } as never)
+    await new Promise<void>((resolve, reject) => {
+      socket.addEventListener("message", () => resolve())
+      socket.addEventListener("error", () => reject(new Error("socket failed")))
+    })
+    socket.close()
+
+    expect(seen).toEqual([
+      {
+        cookie: "sixb_session_app=ada",
+        origin: `https://${branchHost}`,
+        key: null,
+        protocol: "sixb.v1",
+      },
+    ])
+  })
+})
+
+describe("a preview domain", () => {
+  // A branch's pages on production's site would get its SameSite cookies, and could set its CSRF
+  // cookie. Guard check: return early from `assertPreviewSiteApart` (`branches/preview.ts`).
+  test("is refused on production's site: its cookies' domain, its API's or its app's", () => {
+    const storage = new InMemoryStorage()
+    const withPreview = (previewDomain: string, auth?: SixbHostOptions["auth"]) =>
+      new SixbHost(
+        options(storage, {
+          source: { repository: "acme/shop", previewDomain },
+          ...(auth ? { auth } : {}),
+        })
+      )
+
+    expect(() =>
+      withPreview("preview.shop.test", {
+        strategy: { id: "test", kind: "dev" },
+        cookies: { cookieDomain: "app.shop.test" },
+      })
+    ).toThrow("same site as production's cookieDomain")
+
+    const production = withPreview("preview.shop.test")
     expect(
       () =>
-        new SixbHost(
-          options(storage, {
-            source: { repository: "acme/shop", previewDomain: "preview.shop.test" },
-            auth: {
-              strategy: { id: "test", kind: "dev" },
-              cookies: { cookieDomain: ".shop.test" },
-            },
-          })
-        )
-    ).toThrow("inside production's cookieDomain")
+        new SixbServer({
+          host: production,
+          quiet: true,
+          browser: createTestBrowserPolicy({
+            apiOrigin: "https://api.elsewhere.test",
+            appOrigin: "https://app.shop.test",
+          }),
+        })
+    ).toThrow("same site as production's app ('app.shop.test')")
+
+    const apart = withPreview("shop-preview.test")
+    expect(
+      () =>
+        new SixbServer({
+          host: apart,
+          quiet: true,
+          browser: createTestBrowserPolicy({
+            apiOrigin: "https://api.shop.test",
+            appOrigin: "https://app.shop.test",
+          }),
+        })
+    ).not.toThrow()
+  })
+
+  // Each subdomain of a suffix on the Public Suffix List is a site of its own.
+  test("names the site of a host as browsers do", () => {
+    expect(siteOf("app.shop.dev")).toBe("shop.dev")
+    expect(siteOf("feature-x.shop-preview.dev")).toBe("shop-preview.dev")
+    expect(siteOf("feature-x.vercel.app")).toBe("feature-x.vercel.app")
+    expect(siteOf("app.shop.co.uk")).toBe("shop.co.uk")
   })
 })
 

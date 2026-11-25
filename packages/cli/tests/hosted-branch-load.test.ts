@@ -119,7 +119,7 @@ test("loads the copy production delivered into the branch's storage, and runs on
     host: loaded,
     projectRoot: root,
     storage: branchStorage,
-    key: "k".repeat(43),
+    hosted: { key: "k".repeat(43), origin: "https://feature-invoices.preview.shop.test" },
   })
 
   expect(branch.copied).toBe(true)
@@ -143,7 +143,7 @@ test("loads the copy production delivered into the branch's storage, and runs on
     host: loaded,
     projectRoot: root,
     storage: branchStorage,
-    key: "k".repeat(43),
+    hosted: { key: "k".repeat(43), origin: "https://feature-invoices.preview.shop.test" },
   })
   expect(again.copied).toBe(false)
 })
@@ -160,7 +160,7 @@ test("refuses to start without a copy production delivered", async () => {
     host: loaded,
     projectRoot: root,
     storage: new InMemoryStorage(),
-    key: "k".repeat(43),
+    hosted: { key: "k".repeat(43), origin: "https://feature-invoices.preview.shop.test" },
   }).catch((error: unknown) => error)
 
   expect(String(refused)).toContain("has no copy of production")
@@ -192,7 +192,7 @@ test("keeps no copy when a new one fails to load, and says so at the next start"
       host: loaded,
       projectRoot: root,
       storage: new InMemoryStorage(),
-      key: "k".repeat(43),
+      hosted: { key: "k".repeat(43), origin: "https://feature-invoices.preview.shop.test" },
     })
   await start()
 

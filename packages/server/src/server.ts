@@ -11,6 +11,7 @@ import { bindAgentRunRequestExecution } from "@sixb/core/internal/agent-executio
 import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
 import { CSRF_HEADER_NAME, setRequestClientAddress } from "@sixb/core/internal/auth"
 import {
+  assertPreviewSiteApart,
   authorizeBranchCredential,
   BRANCH_CREDENTIAL_PREFIX,
   branchRuntimeOf,
@@ -72,7 +73,7 @@ import { registerHttpRoutes } from "./registerRoutes"
 import { agentRunSessionHandler, startLapsedRunSweeper } from "./routes/agent-runners"
 import { registerAuthRoutes } from "./routes/auth"
 import { registerBranchHandoverRoutes } from "./routes/branch-handover"
-import { forwardToPreview } from "./routes/branch-preview"
+import { BranchPreview, PreviewSocket } from "./routes/branch-preview"
 import { registerWebhookRoutes } from "./routes/webhooks"
 import { registerWebSocketRoutes } from "./routes/ws"
 import { ObjectQueryOpenApiSchemas } from "./schemas/objects"
@@ -169,6 +170,7 @@ export class SixbServer {
       this.hostRuntime,
       resolveApiBrowserPolicy(options.browser)
     )
+    assertPreviewDomainApart(this.hostRuntime, this.apiBrowserPolicy)
     // URLs the API hands to third parties, such as file download URLs, name this origin.
     if (this.apiBrowserPolicy.publicOrigin) {
       setApiPublicOrigin(this.hostRuntime, this.apiBrowserPolicy.publicOrigin)
@@ -267,7 +269,7 @@ export class SixbServer {
         port: this.port,
         resolveClientAddress: this.resolveClientAddress,
         timing: this.timing,
-        preview: (request) => forwardToPreview(this.hostRuntime, request),
+        preview: new BranchPreview(this.hostRuntime),
       })
       this.bunServer = started.bunServer
       this.closeWebSockets = started.closeWebSockets
@@ -765,8 +767,8 @@ function startApiServer(
     readonly port: number
     readonly resolveClientAddress: ClientAddressResolver
     readonly timing: SixbRequestTimingOptions
-    /** A branch's answer for a request to its preview host, or null for production's own. */
-    readonly preview: (request: Request) => Promise<Response> | null
+    /** Answers a branch's preview host, the branch's and never production's. */
+    readonly preview: BranchPreview
   }
 ) {
   const openSockets = new Set<ServerWebSocket<unknown>>()
@@ -779,8 +781,8 @@ function startApiServer(
     maxRequestBodySize: MAX_FILE_UPLOAD_BYTES,
     fetch: (incoming: Request, server: Server<unknown>) => {
       // A branch's preview host is the branch's, never production's: it goes to the branch whole.
-      const preview = options.preview(incoming)
-      if (preview) return preview
+      const preview = options.preview.fetch(incoming, server)
+      if (preview !== null) return preview
 
       const tooLarge = declaredBodyTooLarge(incoming)
       if (tooLarge) return Response.json({ error: tooLarge.message }, { status: 413 })
@@ -796,7 +798,7 @@ function startApiServer(
       }
       return timeRequest(request, options.timing, () => app.fetch(request))
     },
-    websocket: getElysiaWsHandler(app, openSockets),
+    websocket: getElysiaWsHandler(app, openSockets, options.preview),
   } as Parameters<typeof Bun.serve>[0])
 
   attachBunServer(app, bunServer)
@@ -815,7 +817,11 @@ function startApiServer(
   }
 }
 
-function getElysiaWsHandler(app: SixbApp, openSockets: Set<ServerWebSocket<unknown>>) {
+function getElysiaWsHandler(
+  app: SixbApp,
+  openSockets: Set<ServerWebSocket<unknown>>,
+  preview: BranchPreview
+) {
   const cfg = (app as unknown as { config?: { websocket?: Record<string, unknown> } }).config
   const base = {
     ...elysiaWebSocket,
@@ -826,10 +832,22 @@ function getElysiaWsHandler(app: SixbApp, openSockets: Set<ServerWebSocket<unkno
     maxPayloadLength: MAX_WEBSOCKET_MESSAGE_BYTES,
     open(ws: ServerWebSocket<unknown>) {
       openSockets.add(ws)
+      if (ws.data instanceof PreviewSocket) {
+        return preview.websocket.open(ws as ServerWebSocket<PreviewSocket>)
+      }
       return base.open?.(ws)
+    },
+    message(ws: ServerWebSocket<unknown>, message: string | Buffer<ArrayBuffer>) {
+      if (ws.data instanceof PreviewSocket) {
+        return preview.websocket.message(ws as ServerWebSocket<PreviewSocket>, message)
+      }
+      return base.message?.(ws, message)
     },
     close(ws: ServerWebSocket<unknown>, code: number, reason: string) {
       openSockets.delete(ws)
+      if (ws.data instanceof PreviewSocket) {
+        return preview.websocket.close(ws as ServerWebSocket<PreviewSocket>, code, reason)
+      }
       return base.close?.(ws, code, reason)
     },
   } as Parameters<typeof Bun.serve>[0]["websocket"]
@@ -956,11 +974,9 @@ function ownOriginOnBranch(
   host: SixbHostView,
   policy: ResolvedSixbApiBrowserPolicy
 ): ResolvedSixbApiBrowserPolicy {
-  if (!branchRuntimeOf(host)?.hosted) return policy
-  return {
-    publicOrigin: policy.publicOrigin,
-    allowedOrigins: policy.publicOrigin ? [policy.publicOrigin] : [],
-  }
+  const hosted = branchRuntimeOf(host)?.hosted
+  if (!hosted) return policy
+  return resolveApiBrowserPolicy({ publicOrigin: hosted.origin, allowedOrigins: [hosted.origin] })
 }
 
 /**
@@ -994,4 +1010,30 @@ function isLoopbackHost(request: Request): boolean {
   return (
     name === "localhost" || name.endsWith(".localhost") || name === "127.0.0.1" || name === "[::1]"
   )
+}
+
+/** Production refuses to serve branches on its own site: `assertPreviewSiteApart` says why. */
+function assertPreviewDomainApart(host: SixbHostView, policy: ResolvedSixbApiBrowserPolicy): void {
+  const previewDomain = host.source?.previewDomain
+  if (!previewDomain || host.branch) return
+
+  const origins = [
+    ...(policy.publicOrigin ? [{ what: "API", origin: policy.publicOrigin }] : []),
+    ...policy.allowedOrigins.map((origin) => ({ what: "app", origin })),
+  ]
+  assertPreviewSiteApart(
+    previewDomain,
+    origins.flatMap(({ what, origin }) => {
+      const host = hostnameOf(origin)
+      return host ? [{ what, host }] : []
+    })
+  )
+}
+
+function hostnameOf(origin: string): string | null {
+  try {
+    return new URL(origin).hostname
+  } catch {
+    return null
+  }
 }

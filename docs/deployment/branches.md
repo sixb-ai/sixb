@@ -73,18 +73,20 @@ A branch has an origin of its own, never production's: `<branch>.<previewDomain>
 project names one, else its sandbox's URL (Vercel's own domain).
 
 ```ts
-source: { repository: "acme/shop", previewDomain: "preview.shop.dev" },
+source: { repository: "acme/shop", previewDomain: "shop-preview.dev" },
 ```
 
 | Preview domain | |
 |---|---|
-| DNS | A wildcard, `*.preview.shop.dev`, to production's API server, which forwards each host to its branch |
-| Cookies | Production refuses a preview domain its `cookieDomain` covers: its cookies would reach every branch. Use a domain of its own, as Vercel uses vercel.app |
-| Live updates | Not forwarded under the preview domain yet: pages load, but do not update live |
+| Its own site | Register a domain apart from production's: `shop-preview.dev` beside `shop.dev`, never `preview.shop.dev`. On production's site, a branch's pages would get production's cookies, so production refuses one that shares a site with its API, its app or its `cookieDomain`. Vercel's `vercel.app` is safe because it is on the [Public Suffix List](https://publicsuffix.org), which makes every subdomain a site of its own |
+| DNS and TLS | A wildcard record, `*.shop-preview.dev`, to production's API server, and a wildcard certificate for it. Production forwards each host to its branch, WebSockets included |
+| Limits | Branches share 64 of production's connections at once. A request has 30 s to start answering and 5 min to finish, a WebSocket an hour |
 
-You sign in from production only: production checks your grant, the branch makes you a member when
-its copy predates you, and the one-time link signs you in there. The link works once, for you, for
-a minute. The branch has no other sign-in, and its project's own strategy signs nobody in.
+You sign in from production only: production checks your grant, the branch lets you in as
+production has you now (a member, in your groups), and the one-time link signs you in there. The
+link works once, for you, for a minute. The branch's session lasts 4 hours at most, so losing the
+grant reaches the branch within that. The branch has no other sign-in, and its project's own
+strategy signs nobody in.
 A branch on your laptop (`sixb dev --from production`) needs no sign-in: it runs as you, and answers
 your machine only.
 

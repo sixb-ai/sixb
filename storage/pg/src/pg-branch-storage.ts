@@ -19,6 +19,17 @@ export class PgBranchStorage implements BranchStorage {
     return row ? parseBranchRow(row) : null
   }
 
+  async getByNamespace(input: {
+    readonly projectId: string
+    readonly namespace: string
+  }): Promise<BranchRecord | null> {
+    const [row] = await this.sql<PgBranchRow[]>`
+      SELECT * FROM hosted_branches
+      WHERE project_id = ${input.projectId} AND record->>'namespace' = ${input.namespace}
+    `
+    return row ? parseBranchRow(row) : null
+  }
+
   async list(input: { readonly projectId: string }): Promise<readonly BranchRecord[]> {
     const rows = await this.sql<PgBranchRow[]>`
       SELECT * FROM hosted_branches WHERE project_id = ${input.projectId} ORDER BY name COLLATE "C"

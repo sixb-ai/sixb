@@ -25,16 +25,37 @@ export const BRANCH_HANDOVER_SIGN_IN_PATH = "/auth/branch-handover"
 export const BRANCH_HANDOVER_STRATEGY_ID = "branch-handover"
 
 /**
- * The auth a branch production runs serves: the project's sessions and cookies, but a strategy
- * that signs nobody in, so the handover is the only way in. Its cookies stay on the branch's own
- * origin, whatever domain production's span.
+ * The longest a branch's session lasts, however active: production checks the grant only at the
+ * handover, so losing it, or being suspended, takes effect on the branch within this.
  */
-export function branchHandoverAuth(config: SixbAuthConfig | undefined): SixbAuthConfig {
+export const BRANCH_SESSION_MAX_MS = 4 * 60 * 60_000
+
+/**
+ * The auth a branch production runs serves: the project's sessions and cookies, but a strategy
+ * that signs nobody in, so the handover is the only way in. Its sessions end within
+ * {@link BRANCH_SESSION_MAX_MS}. Its cookies stay on the branch's own origin, whatever domain
+ * production's span, and are `Secure` when that origin is https: its API sees plain http from the
+ * front, so it cannot tell by itself.
+ */
+export function branchHandoverAuth(
+  config: SixbAuthConfig | undefined,
+  publicOrigin: string | undefined
+): SixbAuthConfig {
   const options = config && "strategy" in config ? config : undefined
+  const session = options?.session
+  const absoluteTimeoutMs = Math.min(
+    session?.absoluteTimeoutMs ?? BRANCH_SESSION_MAX_MS,
+    BRANCH_SESSION_MAX_MS
+  )
+  // A session's idle limit and renewal window fit inside its lifetime.
+  const idleTimeoutMs = Math.min(session?.idleTimeoutMs ?? absoluteTimeoutMs, absoluteTimeoutMs)
+  const renewalWindowMs = Math.min(session?.renewalWindowMs ?? idleTimeoutMs / 4, idleTimeoutMs / 4)
+  const https = publicOrigin?.startsWith("https://") ?? false
+
   return {
     strategy: { id: BRANCH_HANDOVER_STRATEGY_ID, kind: "dev" },
-    ...(options?.session ? { session: options.session } : {}),
-    cookies: { ...options?.cookies, cookieDomain: undefined },
+    session: { ...session, absoluteTimeoutMs, idleTimeoutMs, renewalWindowMs },
+    cookies: { ...options?.cookies, cookieDomain: undefined, ...(https ? { secure: true } : {}) },
   }
 }
 
@@ -57,8 +78,8 @@ export class BranchHandover {
   constructor(private readonly host: SixbHostView) {}
 
   /**
-   * A code for `person`, made a member of the branch's copy when the copy predates them, and
-   * given their groups.
+   * A code for `person`, made an active member of the branch's copy when the copy predates them
+   * or holds them otherwise, and given exactly their groups.
    */
   async prepare(
     person: BranchHandoverPerson
@@ -91,10 +112,8 @@ export class BranchHandover {
     if (!auth) throw new Error("[Sixb] A branch signs people in through storage.auth.")
     const projectId = this.host.projectId
 
+    // Production let them in as an active member: the copy, taken earlier, may say otherwise.
     const existing = await auth.users.getById({ projectId, id: person.id })
-    if (existing && existing.status !== "active") {
-      throw new Error(`[Sixb] '${person.id}' is not an active member of this branch's copy.`)
-    }
     if (!existing) {
       await auth.users.create({
         projectId,
@@ -102,8 +121,22 @@ export class BranchHandover {
         email: person.email,
         ...(person.displayName ? { displayName: person.displayName } : {}),
       })
+    } else if (existing.status !== "active") {
+      await auth.users.updateStatus({ projectId, id: person.id, status: "active" })
     }
-    for (const groupId of person.groupIds) {
+
+    // Their groups as production has them now: none the copy kept, none it lacks.
+    const wanted = new Set(person.groupIds)
+    const held = await auth.groupMemberships.listForUser({ projectId, userId: person.id })
+    for (const membership of held) {
+      if (wanted.has(membership.groupId)) continue
+      await auth.groupMemberships.remove({
+        projectId,
+        userId: person.id,
+        groupId: membership.groupId,
+      })
+    }
+    for (const groupId of wanted) {
       await auth.groupMemberships.upsert({
         projectId,
         userId: person.id,

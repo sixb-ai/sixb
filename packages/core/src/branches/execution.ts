@@ -211,9 +211,14 @@ export function createBranchesRuntime(
       }).catch((error: unknown) => {
         throw new Error(`[Sixb] Branch '${name}' did not answer: ${errorMessage(error)}`)
       })
-      const answer = (await response.json().catch(() => null)) as { code?: unknown } | null
+      const answer = (await response.json().catch(() => null)) as {
+        code?: unknown
+        error?: unknown
+      } | null
       if (!response.ok || typeof answer?.code !== "string") {
-        throw new Error(`[Sixb] Branch '${name}' did not let you in (HTTP ${response.status}).`)
+        // The branch's own reason, when it gave one: it is about the person, never a secret.
+        const reason = typeof answer?.error === "string" ? answer.error : `HTTP ${response.status}`
+        throw new Error(`[Sixb] Branch '${name}' did not let you in: ${reason}`)
       }
 
       const origin = branchPreviewOrigin(branch, dependencies.source?.previewDomain ?? null)

@@ -301,11 +301,11 @@ describe("a held branch", () => {
     })
     const held = await hold(host)
     await until(row(host), (branch) => branch?.state === "copying")
-    await pass(25 * 60_000, 2_000)
+    await pass(25 * 60_000)
     release()
     await ready(host)
 
-    await pass(5 * 60_000, 2_000)
+    await pass(5 * 60_000)
     expect((await row(host)())?.state).toBe("ready")
     await held.stop()
   })
