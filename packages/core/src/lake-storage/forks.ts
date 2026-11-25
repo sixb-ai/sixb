@@ -51,6 +51,15 @@ export interface LakeForks {
   releaseFiles(input: ReleaseLakeSliceFilesInput): Promise<number>
 }
 
+/**
+ * A lake that is a branch's slice of production's. Its versions up to the slice's point are
+ * production's, read in place; the ones it commits are the branch's own, and their ids say so.
+ */
+export interface LakeFork {
+  /** Whether a version is one the branch committed, not one of production's it reads. */
+  ownsVersion(versionId: string): boolean
+}
+
 export interface LakeVersionsAtInput {
   readonly point: string
   readonly datasetIds: readonly string[]

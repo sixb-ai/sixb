@@ -64,6 +64,12 @@ export interface WriteLakeSliceOptions {
   readonly path: string
   /** The branch the slice is for. */
   readonly branch: string
+  /**
+   * Versions to hold instead of a dataset's latest at the point, one per dataset, such as the one
+   * a projection applied to the objects the branch copied: the branch's projection then continues
+   * from it.
+   */
+  readonly pinned?: readonly DatasetVersionRef[]
 }
 
 export interface IssueLakeSliceTokenInput {
@@ -132,10 +138,19 @@ export async function writeLakeSlice(
     datasetIds: datasets.map((dataset) => dataset.id),
   })
 
+  const pinned = pinnedVersions(input.pinned ?? [], datasets)
   const held: LakeSliceVersion[] = []
   const skipped: LakeSliceSkip[] = []
   for (const dataset of datasets) {
-    const version = versions.get(dataset.id)
+    const pin = pinned.get(dataset.id)
+    const version =
+      pin === undefined ? versions.get(dataset.id) : await reader.datasets.getVersion(dataset, pin)
+
+    if (pin !== undefined && !version) {
+      throw new Error(
+        `[Sixb] The slice pins version '${pin}' of '${dataset.id}', which no longer exists. Take the version the projection applies now.`
+      )
+    }
     if (!version) continue
 
     const hidden = await hiddenColumns(reader, dataset, version.versionId)
@@ -288,6 +303,30 @@ export async function releaseLakeSliceFiles(host: LakeSliceHost): Promise<number
 
   const live = await liveLakeSlices(host)
   return forks.releaseFiles({ liveSlices: live.map((slice) => slice.files) })
+}
+
+/** One version per dataset the reader views: a slice holds a single version of each. */
+function pinnedVersions(
+  pins: readonly DatasetVersionRef[],
+  datasets: readonly { readonly id: string }[]
+): ReadonlyMap<string, string> {
+  const pinned = new Map<string, string>()
+  for (const { datasetId, versionId } of pins) {
+    const earlier = pinned.get(datasetId)
+    if (earlier !== undefined && earlier !== versionId) {
+      throw new Error(
+        `[Sixb] The slice pins '${datasetId}' at both '${earlier}' and '${versionId}'. A slice holds one version of each dataset: pin one.`
+      )
+    }
+    if (!datasets.some((dataset) => dataset.id === datasetId)) {
+      throw new Error(
+        `[Sixb] The slice pins '${datasetId}', which is not a dataset its person reads. Pin only the datasets they view.`
+      )
+    }
+    pinned.set(datasetId, versionId)
+  }
+
+  return pinned
 }
 
 /**
