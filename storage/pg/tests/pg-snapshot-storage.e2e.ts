@@ -148,6 +148,20 @@ runSnapshotLoadContractSuite("PostgreSQL storage", {
         )
         rows[table] = found.map((entry) => entry.row).sort()
       }
+
+      // And the keys and indexes a copy drops while it runs, every one of them back. A foreign
+      // key to a partitioned table numbers the copies it makes for its partitions. Reproduce:
+      // skip the partitions' keys in the copy's finish, and the copy's keys differ.
+      const schema = branchSchema(namespace)
+      const indexes = await sql<{ definition: string }[]>`
+        SELECT replace(indexdef, ${`${schema}.`}, '') AS definition FROM pg_indexes
+        WHERE schemaname = ${schema}`
+      const keys = await sql<{ definition: string }[]>`
+        SELECT conrelid::regclass::text || ' ' || regexp_replace(conname, '_fkey[0-9]+$', '_fkey')
+          || ' ' || pg_get_constraintdef(oid) AS definition
+        FROM pg_constraint WHERE connamespace = ${schema}::regnamespace`
+      rows.indexes = indexes.map((entry) => entry.definition).sort()
+      rows.keys = keys.map((entry) => entry.definition).sort()
       return rows
     }),
 })

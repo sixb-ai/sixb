@@ -17,6 +17,12 @@ import { runPgTransactionOn } from "./transactions"
 // reads: the rows never leave the server. It writes what a load of the same snapshot writes, row
 // for row; times are cut to the millisecond, as the snapshot's format carries them.
 
+/**
+ * Lanes a copy takes. Each row the lanes insert is logged, and the log is one stream: past a few
+ * lanes they wait on it rather than copy (1M objects: 22 s on 3 lanes, 25 s on 6, 30 s on 10).
+ */
+export const COPY_LANES = 4
+
 /** A type this large is copied in ranges of primary ids, side by side. */
 const RANGE_MIN_OBJECTS = 200_000
 
@@ -47,14 +53,14 @@ interface CopyWork {
  * Copy from the `source` schema into this connection's schema, as `plan` says, at the snapshot
  * `snapshotId` exported by a transaction of the source that stays open until every lane adopted it.
  *
- * 1. One transaction writes the commit, marks the schema `loading`, and drops the secondary indexes
- *    of the tables the copy fills and the foreign keys of vectors.
- * 2. Lanes, each a transaction on the snapshot, take work by type and range until none is left,
- *    then commit. Objects and their vectors share a transaction: a vector's key reads its object.
- * 3. Each table is vacuumed, so its pages are visible to all, its indexes are built again side by
- *    side, the vectors' keys are added again, and the mark is cleared.
+ * 1. One transaction writes the commit, marks the schema `loading`, and drops the keys and
+ *    indexes of the tables the copy fills.
+ * 2. Lanes, each a transaction on the snapshot, take work by type and range of primary ids until
+ *    none is left, then commit.
+ * 3. Each table is vacuumed, so its pages are visible to all, its keys and indexes are built again
+ *    side by side, and the mark is cleared.
  *
- * A failure rolls back the open lanes, empties what any committed and builds the dropped indexes
+ * A failure rolls back the open lanes, empties what any committed and adds the keys and indexes
  * again. A crash leaves the mark.
  */
 export async function copySnapshotInPg(input: {
@@ -82,8 +88,8 @@ export async function copySnapshotInPg(input: {
     await markState(first, { ...state, loading: true })
 
     return {
+      keys: await dropKeys(first, LOADED_TABLES),
       indexes: await dropSecondaryIndexes(first, LOADED_TABLES),
-      keys: await dropVectorKeys(first),
     }
   })
 
@@ -131,8 +137,7 @@ export async function copySnapshotInPg(input: {
       open.splice(open.indexOf(sql), 1)
     }
 
-    await finish(connections, indexes)
-    for (const key of keys) await first.unsafe(key)
+    await finish(connections, keys, indexes)
     await markState(first, state)
   } catch (error) {
     work.length = 0
@@ -141,7 +146,9 @@ export async function copySnapshotInPg(input: {
       await first.unsafe(`TRUNCATE ${LOADED_TABLES.join(", ")}`)
       await first`DELETE FROM object_unique_properties WHERE project_id = ${projectId}`
       await first`DELETE FROM ontology_commits WHERE project_id = ${projectId} AND id = ${plan.commit.id}`
-      for (const definition of [...indexes, ...keys]) await first.unsafe(definition)
+      for (const definition of [...keys.tables, ...keys.partitioned, ...indexes, ...keys.foreign]) {
+        await first.unsafe(definition)
+      }
       await markState(first, state)
     })
     throw error
@@ -150,26 +157,74 @@ export async function copySnapshotInPg(input: {
   return { types: counts, users }
 }
 
-/**
- * Drop the foreign keys of `object_vectors` until the copy ends, returning how to add them again.
- * The lanes read at production's snapshot, which predates the commit their vectors name, and a
- * key reads what the snapshot shows. Added again, each key checks every copied row.
- */
-async function dropVectorKeys(sql: SQLClient): Promise<readonly string[]> {
-  const keys = await sql<{ name: string; definition: string }[]>`
-    SELECT conname AS name, pg_get_constraintdef(oid) AS definition FROM pg_constraint
-    WHERE conrelid = to_regclass('object_vectors') AND contype = 'f' AND conparentid = 0
-  `
-  for (const key of keys) {
-    await sql.unsafe(`ALTER TABLE object_vectors DROP CONSTRAINT ${quoteIdent(key.name)}`)
-  }
-  return keys.map(
-    (key) => `ALTER TABLE object_vectors ADD CONSTRAINT ${quoteIdent(key.name)} ${key.definition}`
-  )
+/** How to add again the keys a copy dropped, in the order they can be. */
+interface DroppedKeys {
+  /** Primary and unique keys of plain tables and of partitions, each built on its own. */
+  readonly tables: readonly string[]
+  /** A partitioned table's, which attaches its partitions' keys once they exist. */
+  readonly partitioned: readonly string[]
+  /** Foreign keys, which read the keys they reference. */
+  readonly foreign: readonly string[]
 }
 
-/** Vacuum every table, so pages are visible to all at once, then build the indexes side by side. */
-async function finish(connections: readonly ReservedSQL[], indexes: readonly string[]) {
+/**
+ * Drop the keys of the tables the copy fills until it ends. Lanes inserting side by side into one
+ * B-tree contend for its pages, and log every insert: a key built afterwards is one sorted pass.
+ * Foreign keys go too: the lanes read at production's snapshot, which predates the commit the
+ * rows name. Added again, each key checks every copied row.
+ */
+async function dropKeys(sql: SQLClient, tables: readonly string[]): Promise<DroppedKeys> {
+  const keys = await sql<
+    { table: string; name: string; definition: string; kind: string; partitioned: boolean }[]
+  >`
+    SELECT owner.relname AS table, constraint_row.conname AS name,
+      pg_get_constraintdef(constraint_row.oid) AS definition, constraint_row.contype AS kind,
+      owner.relkind = 'p' AS partitioned
+    FROM pg_constraint AS constraint_row
+    JOIN pg_class AS owner ON owner.oid = constraint_row.conrelid
+    WHERE owner.relnamespace = current_schema()::regnamespace
+      AND constraint_row.contype IN ('p', 'u', 'f')
+      AND (constraint_row.contype <> 'f' OR constraint_row.conparentid = 0)
+      AND (owner.relname = ANY(${tables}::text[]) OR EXISTS (
+        SELECT 1 FROM pg_inherits AS link JOIN pg_class AS parent ON parent.oid = link.inhparent
+        WHERE link.inhrelid = owner.oid AND parent.relname = ANY(${tables}::text[])
+      ))
+    ORDER BY constraint_row.contype = 'f' DESC, constraint_row.conparentid = 0 DESC
+  `
+  const add = (key: (typeof keys)[number]) =>
+    `ALTER TABLE ${quoteIdent(key.table)} ADD CONSTRAINT ${quoteIdent(key.name)} ${key.definition}`
+
+  // Foreign keys first, then a partitioned table's key, which takes its partitions' with it.
+  for (const key of keys) {
+    const inherited = key.kind !== "f" && !key.partitioned && (await isPartition(sql, key.table))
+    if (inherited) continue
+    await sql.unsafe(`ALTER TABLE ${quoteIdent(key.table)} DROP CONSTRAINT ${quoteIdent(key.name)}`)
+  }
+
+  return {
+    tables: keys.filter((key) => key.kind !== "f" && !key.partitioned).map(add),
+    partitioned: keys.filter((key) => key.kind !== "f" && key.partitioned).map(add),
+    foreign: keys.filter((key) => key.kind === "f").map(add),
+  }
+}
+
+async function isPartition(sql: SQLClient, table: string): Promise<boolean> {
+  const [row] = await sql<{ partition: boolean }[]>`
+    SELECT relispartition AS partition FROM pg_class
+    WHERE relnamespace = current_schema()::regnamespace AND relname = ${table}
+  `
+  return row?.partition === true
+}
+
+/**
+ * Vacuum every table, so pages are visible to all at once. Then build the keys and indexes side
+ * by side: partitions' keys before their table's, which attaches them, and foreign keys last.
+ */
+async function finish(
+  connections: readonly ReservedSQL[],
+  keys: DroppedKeys,
+  indexes: readonly string[]
+) {
   const tables = [...LOADED_TABLES]
   await Promise.all(
     connections.map(async (sql) => {
@@ -179,12 +234,21 @@ async function finish(connections: readonly ReservedSQL[], indexes: readonly str
     })
   )
 
-  const pending = [...indexes]
+  const first = connections[0]!
+  await sideBySide(connections, keys.tables)
+  for (const key of keys.partitioned) await first.unsafe(key)
+  await sideBySide(connections, indexes)
+  for (const key of keys.foreign) await first.unsafe(key)
+}
+
+/** Run `statements` across the connections, each taking the next as it ends one. */
+async function sideBySide(connections: readonly ReservedSQL[], statements: readonly string[]) {
+  const pending = [...statements]
   await Promise.all(
     connections.map(async (sql) => {
       await sql.unsafe("SET maintenance_work_mem = '256MB'")
-      for (let definition = pending.shift(); definition; definition = pending.shift()) {
-        await sql.unsafe(definition)
+      for (let statement = pending.shift(); statement; statement = pending.shift()) {
+        await sql.unsafe(statement)
       }
       await sql.unsafe("RESET maintenance_work_mem")
     })
@@ -244,17 +308,23 @@ function typeWork(context: CopyContext, type: SnapshotCopyType, range: Range): C
     {
       label: `overrides ${objectTypeId}`,
       run: async (sql) => {
-        const edited = "(properties - $3::text[])"
+        // Every property was edited when the object last changed: its time, written once a row.
         await sql.unsafe(
           `INSERT INTO ontology_object_overrides
              (project_id, object_type_id, primary_id, value, last_commit_id, updated_at, edited_at)
            SELECT project_id, object_type_id, primary_id,
-             jsonb_build_object('kind', 'create', 'properties', ${edited}), $4, ${MS("updated_at")},
+             jsonb_build_object('kind', 'create', 'properties', edited.properties), $4,
+             ${MS("updated_at")},
              COALESCE(
-               (SELECT jsonb_object_agg(key, ${ISO("updated_at")}) FROM jsonb_object_keys(${edited}) AS key),
+               (SELECT jsonb_object_agg(key, edited.at)
+                FROM jsonb_object_keys(edited.properties) AS key),
                '{}'::jsonb
              )
-           ${objectsOf}`,
+           FROM ${source}.objects AS object
+           CROSS JOIN LATERAL (
+             SELECT object.properties - $3::text[] AS properties, to_jsonb(${ISO("object.updated_at")}) AS at
+           ) AS edited
+           WHERE project_id = $1 AND object_type_id = $2${within("primary_id", range)}`,
           [
             projectId,
             objectTypeId,

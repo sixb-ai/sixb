@@ -86,7 +86,7 @@ import { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storag
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
 import { PgShareGrantStorage } from "./share-grant-storage"
 import { PgShareSessionStorage } from "./share-session-storage"
-import { copyBounds, copySnapshotInPg } from "./snapshot-copy"
+import { COPY_LANES, copyBounds, copySnapshotInPg } from "./snapshot-copy"
 import { type BranchSchemaState, PgSnapshotLoad, SNAPSHOT_LANES } from "./snapshot-load"
 import { readPgLatestPoints, readPgMemberships, readPgRanges, readPgVectors } from "./snapshot-read"
 import { isRetryableTransactionConflict } from "./storage-errors"
@@ -520,7 +520,7 @@ export class PostgresStorage
       )
       if (!plan) return undefined
 
-      const count = Math.max(1, Math.floor((this.options.max ?? 10) / 2))
+      const count = Math.max(1, Math.min(COPY_LANES, Math.floor((this.options.max ?? 10) / 2)))
       const bounds = await copyBounds(
         production,
         source.schemaName,
