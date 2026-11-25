@@ -62,24 +62,11 @@ export async function* copyForBranch(
   let slice: SnapshotLakeSlice | undefined
   let complete = false
 
-  // Recorded as it starts, so a copy cut short shows too: in the log with its branch, and in
-  // the person's activity, which keeps no value such as a branch's name.
+  // Recorded as it starts, so a copy cut short shows too: in production's log, with the person,
+  // the branch and how they signed in. Not in their activity, which counts app visits.
   console.info(
-    `[Sixb] ${principal.id} is copying what they can read to branch ${JSON.stringify(input.branch)}.`
+    `[Sixb] ${principal.id} is copying what they can read to branch ${JSON.stringify(input.branch)}, signed in with ${input.credential?.type === "accessToken" ? "an access token" : "a session"}.`
   )
-  if (input.credential?.type === "session") {
-    await host.activity.capture(
-      { actor: { type: "user", userId: principal.id }, sessionId: input.credential.id },
-      [
-        {
-          id: `branch_copy_${randomUUID()}`,
-          type: "ui.interaction",
-          name: "branch.copy",
-          route: "/branches",
-        },
-      ]
-    )
-  }
 
   try {
     for await (const chunk of exportSnapshot(hostSnapshotSource(host), {
@@ -90,6 +77,8 @@ export async function* copyForBranch(
               path: catalogPath,
               branch: input.branch,
               credentialHash: branchCredential.hash,
+              // An access token may narrow the person's groups: the credential keeps to them.
+              credentialGroupIds: input.person.groupIds,
               onSlice: (cut: SnapshotLakeSlice) => {
                 slice = cut
               },

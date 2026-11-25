@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { createHash } from "node:crypto"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -78,18 +78,23 @@ async function production() {
   await createTestSixb(host).datasets.ingest(orders, {
     changes: [change.upsert({ id: "o-1", total: 1 })],
   })
-  const person = (groupId: string) =>
+  const person = (groupId: string, sessionId?: string) =>
     resolveAuthorizationContext({
       principal: { type: "user", id: "usr_alice" },
+      ...(sessionId ? { sessionId } : {}),
       groupIds: [groupId],
       roles: host.definitions.security.listResolvedRoles(),
     })
-  const copy = (groupId: string = developers.id) =>
+  const copy = (
+    groupId: string = developers.id,
+    credential?: { readonly type: "session" | "accessToken"; readonly id: string }
+  ) =>
     copyForBranch(host, {
-      person: person(groupId),
+      person: person(groupId, credential?.type === "session" ? credential.id : undefined),
       branch: "feature/x",
       requestId: "req_copy",
       directory,
+      ...(credential ? { credential } : {}),
     })
   const live = () =>
     host.storage.lakeSlices!.listLive({ projectId: host.id, liveAfter: new Date(0) })
@@ -131,6 +136,27 @@ describe("a copy for a branch", () => {
     expect(slice?.credentialHash).toBe(
       createHash("sha256").update(`${rest?.lake.credential}`).digest("hex")
     )
+    // With the groups the copy read with, which the credential never reads beyond.
+    expect(slice?.credentialGroupIds).toEqual([developers.id])
+  })
+
+  // Red check: capture the copy in the person's activity again: it opens a visit on a page no one
+  // saw. A copy goes to production's log, not to app usage.
+  test("is no visit in its person's activity", async () => {
+    const { host, copy } = await production()
+    const captured = spyOn(host.activity, "capture")
+    const log = spyOn(console, "info").mockImplementation(() => {})
+    try {
+      for await (const _ of copy(developers.id, { type: "session", id: "ses_alice" })) void _
+
+      expect(captured).not.toHaveBeenCalled()
+      expect(log.mock.calls.flat().join("\n")).toContain(
+        'to branch "feature/x", signed in with a session'
+      )
+    } finally {
+      captured.mockRestore()
+      log.mockRestore()
+    }
   })
 
   // Red check: drop the grant check from `copyForBranch`.

@@ -7,7 +7,6 @@ import {
   type ObjectRef,
   type SixbHostView,
 } from "@sixb/core"
-import { branchRuntimeOf } from "@sixb/core/internal/branches"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { serializeExpandedObject, serializeObject } from "@sixb/core/internal/objects"
 import type { ObjectRow } from "@sixb/core/storage"
@@ -260,7 +259,9 @@ async function objectFileContentResponse(
 ) {
   const sixb = requireRequestSixb(context)
 
-  const local = await createContextualFileContentResponse({
+  // On a branch from production, the host's blob storage reads the copied objects' files through
+  // production, as the person who copied it.
+  return createContextualFileContentResponse({
     blobStorage: host.blobStorage,
     query: context.query,
     querySchema: ObjectFileContentQuerySchema,
@@ -277,38 +278,7 @@ async function objectFileContentResponse(
       return serializeObject(row)
     },
   })
-
-  // A branch from production holds its objects, not their files: those are read through
-  // production, as the person who copied it, who may read them there.
-  const runtime = branchRuntimeOf(host)
-  const status = local instanceof Response ? local.status : Number(context.set.status ?? 200)
-  if (!runtime || status !== 404) return local
-
-  const url = new URL(context.request.url)
-  const production = new URL(
-    `api/objects/${encodeURIComponent(context.params.objectTypeId)}/${encodeURIComponent(context.params.objectId)}/files/content${url.search}`,
-    runtime.production.url.endsWith("/") ? runtime.production.url : `${runtime.production.url}/`
-  )
-  const headers = new Headers({ authorization: await runtime.production.authorization() })
-  const range = context.request.headers.get("range")
-  if (range) headers.set("range", range)
-
-  const response = await fetch(production, { method: options.head ? "HEAD" : "GET", headers })
-  // `fetch` has already decoded the body: production's encoding and length describe other bytes.
-  const forwarded = new Headers(response.headers)
-  for (const name of PRODUCTION_ONLY_HEADERS) forwarded.delete(name)
-  context.set.status = response.status
-  return new Response(response.body, { status: response.status, headers: forwarded })
 }
-
-/** What production answers that holds only between production and the branch. */
-const PRODUCTION_ONLY_HEADERS = [
-  "content-encoding",
-  "content-length",
-  "transfer-encoding",
-  "connection",
-  "set-cookie",
-]
 
 export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
   return app

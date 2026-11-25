@@ -16,11 +16,12 @@ export class PgLakeSliceStorage implements LakeSliceStorage {
     await this.sql`
       INSERT INTO lake_slices (
         project_id, id, user_id, branch, point, versions, files, created_at, last_token_expires_at,
-        credential_hash, received_at
+        credential_hash, credential_group_ids, received_at
       ) VALUES (
         ${record.projectId}, ${record.id}, ${record.userId}, ${record.branch}, ${record.point},
         ${JSON.stringify(record.versions)}::text::jsonb, ${JSON.stringify(record.files)}::text::jsonb,
         ${record.createdAt}, ${record.lastTokenExpiresAt ?? null}, ${record.credentialHash ?? null},
+        ${record.credentialGroupIds ? JSON.stringify(record.credentialGroupIds) : null}::text::jsonb,
         ${record.receivedAt ?? null}
       )
     `
@@ -140,6 +141,7 @@ function sliceFromRow(row: PgRow): LakeSliceRecord {
     createdAt: row.created_at,
     lastTokenExpiresAt: row.last_token_expires_at,
     credentialHash: row.credential_hash,
+    credentialGroupIds: row.credential_group_ids,
     receivedAt: row.received_at,
   })
 }

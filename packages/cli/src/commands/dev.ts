@@ -1,6 +1,10 @@
 import { dirname, resolve } from "node:path"
-import { BRANCH_DATA_FROM_ENV, BRANCH_NAME_ENV } from "@sixb/core/internal/runtime"
-import { currentGitBranch, fetchBranchCopy } from "../lib/branch-from-production"
+import {
+  BRANCH_DATA_FROM_ENV,
+  BRANCH_NAME_ENV,
+  BRANCH_RUNTIME_ENV,
+} from "@sixb/core/internal/runtime"
+import { checkoutOf, currentGitBranch, fetchBranchCopy } from "../lib/branch-from-production"
 import { connect } from "../lib/connection"
 import { runDevSupervisor } from "../lib/dev-supervisor"
 import { resolveProfile } from "../lib/profiles"
@@ -64,6 +68,7 @@ export async function runDev(options: DevOptions = {}) {
     })
     process.env[BRANCH_NAME_ENV] = gitBranch
     process.env[BRANCH_DATA_FROM_ENV] = "production"
+    process.env[BRANCH_RUNTIME_ENV] = await checkoutOf(root)
 
     // Each child inherits this environment: the branch's code gets none of the sign-in that took
     // the copy, only the branch's own credential.

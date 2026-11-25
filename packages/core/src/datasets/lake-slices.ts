@@ -87,6 +87,8 @@ export interface WriteLakeSliceOptions {
   readonly pinned?: readonly DatasetVersionRef[]
   /** SHA-256 of the branch's credential, recorded with the slice it reads production for. */
   readonly credentialHash?: string
+  /** The groups the credential reads with at most: those the copy read with. */
+  readonly credentialGroupIds?: readonly string[]
 }
 
 export interface IssueLakeSliceTokenInput {
@@ -201,6 +203,7 @@ export async function writeLakeSlice(
           userId,
           branch: input.branch,
           ...(input.credentialHash ? { credentialHash: input.credentialHash } : {}),
+          ...(input.credentialGroupIds ? { credentialGroupIds: input.credentialGroupIds } : {}),
           point: input.point,
           versions: refs,
           files: [...files],

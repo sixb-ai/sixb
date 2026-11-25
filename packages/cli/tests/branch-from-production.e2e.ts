@@ -437,6 +437,7 @@ export const sixb = await createSixb({
 // What the branch's code is given of the developer's production sign-in.
 const signIn = ["SIXB_API_URL", "SIXB_API_TOKEN", "SIXB_TOKEN", "SIXB_PROFILE"].filter((name) => process.env[name] !== undefined)
 await Bun.write(import.meta.dir + "/.sixb/sign-in-seen.json", JSON.stringify(signIn))
+await Bun.write(import.meta.dir + "/.sixb/runtime-seen.txt", process.env.SIXB_BRANCH_RUNTIME ?? "")
 `
     )
     for (const args of [
@@ -547,7 +548,8 @@ await Bun.write(import.meta.dir + "/.sixb/sign-in-seen.json", JSON.stringify(sig
   // Red checks: in commands/dev-runner.ts, start the project's own host instead of the branch's:
   // the API serves the laptop's empty storage. In commands/dev.ts, leave `refresh` out of
   // `fetchBranchCopy`: --refresh reuses the copy, as it once did before this test found it; drop
-  // the loop over `PRODUCTION_SIGN_IN_ENV`: the branch's code reads the developer's token.
+  // the loop over `PRODUCTION_SIGN_IN_ENV`: the branch's code reads the developer's token; drop
+  // `BRANCH_RUNTIME_ENV`: the branch runs as no checkout in particular.
   test("copies, serves the copy as the person, reuses it, refreshes it, and drops it with its git branch", async () => {
     const root = await checkout()
     const alice = (await signedIn("usr_alice")).authorization
@@ -557,6 +559,10 @@ await Bun.write(import.meta.dir + "/.sixb/sign-in-seen.json", JSON.stringify(sig
       expect(first.output()).toContain("Branch: production's data as you read it, copied now")
       expect(first.output()).toContain("Off on this branch")
       expect(await Bun.file(join(root, ".sixb/sign-in-seen.json")).json()).toEqual([])
+      // Who runs the branch: this checkout, apart from the same git branch run anywhere else.
+      expect(await Bun.file(join(root, ".sixb/runtime-seen.txt")).text()).toBe(
+        (await Bun.file(join(root, ".sixb/branches/checkout")).text()).trim()
+      )
       // Served as Alice: the closed ticket stays in production.
       expect(await tickets(first.api)).toEqual(["t-1:Ticket t-1", "t-3:Ticket t-3"])
       await first.stop()

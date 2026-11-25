@@ -54,12 +54,13 @@ export function runLakeSliceStorageContractSuite<TStorage extends LakeSliceStora
 
     test("finds a slice by its branch credential, in its project only", async () => {
       await withStorage(async (storage) => {
-        await storage.create({ ...slice(), credentialHash: "c".repeat(64) })
+        const credential = { credentialHash: "c".repeat(64), credentialGroupIds: ["developers"] }
+        await storage.create({ ...slice(), ...credential })
         await storage.create({ ...slice(), id: "slice_2" })
 
         expect(
           await storage.findByCredentialHash({ projectId, credentialHash: "c".repeat(64) })
-        ).toEqual({ ...slice(), credentialHash: "c".repeat(64) })
+        ).toEqual({ ...slice(), ...credential })
         expect(
           await storage.findByCredentialHash({ projectId: "other", credentialHash: "c".repeat(64) })
         ).toBeNull()

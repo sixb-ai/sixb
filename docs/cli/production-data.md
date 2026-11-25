@@ -29,8 +29,10 @@ defineRole("developers", { grantedTo: [developers], grants: [can.manage(project.
 - **You, on this machine.** Every request on the branch runs as you, with your production groups,
   without signing in. The branch listens on this machine only, answers no other host name, and
   refuses requests from web pages it does not serve.
-- **Files from production.** Files attached to objects are read from production, as you, when
-  production's lake can be branched (DuckLake): the branch's credential comes with its datasets.
+- **Files from production.** Files attached to the objects you copied are read from production,
+  as you, wherever the branch reads them: the app, your actions, the agent and its models. This
+  takes a production lake that branches can read (DuckLake): the branch's credential comes with
+  its datasets. Files the branch writes stay on it.
 - **Types fed by a projection** keep updating: a pipeline you change on the branch updates only
   the objects its new rows change. When a type cannot, `sixb dev` says why.
 
@@ -51,8 +53,15 @@ Not refused: your project's own `fetch` calls and the agent's web tools still re
 branch's code runs, and keeps it under `.sixb/branches/`, readable by you only. The branch's code
 gets none of that sign-in: it holds only its own credential, which reads production as you for its
 objects' files and its datasets, and nothing else, and ends with the copy. Production runs two
-copies at a time per server process, one per person, and records each copy in its log, and in
-your activity when you signed in with `sixb login`.
+copies at a time per server process, one per person, and records each copy in its log, with your
+name, the branch and how you signed in.
 
 On your machine, the branch's code runs as your OS user and could read your `sixb login` session
 file: run branches whose code you trust.
+
+## Your project's settings
+
+A branch runs with your project's `dev` values, the environment `sixb dev` always uses: its model
+keys and settings. **Never make a `dev` value a production credential.** Connectors and writebacks
+are refused on a branch, but your project's own `fetch` calls, its models and the agent's web tools
+are not: whatever key a `dev` value holds, the branch's code uses it.

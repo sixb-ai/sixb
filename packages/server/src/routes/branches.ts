@@ -68,6 +68,15 @@ async function copyResponse(
     return { error: "[SixbServer] Sign in with `sixb login` to copy production's data." }
   }
 
+  // A copy is what one person reads, and a branch runs as them: a service account has no branch.
+  if (session.principal.type !== "user") {
+    set.status = 403
+    return {
+      error:
+        "[SixbServer] A branch copies what a person reads: sign in as yourself with `sixb login`, or use a personal access token.",
+    }
+  }
+
   const person = host.auth.contextFromSession(session)
   if (!isAllowed(person, { kind: "source.manage" })) {
     set.status = 403

@@ -90,6 +90,8 @@ export interface SnapshotLakeOptions {
   readonly branch: string
   /** SHA-256 of the branch's credential, which reads production for this slice only. */
   readonly credentialHash?: string
+  /** The groups the credential reads with at most. */
+  readonly credentialGroupIds?: readonly string[]
   /** Receives the slice and its first token, before the snapshot's end record. */
   readonly onSlice: (slice: SnapshotLakeSlice) => void | Promise<void>
 }
@@ -413,6 +415,7 @@ async function cutLakeSlice(
     path: options.path,
     branch: options.branch,
     ...(options.credentialHash ? { credentialHash: options.credentialHash } : {}),
+    ...(options.credentialGroupIds ? { credentialGroupIds: options.credentialGroupIds } : {}),
     ...(pinned.length === 0 ? {} : { pinned }),
   })
 

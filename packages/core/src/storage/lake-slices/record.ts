@@ -30,6 +30,9 @@ export function parseLakeSliceRow(row: { readonly [column: string]: unknown }): 
     ...(row.credentialHash == null
       ? {}
       : { credentialHash: text(row.credentialHash, "credentialHash", id) }),
+    ...(row.credentialGroupIds == null
+      ? {}
+      : { credentialGroupIds: groupIds(json(row.credentialGroupIds), id) }),
     ...(row.receivedAt == null ? {} : { receivedAt: date(row.receivedAt, "receivedAt", id) }),
   }
 }
@@ -46,6 +49,13 @@ export function parseLakeSliceGrantRow(row: {
     createdAt: date(row.createdAt, "createdAt", id),
     expiresAt: date(row.expiresAt, "expiresAt", id),
   }
+}
+
+function groupIds(value: unknown, id: string): string[] {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw corrupt(id, "credential groups are not group ids")
+  }
+  return [...value]
 }
 
 function json(value: unknown): unknown {

@@ -16,6 +16,8 @@ import {
   apiDocsUrl,
   apiEventsUrl,
   apiUrl,
+  type BrowserTopology,
+  exposedBeyondThisMachine,
   resolveBrowserTopology,
   servedUrl,
 } from "../lib/browser-topology"
@@ -100,15 +102,6 @@ export async function runDevRuntime(options: DevOptions = {}) {
     sixb = loaded
     abort.signal.throwIfAborted()
 
-    const branch =
-      options.from === "production" ? await openBranch(loaded, projectRoot, options) : null
-    const host = branch?.host ?? loaded
-    if (branch) {
-      // The project's own providers serve nothing on the branch, but the runtime stops only its host's.
-      branchBase = loaded
-      sixb = host
-    }
-
     const topology = resolveBrowserTopology({
       role: "dev",
       host: options.host,
@@ -118,6 +111,14 @@ export async function runDevRuntime(options: DevOptions = {}) {
       apiPublicOrigin: options.apiPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
     })
+    const branch =
+      options.from === "production" ? await openBranch(loaded, projectRoot, topology) : null
+    const host = branch?.host ?? loaded
+    if (branch) {
+      // The project's own providers serve nothing on the branch, but the runtime stops only its host's.
+      branchBase = loaded
+      sixb = host
+    }
     const customApp = await createCustomApp({
       rootDir: projectRoot,
       apiBaseUrl: topology.apiPublicOrigin,
@@ -249,15 +250,13 @@ export async function startDevApp(
 async function openBranch(
   host: LoadedSixbHost,
   projectRoot: string,
-  options: DevOptions
+  topology: BrowserTopology
 ): Promise<BranchFromProduction> {
   // Every request runs as that person, unauthenticated: only this machine may send them.
-  const exposed = [options.host, options.apiHost, options.apiPublicOrigin, options.appPublicOrigin]
-    .filter((value): value is string => value !== undefined)
-    .filter((value) => !isLoopback(value))
+  const exposed = exposedBeyondThisMachine(topology)
   if (exposed.length > 0) {
     throw new Error(
-      `[SixbCLI] A branch from production listens on this machine only, since every request runs as you: drop ${exposed.join(", ")}.`
+      `[SixbCLI] A branch from production listens on this machine only, since every request runs as you: drop ${exposed.join(", ")} (a flag, SIXB_API_PUBLIC_ORIGIN or SIXB_APP_PUBLIC_ORIGIN).`
     )
   }
 
@@ -268,11 +267,6 @@ async function openBranch(
     gitBranch: process.env.SIXB_BRANCH ?? (await currentGitBranch(projectRoot)),
     gitBranches: await localGitBranches(projectRoot),
   })
-}
-
-function isLoopback(value: string): boolean {
-  const host = /^[a-z]+:\/\//i.test(value) ? new URL(value).hostname : value
-  return ["localhost", "127.0.0.1", "[::1]", "::1"].includes(host.toLowerCase())
 }
 
 /** What the startup view says of a branch: where its data comes from, and what is off on it. */

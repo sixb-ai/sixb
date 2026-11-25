@@ -15,15 +15,18 @@ import {
   resolveAuthorizationContext,
   SixbHost,
   type SixbHostOptions,
+  SYSTEM_PRINCIPAL,
 } from "@sixb/core"
-import { createSessionCredential } from "@sixb/core/internal/auth"
+import { createAccessTokenCredential, createSessionCredential } from "@sixb/core/internal/auth"
 import {
   BRANCH_CREDENTIAL_PREFIX,
   type BranchRuntime,
   hostOnBranch,
 } from "@sixb/core/internal/branches"
+import { LAKE_SLICE_KEEP_MS } from "@sixb/core/internal/lake-slices"
 import { putOnBranch } from "@sixb/core/internal/runtime"
 import { exportSnapshot, hostSnapshotSource, importSnapshot } from "@sixb/core/internal/snapshots"
+import type { LakeSliceRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
 import { createTestingScope } from "../../core/src/execution/scopes"
 import { createSixbApi, SixbServer } from "../src/server"
@@ -105,6 +108,8 @@ beforeAll(async () => {
     ["usr_alice", developers.id],
     ["usr_bob", readers.id],
     ["usr_dave", developers.id],
+    ["usr_carol", developers.id],
+    ["usr_erin", developers.id],
   ] as const) {
     await storage.auth.users.create({ projectId: PROJECT, id: userId, email: `${userId}@x.test` })
     await storage.auth.groupMemberships.upsert({
@@ -121,6 +126,13 @@ beforeAll(async () => {
     await storage.auth.sessions.create(session)
     tokens[userId] = `Bearer ${issued.accessToken}`
   }
+  // Carol reads every ticket as a reader too: a token can leave that group out.
+  await storage.auth.groupMemberships.upsert({
+    projectId: PROJECT,
+    userId: "usr_carol",
+    groupId: readers.id,
+    source: "manual",
+  })
   const app = createSixbApi(
     new SixbServer({ host, quiet: true, browser: createTestBrowserPolicy() })
   )
@@ -129,7 +141,10 @@ beforeAll(async () => {
     port: 0,
     fetch: async (request) => {
       const response = await app.fetch(request)
+      // It compresses every read, and says so on HEAD too, unless asked for the file's own bytes.
+      const compressible = request.headers.get("accept-encoding") !== "identity"
       if (!new URL(request.url).pathname.endsWith("/files/content") || !response.ok) return response
+      if (!compressible) return response
       const body = Bun.gzipSync(new Uint8Array(await response.arrayBuffer()))
       const headers = new Headers(response.headers)
       headers.set("content-encoding", "gzip")
@@ -230,9 +245,8 @@ describe("a branch from production", () => {
     expect(session.authEnabled).toBe(false)
   })
 
-  // Red checks: in routes/objects.ts, drop the read through production: t-1's file is not on the
-  // branch, and its content answers 404. Forward production's headers as they are: the branch
-  // says gzip of a body `fetch` already decoded.
+  // Red check: in branches/runtime.ts, drop `branchBlobStorage`: t-1's file is not on the branch,
+  // and its content answers 404.
   test("reads its objects' files through production, as that person", async () => {
     const path = encodeURIComponent("/properties/attachment")
     const own = await get(`/api/objects/ticket/t-1/files/content?path=${path}`)
@@ -250,6 +264,48 @@ describe("a branch from production", () => {
       { headers: { authorization: tokens.usr_bob! } }
     )
     expect(await asBob.text()).toBe("t-2 file")
+  })
+})
+
+describe("a branch's files", () => {
+  // Red checks: in branches/runtime.ts, leave the project's blob storage to the branch host (drop
+  // `branchBlobStorage`): the branch's code finds no file of the objects it copied. In blobs.ts,
+  // drop the `identity` encoding: the size is the compressed body's.
+  test("are read through production by the branch's own code, as the person who copied it", async () => {
+    const sixb = createTestSixb(branch.host)
+    const attachmentOf = async (id: string) => {
+      const row = await branch.storage.objects.getByPrimaryId({
+        projectId: PROJECT,
+        objectTypeId: Ticket.id,
+        primaryId: id,
+      })
+      return (row?.properties.attachment as { blobId: string } | undefined)?.blobId
+    }
+    const t1 = await attachmentOf("t-1")
+    expect(t1).toBeString()
+    expect(await new Response(await sixb.blobs.open(`${t1}`)).text()).toBe("t-1 file")
+    expect((await sixb.blobs.stat(`${t1}`))?.sizeBytes).toBe("t-1 file".length)
+
+    // t-2 is closed: Alice copied no object holding its file, and production would refuse it.
+    const t2 = (
+      await production.storage.objects.getByPrimaryId({
+        projectId: PROJECT,
+        objectTypeId: Ticket.id,
+        primaryId: "t-2",
+      })
+    )?.properties.attachment as { blobId: string }
+    expect(await sixb.blobs.stat(t2.blobId)).toBeNull()
+    expect(String(await sixb.blobs.open(t2.blobId).catch((error) => error))).toContain(
+      "neither on this branch nor in production"
+    )
+
+    // What the branch writes is its own.
+    const own = await sixb.blobs.put({
+      body: new TextEncoder().encode("branch note"),
+      fileName: "note.txt",
+      mediaType: "text/plain",
+    })
+    expect(await new Response(await sixb.blobs.open(own.blobId)).text()).toBe("branch note")
   })
 })
 
@@ -323,6 +379,40 @@ describe("a branch's credential in production", () => {
     expect((await fileAs(own)).status).toBe(401)
   })
 
+  // Red check: in branches/credential.ts, drop the filter by `credentialGroupIds`: Carol's readers
+  // group, which the token that made the copy left out, reads the closed t-2.
+  test("reads with the groups the copy read with, not every group its person holds", async () => {
+    const carols = await branchSlice("usr_carol", "slice_carol", new Date(), {
+      credentialGroupIds: [developers.id],
+      receivedAt: new Date(),
+    })
+
+    expect((await fileAs(carols, "t-1")).status).toBe(200)
+    expect((await fileAs(carols, "t-2")).status).toBe(404)
+  })
+
+  // Red checks: in branches/credential.ts, drop the active-person check: Erin, suspended, still
+  // reads t-1's file; drop the `liveUntil` check: a slice two weeks past its last token still does.
+  test("reads nothing once its person is suspended, or its slice is no longer live", async () => {
+    const erins = await branchSlice("usr_erin", "slice_erin", new Date(), {
+      receivedAt: new Date(),
+    })
+    expect((await fileAs(erins)).status).toBe(200)
+    await production.storage.auth.users.updateStatus({
+      projectId: PROJECT,
+      id: "usr_erin",
+      status: "suspended",
+    })
+    expect((await fileAs(erins)).status).toBe(401)
+
+    const longAgo = new Date(Date.now() - LAKE_SLICE_KEEP_MS - 60 * 60_000)
+    const expired = await branchSlice("usr_dave", "slice_expired", longAgo, {
+      lastTokenExpiresAt: new Date(longAgo.getTime() + 15 * 60_000),
+      receivedAt: longAgo,
+    })
+    expect((await fileAs(expired)).status).toBe(401)
+  })
+
   // Red check: in branches/credential.ts, drop `isUnreceivedCopy` from the credential's check:
   // a copy its branch never confirmed holding still reads production.
   test("reads nothing for a copy its branch never confirmed, once the hour is over", async () => {
@@ -379,6 +469,53 @@ describe("production's copy route", () => {
     await Promise.all([alice.arrayBuffer(), dave.arrayBuffer()])
     return [alice.status, dave.status]
   }
+
+  // Red check: in routes/branches.ts, drop the person check of the copy route: the service account
+  // gets a 200 and a copy that breaks off at its first part.
+  test("refuses a service account with a clear status, before any copy starts", async () => {
+    const now = new Date()
+    await production.storage.auth.serviceAccounts.create({
+      id: "sa_reports",
+      projectId: PROJECT,
+      name: "Reports",
+      status: "active",
+      createdByPrincipal: SYSTEM_PRINCIPAL,
+      createdAt: now,
+      updatedAt: now,
+    })
+    await production.storage.auth.serviceAccountGroupMemberships.upsert({
+      projectId: PROJECT,
+      serviceAccountId: "sa_reports",
+      groupId: developers.id,
+      source: "manual",
+    })
+    const token = createAccessTokenCredential("serviceAccount")
+    await production.storage.auth.accessTokens.create({
+      id: token.tokenId,
+      projectId: PROJECT,
+      name: "reports",
+      kind: "serviceAccount",
+      subject: { type: "serviceAccount", id: "sa_reports" },
+      tokenHash: token.tokenHash,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + 86_400_000),
+    })
+
+    const refused = await production.app.fetch(
+      new Request("http://api.localhost/api/branches/copy", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token.tokenValue}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ branch: "feature/reports" }),
+      })
+    )
+    expect(refused.status).toBe(403)
+    expect(((await refused.json()) as { error: string }).error).toContain(
+      "copies what a person reads"
+    )
+  })
 
   // Red check: in routes/branches.ts, attach the abort listener without checking
   // `request.signal.aborted` first: the branch that went away keeps its place for good.
@@ -466,7 +603,12 @@ function opens(url: string, origin: string): Promise<boolean> {
 }
 
 /** A slice a copy cut for `userId`, and the branch credential it records. */
-async function branchSlice(userId: string, id: string, createdAt = new Date()): Promise<string> {
+async function branchSlice(
+  userId: string,
+  id: string,
+  createdAt = new Date(),
+  record: Partial<LakeSliceRecord> = {}
+): Promise<string> {
   const credential = `${BRANCH_CREDENTIAL_PREFIX}${createHash("sha256").update(id).digest("base64url")}`
   await production.storage.lakeSlices.create({
     id,
@@ -478,15 +620,19 @@ async function branchSlice(userId: string, id: string, createdAt = new Date()): 
     files: [],
     createdAt,
     credentialHash: createHash("sha256").update(credential).digest("hex"),
+    ...record,
   })
   return credential
 }
 
-function fileAs(credential: string): Promise<Response> {
+function fileAs(credential: string, ticketId = "t-1"): Promise<Response> {
   const path = encodeURIComponent("/properties/attachment")
-  return fetch(new URL(`api/objects/ticket/t-1/files/content?path=${path}`, production.url), {
-    headers: { authorization: `Bearer ${credential}` },
-  })
+  return fetch(
+    new URL(`api/objects/ticket/${ticketId}/files/content?path=${path}`, production.url),
+    {
+      headers: { authorization: `Bearer ${credential}` },
+    }
+  )
 }
 
 function releaseAs(credential: string, sliceId: string): Promise<Response> {

@@ -28,6 +28,11 @@ export interface LakeSliceRecord {
    */
   readonly credentialHash?: string
   /**
+   * The groups the copy that made the credential read with, which an access token may narrow: the
+   * credential never reads with more, whatever groups its person joins since.
+   */
+  readonly credentialGroupIds?: readonly string[]
+  /**
    * When the branch confirmed it holds its copy whole. A slice with a credential that no branch
    * confirmed is the copy of a branch that never got it: it lives only a short grace.
    */

@@ -220,6 +220,14 @@ export function namespaceFor(gitBranch: string, checkout: string): string {
 
 /** This checkout's namespace for a git branch. */
 export async function namespaceOf(projectRoot: string, gitBranch: string): Promise<string> {
+  return namespaceFor(gitBranch, await checkoutOf(projectRoot))
+}
+
+/**
+ * This checkout's id, made on its first branch: who runs its branches, so that its jobs and
+ * events never meet those of the same git branch run elsewhere on a shared dev broker.
+ */
+export async function checkoutOf(projectRoot: string): Promise<string> {
   const directory = await branchesDirectory(projectRoot)
   const file = join(directory, "checkout")
   let checkout = (await readFile(file, "utf8").catch(() => "")).trim()
@@ -227,7 +235,7 @@ export async function namespaceOf(projectRoot: string, gitBranch: string): Promi
     checkout = randomUUID()
     await writeFile(file, `${checkout}\n`, { mode: 0o600 })
   }
-  return namespaceFor(gitBranch, checkout)
+  return checkout
 }
 
 async function loadCopy(input: {

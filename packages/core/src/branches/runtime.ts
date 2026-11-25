@@ -3,6 +3,7 @@ import { putOnBranch } from "../branch-mode"
 import type { LakeStorage } from "../lake-storage/types"
 import { hostOptionsOf, SixbHost, type SixbHostView } from "../runtime/host"
 import type { Storage } from "../storage/types"
+import { branchBlobStorage } from "./blobs"
 
 /** What a branch on a laptop knows of production, as `sixb dev --from production` set it up. */
 export interface BranchRuntime {
@@ -42,11 +43,21 @@ export function hostOnBranch(
     throw new Error("[Sixb] Only a host that runs as a branch is built on a branch's data.")
   }
 
+  const base = hostOptionsOf(host as SixbHost)
   const options = putOnBranch(
     {
-      ...hostOptionsOf(host as SixbHost),
+      ...base,
       storage: input.storage,
       ...(input.lakeStorage ? { lakeStorage: input.lakeStorage } : {}),
+      // The copied objects' files stay in production: whatever reads them on the branch reads
+      // them from there, as the person.
+      blobStorage: branchBlobStorage({
+        local: base.blobStorage,
+        runtime: input.runtime,
+        projectId: host.projectId,
+        objects: input.storage.objects,
+        objectTypes: () => host.definitions.ontology.listObjectTypes(),
+      }),
     },
     branch
   )

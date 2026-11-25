@@ -66,7 +66,7 @@ export interface BranchCredentialHost {
 /**
  * The person a branch credential reads production as, and its slice, or null: a credential of no
  * live slice, of a person no longer active, or of one who may no longer copy to a branch, reads
- * nothing.
+ * nothing. It reads with the person's groups now, and no more than the copy read with.
  */
 export async function authorizeBranchCredential(
   host: BranchCredentialHost,
@@ -92,9 +92,12 @@ export async function authorizeBranchCredential(
     projectId: host.id,
     userId: slice.userId,
   })
+  const copied = slice.credentialGroupIds && new Set(slice.credentialGroupIds)
   const person = resolveAuthorizationContext({
     principal: { type: "user", id: slice.userId },
-    groupIds: memberships.map((membership) => membership.groupId),
+    groupIds: memberships
+      .map((membership) => membership.groupId)
+      .filter((groupId) => !copied || copied.has(groupId)),
     roles: host.definitions.security.listResolvedRoles(),
   })
   return isAllowed(person, { kind: "source.manage" }) ? { slice, person } : null
