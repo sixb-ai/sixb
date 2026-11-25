@@ -52,8 +52,8 @@ export interface SnapshotManifest {
   /** Object types the person cannot read: nothing of theirs is in the snapshot. */
   readonly unreadableTypeIds: readonly string[]
   /**
-   * The lake catalog's snapshot at S, so the objects and the lake slice a branch reads describe
-   * the same moment. Absent until the branch's lake reads production's datasets in place.
+   * The lake catalog's point at S, so the objects and the lake slice a branch reads describe the
+   * same moment. Present when the export cut a slice (`lake` option).
    */
   readonly lake?: { readonly catalogVersion: string }
 }

@@ -4,6 +4,9 @@ export {
   type ExportSnapshotOptions,
   exportSnapshot,
   hostSnapshotSource,
+  type SnapshotLakeOptions,
+  type SnapshotLakeSlice,
+  type SnapshotLakeSource,
   type SnapshotSource,
 } from "./export"
 export { readSnapshotFile, spoolSnapshot, writeSnapshotFile } from "./files"

@@ -1,4 +1,14 @@
 import {
+  currentLakePoint,
+  dropLakeSlice,
+  issueLakeSliceToken,
+  type LakeSlice,
+  type LakeSliceHost,
+  type LakeSliceReader,
+  type LakeSliceToken,
+  writeLakeSlice,
+} from "../datasets/lake-slices"
+import {
   createAuthorizedObjectReader,
   objectReadersIn,
   type ReaderSnapshotScope,
@@ -13,6 +23,7 @@ import type { ObjectType } from "../ontology/types"
 import type { UserRef } from "../ontology/user-ref"
 import type { ProjectionDefinitionCatalog } from "../projections"
 import type { SixbHost } from "../runtime/host"
+import { isBoundSixb } from "../runtime/sixb"
 import type { AppliedMarkings } from "../security/applied-markings"
 import { appliedSourcesKey } from "../security/applied-markings"
 import { getAppliedMarkings } from "../security/applied-markings-host"
@@ -52,6 +63,32 @@ export interface SnapshotSource {
   readonly ontology: OntologyRegistry
   readonly appliedMarkings?: AppliedMarkings
   readonly projections?: ProjectionDefinitionCatalog
+  /** Production's lake, for a snapshot that cuts a branch's lake slice of the same moment. */
+  readonly lake?: SnapshotLakeSource
+}
+
+export interface SnapshotLakeSource {
+  readonly host: LakeSliceHost
+  /** Production as the person reads it: what of the lake they read in full. */
+  readonly readerFor: (scope: ExecutionScope) => LakeSliceReader
+}
+
+/**
+ * The lake slice a branch reads production's datasets through. Its point is taken inside the
+ * snapshot's read, so the objects and the datasets describe the same moment.
+ */
+export interface SnapshotLakeOptions {
+  /** A local file the slice's catalog is written to. */
+  readonly path: string
+  /** The branch the slice is for. */
+  readonly branch: string
+  /** Receives the slice and its first token, before the snapshot's end record. */
+  readonly onSlice: (slice: SnapshotLakeSlice) => void | Promise<void>
+}
+
+export interface SnapshotLakeSlice {
+  readonly slice: LakeSlice
+  readonly token: LakeSliceToken
 }
 
 export interface ExportSnapshotOptions {
@@ -70,6 +107,8 @@ export interface ExportSnapshotOptions {
   readonly compress?: boolean
   /** Objects per page and frame. Defaults to 2,000. */
   readonly pageSize?: number
+  /** Cut the branch's lake slice at S too. The snapshot fails when the slice does. */
+  readonly lake?: SnapshotLakeOptions
 }
 
 const DEFAULT_CONCURRENCY = 4
@@ -90,6 +129,16 @@ export function hostSnapshotSource(host: SixbHost): SnapshotSource {
     ontology,
     appliedMarkings: getAppliedMarkings(host),
     projections: host.definitions.projections,
+    lake: {
+      host: { id: host.id, lakeStorage: host.lakeStorage, storage: host.storage },
+      readerFor: (scope) => {
+        const sixb = host.withScope(scope)
+        if (!isBoundSixb(sixb)) {
+          throw new Error("[Sixb] The host did not return an execution-bound Sixb.")
+        }
+        return sixb
+      },
+    },
   }
 }
 
@@ -128,6 +177,7 @@ interface ExportSettings {
   readonly pageSize: number
   readonly compress: boolean
   readonly vectorConfigurations?: ReadonlySet<string>
+  readonly lake?: SnapshotLakeOptions
 }
 
 function exportSettings(options: ExportSnapshotOptions): ExportSettings {
@@ -150,6 +200,7 @@ function exportSettings(options: ExportSnapshotOptions): ExportSettings {
     maxDurationMs,
     pageSize,
     compress: options.compress ?? true,
+    ...(options.lake === undefined ? {} : { lake: options.lake }),
     ...(options.vectorConfigurations === undefined
       ? {}
       : { vectorConfigurations: new Set(options.vectorConfigurations) }),
@@ -210,13 +261,16 @@ async function takeSnapshot(
   const user = scope.user
   if (!user) throw new Error("[Sixb] A snapshot is taken as a user: sign in as one.")
 
+  const lake = settings.lake ? { source: lakeSourceOf(source), options: settings.lake } : undefined
+  let slicing: Promise<SnapshotLakeSlice> | undefined
+
   const counts = { objects: 0, links: 0, points: 0, vectors: 0, users: 0 }
   const encode = (record: SnapshotRecord) =>
     encodeSnapshotFrame(record, { compress: settings.compress })
   const pushFrame = (frame: Uint8Array) => frames.push(frame)
   const push = async (record: SnapshotRecord) => pushFrame(await encode(record))
 
-  return storage.readSnapshot(
+  const read = storage.readSnapshot(
     { views: settings.concurrency, maxDurationMs: settings.maxDurationMs },
     (views) =>
       withinDuration(
@@ -237,8 +291,20 @@ async function takeSnapshot(
             return false
           }
 
+          // Every version an object was derived from was committed before the read began, so the
+          // lake's point taken now is at or after it: the slice and the objects agree.
+          const point = lake ? await currentLakePoint(lake.source.host) : undefined
+          if (lake && point !== undefined) {
+            slicing = cutLakeSlice(lake.source, lake.options, executionScope, point)
+            slicing.catch((error: unknown) => stop.abort(error))
+          }
+
           const manifest = snapshotManifest(source, { ...scope, user }, active, settings)
-          await push({ ...manifest, takenAt })
+          await push({
+            ...manifest,
+            takenAt,
+            ...(point === undefined ? {} : { lake: { catalogVersion: point } }),
+          })
 
           const members = await readMembers(source.projectId, first, scope)
           counts.users = members.users.length
@@ -266,14 +332,56 @@ async function takeSnapshot(
           const failed = settled.find((result) => result.status === "rejected")
           if (failed) throw failed.reason
 
+          if (slicing && lake) await lake.options.onSlice(await slicing)
           await push({ kind: "end", counts })
           return true
         }
       )
   )
+
+  try {
+    return await read
+  } catch (error) {
+    // A snapshot that fails leaves no slice: its record would hold production's files for weeks.
+    const cut = await slicing?.catch(() => undefined)
+    if (cut && lake) await dropLakeSlice(lake.source.host, cut.slice.id)
+    throw error
+  }
 }
 
 const APPLIED_MARKINGS_ATTEMPTS = 3
+
+function lakeSourceOf(source: SnapshotSource): SnapshotLakeSource {
+  if (!source.lake) {
+    throw new Error("[Sixb] This snapshot source has no lake: a branch's slice is cut from a host.")
+  }
+  return source.lake
+}
+
+/** The person's slice at the snapshot's point, and the first token a branch reads it with. */
+async function cutLakeSlice(
+  lake: SnapshotLakeSource,
+  options: SnapshotLakeOptions,
+  scope: ExecutionScope,
+  point: string
+): Promise<SnapshotLakeSlice> {
+  const reader = lake.readerFor(scope)
+  const slice = await writeLakeSlice(lake.host, reader, {
+    point,
+    path: options.path,
+    branch: options.branch,
+  })
+
+  // A cut that fails after its slice is written deletes it: no one could read it, and it would
+  // hold production's files for two weeks.
+  try {
+    const token = await issueLakeSliceToken(lake.host, reader, { sliceId: slice.id })
+    return { slice, token }
+  } catch (error) {
+    await dropLakeSlice(lake.host, slice.id)
+    throw error
+  }
+}
 
 function declaredProjectionIds(source: SnapshotSource): readonly string[] {
   return [
