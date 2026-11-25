@@ -8,6 +8,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -69,6 +70,7 @@ afterEach(async () => {
     )
   await sandbox.destroy()
   rmSync(root, { recursive: true, force: true })
+  rmSync(`${root}-bin`, { recursive: true, force: true })
   if (leaked.length > 0) {
     throw new Error(
       `[test] It left ${leaked.length} command(s) running: ${leaked.map(({ file, group }) => `group ${group} of ${file}`).join(", ")}`
@@ -141,6 +143,36 @@ function gone(pid: number): boolean {
   } catch {
     return true
   }
+}
+
+/**
+ * A sandbox in the workspace whose commands find every command on this PATH but `ps`, as in the
+ * slim Linux images sandboxes run. Its PATH is a directory of links beside the workspace, not in
+ * it: one may link a directory back to itself (`/usr/bin/X11`), which a walk of it would loop in.
+ */
+async function sandboxWithoutPs(): Promise<Sandbox> {
+  const bin = `${root}-bin`
+  mkdirSync(bin)
+
+  const linked = new Set(["ps"])
+  for (const directory of (process.env.PATH ?? "").split(":")) {
+    let names: string[] = []
+    try {
+      names = readdirSync(directory)
+    } catch {
+      continue
+    }
+
+    for (const name of names) {
+      if (linked.has(name)) continue
+      linked.add(name)
+      symlinkSync(join(directory, name), join(bin, name))
+    }
+  }
+
+  return new LocalSandboxFactory({ isolation: "none", env: { PATH: bin } }).create({
+    workingDirectory: root,
+  })
 }
 
 describe("background commands", () => {
@@ -270,6 +302,53 @@ describe("background commands", () => {
       await graced.stopAll()
     }
   })
+
+  // Removal proof: list the group with `ps` alone in GROUP_LEFT_SCRIPT, as it did. Without one,
+  // the group reads as gone at once, no SIGKILL follows, and the process that ignores SIGTERM runs
+  // on. Linux alone: macOS has no `/proc`, and always a `ps`.
+  test.skipIf(process.platform !== "linux")(
+    "kill what is left of its group where the sandbox has no ps",
+    async () => {
+      const bare = await sandboxWithoutPs()
+      const graced = new BackgroundCommands({ stopGraceMs: 200 })
+      const started = await graced.start({
+        handle: { ...handle, sandbox: bare },
+        command: `sh -c 'trap "" TERM; echo $$ > child.pid; while true; do sleep 0.05; done' & wait`,
+      })
+      await waitFor(() => existsSync(join(root, "child.pid")))
+      const child = Number(readFileSync(join(root, "child.pid"), "utf8"))
+
+      try {
+        expect(await graced.stop(started.id)).toMatchObject({ status: "stopped" })
+        await waitFor(() => gone(child), { label: "the process that ignores SIGTERM exits" })
+      } finally {
+        await graced.stopAll()
+        await bare.destroy()
+      }
+    }
+  )
+
+  // Removal proof: list the group with `ps` alone in REAP_SCRIPT, as it did. Without one, no
+  // process of the group holds its output file, and the command a killed sixb left runs on.
+  test.skipIf(process.platform !== "linux")(
+    "stop what a killed sixb left running where the sandbox has no ps",
+    async () => {
+      const bare = await sandboxWithoutPs()
+      const started = await commands.start({
+        handle: { ...handle, sandbox: bare },
+        command: "sleep 30",
+      })
+      const group = groupOf(started)
+
+      try {
+        await stopLeftRunning(bare, [started.outputPath.replace(/\.log$/, ".pid")], signal)
+        await waitFor(() => !groupRunning(group), { label: "the command's group exits" })
+      } finally {
+        await commands.stopAll()
+        await bare.destroy()
+      }
+    }
+  )
 
   // Removal proof: run a background command in LOGIN_SHELL_SCRIPT_IN_DIRECTORY, without the trap.
   // Its shell, the parent of a lone command since `eval`, then ends at the SIGTERM with 143, and
