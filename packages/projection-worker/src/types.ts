@@ -19,7 +19,7 @@ import type {
 export interface ProjectionWorkerContext {
   readonly projectId: string
   /** The branch the worker runs on, which names its runs: see `createProjectionRunId`. */
-  readonly branch?: SixbBranch | null
+  readonly branch: SixbBranch | null
   readonly ontology: OntologyDefinitionCatalog
   readonly lakeStorage: LakeStorage
   readonly projectionRunsStorage: ProjectionRunStorage

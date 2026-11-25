@@ -17,7 +17,7 @@ export interface RecoveryPassesInput {
    * until the lake tells a branch's versions from production's: its first pass would otherwise
    * re-derive every projection from production's data, and re-create every object it holds.
    */
-  readonly branch?: SixbBranch | null
+  readonly branch: SixbBranch | null
   readonly lakeStorage: Pick<LakeStorage, "listLatestVersionsSince"> &
     ProjectionsPassInput["lakeStorage"] &
     TriggersPassInput["lakeStorage"]

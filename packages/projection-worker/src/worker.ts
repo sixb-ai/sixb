@@ -212,7 +212,7 @@ function buildProjectionContext(
 ): ProjectionWorkerContext {
   const context: ProjectionWorkerContext = {
     projectId: host.id,
-    branch: host.branch ?? null,
+    branch: host.branch,
     ontology: host.definitions.ontology,
     lakeStorage: host.lakeStorage,
     projectionRunsStorage,
@@ -228,7 +228,7 @@ function buildProjectionContext(
 }
 
 export interface ProjectionWorkerHost extends PrimitiveExecutionHost {
-  readonly branch?: SixbBranch | null
+  readonly branch: SixbBranch | null
   readonly storage: Storage
   readonly lakeStorage: LakeStorage
   readonly queues: Queues

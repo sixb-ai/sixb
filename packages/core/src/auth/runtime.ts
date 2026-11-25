@@ -160,7 +160,7 @@ export interface AuthRuntimeOptions {
    */
   readonly onUserSuspended?: (userId: string) => Promise<void>
   /** On a branch, nothing is emailed and the directory is never checked: see `branch-mode/README.md`. */
-  readonly branch?: SixbBranch | null
+  readonly branch: SixbBranch | null
 }
 
 export class AuthRuntime {
@@ -178,7 +178,7 @@ export class AuthRuntime {
 
   constructor(options: AuthRuntimeOptions) {
     this.projectId = options.projectId
-    this.branch = options.branch ?? null
+    this.branch = options.branch
     this.storage = options.storage
     this.security = options.security
     this.events = options.events

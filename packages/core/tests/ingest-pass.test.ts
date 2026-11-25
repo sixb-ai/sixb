@@ -120,9 +120,13 @@ test("purges the refused deliveries past a week", async () => {
 test("reports a stall even when the queue refuses", async () => {
   const host = {}
   const reports: SixbErrorContext[] = []
-  attachSixbErrorReporter(host, (_error, context) => {
-    reports.push(context)
-  })
+  attachSixbErrorReporter(
+    host,
+    (_error, context) => {
+      reports.push(context)
+    },
+    null
+  )
   const pass = ingestPass({
     projectId: PROJECT_ID,
     queue: {
@@ -149,9 +153,13 @@ test("reports a dataset whose changes nothing wrote for 10 minutes, once per sta
   jest.useFakeTimers()
   const host = {}
   const reports: SixbErrorContext[] = []
-  attachSixbErrorReporter(host, (_error, context) => {
-    reports.push(context)
-  })
+  attachSixbErrorReporter(
+    host,
+    (_error, context) => {
+      reports.push(context)
+    },
+    null
+  )
 
   const ago = (minutes: number) => new Date(Date.now() - minutes * MINUTE)
   const lastFlushedAt = ago(11)

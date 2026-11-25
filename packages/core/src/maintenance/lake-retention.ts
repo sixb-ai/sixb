@@ -109,7 +109,7 @@ interface LakeRetentionInput {
   readonly sources: Pick<OntologySourceStorage, "listActive">
   readonly datasetCount: number
   /** On a branch, retention never runs: it deletes files, and a branch reads production's. */
-  readonly branch?: SixbBranch | null
+  readonly branch: SixbBranch | null
 }
 
 /** Retention for one project: the entry point of the worker, the CLI and the API. */

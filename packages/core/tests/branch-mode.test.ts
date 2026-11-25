@@ -611,7 +611,7 @@ describe("what a branch tells and shares", () => {
       ownershipHash: "ownership-1",
     } as Parameters<typeof createProjectionRunId>[1]
 
-    const productionId = createProjectionRunId(PROJECT_ID, identity)
+    const productionId = createProjectionRunId(PROJECT_ID, identity, null)
     expect(createProjectionRunId(PROJECT_ID, identity, null)).toBe(productionId)
     expect(createProjectionRunId(PROJECT_ID, identity, BRANCH)).not.toBe(productionId)
   })

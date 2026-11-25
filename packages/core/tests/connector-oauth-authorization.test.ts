@@ -255,6 +255,7 @@ describe("connector OAuth lifecycle", () => {
     })
     const process = requireConnectionProcess(
       new ConnectorService("project", [connector], {
+        branch: null,
         storage: harness.storage,
         credentialProtector: harness.protector,
       })

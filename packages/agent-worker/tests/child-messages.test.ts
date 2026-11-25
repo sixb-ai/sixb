@@ -1094,7 +1094,7 @@ describe("a child whose sandbox stopped", () => {
       },
     })
     // The child's failure is the outcome under test, not one to report.
-    attachSixbErrorReporter(harness.host, () => {})
+    attachSixbErrorReporter(harness.host, () => {}, null)
     jest.useFakeTimers()
     await harness.worker.start()
     try {

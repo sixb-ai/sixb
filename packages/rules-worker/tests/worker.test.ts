@@ -164,9 +164,13 @@ describe("RulesWorker", () => {
       replaceObjectStorage(storage, objects.storage)
       const reports: Array<{ error: Error; context: SixbErrorContext }> = []
       const runtime = createRuntime({ events, storage })
-      attachSixbErrorReporter(runtime, (error, context) => {
-        reports.push({ error, context })
-      })
+      attachSixbErrorReporter(
+        runtime,
+        (error, context) => {
+          reports.push({ error, context })
+        },
+        null
+      )
       await seedCurrentObject(storage, "posted")
       await seedCurrentObject(storage, "posted", "tx-2")
       const worker = track(new RulesWorker(runtime))
@@ -388,9 +392,13 @@ describe("RulesWorker", () => {
       await seedCurrentObject(storage, "posted", "tx-2")
 
       const runtime = createRuntime({ events, storage })
-      attachSixbErrorReporter(runtime, (error, context) => {
-        reports.push({ error, context })
-      })
+      attachSixbErrorReporter(
+        runtime,
+        (error, context) => {
+          reports.push({ error, context })
+        },
+        null
+      )
       const worker = track(new RulesWorker(runtime))
       await worker.start()
 

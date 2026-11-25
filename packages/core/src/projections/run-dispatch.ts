@@ -46,7 +46,7 @@ export type ProjectionRunDispatchPort = RunDispatcher<
 export interface ProjectionRunDispatcherDependencies {
   readonly id: string
   /** A branch names its runs apart from production's (see `createProjectionRunId`). */
-  readonly branch?: SixbBranch | null
+  readonly branch: SixbBranch | null
   readonly definitions: Pick<SixbDefinitions, "projections">
   readonly lakeStorage: Pick<LakeStorage, "getVersion">
   readonly storage: Storage

@@ -321,6 +321,7 @@ async function connectAdaAndBen(
   await seedConnectorActors(dependencies.storage, projectId, new Date("2026-08-19T12:00:00.000Z"))
   const process = requireConnectionProcess(
     new ConnectorService(projectId, [harness.connector], {
+      branch: null,
       storage: dependencies.storage,
       credentialProtector: harness.protector,
     })
@@ -361,6 +362,7 @@ async function connectProjectAccount(
 ): Promise<void> {
   const process = requireConnectionProcess(
     new ConnectorService(projectId, [harness.connector], {
+      branch: null,
       storage: dependencies.storage,
       credentialProtector: harness.protector,
     })

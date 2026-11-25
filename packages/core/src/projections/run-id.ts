@@ -10,7 +10,7 @@ import type { ProjectionMaterializationIdentity } from "../materialization/model
 export function createProjectionRunId(
   projectId: string,
   identity: ProjectionMaterializationIdentity,
-  branch?: SixbBranch | null
+  branch: SixbBranch | null
 ): string {
   return sha256Canonical({
     projectId,

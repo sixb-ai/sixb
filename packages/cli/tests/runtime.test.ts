@@ -470,6 +470,7 @@ describe("startSixbRuntime", () => {
     expect(runtime.syncWorker?.concurrency).toBe(3)
 
     await new SyncRunDispatcher({
+      branch: null,
       id: sixb.id,
       definitions: sixb.definitions,
       storage: sixb.storage,

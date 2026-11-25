@@ -46,10 +46,10 @@ function resolveSixbErrorReporter(host: unknown): SixbErrorReporter {
 
 export function attachSixbErrorReporter(
   host: object,
-  handler?: SixbErrorHandler,
-  branch?: SixbBranch | null
+  handler: SixbErrorHandler | undefined,
+  branch: SixbBranch | null
 ): SixbErrorReporter {
-  const reporter = new SixbErrorReporter(handler, branch ?? null)
+  const reporter = new SixbErrorReporter(handler, branch)
   ;(host as ErrorReporterHost)[ERROR_REPORTER] = reporter
   return reporter
 }

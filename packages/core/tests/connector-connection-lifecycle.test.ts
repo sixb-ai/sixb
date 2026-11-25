@@ -104,6 +104,7 @@ describe("connector connection lifecycle", () => {
     const decryptionError = new Error("missing decryption key")
     const process = requireConnectionProcess(
       new ConnectorService("project", [harness.connector], {
+        branch: null,
         storage: harness.storage,
         credentialProtector: {
           seal: (plaintext, credentialContext) =>

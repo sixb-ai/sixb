@@ -3055,7 +3055,7 @@ describe("AgentWorker", () => {
         },
       }
     )
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
     const prepare = conversationPreparation.prepareAgentConversationContext
     const preflight = spyOn(
       conversationPreparation,
@@ -3122,9 +3122,13 @@ describe("AgentWorker", () => {
         },
       }
     )
-    attachSixbErrorReporter(host, (error) => {
-      reported.push(error)
-    })
+    attachSixbErrorReporter(
+      host,
+      (error) => {
+        reported.push(error)
+      },
+      null
+    )
     const sdk = createTestSixb(host)
     const thread = await sdk.agent.threads.create({ sandbox: {} })
     const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
@@ -3228,7 +3232,7 @@ describe("AgentWorker", () => {
       },
       { sandboxConfig: { setup: [] } }
     )
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
     const sdk = createTestSixb(host)
     const thread = await sdk.agent.threads.create({ sandbox: {} })
     const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
@@ -3294,7 +3298,7 @@ describe("AgentWorker", () => {
       },
       { sandboxConfig: { resolve: () => ({ network: { mode: "none" } }) } }
     )
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
     const sdk = createTestSixb(host)
     const thread = await sdk.agent.threads.create({ sandbox: {} })
     const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
@@ -3489,7 +3493,7 @@ describe("AgentWorker", () => {
     const sdk = createTestSixb(host)
     const thread = await sdk.agent.threads.create({ sandbox: {} })
     const runs = agentStorageOf(host).runs
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
     const stopSession = sandbox.stop.bind(sandbox)
     const observer = spyOn(sandbox, "stop").mockImplementation(async () => {
       const current = await agentStorageOf(host).threads.getById({
@@ -3767,7 +3771,7 @@ describe("AgentWorker", () => {
         },
       }
     )
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
     const sdk = createTestSixb(host)
     const thread = await sdk.agent.threads.create({ sandbox: {} })
     for (let i = 0; i < 2; i++) {
@@ -3854,7 +3858,7 @@ describe("AgentWorker", () => {
         },
       }
     )
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
     const sdk = createTestSixb(host)
     const thread = await sdk.agent.threads.create({ sandbox: {} })
     const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
@@ -3928,7 +3932,7 @@ describe("AgentWorker", () => {
         },
       }
     )
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
     const sdk = createTestSixb(host)
     const thread = await sdk.agent.threads.create({ sandbox: {} })
     const errors = spyOn(console, "error").mockImplementation(() => {})
@@ -4031,7 +4035,7 @@ describe("AgentWorker", () => {
       supportsRequestCredentials: true,
       create: async () => sandbox,
     })
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
     const requested = await requestAgent(host, { text: "Run the tests" })
     const completion = observeQueueSettlement(host.queues.agents)
     const worker = new AgentWorker(host, workerOptions())
@@ -4129,7 +4133,7 @@ describe("AgentWorker", () => {
         },
       }
     )
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
     const sdk = createTestSixb(host)
     const thread = await sdk.agent.threads.create({ sandbox: {} })
     const errors = spyOn(console, "error").mockImplementation(() => {})
@@ -4211,7 +4215,7 @@ describe("AgentWorker", () => {
         },
       }
     )
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
     const thread = await createTestSixb(host).agent.threads.create({ sandbox: {} })
     const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
     const completion = observeQueueSettlement(host.queues.agents)
@@ -4599,7 +4603,7 @@ describe("AgentWorker", () => {
       },
       { sandboxConfig: { source: { type: "git", url: "https://example.com/repository.git" } } }
     )
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
     const errors = spyOn(console, "error").mockImplementation(() => {})
     const sdk = createTestSixb(host)
     const thread = await sdk.agent.threads.create({ sandbox: {} })
@@ -4671,7 +4675,7 @@ describe("AgentWorker", () => {
         },
       }
     )
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
     const thread = await createTestSixb(host).agent.threads.create({ sandbox: {} })
     const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
     const completion = observeQueueSettlement(host.queues.agents)
@@ -4838,9 +4842,13 @@ describe("AgentWorker", () => {
       },
       { sandboxConfig: { source: { type: "git", url: "https://example.com/repository.git" } } }
     )
-    attachSixbErrorReporter(host, (error) => {
-      reported.push(error)
-    })
+    attachSixbErrorReporter(
+      host,
+      (error) => {
+        reported.push(error)
+      },
+      null
+    )
 
     // workspace-files.test.ts runs the script against real repositories; here it only refuses.
     const runFiles = spyOn(workspaceFiles, "prepareWorkspaceRunFiles").mockRejectedValue(
@@ -4877,7 +4885,7 @@ describe("AgentWorker", () => {
       modelCalls++
     })
     const sixb = buildSixb(model, new InMemoryBroker(), factory)
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const thread = await agentStorageOf(sixb).threads.create({
       projectId: PROJECT_ID,
       id: "sandbox-thread",
@@ -5603,7 +5611,7 @@ describe("AgentWorker", () => {
       },
     })
     const sixb = buildSixb(model)
-    const reporter = attachSixbErrorReporter(sixb, () => {})
+    const reporter = attachSixbErrorReporter(sixb, () => {}, null)
     const request = await requestAgent(sixb, { text: "queued first" })
     await sixb.storage.aiLimits?.createPolicy({
       id: "project_tokens_exhausted_after_queue",
@@ -6502,7 +6510,7 @@ describe("AgentWorker", () => {
       subject: { type: "project" },
       limit: { meter: "tokens.total", amount: 0 },
     })
-    const reporter = attachSixbErrorReporter(sixb, () => {})
+    const reporter = attachSixbErrorReporter(sixb, () => {}, null)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
@@ -6608,9 +6616,13 @@ describe("AgentWorker", () => {
       models: { language: [large, small] },
     })
     const reportedErrors: Error[] = []
-    const reporter = attachSixbErrorReporter(sixb, (error) => {
-      reportedErrors.push(error)
-    })
+    const reporter = attachSixbErrorReporter(
+      sixb,
+      (error) => {
+        reportedErrors.push(error)
+      },
+      null
+    )
     const storage = agentStorageOf(sixb)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
@@ -7695,7 +7707,7 @@ describe("AgentWorker", () => {
         stepSandbox: step,
         runId: "workflow-step-renewal-failure",
       })
-      attachSixbErrorReporter(sixb, () => {})
+      attachSixbErrorReporter(sixb, () => {}, null)
       const worker = new AgentWorker(sixb, workerOptions())
       await worker.start()
       try {
@@ -7763,7 +7775,7 @@ describe("AgentWorker", () => {
       stepSandbox: step,
       runId: "workflow-step-refused-grant",
     })
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
@@ -7807,7 +7819,7 @@ describe("AgentWorker", () => {
       stepSandbox: step,
       runId: "workflow-step-setup-failure",
     })
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
@@ -7889,7 +7901,7 @@ describe("AgentWorker", () => {
       stepSandbox: step,
       runId: "workflow-step-model-failure",
     })
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
@@ -8210,7 +8222,7 @@ describe("AgentWorker", () => {
       model,
       runId: `workflow-preparation-${state}`,
     })
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     if (state === "running" || state === "taken-over") {
       await runs.agentNodes.start({
         projectId: PROJECT_ID,
@@ -8328,9 +8340,13 @@ describe("AgentWorker", () => {
       sandboxes: { supportsRequestCredentials: true, create: () => sandbox.promise },
     })
     const errors: unknown[] = []
-    const reporter = attachSixbErrorReporter(sixb, (error) => {
-      errors.push(error)
-    })
+    const reporter = attachSixbErrorReporter(
+      sixb,
+      (error) => {
+        errors.push(error)
+      },
+      null
+    )
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
@@ -8457,7 +8473,7 @@ describe("AgentWorker", () => {
       model,
       runId,
     })
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
@@ -8517,7 +8533,7 @@ describe("AgentWorker", () => {
       model,
       runId: `workflow-output-limit-${text || "empty"}`,
     })
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
@@ -8558,7 +8574,7 @@ describe("AgentWorker", () => {
       runId: "workflow-step-limit",
       maxSteps: 3,
     })
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
@@ -8883,9 +8899,13 @@ describe("AgentWorker", () => {
       sandboxes: new RecordingSandboxFactory(),
     })
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    const reporter = attachSixbErrorReporter(sixb, (error, context) => {
-      reports.push({ error, context })
-    })
+    const reporter = attachSixbErrorReporter(
+      sixb,
+      (error, context) => {
+        reports.push({ error, context })
+      },
+      null
+    )
     const runs = sixb.storage.workflowRuns!
     const runId = "workflow-agent-failure-run"
     const nodeRunId = `${runId}:node:0`
@@ -9031,7 +9051,7 @@ describe("AgentWorker", () => {
       queues: new InMemoryQueues(),
       sandboxes: new RecordingSandboxFactory(),
     })
-    const reporter = attachSixbErrorReporter(sixb, () => {})
+    const reporter = attachSixbErrorReporter(sixb, () => {}, null)
     await sixb.storage.aiLimits?.createPolicy({
       id: "project_tokens_exhausted",
       projectId: PROJECT_ID,
@@ -10568,7 +10588,7 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(parentModel, new InMemoryBroker(), sandboxes, {
       models: { language: [parentModel, childModel] },
     })
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const storage = agentStorageOf(sixb)
     const requested = await requestAgent(sixb, { text: "Write the Q3 review." })
     childRunId = createSubagentRunId(requested.run.id, "q3-review")
@@ -11353,7 +11373,7 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(parentModel, new InMemoryBroker(), sandboxes, {
       models: { language: [parentModel, childModel] },
     })
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const storage = agentStorageOf(sixb)
     const requested = await requestAgent(sixb, { text: "Chart Acme's margins." })
     childRunId = createSubagentRunId(requested.run.id, "research")
@@ -11838,7 +11858,7 @@ describe("AgentWorker", () => {
   ])("fences a revoked child's delivery (concurrent takeover: %s)", async (takeover) => {
     const model = answerModel()
     const sixb = buildSixb(model)
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const storage = agentStorageOf(sixb)
     const auth = authStorageOf(sixb)
     const requested = await requestAgentAs(sixb, REQUESTER, { text: "Delegate a task." })
@@ -11969,7 +11989,7 @@ describe("AgentWorker", () => {
     const requested = await scoped.agent.runs.request({
       text: "Delegate a task.",
     })
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const storage = agentStorageOf(sixb)
     // The parent is already running elsewhere; only the child's queue delivery runs in this test.
     const [parentJob] = await sixb.queues.agents.claim({
@@ -12052,7 +12072,7 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
       models: { language: [parentModel, childModel] },
     })
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const storage = agentStorageOf(sixb)
     const requested = await requestAgent(sixb, { text: "Delegate this research task." })
     childRunId = createSubagentRunId(requested.run.id, "research")
@@ -12111,7 +12131,7 @@ describe("AgentWorker", () => {
       models: { language: [parentModel, childModel] },
       agentOptions: { subagentMaxSteps: 3 },
     })
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const storage = agentStorageOf(sixb)
     const requested = await requestAgent(sixb, { text: "Delegate this research task." })
     childRunId = createSubagentRunId(requested.run.id, "research")
@@ -12156,7 +12176,7 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
       agentOptions: { subagentMaxSteps: 3 },
     })
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const storage = agentStorageOf(sixb)
     const requested = await requestAgent(sixb, { text: "Delegate." })
     const parent = requireConversationRun(
@@ -12208,7 +12228,7 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
       models: { language: [parentModel, childModel] },
     })
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const storage = agentStorageOf(sixb)
     const requested = await requestAgent(sixb, { text: "Delegate this research task." })
     childRunId = createSubagentRunId(requested.run.id, "research")
@@ -12785,9 +12805,13 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(hangingModel())
     const storage = agentStorageOf(sixb)
     let reportCount = 0
-    const reporter = attachSixbErrorReporter(sixb, () => {
-      reportCount += 1
-    })
+    const reporter = attachSixbErrorReporter(
+      sixb,
+      () => {
+        reportCount += 1
+      },
+      null
+    )
     const queue = sixb.queues.agents
     const originalRenew = queue.renewLease?.bind(queue)
     if (!originalRenew) throw new Error("expected queue lease renewal")
@@ -14263,9 +14287,13 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(controlled.model, new InMemoryBroker(), new RecordingSandboxFactory())
     const storage = agentStorageOf(sixb)
     let reportCount = 0
-    const reporter = attachSixbErrorReporter(sixb, () => {
-      reportCount += 1
-    })
+    const reporter = attachSixbErrorReporter(
+      sixb,
+      () => {
+        reportCount += 1
+      },
+      null
+    )
 
     const request = await requestAgent(sixb, { text: "go" })
 
@@ -14550,9 +14578,13 @@ describe("AgentWorker", () => {
     const sixb = buildSixbWithEchoTool(toolThenAnswerModel(), new FailingRunStreamBroker())
     const storage = agentStorageOf(sixb)
     let reportCount = 0
-    const reporter = attachSixbErrorReporter(sixb, () => {
-      reportCount += 1
-    })
+    const reporter = attachSixbErrorReporter(
+      sixb,
+      () => {
+        reportCount += 1
+      },
+      null
+    )
     const originalConsoleError = console.error
     console.error = () => {}
 
@@ -14866,7 +14898,7 @@ describe("AgentWorker", () => {
     // Regression proof: rethrow preparation failures for a redelivery instead of recording them;
     // the job is retried and the thread stays locked.
     const sixb = buildSixb(answerModel())
-    attachSixbErrorReporter(sixb, () => {})
+    attachSixbErrorReporter(sixb, () => {}, null)
     const storage = agentStorageOf(sixb)
     const { host, reads } = withFailingExecutionReads(sixb, () => true)
     const request = await requestAgent(sixb, { text: "hello" })
@@ -15111,9 +15143,13 @@ describe("AgentWorker", () => {
     })
     const sixb = buildSixb(failingModel)
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    const reporter = attachSixbErrorReporter(sixb, (error, context) => {
-      reports.push({ error, context })
-    })
+    const reporter = attachSixbErrorReporter(
+      sixb,
+      (error, context) => {
+        reports.push({ error, context })
+      },
+      null
+    )
     const storage = agentStorageOf(sixb)
 
     const worker = new AgentWorker(sixb, workerOptions())
@@ -15363,9 +15399,13 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    const reporter = attachSixbErrorReporter(sixb, (error, context) => {
-      reports.push({ error, context })
-    })
+    const reporter = attachSixbErrorReporter(
+      sixb,
+      (error, context) => {
+        reports.push({ error, context })
+      },
+      null
+    )
     const threadId = "thread-missing-agent"
     const runId = createAgentRunId()
     const triggerMessageId = "message-missing-agent"

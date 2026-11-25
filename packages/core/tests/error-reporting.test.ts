@@ -34,9 +34,13 @@ describe("Sixb error reporting", () => {
   test("reports a normalized terminal run failure with stable context", async () => {
     const host = {}
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    attachSixbErrorReporter(host, (error, context) => {
-      reports.push({ error, context })
-    })
+    attachSixbErrorReporter(
+      host,
+      (error, context) => {
+        reports.push({ error, context })
+      },
+      null
+    )
 
     const failure = unexpectedFailure("projection exploded", "2026-01-02T03:04:05.000Z")
     reportRunFailure(host, "projection exploded", {
@@ -77,9 +81,13 @@ describe("Sixb error reporting", () => {
   test("reports delivery failures with envelope IDs only", async () => {
     const host = {}
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    attachSixbErrorReporter(host, (error, context) => {
-      reports.push({ error, context })
-    })
+    attachSixbErrorReporter(
+      host,
+      (error, context) => {
+        reports.push({ error, context })
+      },
+      null
+    )
 
     const failure = {
       code: "event.delivery_failed" as const,
@@ -119,9 +127,13 @@ describe("Sixb error reporting", () => {
   test("two concurrent losses of the same event types are two notifications", async () => {
     const host = {}
     const reports: SixbErrorContext[] = []
-    attachSixbErrorReporter(host, (_error, context) => {
-      reports.push(context)
-    })
+    attachSixbErrorReporter(
+      host,
+      (_error, context) => {
+        reports.push(context)
+      },
+      null
+    )
 
     // The case that forced an identity onto this path: a broker outage during one scheduler tick loses
     // `schedule.triggered` for every due schedule at once. Nothing was persisted, so there are no
@@ -144,9 +156,13 @@ describe("Sixb error reporting", () => {
   test("a delivery failure key is reproducible when the occurrence id is given", async () => {
     const host = {}
     const reports: SixbErrorContext[] = []
-    attachSixbErrorReporter(host, (_error, context) => {
-      reports.push(context)
-    })
+    attachSixbErrorReporter(
+      host,
+      (_error, context) => {
+        reports.push(context)
+      },
+      null
+    )
 
     reportEventDeliveryFailure(host, new Error("broker unavailable"), {
       projectId: PROJECT_ID,
@@ -162,9 +178,13 @@ describe("Sixb error reporting", () => {
   test("reports rule evaluation failures without event payloads", async () => {
     const host = {}
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    attachSixbErrorReporter(host, (error, context) => {
-      reports.push({ error, context })
-    })
+    attachSixbErrorReporter(
+      host,
+      (error, context) => {
+        reports.push({ error, context })
+      },
+      null
+    )
 
     reportRuleEvaluationFailure(host, new Error("rule storage unavailable"), {
       projectId: PROJECT_ID,
@@ -210,9 +230,13 @@ describe("Sixb error reporting", () => {
   test("isolates callback rejection from framework execution", async () => {
     const host = {}
     const consoleError = spyOn(console, "error").mockImplementation(() => {})
-    attachSixbErrorReporter(host, async () => {
-      throw new Error("notification unavailable")
-    })
+    attachSixbErrorReporter(
+      host,
+      async () => {
+        throw new Error("notification unavailable")
+      },
+      null
+    )
 
     expect(() =>
       reportRunFailure(host, new Error("run failed"), {
@@ -231,17 +255,21 @@ describe("Sixb error reporting", () => {
   test("flush drains reports added while a handler is running", async () => {
     const host = {}
     const messages: string[] = []
-    attachSixbErrorReporter(host, (error) => {
-      messages.push(error.message)
-      if (error.message === "first") {
-        reportRunFailure(host, new Error("second"), {
-          projectId: PROJECT_ID,
-          runKind: "sync",
-          run: { runId: "sync-run-2", syncId: "customers" },
-          failure: unexpectedFailure("second"),
-        })
-      }
-    })
+    attachSixbErrorReporter(
+      host,
+      (error) => {
+        messages.push(error.message)
+        if (error.message === "first") {
+          reportRunFailure(host, new Error("second"), {
+            projectId: PROJECT_ID,
+            runKind: "sync",
+            run: { runId: "sync-run-2", syncId: "customers" },
+            failure: unexpectedFailure("second"),
+          })
+        }
+      },
+      null
+    )
 
     reportRunFailure(host, new Error("first"), {
       projectId: PROJECT_ID,
@@ -259,7 +287,7 @@ describe("Sixb error reporting", () => {
     const consoleError = spyOn(console, "error").mockImplementation(() => {})
     jest.useFakeTimers()
     try {
-      attachSixbErrorReporter(host, () => new Promise<void>(() => {}))
+      attachSixbErrorReporter(host, () => new Promise<void>(() => {}), null)
       reportRunFailure(host, new Error("run failed"), {
         projectId: PROJECT_ID,
         runKind: "agent",
@@ -329,9 +357,13 @@ describe("Sixb error reporting", () => {
   test("a rule failure is correlated by candidate, since it has no run id", async () => {
     const host = {}
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    attachSixbErrorReporter(host, (error, context) => {
-      reports.push({ error, context })
-    })
+    attachSixbErrorReporter(
+      host,
+      (error, context) => {
+        reports.push({ error, context })
+      },
+      null
+    )
 
     reportRuleEvaluationFailure(host, new Error("predicate exploded"), {
       projectId: PROJECT_ID,
@@ -353,9 +385,13 @@ describe("Sixb error reporting", () => {
   test("a rule failure with no attributable candidate falls back to the batch", async () => {
     const host = {}
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    attachSixbErrorReporter(host, (error, context) => {
-      reports.push({ error, context })
-    })
+    attachSixbErrorReporter(
+      host,
+      (error, context) => {
+        reports.push({ error, context })
+      },
+      null
+    )
 
     reportRuleEvaluationFailure(host, new Error("reconciliation exploded"), {
       projectId: PROJECT_ID,
@@ -374,9 +410,13 @@ describe("Sixb error reporting", () => {
     try {
       const host = {}
       const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-      const reporter = attachSixbErrorReporter(host, (error, context) => {
-        reports.push({ error, context })
-      })
+      const reporter = attachSixbErrorReporter(
+        host,
+        (error, context) => {
+          reports.push({ error, context })
+        },
+        null
+      )
       const appendFailure = new Error("broker unavailable")
       const events = eventServiceFor(reporter)
       spyOn(events, "append").mockImplementation(() => Promise.reject(appendFailure))

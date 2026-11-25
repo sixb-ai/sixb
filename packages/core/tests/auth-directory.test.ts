@@ -339,6 +339,7 @@ describe("directory check", () => {
     })
     const ended: string[] = []
     const auth = new AuthRuntime({
+      branch: null,
       projectId: PROJECT_ID,
       storage: project.host.storage,
       security: project.host.definitions.security,

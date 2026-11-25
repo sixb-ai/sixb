@@ -162,9 +162,9 @@ describe("projection registry", () => {
       ownershipHash: "ownership-1",
     }
 
-    const first = createProjectionRunId("project", identity)
+    const first = createProjectionRunId("project", identity, null)
     expect(first).toMatch(/^[a-f0-9]{64}$/)
-    expect(createProjectionRunId("project", structuredClone(identity))).toBe(first)
+    expect(createProjectionRunId("project", structuredClone(identity), null)).toBe(first)
 
     const changed = (patch: Record<string, unknown>) =>
       ({ ...identity, ...patch }) as ProjectionMaterializationIdentity
@@ -201,7 +201,7 @@ describe("projection registry", () => {
     ]
 
     for (const [field, projectId, variant] of variants) {
-      expect(createProjectionRunId(projectId, variant), field).not.toBe(first)
+      expect(createProjectionRunId(projectId, variant, null), field).not.toBe(first)
     }
   })
 

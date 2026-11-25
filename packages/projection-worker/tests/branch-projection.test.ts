@@ -183,7 +183,7 @@ async function project(host: SixbHost, storage: InMemoryStorage, lake: Lake, ver
   }
   if (identity.projectionKind !== "object") throw new Error("Unexpected projection kind")
 
-  const id = createProjectionRunId(host.id, identity)
+  const id = createProjectionRunId(host.id, identity, null)
   const target = projectionTargetOf(projection)
   if (!("objectTypeId" in target)) throw new Error("Unexpected projection target")
   await queueTestProjectionRun(storage, { projectId: host.id, id, identity, target })
@@ -198,6 +198,7 @@ async function project(host: SixbHost, storage: InMemoryStorage, lake: Lake, ver
     ontology: host.definitions.ontology,
     lakeStorage: lake,
     projectionRunsStorage: storage.projectionRuns,
+    branch: null,
     syncRuns: storage.syncRuns,
     datasets: host.definitions.datasets,
     projections: host.definitions.projections,

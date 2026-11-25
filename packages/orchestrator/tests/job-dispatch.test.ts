@@ -43,9 +43,13 @@ describe("JobDispatch", () => {
   beforeEach(() => {
     reported.length = 0
     controller.current = new AbortController()
-    attachSixbErrorReporter(reporter, (error, context) => {
-      reported.push({ error, context })
-    })
+    attachSixbErrorReporter(
+      reporter,
+      (error, context) => {
+        reported.push({ error, context })
+      },
+      null
+    )
     jest.useFakeTimers()
     spyOn(console, "error").mockImplementation(() => {})
   })

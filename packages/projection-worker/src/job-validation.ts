@@ -226,7 +226,7 @@ function validatePinnedMarkings(input: {
 export function assertProjectionJobId(
   projectId: string,
   job: ProjectionJob,
-  branch?: SixbBranch | null
+  branch: SixbBranch | null
 ): void {
   const expected = createProjectionRunId(projectId, job, branch)
   if (job.id === expected) return

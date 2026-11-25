@@ -20,7 +20,7 @@ import { isOAuthConnectorDefinition } from "./types"
 
 export interface ConnectorServiceOptions extends ConnectorConnectionServiceOptions {
   /** On a branch, every client and every connection change is refused: see `branch-mode/README.md`. */
-  readonly branch?: SixbBranch | null
+  readonly branch: SixbBranch | null
 }
 
 type StaticConnectorConnectionState = {
@@ -48,10 +48,10 @@ export class ConnectorService {
   constructor(
     private readonly projectId: string,
     definitions: readonly ConnectorDefinition[],
-    options: ConnectorServiceOptions = {}
+    options: ConnectorServiceOptions
   ) {
     this.definitionsById = new Map(definitions.map((definition) => [definition.id, definition]))
-    this.branch = options.branch ?? null
+    this.branch = options.branch
 
     if (definitions.some(isOAuthConnectorDefinition)) {
       this.connections = new ConnectorConnectionService(projectId, definitions, options)

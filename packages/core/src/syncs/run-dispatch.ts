@@ -50,7 +50,7 @@ export type SyncRunDispatchPort = RunDispatcher<
 export interface SyncRunDispatcherDependencies {
   readonly id: string
   /** On a branch, no sync runs: a trigger's dispatch is refused, and the orchestrator reports it. */
-  readonly branch?: SixbBranch | null
+  readonly branch: SixbBranch | null
   readonly definitions: Pick<SixbDefinitions, "syncs">
   readonly storage: Storage
   readonly queues: Pick<Queues, "syncRuns">

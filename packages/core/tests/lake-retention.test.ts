@@ -78,6 +78,7 @@ function runtime(input: {
   storage?: Pick<Storage, "syncRuns" | "pipelineRuns" | "datasetIngest" | "lakeSlices">
 }) {
   return new LakeRetention({
+    branch: null,
     projectId: "project",
     options: input.options,
     lakeStorage: { maintenance: input.maintenance },

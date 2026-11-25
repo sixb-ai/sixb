@@ -135,6 +135,7 @@ describe("OAuth provider callback parameters and authorization context", () => {
     })
     await harness.service.close()
     const restarted = new ConnectorService("project", [harness.connector], {
+      branch: null,
       storage: harness.storage,
       credentialProtector: harness.protector,
       now: harness.now,

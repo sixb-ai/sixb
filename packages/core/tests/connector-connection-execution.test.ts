@@ -63,6 +63,7 @@ describe("connector connection execution boundary", () => {
     await seedConnectorActors(dependencies.storage, "default", new Date("2026-08-19T12:00:00.000Z"))
     const management = requireConnectionProcess(
       new ConnectorService("default", [harness.connector], {
+        branch: null,
         storage: dependencies.storage,
         credentialProtector: harness.protector,
       })
@@ -131,6 +132,7 @@ describe("connector connection execution boundary", () => {
     await seedConnectorActors(dependencies.storage, "default", new Date("2026-08-19T12:00:00.000Z"))
     const management = requireConnectionProcess(
       new ConnectorService("default", [harness.connector], {
+        branch: null,
         storage: dependencies.storage,
         credentialProtector: harness.protector,
       })
@@ -206,6 +208,7 @@ describe("connector connection execution boundary", () => {
     await seedConnectorActors(dependencies.storage, "default", harness.now())
     const management = requireConnectionProcess(
       new ConnectorService("default", [harness.connector], {
+        branch: null,
         storage: dependencies.storage,
         credentialProtector: harness.protector,
       })

@@ -499,6 +499,7 @@ describe("connections that share a person's GitHub grant", () => {
     await seedConnectorActors(storage, "project", new Date())
 
     const service = new ConnectorService("project", [definition], {
+      branch: null,
       storage,
       credentialProtector: createConnectorCredentialProtectorFromKey(encryptionKey),
     })
