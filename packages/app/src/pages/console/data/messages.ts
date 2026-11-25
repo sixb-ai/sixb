@@ -206,6 +206,7 @@ export const en = {
       plural("en", count, { one: `${formatted} delete file`, other: `${formatted} delete files` }),
     inlinedRows: (count: number, formatted: string) =>
       plural("en", count, { one: `${formatted} inlined row`, other: `${formatted} inlined rows` }),
+    branchCopies: (formatted: string) => `${formatted} copied for branches`,
     snapshots: (count: number, formatted: string) =>
       plural("en", count, { one: `${formatted} snapshot`, other: `${formatted} snapshots` }),
     partitionedBy: (columns: string) => `Partitioned by ${columns}`,
@@ -496,6 +497,7 @@ export const fr: Translation<DataMessages> = {
         one: `${formatted} ligne dans le catalogue`,
         other: `${formatted} lignes dans le catalogue`,
       }),
+    branchCopies: (formatted: string) => `${formatted} copiés pour les branches`,
     snapshots: (count: number, formatted: string) =>
       plural("fr", count, { one: `${formatted} instantané`, other: `${formatted} instantanés` }),
     partitionedBy: (columns: string) => `Partitionné par ${columns}`,

@@ -7,6 +7,7 @@ import type {
 } from "@sixb/core/lake-storage"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
+import { catalogDataPath } from "./catalog-slice"
 import { getBigIntLike, getOptionalString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
@@ -16,6 +17,8 @@ import { DuckLakeReadsBusy } from "./ducklake-read-gate"
 import type { DuckLakeSnapshotReader } from "./ducklake-snapshot-reader"
 import { describeDatasetStorage } from "./ducklake-storage-stats"
 import { isSqliteCatalog } from "./ducklake-version-transaction"
+import { LakeFiles } from "./lake-files"
+import { decodeDatasetTableName } from "./names"
 import {
   buildDuckLakeMetadataQuery,
   duckLakeAlias,
@@ -56,9 +59,12 @@ interface RetentionYield {
 // Snapshots read per history query.
 const HISTORY_PAGE_SIZE = 512
 
+const HOLD_BATCH = 500
+
 interface Retention {
   readonly keepVersionsForMs: number
   readonly deleteFilesAfterMs: number
+  readonly holdFiles: readonly string[]
   readonly dryRun: boolean
   readonly limit: number
   readonly signal: AbortSignal | undefined
@@ -176,10 +182,10 @@ export class DuckLakeMaintenance implements LakeMaintenance {
     )
   }
 
-  describeStorage(datasetIds: readonly string[]): Promise<readonly DatasetStorageHealth[]> {
+  async describeStorage(datasetIds: readonly string[]): Promise<readonly DatasetStorageHealth[]> {
     this.connections.assertOpen()
 
-    return describeDatasetStorage(
+    const described = await describeDatasetStorage(
       {
         options: this.options,
         connections: this.connections,
@@ -188,6 +194,44 @@ export class DuckLakeMaintenance implements LakeMaintenance {
       },
       datasetIds
     )
+    const copies = await this.copyBytesByDataset()
+    return described.map((health) => {
+      const bytes = copies.get(health.datasetId)
+      return bytes === undefined ? health : { ...health, branchCopyBytes: bytes }
+    })
+  }
+
+  /** The disk branches' copies take, by dataset: each copy's name starts with its table's uuid. */
+  private async copyBytesByDataset(): Promise<ReadonlyMap<string, number>> {
+    if (this.options.productionFiles !== undefined) return new Map()
+
+    const { dataPath, tables } = await this.connections.withAttachedRuntime(async (runtime) => ({
+      dataPath: await catalogDataPath(this.options, runtime),
+      tables: await runtime.query(
+        `SELECT table_uuid::VARCHAR AS uuid, table_name FROM ${duckLakeMetadataTableName(this.options, "ducklake_table")} WHERE end_snapshot IS NULL`
+      ),
+    }))
+    const datasetByUuid = new Map(
+      tables.flatMap((row) => {
+        const datasetId = decodeDatasetTableName(String(row.table_name))
+        return datasetId === null ? [] : [[String(row.uuid), datasetId] as const]
+      })
+    )
+
+    // A data path at a bucket's root has no place for copies, and so holds none.
+    let files: LakeFiles
+    try {
+      files = new LakeFiles(this.options, dataPath)
+    } catch {
+      return new Map()
+    }
+
+    const bytes = new Map<string, number>()
+    for (const copy of await files.listCopies()) {
+      const datasetId = datasetByUuid.get(copy.name.slice(0, 36))
+      if (datasetId) bytes.set(datasetId, (bytes.get(datasetId) ?? 0) + copy.sizeBytes)
+    }
+    return bytes
   }
 
   /** Which snapshots to expire, from one walk up the history (see `ExpiryWalk`). */
@@ -259,6 +303,8 @@ export class DuckLakeMaintenance implements LakeMaintenance {
     }
 
     return this.connections.withMaintenanceRuntime(retention.signal, async (runtime) => {
+      if (!retention.dryRun) await this.holdFiles(runtime, retention.holdFiles)
+
       const scheduled = await this.scheduledFileTimes(runtime, dueBefore, retention.limit + 1)
       const first = scheduled[0]
       if (first === undefined) {
@@ -284,6 +330,28 @@ export class DuckLakeMaintenance implements LakeMaintenance {
 
       return { deleted: deleted.length, hasMore: overLimit !== undefined }
     })
+  }
+
+  /**
+   * Files a live slice serves stay, even once compaction replaced them: their schedule starts
+   * again now (this process's clock, as the pass's own cutoff), so no pass deletes them while they
+   * stay listed. Paths are the slice's, relative to
+   * the data path.
+   */
+  private async holdFiles(runtime: DuckDbQueryRuntime, paths: readonly string[]): Promise<void> {
+    const scheduled = duckLakeMetadataTableName(
+      this.options,
+      "ducklake_files_scheduled_for_deletion"
+    )
+    const dataPath = await catalogDataPath(this.options, runtime)
+    const relative = `CASE WHEN path_is_relative THEN path ELSE substr(path, ${dataPath.length + 1}) END`
+
+    for (let start = 0; start < paths.length; start += HOLD_BATCH) {
+      const batch = paths.slice(start, start + HOLD_BATCH).map((path) => quoteSqlString(path))
+      await runtime.run(
+        `UPDATE ${scheduled} SET schedule_start = ${timestampSql(new Date())} WHERE ${relative} IN (${batch.join(", ")})`
+      )
+    }
   }
 
   /**
@@ -440,6 +508,7 @@ function resolveRetention(options: LakeRetentionOptions): Retention {
   return {
     keepVersionsForMs,
     deleteFilesAfterMs,
+    holdFiles: options.holdFiles ?? [],
     dryRun: options.dryRun ?? false,
     limit,
     signal: options.signal,

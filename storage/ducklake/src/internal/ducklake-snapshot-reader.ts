@@ -809,6 +809,22 @@ export class DuckLakeSnapshotReader {
     return match ? (await this.snapshotsToVersions(runtime, tableRef, [match]))[0] : null
   }
 
+  /** The dataset's latest version at a snapshot, schema changes included: what a catalog cut there holds. */
+  async getVersionAtSnapshot(
+    runtime: DuckDbQueryRuntime,
+    tableRef: DatasetTableRef,
+    snapshotId: string
+  ): Promise<DatasetVersion | null> {
+    assertDuckLakeSnapshotId(snapshotId)
+
+    const [row] = await this.collectVisibleSnapshotRows(runtime, {
+      table: tableRef,
+      beforeSnapshotId: (BigInt(snapshotId) + 1n).toString(),
+      visibleRowLimit: 1,
+    })
+    return row ? this.getVersionForTableRef(runtime, tableRef, row.snapshotId) : null
+  }
+
   async getVersionRefForSnapshot(
     runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition,

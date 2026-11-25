@@ -11,6 +11,7 @@ import {
   setupDuckLake,
 } from "./duckdb-runtime"
 import { DuckLakeReadGate } from "./ducklake-read-gate"
+import type { ProductionFilesProxy } from "./production-files-proxy"
 import {
   buildAttachSql,
   buildConfigurePostgresMetadataPoolSql,
@@ -51,7 +52,10 @@ export class DuckLakeConnectionManager {
   private readonly reads = new DuckLakeReadGate()
   private readonly maxStreamingReads: number
 
-  constructor(private readonly options: DuckLakeStorageOptions) {
+  constructor(
+    private readonly options: DuckLakeStorageOptions,
+    private readonly productionFiles?: ProductionFilesProxy
+  ) {
     this.observedLocalCatalogGeneration = currentLocalCatalogGeneration(options)
     this.maxStreamingReads = options.maxStreamingReads ?? 4
     if (!Number.isSafeInteger(this.maxStreamingReads) || this.maxStreamingReads < 1) {
@@ -121,6 +125,41 @@ export class DuckLakeConnectionManager {
       throw error
     } finally {
       starting = false
+    }
+  }
+
+  /**
+   * Runs `run` on a connection of its own, which holds the attachment and a read, as an open
+   * reader does, but not the attachment lock: the lake's other work goes on beside it, and file
+   * deletion waits for it. For long catalog work of several statements, such as cutting a slice.
+   */
+  async withDedicatedConnection<T>(
+    run: (runtime: DuckDbExclusiveRuntime) => Promise<T>,
+    signal?: AbortSignal
+  ): Promise<T> {
+    const read = await this.acquireRead(signal)
+    let runtime: DuckDbRuntime
+    try {
+      const lease = await this.acquireAttachedRuntime()
+      runtime = lease.runtime
+      this.pinnedReaders++
+      await lease.release()
+    } catch (error) {
+      read.release()
+      throw error
+    }
+
+    try {
+      return await runtime.withConnection(run)
+    } finally {
+      this.pinnedReaders--
+      read.release()
+      if (!this.closed) {
+        await this.withAttachmentLock(async () => {
+          if (this.pinnedReaders === 0 && this.refreshRequested) await this.resetRuntimeUnlocked()
+          await this.detachDuckDbCatalogAfterLease()
+        })
+      }
     }
   }
 
@@ -247,6 +286,9 @@ export class DuckLakeConnectionManager {
         attach: false,
         installExtensions: false,
       })
+      if (this.productionFiles) {
+        await runtime.run(this.productionFiles.secretSql())
+      }
       // Projection checkpoints use physical offsets. Reapply this after caller setup SQL so it
       // cannot weaken immutable snapshot ordering, including after runtime recreation.
       await runtime.run("SET preserve_insertion_order = true")

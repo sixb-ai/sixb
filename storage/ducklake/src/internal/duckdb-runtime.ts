@@ -49,6 +49,12 @@ export interface DuckDbRuntime extends DuckDbQueryRuntime {
    */
   withExclusive<T>(useRuntime: (runtime: DuckDbExclusiveRuntime) => Promise<T>): Promise<T>
   /**
+   * Run on a connection of its own, outside the main connection's queue: the runtime's other work
+   * goes on beside it. For long reads of several statements, such as a transaction cutting a
+   * slice. Closing the runtime waits for it.
+   */
+  withConnection<T>(useRuntime: (runtime: DuckDbExclusiveRuntime) => Promise<T>): Promise<T>
+  /**
    * Drop DuckDB's cache of remote files and return the memory DuckDB freed to the system. The
    * runtime does this on its own once it has been idle for `releaseMemoryAfterIdleMs`.
    */
@@ -120,6 +126,7 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
   // Serialize main-connection calls so transactions and staged writes cannot interleave.
   private operations: Promise<void> = Promise.resolve()
   private readonly readers = new Set<DuckDbReader>()
+  private readonly connections = new Set<Promise<unknown>>()
   private closePromise: Promise<void> | undefined
   // Operations accepted and not yet settled, on the main connection.
   private active = 0
@@ -213,6 +220,25 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
     })
   }
 
+  async withConnection<T>(useRuntime: (runtime: DuckDbExclusiveRuntime) => Promise<T>): Promise<T> {
+    const connection = await this.enqueue(() => this.instance.connect())
+    const used = (async () => {
+      try {
+        return await useRuntime(new NodeDuckDbExclusiveRuntime(connection))
+      } finally {
+        connection.closeSync()
+      }
+    })()
+
+    this.connections.add(used)
+    try {
+      return await used
+    } finally {
+      this.connections.delete(used)
+      this.scheduleIdleRelease()
+    }
+  }
+
   /**
    * DuckDB keeps remote Parquet it read in memory for later queries, up to `memory_limit`, and
    * glibc keeps what DuckDB frees in its arenas. Neither shrinks without memory pressure inside
@@ -271,6 +297,7 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
     // resetRuntime()/close() can run while an API read is still using this
     // runtime. Wait for accepted work before closing the native connection.
     await this.operations.catch(() => {})
+    await Promise.allSettled([...this.connections])
     this.closed = true
     this.connection.closeSync()
     this.instance.closeSync()
@@ -304,7 +331,15 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
 
   private scheduleIdleRelease(): void {
     const delay = this.releaseMemoryAfterIdleMs
-    if (delay === false || this.closing || this.active > 0 || this.readers.size > 0) return
+    if (
+      delay === false ||
+      this.closing ||
+      this.active > 0 ||
+      this.readers.size > 0 ||
+      this.connections.size > 0
+    ) {
+      return
+    }
     // New work and close() cancel the timer, so it fires only on an idle, open runtime.
     this.idleTimer = setTimeout(() => {
       this.idleTimer = undefined

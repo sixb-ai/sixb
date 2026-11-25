@@ -113,6 +113,12 @@ export {
 } from "./file-upload-session-storage-contract"
 export { runLakeChangesContractSuite } from "./lake-changes-contract"
 export {
+  type ForkableLakeStorage,
+  type LakeForksContractSuiteOptions,
+  type OpenBranchLakeInput,
+  runLakeForksContractSuite,
+} from "./lake-forks-contract"
+export {
   type LakeMergeStorageContractSuiteOptions,
   runLakeMergeStorageContractSuite,
 } from "./lake-merge-storage-contract"

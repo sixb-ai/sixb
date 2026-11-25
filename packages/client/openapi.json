@@ -21898,6 +21898,10 @@
                             "type": "integer",
                             "description": "Commits still in the dataset's history"
                           },
+                          "branchCopyBytes": {
+                            "type": "integer",
+                            "description": "Bytes of the copies branches read instead of files with rows their version drops"
+                          },
                           "partitionBy": {
                             "type": "array",
                             "items": {

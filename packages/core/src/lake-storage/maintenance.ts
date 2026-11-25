@@ -82,6 +82,11 @@ export interface DatasetStorageHealth {
   readonly inlinedRows: number
   /** Commits still in the dataset's history: its versions and their maintenance. */
   readonly retainedSnapshots: number
+  /**
+   * Bytes of the copies branches' slices read instead of files whose rows their version does not
+   * all return. Absent when there are none.
+   */
+  readonly branchCopyBytes?: number
   /** The columns the dataset is partitioned by, empty when it is not. */
   readonly partitionBy: readonly string[]
   readonly warnings: readonly DatasetStorageWarning[]

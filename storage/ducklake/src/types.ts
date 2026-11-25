@@ -131,6 +131,19 @@ export type DuckDbSecretOptions =
   | AzureSecretOptions
 
 /**
+ * How a branch reads production's files, for a catalog production sliced for it (see the README,
+ * "Branches"). The provider reaches them through a loopback proxy that caches them on disk.
+ */
+export interface DuckLakeProductionFilesOptions {
+  /** Production's lake file route: its API origin followed by `/api/lake/slice-files/`. */
+  readonly url: string
+  /** The slice's token. Called again when production answers that the last one expired. */
+  readonly token: () => string | Promise<string>
+  /** Where production's files are cached by name. Kept across restarts; nothing evicts it. */
+  readonly cacheDirectory: string
+}
+
+/**
  * Public provider configuration for `new DuckLakeStorage(...)`.
  *
  * Defaults:
@@ -152,4 +165,9 @@ export interface DuckLakeStorageOptions {
   readonly setupSql?: readonly string[]
   readonly createIfNotExists?: boolean
   readonly readOnly?: boolean
+  /**
+   * For a branch whose catalog is a slice of production's: where production's files are read.
+   * The catalog must be a DuckDB file, and `dataPath` holds what the branch writes.
+   */
+  readonly productionFiles?: DuckLakeProductionFilesOptions
 }
