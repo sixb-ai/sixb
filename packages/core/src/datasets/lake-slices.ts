@@ -91,7 +91,7 @@ export type LakeSliceFileResult =
 /** What production's side of a branch reads. */
 export interface LakeSliceHost {
   readonly id: string
-  readonly lakeStorage: Pick<LakeStorage, "forks">
+  readonly lakeStorage: Pick<LakeStorage, "forks" | "fork">
   readonly storage: Pick<Storage, "lakeSlices">
 }
 
@@ -299,7 +299,8 @@ export async function liveLakeSlices(
 /** Deletes the files production made for slices no branch may still open. Returns how many. */
 export async function releaseLakeSliceFiles(host: LakeSliceHost): Promise<number> {
   const forks = host.lakeStorage.forks
-  if (!forks || !host.storage.lakeSlices) return 0
+  // A branch's lake cuts no slice: it has no file made for one, and production's are not its own.
+  if (!forks || host.lakeStorage.fork || !host.storage.lakeSlices) return 0
 
   const live = await liveLakeSlices(host)
   return forks.releaseFiles({ liveSlices: live.map((slice) => slice.files) })

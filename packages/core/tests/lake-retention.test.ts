@@ -12,6 +12,7 @@ import {
 import { InMemoryStorage, type Storage } from "../src/storage"
 import type { DatasetIngestStorage } from "../src/storage/dataset-ingest"
 import { InMemoryLakeRetentionRunStorage } from "../src/storage/lake-retention-runs"
+import { InMemoryLakeSliceStorage } from "../src/storage/lake-slices"
 import type { ActiveOntologySource } from "../src/storage/ontology/sources"
 import { queueTestPipelineRun } from "../src/testing"
 import { queueTestSyncRun } from "../src/testing/sync-execution"
@@ -200,6 +201,41 @@ describe("lake retention passes", () => {
   })
 
   // Reproduce: remove the pause between passes in maintenance/lake-retention.ts.
+  // Red check: in releaseLakeSliceFiles, drop the `fork` check: the run ends by releasing files
+  // through the branch's lake, which reads a slice's placeholder data path and throws.
+  test("on a branch's lake, end without releasing files made for slices", async () => {
+    const { maintenance } = fakeMaintenance()
+    const released: unknown[] = []
+    const retention = new LakeRetention({
+      projectId: "project",
+      options: undefined,
+      lakeStorage: {
+        maintenance,
+        fork: { ownsVersion: () => true },
+        forks: {
+          currentPoint: async () => "point",
+          versionsAt: async () => new Map(),
+          writeSlice: async () => new Set(),
+          openFile: async () => null,
+          releaseFiles: async (input) => {
+            released.push(input)
+            throw new Error("[SixbDuckLake] A branch reads production's files from its slice.")
+          },
+        },
+      },
+      storage: { lakeSlices: new InMemoryLakeSliceStorage() },
+      sources: appliedSources(),
+      datasetCount: 1,
+    })
+
+    const report = await drive(
+      retention.apply({ keepVersionsForMs: HOUR, deleteFilesAfterMs: HOUR })
+    )
+
+    expect(report.expiredVersions).toBe(2)
+    expect(released).toEqual([])
+  })
+
   test("pause between two passes", async () => {
     const { maintenance, passes } = fakeMaintenance({ passesWithMore: 1 })
     const running = runtime({ maintenance }).apply({
