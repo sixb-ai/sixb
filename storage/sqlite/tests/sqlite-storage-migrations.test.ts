@@ -232,6 +232,7 @@ const shippedMigrationIds = [
   "110-video-generation",
   "111-artifact-video-export-asks",
   "112-agent-message-artifact-context",
+  "113-snapshot-load-executions",
 ]
 
 afterEach(async () => {
