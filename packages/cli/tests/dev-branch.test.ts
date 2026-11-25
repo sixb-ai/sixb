@@ -69,6 +69,26 @@ test("serves the project's app, and the API's paths from the API", async () => {
   expect(await (await call("/health")).text()).toBe("api")
 })
 
+// The app serves its own framework files under `/__sixb/`: connector icons and live reload.
+// Guard check: add "/__sixb/" back to `BRANCH_API_PREFIXES` in `core/src/branches/runtime.ts`.
+test("leaves the app's own /__sixb/ files to the app, and answers its status itself", async () => {
+  const { front, call } = setup()
+  front.reporter.message(
+    {
+      type: "ready",
+      watchesApp: true,
+      app: { url: "http://127.0.0.1", apiOrigin: "http://127.0.0.1" },
+    },
+    undefined
+  )
+
+  expect(await (await call("/__sixb/assets/connector-icons/github.svg")).text()).toBe("app")
+  expect(await (await call("/__sixb/dev-reload.js")).text()).toBe("app")
+
+  const status = (await (await call(BRANCH_STATUS_PATH)).json()) as { state: string }
+  expect(status.state).toBe("ready")
+})
+
 test("sends everything to the API when the project has no app", async () => {
   const { front, call } = setup()
   front.reporter.message({ type: "ready", watchesApp: false, app: null }, undefined)

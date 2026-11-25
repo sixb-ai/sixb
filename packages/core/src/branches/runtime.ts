@@ -91,7 +91,11 @@ export const BRANCH_PORT_ENV = "SIXB_BRANCH_PORT"
 /** Where the front is reached from outside the sandbox: the app sends its API requests there. */
 export const BRANCH_PUBLIC_ORIGIN_ENV = "SIXB_BRANCH_PUBLIC_ORIGIN"
 
-/** Paths the front sends to the API; everything else goes to the project's app. */
+/**
+ * Paths the front sends to the API; everything else goes to the project's app, the app's own
+ * `/__sixb/assets/*` and `/__sixb/dev-reload.js` included. The front answers
+ * {@link BRANCH_STATUS_PATH} itself.
+ */
 export function isBranchApiPath(pathname: string): boolean {
   return (
     BRANCH_API_PREFIXES.some((prefix) => pathname.startsWith(prefix)) ||
@@ -99,7 +103,7 @@ export function isBranchApiPath(pathname: string): boolean {
   )
 }
 
-const BRANCH_API_PREFIXES = ["/api/", "/auth/", "/ws/", "/docs/", "/__sixb/"]
+const BRANCH_API_PREFIXES = ["/api/", "/auth/", "/ws/", "/docs/"]
 const BRANCH_API_PATHS = ["/api", "/docs", "/health", "/ready"]
 
 /** The branch's schema on production's instance, as the role limited to it. */
