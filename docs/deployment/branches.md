@@ -57,9 +57,36 @@ await sixb.branches.delete("feature/invoices")  // sandbox, database and role go
 ```
 
 The same through the API: `GET /api/branches`, `POST /api/branches` with `{ name }`,
-`POST /api/branches/refresh`, `POST /api/branches/stop`, and `DELETE /api/branches?name=…`. It takes
-`can.manage(project.source)`. Push the branch first: one the remote does not have fails, and says
-so. A copy waits while its creator has another one running, or while two run in the project.
+`POST /api/branches/refresh`, `POST /api/branches/stop`, and `DELETE /api/branches?name=…`. Every
+call takes `can.manage(project.source)`. Push the branch first: one the remote does not have fails,
+and says so. A copy waits while its creator has another one running, or while two run in the
+project.
+
+## Use a branch in the browser
+
+```ts
+const { url } = await sixb.branches.signIn("feature/invoices") // POST /api/branches/sign-in
+// open `url` within a minute: you land on the branch's app, signed in as yourself
+```
+
+A branch has an origin of its own, never production's: `<branch>.<previewDomain>` when the
+project names one, else its sandbox's URL (Vercel's own domain).
+
+```ts
+source: { repository: "acme/shop", previewDomain: "preview.shop.dev" },
+```
+
+| Preview domain | |
+|---|---|
+| DNS | A wildcard, `*.preview.shop.dev`, to production's API server, which forwards each host to its branch |
+| Cookies | Production refuses a preview domain its `cookieDomain` covers: its cookies would reach every branch. Use a domain of its own, as Vercel uses vercel.app |
+| Live updates | Not forwarded under the preview domain yet: pages load, but do not update live |
+
+You sign in from production only: production checks your grant, the branch makes you a member when
+its copy predates you, and the one-time link signs you in there. The link works once, for you, for
+a minute. The branch has no other sign-in, and its project's own strategy signs nobody in.
+A branch on your laptop (`sixb dev --from production`) needs no sign-in: it runs as you, and answers
+your machine only.
 
 | When | The branch |
 |---|---|
