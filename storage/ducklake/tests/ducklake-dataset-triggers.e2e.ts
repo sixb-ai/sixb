@@ -153,7 +153,6 @@ describe("dataset triggers on DuckLake", () => {
       projections: getProjectionDispatchDescriptors(host),
     })
     return createMaintenancePasses({
-      branch: null,
       projectId: "project",
       routes,
       dispatchers: {

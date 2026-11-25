@@ -1,4 +1,3 @@
-import type { SixbBranch } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import {
   type DatasetTrigger,
@@ -13,8 +12,6 @@ import { requireDispatcher } from "./worker"
 
 export interface MaintenancePassesInput {
   readonly projectId: string
-  /** The host's branch: on one, the projections pass leaves production's projections alone. */
-  readonly branch: SixbBranch | null
   readonly routes: OrchestratorRoutes
   readonly dispatchers: OrchestratorDispatchers
   readonly lakeStorage: RecoveryPassesInput["lakeStorage"]
@@ -36,7 +33,6 @@ export function createMaintenancePasses(input: MaintenancePassesInput): readonly
 
   return recoveryPasses({
     projectId,
-    branch: input.branch,
     lakeStorage,
     projections,
     triggers: triggersOf(input),

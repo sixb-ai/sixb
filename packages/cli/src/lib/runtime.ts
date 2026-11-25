@@ -208,7 +208,6 @@ export async function startOrchestratorRuntime(
   const maintenance = sixb.startMaintenance(
     createMaintenancePasses({
       projectId: sixb.id,
-      branch: sixb.branch,
       routes,
       dispatchers,
       lakeStorage: sixb.lakeStorage,

@@ -1,4 +1,3 @@
-import type { SixbBranch } from "../../branch-mode"
 import type { LakeStorage } from "../../lake-storage"
 import type { MaintenancePass } from "../loop"
 import { type IngestPassInput, ingestPass } from "./ingest-pass"
@@ -12,12 +11,6 @@ type WithoutShared<T> = Omit<T, "projectId" | "feed" | "lakeStorage">
 
 export interface RecoveryPassesInput {
   readonly projectId: string
-  /**
-   * On a branch, the projections pass recovers only the datasets the branch writes, and none
-   * until the lake tells a branch's versions from production's: its first pass would otherwise
-   * re-derive every projection from production's data, and re-create every object it holds.
-   */
-  readonly branch: SixbBranch | null
   readonly lakeStorage: Pick<LakeStorage, "listLatestVersionsSince"> &
     ProjectionsPassInput["lakeStorage"] &
     TriggersPassInput["lakeStorage"]
@@ -38,21 +31,9 @@ export function recoveryPasses(input: RecoveryPassesInput): readonly Maintenance
   const feed = new LakeChangeFeed({ lakeStorage, projectId, freshForMs: RECOVERY_INTERVAL_MS })
 
   return [
-    input.projections &&
-      projectionsPass({
-        ...input.projections,
-        projectId,
-        lakeStorage,
-        feed,
-        ...(input.branch ? { recovers: branchRecoversNoDataset } : {}),
-      }),
+    input.projections && projectionsPass({ ...input.projections, projectId, lakeStorage, feed }),
     input.triggers && triggersPass({ ...input.triggers, projectId, lakeStorage, feed }),
     input.ingest && ingestPass({ ...input.ingest, projectId }),
     input.runs && runsPass({ ...input.runs, projectId }),
   ].filter((pass) => pass !== undefined)
-}
-
-/** The datasets a branch writes, until the lake can name them: none. */
-function branchRecoversNoDataset(): boolean {
-  return false
 }

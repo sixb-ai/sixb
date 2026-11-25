@@ -1456,7 +1456,6 @@ describe("OrchestratorWorker", () => {
     expect(
       thrownBy(() =>
         createMaintenancePasses({
-          branch: null,
           projectId: PROJECT_ID,
           routes,
           dispatchers: { projections: createTestProjectionDispatcher([]) },
@@ -1480,7 +1479,6 @@ describe("OrchestratorWorker", () => {
     const lakeStorage = new InMemoryLakeStorage()
     const storage = new InMemoryStorage()
     const passes = createMaintenancePasses({
-      branch: null,
       projectId: PROJECT_ID,
       routes: compileRoutes({
         schedules: [updated],
@@ -1506,7 +1504,6 @@ describe("OrchestratorWorker", () => {
 
   test("adds no pass for a project with nothing to reconcile", () => {
     const passes = createMaintenancePasses({
-      branch: null,
       projectId: PROJECT_ID,
       routes: new Map(),
       dispatchers: {},
@@ -1514,31 +1511,5 @@ describe("OrchestratorWorker", () => {
     })
 
     expect(passes).toEqual([])
-  })
-
-  // Guard check: drop the `recovers` the branch passes in `recoveryPasses`
-  // (core `maintenance/passes/recovery-passes.ts`), and the branch dispatches the projection too.
-  test("on a branch, the projections pass re-derives nothing production had already projected", async () => {
-    const lakeStorage = new InMemoryLakeStorage()
-    await commitInvoiceDatasetVersion(lakeStorage)
-    const storage = new InMemoryStorage()
-
-    const firstPass = async (branch: { name: string; dataFrom: "production" } | null) => {
-      const dispatches: ProjectionDispatchInput[] = []
-      const passes = createMaintenancePasses({
-        projectId: PROJECT_ID,
-        branch,
-        routes: invoiceProjectionRoutes(invoiceProjectionDescriptor()),
-        dispatchers: { projections: createTestProjectionDispatcher(dispatches) },
-        lakeStorage,
-        projectionRuns: storage.projectionRuns,
-      })
-
-      await Promise.all(passes.map((pass) => pass.run(signal)))
-      return dispatches
-    }
-
-    expect(await firstPass(null)).toHaveLength(1)
-    expect(await firstPass({ name: "feature/invoices", dataFrom: "production" })).toEqual([])
   })
 })
