@@ -76,6 +76,12 @@ export {
   planRunClaim,
   type RunClaimPlan,
 } from "./run-claim"
+export {
+  assertBranchNamespaceName,
+  branchNamespaceExists,
+  snapshotEditedAt,
+  snapshotTargetNotEmpty,
+} from "./snapshots"
 export { canRequeueSyncRunAfterEnqueueFailure } from "./sync-runs/idempotency"
 export { canFinishSyncRun } from "./sync-runs/transitions"
 export {
