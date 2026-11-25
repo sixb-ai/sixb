@@ -35,9 +35,13 @@ export async function prepareUniqueProperties(input: {
   readonly storage: Storage
   readonly projectId: string
   readonly ontology: OntologyDefinitionCatalog
+  /** Types whose stored values stay as they are, such as those whose data the code doesn't fit. */
+  readonly keepObjectTypeIds?: ReadonlySet<string>
 }): Promise<void> {
   const { storage, projectId } = input
-  const declared = declaredUniqueProperties(input.ontology)
+  const kept = (property: { readonly objectTypeId: string }) =>
+    input.keepObjectTypeIds?.has(property.objectTypeId) ?? false
+  const declared = declaredUniqueProperties(input.ontology).filter((property) => !kept(property))
   const declaredKeys = new Set(declared.map(propertyKey))
 
   for (const property of declared) {
@@ -49,7 +53,7 @@ export async function prepareUniqueProperties(input: {
   }
 
   const undeclared = (await storage.ontology.uniqueValues.listPrepared({ projectId })).filter(
-    (property) => !declaredKeys.has(propertyKey(property))
+    (property) => !declaredKeys.has(propertyKey(property)) && !kept(property)
   )
   for (const { objectTypeId, propertyId } of undeclared) {
     await withRetries({ objectTypeId, propertyId }, () =>
@@ -61,6 +65,42 @@ export async function prepareUniqueProperties(input: {
         { isolation: "serializable" }
       )
     )
+  }
+}
+
+/** What a dry run throws to roll its values back. */
+class DryRunRollback extends Error {}
+
+/**
+ * The duplicates {@link prepareUniqueProperties} would find, found without writing anything: each
+ * property it would build is built in a transaction that always rolls back. A deploy runs this
+ * while the old release can still start again, and prepares for real once nothing else can fail:
+ * a preparation left behind by a failed deploy would be trusted, stale, by the next one.
+ */
+export async function checkUniqueProperties(input: {
+  readonly storage: Storage
+  readonly projectId: string
+  readonly ontology: OntologyDefinitionCatalog
+  readonly keepObjectTypeIds?: ReadonlySet<string>
+}): Promise<void> {
+  const { storage, projectId } = input
+  const declared = declaredUniqueProperties(input.ontology).filter(
+    (property) => !(input.keepObjectTypeIds?.has(property.objectTypeId) ?? false)
+  )
+
+  for (const property of declared) {
+    const checked = withRetries(property, () =>
+      storage.transaction(
+        async (tx) => {
+          await backfillProperty(tx, projectId, property, { announce: false })
+          throw new DryRunRollback()
+        },
+        { isolation: "serializable" }
+      )
+    )
+    await checked.catch((error: unknown) => {
+      if (!(error instanceof DryRunRollback)) throw error
+    })
   }
 }
 
@@ -90,10 +130,12 @@ async function withRetries(
   }
 }
 
+/** `announce`: say when values are built, which a dry run doesn't. */
 async function backfillProperty(
   tx: Storage,
   projectId: string,
-  property: DeclaredUniqueProperty
+  property: DeclaredUniqueProperty,
+  options: { readonly announce: boolean } = { announce: true }
 ): Promise<void> {
   const { objectTypeId, propertyId } = property
   const values = tx.ontology.uniqueValues
@@ -114,7 +156,7 @@ async function backfillProperty(
       limit: BACKFILL_PAGE_ROWS,
       ...(afterPrimaryId === undefined ? {} : { afterPrimaryId }),
     })
-    if (afterPrimaryId === undefined && page.objects.length > 0) {
+    if (options.announce && afterPrimaryId === undefined && page.objects.length > 0) {
       console.info(`[Sixb] Preparing unique property '${objectTypeId}.${propertyId}'.`)
     }
 
@@ -139,7 +181,10 @@ async function backfillProperty(
 }
 
 /** Keys are rebuilt when they were computed for another kind, as after a schema change. */
-function isCurrent(prepared: PreparedUniqueProperty, property: DeclaredUniqueProperty): boolean {
+function isCurrent(
+  prepared: PreparedUniqueProperty,
+  property: Pick<UniquePropertyDefinition, "kind">
+): boolean {
   return prepared.keyKind === property.kind && prepared.keyVersion === UNIQUE_VALUE_KEY_VERSION
 }
 

@@ -309,6 +309,7 @@ export function checkView({
   projectValidation,
   markings,
   ontology,
+  shapes,
   warnings,
 }: {
   projectId: string
@@ -317,6 +318,8 @@ export function checkView({
   broker: Probe
   queues: Probe
   projectValidation?: Probe
+  /** Whether the stored objects fit the code's object types, when storage could be read. */
+  shapes?: Probe & { readonly findings?: TypeShapeSummary["findings"] }
   /**
    * The pipeline markings preflight: what SQL steps derive, checked against projections. A warning
    * reports projections whose applied version adds markings the code no longer declares.
@@ -328,9 +331,11 @@ export function checkView({
   const validation = projectValidation ?? { ok: true }
   const ontologyOk = (ontology?.errors ?? 0) === 0
   const markingsCheck = markings ?? { ok: true }
+  const shapesCheck = shapes ?? { ok: true }
   const healthy =
-    [storage, timeseries, broker, queues, validation, markingsCheck].every((row) => row.ok) &&
-    ontologyOk
+    [storage, timeseries, broker, queues, validation, markingsCheck, shapesCheck].every(
+      (row) => row.ok
+    ) && ontologyOk
 
   // The message wins when there is one, pass or fail: a probe that succeeded still says which
   // provider answered and whether its schema is current. A bare "ok" the mark already says.
@@ -349,6 +354,7 @@ export function checkView({
       probe("Queues", queues),
       probe("Project", validation),
       probe("Markings", markingsCheck),
+      ...(shapes ? [probe("Stored objects", shapes)] : []),
       ...(ontology
         ? [
             {
@@ -360,6 +366,7 @@ export function checkView({
           ]
         : []),
     ]),
+    shapes?.findings?.length ? typeShapeFindingLines(shapes.findings) : null,
     warningLines(warnings),
     healthy
       ? headline(
@@ -424,12 +431,28 @@ export function dbMigrateView({
 export function dbMigrateCheckView({
   projectId,
   pending,
+  shapes,
 }: {
   projectId: string
   /** The storage adapters with migrations to apply. */
   pending: readonly { readonly adapterId: string; readonly reason?: string }[]
+  /** What the stored objects fit against the code, once the schema is current. */
+  shapes?: TypeShapeSummary
 }): string {
+  if (shapes && shapes.findings.length > 0) {
+    return screen(
+      headline("fail", "The stored objects don't fit this code", projectId),
+      typeShapeFindingLines(shapes.findings)
+    )
+  }
+
   if (pending.length === 0) {
+    if (shapes?.narrows) {
+      return screen(
+        headline("warn", "Object types narrow", projectId),
+        `  ${tone.muted("No stored object is left out: the services stop while the new shapes are recorded.")}`
+      )
+    }
     return screen(headline("ok", "No database migrations pending", projectId))
   }
 
@@ -442,6 +465,23 @@ export function dbMigrateCheckView({
       )
     )
   )
+}
+
+/** What the stored objects fit against the code: what `sixb check` and a deploy print. */
+export interface TypeShapeSummary {
+  readonly findings: readonly { readonly message: string; readonly remedy: readonly string[] }[]
+  /** A change the old release would undo: the services stop before the shapes are recorded. */
+  readonly narrows: boolean
+}
+
+/** One `✗` line per change the data doesn't fit, then what to do about it. */
+export function typeShapeFindingLines(findings: TypeShapeSummary["findings"]): string {
+  return findings
+    .flatMap((finding) => [
+      marked(tone.fail("✗"), finding.message),
+      ...finding.remedy.map((line) => `  ${tone.muted(line)}`),
+    ])
+    .join("\n")
 }
 
 export function lakeCheckView({

@@ -548,19 +548,32 @@ export type {
   DurableExecutionSource,
   ExecutionRecord,
   ExecutionStorage,
+  // `migrateStorage` reports what its ontology step found with the shape types below.
+  FieldShape,
   InMemoryStorageOptions,
+  LinkShape,
   MigrationCapableStorage,
   MigrationReport,
   // `status()` returns these, so reading a migrator from here needs them; without them
   // the operator API on this subpath cannot be consumed, only called and discarded.
   MigrationState,
   MigrationStatus,
+  PropertyShape,
+  SchemaShape,
   Storage,
   StorageMigrationOptions,
   StorageMigrationResult,
   StorageMigrator,
   StorageSchemaCheck,
   StorageTransactionOptions,
+  StoredTypeShape,
+  TypeShape,
+  TypeShapeChange,
+  TypeShapeCheck,
+  TypeShapeEffect,
+  TypeShapeFinding,
+  TypeShapeMode,
+  TypeShapeTypeCheck,
 } from "./storage"
 export {
   checkStorageSchema,

@@ -7,6 +7,12 @@ export {
   step,
 } from "./migration-set"
 export type {
+  TypeShapeCheck,
+  TypeShapeFinding,
+  TypeShapeMode,
+  TypeShapeTypeCheck,
+} from "./type-shapes"
+export type {
   DefineMigrationsOptions,
   MigrationCapableStorage,
   MigrationHistoryStore,
