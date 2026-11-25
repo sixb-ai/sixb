@@ -38,6 +38,8 @@ export interface DevLoadProgress {
 export interface DevStartupFailure {
   readonly message: string
   readonly remediation?: string
+  /** The project file the error points at, relative to the project. */
+  readonly file?: string
 }
 
 export type DevChildMessage =

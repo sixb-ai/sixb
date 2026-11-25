@@ -12,6 +12,7 @@ import {
   discoverProjectInstructions,
 } from "../bootstrap/agent-context"
 import { discoverOntologySources, discoverProjectDefinitions } from "../bootstrap/discovery"
+import type { ProjectSource } from "../branches/source"
 import type { Broker } from "../broker"
 import type { ConnectorConnectionOptions, ConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets"
@@ -96,6 +97,11 @@ export interface CreateSixbOptions<in out TParams extends ParamsConfig = ParamsC
   /** Share definitions to register in addition to auto-discovered `shares/` exports. */
   shares?: readonly ShareDefinition[]
   auth?: SixbAuthConfig
+  /**
+   * Where the project's code lives, such as `{ repository: "acme/operations" }`: production runs
+   * its git branches next to itself from there (`sixb worker branches`).
+   */
+  source?: ProjectSource
   projectRoot?: string
 }
 
@@ -177,5 +183,6 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
     shares: [...(options.shares ?? []), ...definitions.shares],
     definitionFolders: { ...definitions.folders, objectTypes: discoveredOntology.folders },
     auth: options.auth,
+    source: options.source,
   })
 }

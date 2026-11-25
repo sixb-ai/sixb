@@ -30,6 +30,7 @@ import {
   resolveHostBranch,
   type SixbBranch,
 } from "../branch-mode"
+import { captureProjectSource, type ProjectSource } from "../branches/source"
 import type { Broker } from "../broker"
 import { canonicalTimeZone } from "../calendar"
 import {
@@ -202,6 +203,8 @@ export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsCon
   /** The folder each definition sits in below its directory. createSixb() discovers them. */
   definitionFolders?: DefinitionFolderIndex
   auth?: SixbAuthConfig
+  /** Where the project's code lives, so production can run its git branches. */
+  source?: ProjectSource
 }
 
 /** The options each host was built from, so a branch can build the same host on its own data. */
@@ -253,8 +256,15 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage
   readonly queues: Queues
-  readonly sandboxes?: Pick<SandboxFactory, "create" | "resume">
+  readonly sandboxes?: Pick<SandboxFactory, "create" | "resume" | "sharesHost">
+  /**
+   * The variables the sandbox recipe sets, by name. Its provider gives them to every sandbox it
+   * makes, so a hosted branch refuses a recipe that sets any.
+   */
+  readonly sandboxRecipeEnv: readonly string[]
   readonly projectRoot: string
+  /** Where the project's code lives, or null when the project named no repository. */
+  readonly source: ProjectSource | null
   private readonly cron: MaintenancePass
   private readonly errorReporter: ErrorReporter
   /** What every execution in this process runs on once it has bound a script; see `withScope`. */
@@ -295,7 +305,9 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       ? namespaceQueues(options.queues, this.projectId, transportId)
       : options.queues
     this.sandboxes = options.sandboxes
+    this.sandboxRecipeEnv = Object.keys(options.sandboxes?.configuration?.env ?? {})
     this.projectRoot = resolve(options.projectRoot ?? process.cwd())
+    this.source = options.source === undefined ? null : captureProjectSource(options.source)
 
     const definitions = resolveDefinitions(options)
     assertViewConditionsReadable({

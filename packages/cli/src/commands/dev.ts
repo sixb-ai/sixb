@@ -7,6 +7,7 @@ import {
 import { checkoutOf, currentGitBranch, fetchBranchCopy } from "../lib/branch-from-production"
 import { connect } from "../lib/connection"
 import { runDevSupervisor } from "../lib/dev-supervisor"
+import { hostedBranchRuntime } from "../lib/hosted-branch"
 import { resolveProfile } from "../lib/profiles"
 import type { DevOptions } from "./dev-runner"
 import { assertDevEnv } from "./env"
@@ -40,10 +41,13 @@ export async function runDev(options: DevOptions = {}) {
     process.exit(process.exitCode ?? 0)
   }
   const root = dirname(resolve(options.entry ?? "sixb.config.ts"))
-  await assertDevEnv(root)
+  // A branch production runs takes the `dev` values production could read, or none, and its copy
+  // from production itself: its notice says what it lacks.
+  const hosted = hostedBranchRuntime() !== null
+  if (!hosted) await assertDevEnv(root)
 
   // Core reads the branch when it loads, in each child: say it before any child starts.
-  if (options.from !== undefined || options.refresh) {
+  if (!hosted && (options.from !== undefined || options.refresh)) {
     if (options.from !== "production") {
       throw new Error(
         "[SixbCLI] `sixb dev --from` takes `production`: a branch copies its data from production. Add --refresh to take a new copy."

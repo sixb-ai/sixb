@@ -177,6 +177,12 @@ export interface PostgresStorageOptions {
   /** PostgreSQL schema name for all Sixb tables. Defaults to 'sixb'. */
   schemaName?: string
 
+  /**
+   * The branch the schema holds, when a branch's runtime connects to the schema production made
+   * for it (`createHostedBranch`): a snapshot loads only into a branch's schema.
+   */
+  branch?: string
+
   /** SSL configuration. */
   ssl?: boolean | "require" | "prefer"
 }
@@ -262,6 +268,7 @@ export class PostgresStorage
       throw new Error("[SixbPg] maxConcurrentAggregates must be a positive integer")
     this.options = options
     this.schemaName = options.schemaName ?? "sixb"
+    this.branchName = options.branch
     this.shutdownTimeoutSeconds = Math.max(
       1,
       Math.round((options.shutdownTimeoutMillis ?? 5000) / 1000)
