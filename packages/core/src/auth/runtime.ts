@@ -49,11 +49,13 @@ import { SessionCache } from "./session-cache"
 import {
   type BearerSessionTokens,
   createBearerSessionTokens,
+  createSessionCredential,
   hashSessionSecret,
   parseBearerSessionToken,
   parseSessionCookieValue,
   SESSION_ACCESS_TOKEN_PREFIX,
   SESSION_REFRESH_TOKEN_PREFIX,
+  type SessionCredential,
 } from "./sessions"
 import type {
   AuthenticatedAuthSession,
@@ -462,6 +464,33 @@ export class AuthRuntime {
         },
       },
     }
+  }
+
+  /**
+   * A browser session for `userId`, stored now, as a sign-in ends with one: for a sign-in the
+   * strategy does not drive, such as a branch's handover. Its cookie carries `credential`.
+   */
+  async startSession(input: {
+    readonly userId: string
+    readonly now: Date
+    readonly userAgent?: string
+    readonly ipAddress?: string
+  }): Promise<{ readonly credential: SessionCredential; readonly expiresAt: Date }> {
+    const credential = createSessionCredential()
+    const deadlines = this.createSessionDeadlines(input.now)
+
+    await this.requireAuthStorage().sessions.create({
+      id: credential.sessionId,
+      projectId: this.projectId,
+      userId: input.userId,
+      strategyId: this.strategy?.id ?? "session",
+      tokenHash: credential.tokenHash,
+      createdAt: input.now,
+      ...deadlines,
+      ...(input.userAgent ? { userAgent: input.userAgent } : {}),
+      ...(input.ipAddress ? { ipAddress: input.ipAddress } : {}),
+    })
+    return { credential, expiresAt: deadlines.expiresAt }
   }
 
   /**

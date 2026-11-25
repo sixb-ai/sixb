@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, jest, test } from "bun:test"
 import { createHash } from "node:crypto"
 import {
   can,
@@ -306,6 +306,54 @@ describe("a branch's files", () => {
       mediaType: "text/plain",
     })
     expect(await new Response(await sixb.blobs.open(own.blobId)).text()).toBe("branch note")
+  })
+  // A branch's viewers read through its route, as themselves, what the copy holds: never by id
+  // what production holds beside it. Red check: on a local 404 in the object file route, read
+  // through production by id, as the route once did: t-4, made after the copy, is read here.
+  test("never reach an object production made after the copy", async () => {
+    const attachment = await production.host.blobStorage.put({
+      body: new TextEncoder().encode("t-4 file"),
+      fileName: "t-4.txt",
+      mediaType: "text/plain",
+    })
+    await createTestSixb(production.host)
+      .objects(Ticket)
+      .upsert({ properties: { id: "t-4", status: "open", attachment } })
+
+    const path = encodeURIComponent("/properties/attachment")
+    const response = await get(`/api/objects/ticket/t-4/files/content?path=${path}`)
+    expect(response.status).toBe(404)
+    expect(await response.text()).not.toContain("t-4 file")
+  })
+
+  // The branch's object moved to a file production never had: production's own file at the path
+  // is another one. Red check: drop the `digest` production is asked for in blobs.ts.
+  test("never take production's file for one the branch's object holds instead", async () => {
+    const trusted = createTestSixb(branch.host)
+    const copied = (await trusted.objects(Ticket).get("t-1"))!.properties.attachment
+    const elsewhere = await new InMemoryBlobStorage().put({
+      // As long as production's, which a size check alone would take for it.
+      body: new TextEncoder().encode("t-1 FILE"),
+      fileName: "t-1.txt",
+      mediaType: "text/plain",
+    })
+    await trusted
+      .objects(Ticket)
+      .upsert({ properties: { id: "t-1", status: "open", attachment: elsewhere } })
+
+    try {
+      // Long enough after its last look that the branch looks for the file's holder again.
+      jest.useFakeTimers({ now: Date.now() + 60_000 })
+      const path = encodeURIComponent("/properties/attachment")
+      const response = await get(`/api/objects/ticket/t-1/files/content?path=${path}`)
+      expect(response.status).toBe(404)
+      expect(await response.text()).not.toContain("t-1 file")
+    } finally {
+      jest.useRealTimers()
+      await trusted
+        .objects(Ticket)
+        .upsert({ properties: { id: "t-1", status: "open", attachment: copied } })
+    }
   })
 })
 

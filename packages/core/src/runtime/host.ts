@@ -316,7 +316,10 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     this.sandboxes = options.sandboxes
     this.sandboxRecipeEnv = Object.keys(options.sandboxes?.configuration?.env ?? {})
     this.projectRoot = resolve(options.projectRoot ?? process.cwd())
-    this.source = options.source === undefined ? null : captureProjectSource(options.source)
+    this.source =
+      options.source === undefined
+        ? null
+        : captureProjectSource(options.source, authCookieDomain(options.auth))
 
     const definitions = resolveDefinitions(options)
     assertViewConditionsReadable({
@@ -871,4 +874,9 @@ function delegate<T extends object>(target: T, override: (property: PropertyKey)
       return typeof value === "function" ? value.bind(object) : value
     },
   })
+}
+
+/** Production's `cookieDomain`, which a branch preview domain must stay out of. */
+function authCookieDomain(config: SixbAuthConfig | undefined): string | undefined {
+  return config && "strategy" in config ? config.cookies?.cookieDomain : undefined
 }

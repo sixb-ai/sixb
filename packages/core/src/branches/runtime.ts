@@ -5,6 +5,7 @@ import { hostOptionsOf, SixbHost, type SixbHostView } from "../runtime/host"
 import type { BranchError, BranchState } from "../storage/branches"
 import type { Storage } from "../storage/types"
 import { branchBlobStorage } from "./blobs"
+import { branchHandoverAuth } from "./handover"
 import { BRANCH_TOOLS_PATH } from "./source"
 
 /**
@@ -50,21 +51,23 @@ export function hostOnBranch(
     throw new Error("[Sixb] Only a host that runs as a branch is built on a branch's data.")
   }
 
-  const base = hostOptionsOf(host as SixbHost)
+  const project = hostOptionsOf(host as SixbHost)
   const options = putOnBranch(
     {
-      ...base,
+      ...project,
       storage: input.storage,
       ...(input.lakeStorage ? { lakeStorage: input.lakeStorage } : {}),
       // The copied objects' files stay in production: whatever reads them on the branch reads
       // them from there, as the person.
       blobStorage: branchBlobStorage({
-        local: base.blobStorage,
+        local: project.blobStorage,
         runtime: input.runtime,
         projectId: host.projectId,
         objects: input.storage.objects,
         objectTypes: () => host.definitions.ontology.listObjectTypes(),
       }),
+      // A branch production runs signs people in only through production's handover.
+      ...(input.runtime.hosted ? { auth: branchHandoverAuth(project.auth) } : {}),
     },
     branch
   )

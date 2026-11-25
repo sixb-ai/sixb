@@ -107,12 +107,41 @@ in its status, where production reads it.
 Nothing of production's environment reaches the sandbox: the worker refuses a sandbox recipe that
 sets `env`, which its provider would give every sandbox, a branch's too.
 
-The front, on the branch's port, never loads project code. It answers with the generation's
-state, the commit, the project file a startup error points at, the copy it loaded, and the
-requests it forwarded; every request needs the branch's key, which only production holds. It sends the API's paths
-(`/api`, `/auth`, `/ws`, `/docs`, `/health`, `/ready`) to the API on the next port, and the rest
-to the project's app on the one after. A runtime that keeps exiting starts again after 5 s, then
-twice as long each time, up to 5 min; one that never answers within 3 min fails the branch.
+The front, on the branch's port, never loads project code. It answers with the generation's state,
+the commit, the project file a startup error points at, the copy it loaded, and the requests it
+forwarded. Its status (`/__sixb/branch`) and the handover's prepare need the branch's key, which
+only production holds, and only the handover receives it; the rest is people's traffic, which counts
+as use and which the branch's own sessions guard. Until the runtime answers, a request without the
+key gets a bare "starting" page, never a startup error. It sends the API's paths (`/api`, `/auth`,
+`/ws`, `/docs`, `/health`, `/ready`) to the API on the next port, and the rest to the project's app
+on the one after. A runtime that keeps exiting starts again after 5 s, then twice as long each time,
+up to 5 min; one that never answers within 3 min fails the branch.
+
+## Signing in
+
+A branch has an origin of its own, never production's: its cookies, and the code nobody reviewed,
+stay there. `<namespace>.<source.previewDomain>` when the project names one (production's API
+server forwards each such host to the branch, without the key, and refuses a domain its
+`cookieDomain` covers), else the sandbox's URL. `preview.ts` holds the rule.
+
+```txt
+production  sixb.branches.signIn(name)     can.manage(project.source); the person, their groups
+    │  POST /api/branch-handover + key       (front → API)
+branch      BranchHandover.prepare         member and groups made when the copy predates them
+    │  ◄── code (single use, 60 s, held in the API's memory)
+browser     <branch origin>/auth/branch-handover?code=…
+branch      BranchHandover.exchange        a native cookie session, CSRF cookie included → "/"
+```
+
+On a hosted branch the project's strategy is replaced by `branchHandoverAuth`, which has no
+sign-in method: the handover is the only way in, and the sessions it makes are the project's own,
+so CSRF, guards and attribution work unchanged. A code lives in one API process, so it dies with a
+restart; production asks for another on the next click. WebSockets are not forwarded under the
+preview domain yet, so the branch's pages there do not update live.
+
+On a laptop (`sixb dev --from production`) none of this applies: the branch runs on the
+developer's machine with the project's own strategy, and no branch providers, which is what
+`host.ts` keys the replacement on.
 
 ## The sandbox
 

@@ -1,5 +1,9 @@
 import { afterEach, expect, test } from "bun:test"
-import { BRANCH_KEY_HEADER, BRANCH_STATUS_PATH } from "@sixb/core/internal/branches"
+import {
+  BRANCH_HANDOVER_PREPARE_PATH,
+  BRANCH_KEY_HEADER,
+  BRANCH_STATUS_PATH,
+} from "@sixb/core/internal/branches"
 import { startBranchFront } from "../src/lib/dev-branch"
 
 const stops: (() => Promise<unknown>)[] = []
@@ -11,7 +15,14 @@ const KEY = "k".repeat(43)
 
 /** A branch's front, its API and its app, each answering with its own name. */
 function setup() {
-  const api = Bun.serve({ port: 0, fetch: () => new Response("api") })
+  const keys: (string | null)[] = []
+  const api = Bun.serve({
+    port: 0,
+    fetch: (request) => {
+      keys.push(request.headers.get(BRANCH_KEY_HEADER))
+      return new Response("api")
+    },
+  })
   const app = Bun.serve({ port: 0, fetch: () => new Response("app") })
   stops.push(
     async () => api.stop(true),
@@ -33,7 +44,7 @@ function setup() {
       headers: key ? { [BRANCH_KEY_HEADER]: key } : {},
     })
   const status = async () => (await (await call(BRANCH_STATUS_PATH)).json()) as { requests: number }
-  return { front, call, status }
+  return { front, call, status, keys }
 }
 
 // Production stops a branch nobody uses, and learns of its use from this count only.
@@ -44,9 +55,23 @@ test("counts what it forwards as use, and none of production's status reads", as
 
   expect((await status()).requests).toBe(0)
   expect((await call("/api/objects")).status).toBe(200)
-  expect((await call("/api/objects")).status).toBe(200)
-  expect((await call("/api/objects", null)).status).toBe(401)
+  expect((await call("/api/objects", null)).status).toBe(200)
   expect((await status()).requests).toBe(2)
+})
+
+// People reach a branch on its own origin now, signed in by its own sessions; its status and the
+// handover's preparation stay production's. Guard check: let every path through without the key
+// in `fetch` (`dev-branch.ts`), or forward the key everywhere.
+test("takes the key for production's paths only, and passes it on to the handover alone", async () => {
+  const { front, call, keys } = setup()
+  front.reporter.message({ type: "ready", watchesApp: false, app: null }, undefined)
+
+  expect((await call(BRANCH_STATUS_PATH, null)).status).toBe(401)
+  expect((await call(BRANCH_HANDOVER_PREPARE_PATH, null)).status).toBe(401)
+
+  await call("/api/objects")
+  await call(BRANCH_HANDOVER_PREPARE_PATH)
+  expect(keys).toEqual([null, KEY])
 })
 
 // A preview is the project's app on the branch's data: the front serves it beside the API.

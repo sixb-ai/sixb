@@ -100,6 +100,8 @@ export function branchBlobStorage(input: {
       base
     )
     url.searchParams.set("path", holder.path)
+    // That very file: production's object may hold another at the path since the copy.
+    url.searchParams.set("digest", `sha256:${blobId.slice("blob_".length)}`)
     // The file's own bytes: a length production states for them, not for a compressed body.
     const headers = new Headers({
       authorization: await runtime.production.authorization(),

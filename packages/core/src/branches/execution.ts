@@ -14,6 +14,13 @@ import type {
   BranchWanted,
 } from "../storage/branches"
 import { branchNamespaceName } from "./data"
+import {
+  BRANCH_HANDOVER_PREPARE_PATH,
+  BRANCH_HANDOVER_SIGN_IN_PATH,
+  type BranchHandoverPerson,
+} from "./handover"
+import { branchPreviewOrigin } from "./preview"
+import { BRANCH_KEY_HEADER } from "./runtime"
 import { assertGitBranchName, type ProjectSource } from "./source"
 
 /** How often a write retries over a row its worker moved on meanwhile. */
@@ -56,6 +63,11 @@ export interface BranchesRuntime {
   stop(name: string): Promise<BranchView>
   /** Drops its sandbox, its schema and its role, then forgets it. */
   delete(name: string): Promise<BranchView>
+  /**
+   * Lets you into a running branch: the branch prepares a session for you, and the returned URL,
+   * on the branch's own origin, trades a one-time code for it. Open it within a minute.
+   */
+  signIn(name: string): Promise<{ readonly url: string }>
 }
 
 export interface BranchesRuntimeDependencies {
@@ -181,13 +193,76 @@ export function createBranchesRuntime(
     stop: (name) => want(name, () => ({ wanted: "stopped" }), deleting),
 
     delete: (name) => want(name, () => ({ wanted: "deleted" })),
+
+    signIn: async (name) => {
+      const branches = store()
+      const branch = await branches.get({ projectId, name })
+      if (!branch) throw new Error(`[Sixb] There is no branch '${name}'. Open it first.`)
+      if (branch.state !== "ready" || !branch.url) {
+        throw new Error(`[Sixb] Branch '${name}' is not ready yet: it is ${branch.state}.`)
+      }
+
+      const person = await signingIn(runtime, execution)
+      const response = await fetch(new URL(BRANCH_HANDOVER_PREPARE_PATH, branch.url), {
+        method: "POST",
+        headers: { "content-type": "application/json", [BRANCH_KEY_HEADER]: branch.key },
+        body: JSON.stringify(person),
+        signal: AbortSignal.timeout(HANDOVER_TIMEOUT_MS),
+      }).catch((error: unknown) => {
+        throw new Error(`[Sixb] Branch '${name}' did not answer: ${errorMessage(error)}`)
+      })
+      const answer = (await response.json().catch(() => null)) as { code?: unknown } | null
+      if (!response.ok || typeof answer?.code !== "string") {
+        throw new Error(`[Sixb] Branch '${name}' did not let you in (HTTP ${response.status}).`)
+      }
+
+      const origin = branchPreviewOrigin(branch, dependencies.source?.previewDomain ?? null)
+      const url = new URL(BRANCH_HANDOVER_SIGN_IN_PATH, origin ?? branch.url)
+      url.searchParams.set("code", answer.code)
+      return { url: url.toString() }
+    },
   }
 }
 
+/** How long production waits for a branch to prepare a session. */
+const HANDOVER_TIMEOUT_MS = 10_000
+
+/** The person signing in, as production knows them: who the branch lets in. */
+async function signingIn(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext
+): Promise<BranchHandoverPerson> {
+  const requester = execution.requestedBy
+  if (requester?.type !== "user") {
+    throw new Error("[Sixb] Only a person signs into a branch.")
+  }
+  const auth = runtime.storage.auth
+  if (!auth) throw new Error("[Sixb] Signing into a branch takes storage.auth's members.")
+
+  const user = await auth.users.getById({ projectId: runtime.projectId, id: requester.id })
+  if (!user || user.status !== "active") {
+    throw new Error(`[Sixb] '${requester.id}' is not an active member.`)
+  }
+  const memberships = await auth.groupMemberships.listForUser({
+    projectId: runtime.projectId,
+    userId: user.id,
+  })
+  return {
+    id: user.id,
+    email: user.email,
+    displayName: user.displayName ?? null,
+    groupIds: memberships.map((membership) => membership.groupId),
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 /**
- * Who may open, view, refresh, stop and delete branches: whoever manages the project's code, as
- * for a laptop's copy. A branch's code can widen what it does with its creator's data, so the
- * people who see a branch stay a trusted set.
+ * Who may open, view, refresh, stop, delete and sign into branches: whoever manages the project's
+ * code. A branch's code can widen what it does with its creator's data, so the people who see a
+ * branch stay a trusted set.
  */
 export function assertMayManageBranches(runtime: SixbRuntimeContext): void {
   assertAuthorized(runtime, { kind: "source.manage" })

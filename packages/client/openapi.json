@@ -12817,6 +12817,15 @@
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
             }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
+            }
           }
         ]
       },
@@ -12902,6 +12911,15 @@
             "schema": {
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
             }
           }
         ]
@@ -26422,6 +26440,138 @@
         }
       }
     },
+    "/api/branches/sign-in": {
+      "post": {
+        "summary": "Sign into a running branch: a one-time URL on the branch's own origin",
+        "tags": ["Branches"],
+        "operationId": "signIntoBranch",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["url"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workflows": {
       "get": {
         "summary": "List registered workflows",
@@ -31473,6 +31623,15 @@
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
             }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
+            }
           }
         ]
       },
@@ -31568,6 +31727,15 @@
             "schema": {
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
             }
           }
         ]
@@ -31692,6 +31860,15 @@
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
             }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
+            }
           }
         ]
       },
@@ -31796,6 +31973,15 @@
             "schema": {
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
             }
           }
         ]
@@ -36298,6 +36484,15 @@
             }
           },
           {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
+            }
+          },
+          {
             "name": "shareGrant",
             "in": "query",
             "required": false,
@@ -36401,6 +36596,15 @@
             "schema": {
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
             }
           },
           {
@@ -40210,6 +40414,15 @@
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
             }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
+            }
           }
         ]
       },
@@ -40305,6 +40518,15 @@
             "schema": {
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
             }
           }
         ]
@@ -47742,6 +47964,15 @@
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
             }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
+            }
           }
         ]
       },
@@ -47845,6 +48076,15 @@
             "schema": {
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
             }
           }
         ]
@@ -55944,6 +56184,15 @@
             }
           },
           {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
+            }
+          },
+          {
             "name": "run",
             "in": "query",
             "required": true,
@@ -56046,6 +56295,15 @@
             "schema": {
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
             }
           },
           {
@@ -62497,6 +62755,15 @@
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
             }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
+            }
           }
         ]
       }
@@ -63234,6 +63501,15 @@
             "schema": {
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
             }
           },
           {
@@ -73377,6 +73653,15 @@
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
             }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
+            }
           }
         ]
       }
@@ -77007,6 +77292,15 @@
             }
           },
           {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
+            }
+          },
+          {
             "name": "shareGrant",
             "in": "query",
             "required": false,
@@ -77121,6 +77415,15 @@
             "schema": {
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Only this file, as `sha256:…`: when the path holds another, the route answers 404"
             }
           },
           {

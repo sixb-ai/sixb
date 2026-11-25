@@ -1,6 +1,7 @@
 /**
- * Forwards a request, or a WebSocket, to another server: a hosted branch's front to its API.
- * Bodies stream both ways and are never parsed or decompressed.
+ * Forwards a request, or a WebSocket, to another server: a hosted branch's front to its API, and
+ * production's server to a branch under its preview domain. Bodies stream both ways and are never
+ * parsed or decompressed.
  */
 
 /** Headers about one connection rather than the request: never passed on. */

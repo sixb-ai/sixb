@@ -106,4 +106,8 @@ export const FileContentQuerySchema = z.object({
   path: z.string().min(1),
   disposition: z.enum(["inline", "attachment"]).optional(),
   v: z.string().optional().describe("Client cache key; the route still resolves the current file"),
+  digest: z
+    .string()
+    .optional()
+    .describe("Only this file, as `sha256:…`: when the path holds another, the route answers 404"),
 })

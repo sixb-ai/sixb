@@ -71,6 +71,8 @@ import { OPENAPI_TAG_METADATA } from "./openapi/tags"
 import { registerHttpRoutes } from "./registerRoutes"
 import { agentRunSessionHandler, startLapsedRunSweeper } from "./routes/agent-runners"
 import { registerAuthRoutes } from "./routes/auth"
+import { registerBranchHandoverRoutes } from "./routes/branch-handover"
+import { forwardToPreview } from "./routes/branch-preview"
 import { registerWebhookRoutes } from "./routes/webhooks"
 import { registerWebSocketRoutes } from "./routes/ws"
 import { ObjectQueryOpenApiSchemas } from "./schemas/objects"
@@ -163,7 +165,10 @@ export class SixbServer {
     this.timing = options.timing ?? {}
     this.hostsOntologyMaintenance = options.ontologyMaintenance ?? true
     this.flushesIngestion = options.ingestFlush ?? true
-    this.apiBrowserPolicy = resolveApiBrowserPolicy(options.browser)
+    this.apiBrowserPolicy = ownOriginOnBranch(
+      this.hostRuntime,
+      resolveApiBrowserPolicy(options.browser)
+    )
     // URLs the API hands to third parties, such as file download URLs, name this origin.
     if (this.apiBrowserPolicy.publicOrigin) {
       setApiPublicOrigin(this.hostRuntime, this.apiBrowserPolicy.publicOrigin)
@@ -262,6 +267,7 @@ export class SixbServer {
         port: this.port,
         resolveClientAddress: this.resolveClientAddress,
         timing: this.timing,
+        preview: (request) => forwardToPreview(this.hostRuntime, request),
       })
       this.bunServer = started.bunServer
       this.closeWebSockets = started.closeWebSockets
@@ -669,6 +675,14 @@ export function createSixbApi(server: SixbServer) {
         new URL("/auth/connectors/callback", server.resolveAuthRequestOrigin(request)).toString(),
     },
   })
+  // A branch production runs lets people in through production's handover, with the branch's key.
+  const hosted = branchRuntimeOf(host)?.hosted
+  if (hosted) {
+    registerBranchHandoverRoutes(app, host, {
+      key: hosted.key,
+      apiOrigin: (request) => server.resolveAuthRequestOrigin(request),
+    })
+  }
   registerWebhookRoutes(app, host)
   registerWebSocketRoutes(app, server, sharedAccess)
 
@@ -751,6 +765,8 @@ function startApiServer(
     readonly port: number
     readonly resolveClientAddress: ClientAddressResolver
     readonly timing: SixbRequestTimingOptions
+    /** A branch's answer for a request to its preview host, or null for production's own. */
+    readonly preview: (request: Request) => Promise<Response> | null
   }
 ) {
   const openSockets = new Set<ServerWebSocket<unknown>>()
@@ -762,6 +778,10 @@ function startApiServer(
     // `limitRequestBody` as it streams.
     maxRequestBodySize: MAX_FILE_UPLOAD_BYTES,
     fetch: (incoming: Request, server: Server<unknown>) => {
+      // A branch's preview host is the branch's, never production's: it goes to the branch whole.
+      const preview = options.preview(incoming)
+      if (preview) return preview
+
       const tooLarge = declaredBodyTooLarge(incoming)
       if (tooLarge) return Response.json({ error: tooLarge.message }, { status: 413 })
 
@@ -928,12 +948,29 @@ async function stopElysiaHooks(app: SixbApp): Promise<void> {
 }
 
 /**
- * The person a branch from production runs as, with the groups production gave them, which the
- * copy carried. Null off such a branch.
+ * A branch production runs answers browsers on its own origin, where people open it, and on no
+ * other, whatever it was given: never production's, whose pages run with production's sessions, so
+ * a page there never acts in the branch with the session of whoever opened it.
+ */
+function ownOriginOnBranch(
+  host: SixbHostView,
+  policy: ResolvedSixbApiBrowserPolicy
+): ResolvedSixbApiBrowserPolicy {
+  if (!branchRuntimeOf(host)?.hosted) return policy
+  return {
+    publicOrigin: policy.publicOrigin,
+    allowedOrigins: policy.publicOrigin ? [policy.publicOrigin] : [],
+  }
+}
+
+/**
+ * The person a laptop's branch from production runs as, with the groups production gave them,
+ * which the copy carried. Null off such a branch, and on one production runs: people sign in there
+ * through production's handover, each as themselves.
  */
 async function branchPersonContext(host: SixbHostView) {
   const runtime = branchRuntimeOf(host)
-  if (!runtime) return null
+  if (!runtime || runtime.hosted) return null
 
   const userId = runtime.person.userId
   const memberships =

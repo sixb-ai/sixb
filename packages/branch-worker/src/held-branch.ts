@@ -25,6 +25,7 @@ import {
   branchCheckout,
   branchClosureNotice,
   branchDatabaseAddress,
+  branchPreviewOrigin,
   closeBranchData,
   dropBranchData,
   enforceBranchLimits,
@@ -685,6 +686,10 @@ export class HeldBranch {
   private async runtimeEnv(): Promise<Record<string, string>> {
     const { branch } = this
     const database = await hostBranchDatabase(this.host, branch)
+    const origin = this.publicOrigin()
+    const publicOrigin: Readonly<Record<string, string>> = origin
+      ? { [BRANCH_PUBLIC_ORIGIN_ENV]: origin }
+      : {}
 
     return {
       ...this.devValues,
@@ -694,7 +699,7 @@ export class HeldBranch {
       [BRANCH_RUNTIME_ENV]: `hosted-${branch.namespace}`,
       [BRANCH_KEY_ENV]: branch.key,
       [BRANCH_PORT_ENV]: String(branch.port),
-      ...(this.url ? { [BRANCH_PUBLIC_ORIGIN_ENV]: this.url } : {}),
+      ...publicOrigin,
       [BRANCH_DATABASE_URL_ENV]: database.url,
       [BRANCH_DATABASE_SCHEMA_ENV]: database.schemaName,
     }
@@ -995,6 +1000,16 @@ export class HeldBranch {
     throw new Error(
       `[SixbBranchWorker] Branch '${this.branch.name}' kept changing under its owner.`
     )
+  }
+
+  /** Where people open the branch: under the preview domain, or at its sandbox's URL. */
+  private publicOrigin(): string | null {
+    return this.url
+      ? branchPreviewOrigin(
+          { namespace: this.branch.namespace, url: this.url },
+          this.host.source?.previewDomain ?? null
+        )
+      : null
   }
 
   private requireSandbox(): Sandbox {

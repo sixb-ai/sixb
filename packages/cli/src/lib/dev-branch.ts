@@ -1,17 +1,18 @@
 import { timingSafeEqual } from "node:crypto"
 import {
+  BRANCH_HANDOVER_PREPARE_PATH,
   BRANCH_KEY_HEADER,
   BRANCH_STATUS_PATH,
   type BranchRuntimeStatus,
   HOSTED_BRANCH_COPY,
   isBranchApiPath,
 } from "@sixb/core/internal/branches"
+import { type ForwardedSocket, forwardRequest, forwardWebSocket } from "@sixb/core/internal/http"
 import type { Server, ServerWebSocket } from "bun"
 import { loadedCopyOf } from "./branch-from-production"
 import { type DevChildMessage, loadingLine } from "./dev-messages"
 import type { DevReporter } from "./dev-supervisor"
 import { errorMessage } from "./errors"
-import { type ForwardedSocket, forwardRequest, forwardWebSocket } from "./forward"
 
 interface SocketData {
   readonly path: string
@@ -21,8 +22,9 @@ interface SocketData {
 
 /**
  * The front of a hosted branch's `sixb dev`: it never imports project code, so it answers on the
- * port while the project restarts or fails to load. Every request must carry the branch's key,
- * which only production holds. Status is its own. The API's paths go to the API, everything else
+ * port while the project restarts or fails to load. Its status and the handover's preparation take
+ * the branch's key, which only production holds; people reach the rest, signed in by the branch's
+ * own sessions. Status is its own. The API's paths go to the API, everything else
  * to the project's app while it runs; both count as someone using the branch: production stops a
  * branch nobody uses.
  */
@@ -56,6 +58,12 @@ export function startBranchFront(input: {
   const upstream = (pathname: string) => (serving && !isBranchApiPath(pathname) ? app : api)
   const statusResponse = (httpStatus = 200) =>
     Response.json(status, { status: httpStatus, headers: { "cache-control": "no-store" } })
+  // What a person sees while the branch restarts: nothing of its errors, which are production's.
+  const startingResponse = () =>
+    new Response("The branch is starting. Reload in a moment.", {
+      status: 503,
+      headers: { "cache-control": "no-store", "retry-after": "2" },
+    })
 
   const server: Server<SocketData> = Bun.serve<SocketData>({
     hostname: input.host,
@@ -63,12 +71,18 @@ export function startBranchFront(input: {
     // Uploads go through the project's server first, which already caps them.
     maxRequestBodySize: 1024 * 1024 * 1024,
     async fetch(request, server) {
-      if (!authorized(request)) return new Response("Unauthorized", { status: 401 })
       const url = new URL(request.url)
+      // Production's own paths take the key; people reach the rest, which the branch's own
+      // sessions guard: production signs them in through the handover.
+      const production =
+        url.pathname === BRANCH_STATUS_PATH || url.pathname === BRANCH_HANDOVER_PREPARE_PATH
+      if (production && !authorized(request)) return new Response("Unauthorized", { status: 401 })
       if (url.pathname === BRANCH_STATUS_PATH) return statusResponse()
 
       status = { ...status, requests: status.requests + 1 }
-      if (status.state !== "ready") return statusResponse(503)
+      if (status.state !== "ready") {
+        return production ? statusResponse(503) : startingResponse()
+      }
 
       const path = `${url.pathname}${url.search}`
       const target = upstream(url.pathname)
@@ -79,11 +93,12 @@ export function startBranchFront(input: {
       }
       try {
         return await forwardRequest(request, `http://${target}${path}`, {
-          requestHeaders: (name) => name !== BRANCH_KEY_HEADER,
+          // The key goes on only where the branch checks it again: the handover.
+          requestHeaders: (name) => production || name !== BRANCH_KEY_HEADER,
         })
       } catch {
         // The generation stopped between the state check and the request.
-        return statusResponse(503)
+        return production ? statusResponse(503) : startingResponse()
       }
     },
     websocket: {

@@ -11,6 +11,7 @@ import {
   BranchNameBodySchema,
   BranchNameQuerySchema,
   BranchSchema,
+  BranchSignInResponseSchema,
 } from "../schemas/branches"
 import { ErrorResponseSchema } from "../schemas/common"
 import { handleRouteError } from "../utils/http"
@@ -112,6 +113,26 @@ export function registerHostedBranchRoutes(app: Elysia, _host: SixbHostView) {
           summary: "Stop a branch's runtime; its copy stays",
           tags: [OPENAPI_TAGS.branches.name],
           operationId: "stopBranch",
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .post(
+      "/api/branches/sign-in",
+      async (context) => {
+        try {
+          return await requireRequestSixb(context).branches.signIn(context.body.name)
+        } catch (error) {
+          return handleRouteError(error, context.set)
+        }
+      },
+      {
+        body: BranchNameBodySchema,
+        response: { 200: BranchSignInResponseSchema, ...errors },
+        detail: {
+          summary: "Sign into a running branch: a one-time URL on the branch's own origin",
+          tags: [OPENAPI_TAGS.branches.name],
+          operationId: "signIntoBranch",
           security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }

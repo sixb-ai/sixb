@@ -226,6 +226,7 @@ import {
   setArtifactState,
   setSharedAccessGuestName,
   signFileUploadPart,
+  signIntoBranch,
   signOut,
   signOutAll,
   signOutSharedAccess,
@@ -873,6 +874,9 @@ import type {
   SignFileUploadPartData,
   SignFileUploadPartError,
   SignFileUploadPartResponse,
+  SignIntoBranchData,
+  SignIntoBranchError,
+  SignIntoBranchResponse,
   SignOutAllData,
   SignOutAllError,
   SignOutAllResponse,
@@ -3441,6 +3445,29 @@ export const stopBranchMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await stopBranch({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Sign into a running branch: a one-time URL on the branch's own origin
+ */
+export const signIntoBranchMutation = (
+  options?: Partial<Options<SignIntoBranchData>>
+): UseMutationOptions<SignIntoBranchResponse, SignIntoBranchError, Options<SignIntoBranchData>> => {
+  const mutationOptions: UseMutationOptions<
+    SignIntoBranchResponse,
+    SignIntoBranchError,
+    Options<SignIntoBranchData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await signIntoBranch({
         ...options,
         ...fnOptions,
         throwOnError: true,
