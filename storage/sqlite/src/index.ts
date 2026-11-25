@@ -2,6 +2,7 @@
 // source.
 /// <reference path="./sql.d.ts" />
 
+import { Database } from "bun:sqlite"
 import { AsyncLocalStorage } from "node:async_hooks"
 import type {
   MigrationCapableStorage,
@@ -29,6 +30,9 @@ import {
   type AiUsageStorage,
   type ShareGrantStorage,
   type ShareSessionStorage,
+  type SnapshotReadOptions,
+  type SnapshotReadStorage,
+  type SnapshotReadView,
   StorageTransactionError,
 } from "@sixb/core/storage"
 import { SqliteActionRunStorage } from "./action-run-storage"
@@ -54,11 +58,14 @@ import { SqliteProjectionRunStorage } from "./projection-run-storage"
 import { SqliteRulesStorage } from "./rules-storage"
 import { SqliteShareGrantStorage } from "./share-grant-storage"
 import { SqliteShareSessionStorage } from "./share-session-storage"
+import { readSqliteLatestPoints, readSqliteMemberships, readSqliteVectors } from "./snapshot-read"
 import { SqliteSyncRunStorage } from "./sync-run-storage"
 import { registerSqliteStorageTestingAdapter } from "./testing"
 import { SqliteTimeseriesStorage } from "./timeseries-storage"
 import {
+  beginSqliteSnapshot,
   closeSqliteStoreConnection,
+  endSqliteSnapshot,
   openSqliteStoreConnection,
   runImmediateTransactionAsync,
   type SqliteStoreConnection,
@@ -88,7 +95,7 @@ export interface SqliteStorageOptions {
  * })
  * ```
  */
-export class SqliteStorage implements MigrationCapableStorage {
+export class SqliteStorage implements MigrationCapableStorage, SnapshotReadStorage {
   readonly objects: Storage["objects"]
   readonly ontology: SqliteOntologyStorage
   readonly auth: SqliteAuthStorage
@@ -118,6 +125,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly activity: SqliteActivityStorage
   readonly migrators: readonly StorageMigrator[]
 
+  private readonly basePath: string | undefined
   private readonly connection: SqliteStoreConnection
   private readonly readConnection: SqliteStoreConnection
   private readonly transactionScope = new AsyncLocalStorage<{ active: boolean }>()
@@ -125,6 +133,7 @@ export class SqliteStorage implements MigrationCapableStorage {
 
   constructor(options: SqliteStorageOptions = {}) {
     const path = options.path ? sqliteStoragePath(options.path) : undefined
+    this.basePath = options.path
     this.connection = openSqliteStoreConnection({ path })
     if (path) {
       this.connection.db.run("PRAGMA journal_mode = WAL")
@@ -259,6 +268,53 @@ export class SqliteStorage implements MigrationCapableStorage {
   close(): void {
     if (this.readConnection !== this.connection) closeSqliteStoreConnection(this.readConnection)
     closeSqliteStoreConnection(this.connection)
+  }
+
+  /**
+   * One view, on a connection of its own: a WAL read transaction keeps the file as it was when it
+   * began. A database without a file is copied under the write lock instead.
+   */
+  async readSnapshot<T>(
+    _options: SnapshotReadOptions,
+    run: (views: readonly SnapshotReadView[]) => Promise<T>
+  ): Promise<T> {
+    this.assertRootOperationAvailable()
+    const path = this.basePath ? sqliteStoragePath(this.basePath) : undefined
+    const connection = path
+      ? openSqliteStoreConnection({ path, readonly: true })
+      : await this.withTransactionLock(async () => ({
+          db: Database.deserialize(this.connection.db.serialize()),
+          ownsConnection: true,
+        }))
+
+    try {
+      beginSqliteSnapshot(connection.db)
+
+      const stores = createSqliteStores(connection, {
+        runOntologyOperation: async (operation) => operation(),
+        transactionContext: null,
+      })
+      const storage: Storage = {
+        ...stores,
+        ping: async () => undefined,
+        transaction: async <R>(): Promise<R> => {
+          throw new StorageTransactionError("[SixbSqlite] A snapshot's view is read-only.")
+        },
+      }
+
+      return await run([
+        {
+          storage,
+          readVectors: async ({ projectId, refs }) =>
+            readSqliteVectors(connection.db, projectId, refs),
+          readLatestPoints: async (input) => readSqliteLatestPoints(connection.db, input),
+          readMemberships: async ({ projectId }) => readSqliteMemberships(connection.db, projectId),
+        },
+      ])
+    } finally {
+      endSqliteSnapshot(connection.db)
+      closeSqliteStoreConnection(connection)
+    }
   }
 
   private createTransactionStorage(

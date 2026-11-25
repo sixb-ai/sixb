@@ -2031,6 +2031,17 @@ function compileFieldAfter(
   }
 }
 
+/**
+ * The page token after one object of a page in identity order, as a page of `start` reads:
+ * where a snapshot starts the range of a type that follows this object.
+ */
+export function identityPageToken(objectTypeId: string, primaryId: string): string {
+  return encodePageToken(
+    { object_type_id: objectTypeId, primary_id: primaryId, properties: {} },
+    identityOrderFields()
+  )
+}
+
 function encodePageToken(row: PgObjectQueryPageRow, fields: readonly CompiledOrderField[]): string {
   const properties = objectProperties(row._cursor_properties ?? row.properties)
   const token: EncodedPageToken = {

@@ -163,6 +163,46 @@ export async function runPgRepeatableReadTransaction<T>(
   )
 }
 
+/**
+ * Open a `REPEATABLE READ READ ONLY` transaction on a reserved connection for a snapshot: exporting
+ * its snapshot when `snapshotId` is absent, adopting another's when given. Reads through it behave
+ * as reads inside any repeatable-read transaction of this provider, scoped reads included. Both
+ * timeouts bound it on the server too, so a client that stalls cannot pin the vacuum horizon.
+ */
+export async function beginPgSnapshot(
+  connection: ReservedSQL,
+  input: { readonly snapshotId?: string; readonly maxDurationMs: number }
+): Promise<string> {
+  await connection.unsafe("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+  pgTransactionClients.add(connection)
+  activePgTransactions.set(connection, "repeatableRead")
+
+  if (input.snapshotId !== undefined) {
+    await connection.unsafe(`SET TRANSACTION SNAPSHOT '${input.snapshotId.replace(/'/g, "''")}'`)
+  }
+  // PostgreSQL 17 bounds the whole transaction; before it, each statement and each idle wait.
+  const timeout = Math.max(1, Math.trunc(input.maxDurationMs))
+  const [version] = await connection<{ version: number }[]>`
+    SELECT current_setting('server_version_num')::int AS version`
+  await connection.unsafe(
+    (version?.version ?? 0) >= 170000
+      ? `SET LOCAL transaction_timeout = ${timeout}`
+      : `SET LOCAL statement_timeout = ${timeout}; SET LOCAL idle_in_transaction_session_timeout = ${timeout}`
+  )
+
+  if (input.snapshotId !== undefined) return input.snapshotId
+  const [row] = await connection<{ snapshot: string }[]>`SELECT pg_export_snapshot() AS snapshot`
+  if (!row) throw new Error("[SixbPg] PostgreSQL exported no snapshot.")
+  return row.snapshot
+}
+
+/** End a snapshot's transaction; it wrote nothing, so it is rolled back. */
+export async function endPgSnapshot(connection: ReservedSQL): Promise<void> {
+  activePgTransactions.delete(connection)
+  pgTransactionClients.delete(connection)
+  await connection.unsafe("ROLLBACK")
+}
+
 export function authLockKey(kind: string, ...parts: readonly string[]): string {
   return ["auth", kind, ...parts].join(":")
 }
