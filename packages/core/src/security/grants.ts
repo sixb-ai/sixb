@@ -444,12 +444,31 @@ function isAgentMemoryReference(input: unknown): input is AgentMemoryReference {
   )
 }
 
+function isProjectSourceReference(input: unknown): input is ProjectReference["source"] {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    !Array.isArray(input) &&
+    !isBreadthSelector(input) &&
+    "kind" in input &&
+    input.kind === "source"
+  )
+}
+
 function manage(input: GrantInput<ConnectorDefinition, "connector">): ManageGrant<"connector">
 function manage(input: AgentUsageReference): ManageGrant<"aiUsage">
 function manage(input: AgentMemoryReference): ManageGrant<"agentMemory">
+function manage(input: ProjectReference["source"]): ManageGrant<"source">
 function manage(
-  input: GrantInput<ConnectorDefinition, "connector"> | AgentUsageReference | AgentMemoryReference
+  input:
+    | GrantInput<ConnectorDefinition, "connector">
+    | AgentUsageReference
+    | AgentMemoryReference
+    | ProjectReference["source"]
 ): ManageGrant {
+  if (isProjectSourceReference(input)) {
+    return { kind: "grant", capability: "manage", target: "source" }
+  }
   if (isAgentUsageReference(input)) {
     return { kind: "grant", capability: "manage", target: "aiUsage" }
   }

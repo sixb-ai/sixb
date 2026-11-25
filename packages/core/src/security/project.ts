@@ -11,4 +11,5 @@ export const project: ProjectReference = Object.freeze({
   console: Object.freeze({ kind: "console" }),
   users: Object.freeze({ kind: "users" }),
   models: Object.freeze({ kind: "models" }),
+  source: Object.freeze({ kind: "source" }),
 })
