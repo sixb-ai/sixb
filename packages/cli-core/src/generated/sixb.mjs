@@ -568,6 +568,12 @@ List options:
 
 Lists the pipelines you may run, each with its latest run. \`sixb pipeline-runs\` shows the
 history and each run's steps.`,
+  schedules: `Usage:
+  sixb schedules run <schedule-id>
+
+Runs a cron schedule now, as its next occurrence would: the syncs, pipelines and workflows it starts
+run as on any occurrence. It takes the right to run each of them. On a branch, where no cron
+schedule runs on its own clock, this is how one runs.`,
   "pipeline-runs": `Usage:
   sixb pipeline-runs list [options]
   sixb pipeline-runs get <run-id>
@@ -2273,6 +2279,20 @@ async function runs(api, kind, args) {
   fail(`Unknown ${group} command '${sub}'.`);
 }
 
+// src/commands/schedules.ts
+async function schedules(api, args) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP.schedules);
+  if (sub === "run") {
+    const {
+      positionals: [scheduleId]
+    } = parseCommandArgs(rest, {}, "schedules run", 1);
+    return writeJson(await api.post(`/api/schedules/${idSegment(scheduleId)}/runs`, {}));
+  }
+  fail(`Unknown schedules command '${sub}'.`);
+}
+
 // src/commands/telemetry.ts
 async function telemetry(api, args) {
   const [sub, ...rest] = args;
@@ -2444,7 +2464,8 @@ var INSTANCE_COMMANDS = [
   "syncs",
   "sync-runs",
   "pipelines",
-  "pipeline-runs"
+  "pipeline-runs",
+  "schedules"
 ];
 function isInstanceCommand(command) {
   return INSTANCE_COMMANDS.includes(command);
@@ -2485,6 +2506,8 @@ async function dispatch(api, command, args) {
       return runnables(api, "pipelines", args);
     case "pipeline-runs":
       return runs(api, "pipeline", args);
+    case "schedules":
+      return schedules(api, args);
     default:
       fail(`Unknown command '${command}'. Run 'sixb --help'.`);
   }

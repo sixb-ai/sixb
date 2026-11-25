@@ -39,6 +39,7 @@ import { registerPipelineRoutes } from "./routes/pipelines"
 import { registerProjectRoutes } from "./routes/project"
 import { registerProjectionRoutes } from "./routes/projections"
 import { registerRuleRoutes } from "./routes/rules"
+import { registerScheduleRoutes } from "./routes/schedules"
 import { registerShareGrantRoutes } from "./routes/share-grants"
 import { registerSharedAccessRoutes } from "./routes/shared-access"
 import { registerStatusRoutes } from "./routes/status"
@@ -70,6 +71,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerLakeSliceFileRoutes(app, host)
   registerSyncRoutes(app, host)
   registerPipelineRoutes(app, host)
+  registerScheduleRoutes(app, host)
   registerWorkflowRoutes(app, host)
   registerRuleRoutes(app, host)
   registerShareGrantRoutes(app, host)

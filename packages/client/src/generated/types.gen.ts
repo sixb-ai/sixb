@@ -8348,6 +8348,51 @@ export type RequestPipelineRunResponses = {
 export type RequestPipelineRunResponse =
   RequestPipelineRunResponses[keyof RequestPipelineRunResponses]
 
+export type RunScheduleData = {
+  body?: never
+  path: {
+    scheduleId: string
+  }
+  query?: never
+  url: "/api/schedules/{scheduleId}/runs"
+}
+
+export type RunScheduleErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type RunScheduleError = RunScheduleErrors[keyof RunScheduleErrors]
+
+export type RunScheduleResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    scheduleId: string
+    occurrenceKey: string
+    triggeredAt: string
+  }
+}
+
+export type RunScheduleResponse = RunScheduleResponses[keyof RunScheduleResponses]
+
 export type ListWorkflowsData = {
   body?: never
   path?: never

@@ -12,7 +12,7 @@ case "${1:-}" in
   "" | -h | --help | help | --version | version | status | context | memory | history) ;;
   project | ontology | objects | telemetry | actions | action-runs | files) ;;
   workflows | workflow-runs | users | artifacts | models | datasets) ;;
-  syncs | sync-runs | pipelines | pipeline-runs) ;;
+  syncs | sync-runs | pipelines | pipeline-runs | schedules) ;;
   *)
     dir=$(pwd)
     while :; do

@@ -50,6 +50,22 @@ export const importInvoices = defineSync("import-invoices")
 A schedule does nothing until attached. IDs must be unique. When a target has multiple schedules,
 any one can request a run.
 
+## Run now
+
+Run a cron schedule now, as its next occurrence would:
+
+```bash
+sixb schedules run hourly-invoices
+```
+
+| | |
+| --- | --- |
+| Who may | Someone who may run every sync, pipeline and workflow the schedule starts, signed in |
+| From code | `sixb.schedules.run("hourly-invoices")` |
+| API | `POST /api/schedules/:scheduleId/runs` |
+
+An event schedule, or one attached to nothing, is refused.
+
 ## Triggers while a run waits
 
 A sync or pipeline reads its sources when it starts, so one run covers every trigger that arrives

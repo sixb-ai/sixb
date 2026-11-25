@@ -317,6 +317,7 @@ const INSTANCE_SUMMARIES = {
   "sync-runs": "Inspect sync run history",
   pipelines: "List the pipelines you may run",
   "pipeline-runs": "Inspect pipeline runs and their steps",
+  schedules: "Run a cron schedule now",
 } as const satisfies Record<InstanceCommand, string>
 
 const instanceNodes: readonly CommandNode[] = INSTANCE_COMMANDS.map((name) => ({

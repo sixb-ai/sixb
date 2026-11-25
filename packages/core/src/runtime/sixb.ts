@@ -219,7 +219,7 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
     }),
     logs: createLogsRuntime(runtime, dependencies.logging),
     activity: createActivityRuntime(runtime, dependencies.activity),
-    schedules: createSchedulesRuntime(runtime, dependencies.definitions.schedules),
+    schedules: createSchedulesRuntime(runtime, dependencies.definitions),
     shares: createSharesRuntime(runtime, execution, dependencies.definitions.shares),
     users: createUsersRuntime(runtime, dependencies.members),
     connector: createConnectorRuntime(runtime, execution, dependencies.connectorService),

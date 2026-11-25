@@ -88,7 +88,7 @@ import {
 } from "../maintenance/lake-retention"
 import { type MaintenanceFailure, MaintenanceLoop, type MaintenancePass } from "../maintenance/loop"
 import { OntologyMaintenance } from "../maintenance/ontology-maintenance"
-import { cronPass, triggerScheduleNow } from "../maintenance/passes/cron-pass"
+import { cronPass } from "../maintenance/passes/cron-pass"
 import { directoryPass } from "../maintenance/passes/directory-pass"
 import { lakeRetentionPass } from "../maintenance/passes/lake-retention-pass"
 import { ontologyPass } from "../maintenance/passes/ontology-pass"
@@ -556,7 +556,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
    * auth strategy's directory check, and `passes`. The orchestrator is what hosts it.
    *
    * A branch runs no cron schedule, no lake retention and no directory check: nothing on it starts
-   * on its own clock, deletes files or suspends people. `runSchedule` still runs a schedule now.
+   * on its own clock, deletes files or suspends people. `sixb schedules run <id>` runs one now.
    */
   startMaintenance(passes: readonly MaintenancePass[]): OntologyMaintenanceHandle {
     if (this.branch) announceBranchMaintenance(this.branch, this.definitions.schedules.list())
@@ -598,21 +598,6 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
         status: () => retention.status(),
       }),
     ]
-  }
-
-  /**
-   * Trigger a schedule now, as its next occurrence would: what it starts runs as on any
-   * occurrence. This is how a cron schedule runs on a branch, where none runs on its own clock.
-   */
-  async runSchedule(scheduleId: string): Promise<void> {
-    const schedule = this.definitions.schedules.getById(scheduleId)
-    if (!schedule) {
-      throw new RuntimeError(
-        `[Sixb] Unknown schedule '${scheduleId}'. Add it to 'schedules/', or pass it to createSixb({ schedules }).`
-      )
-    }
-
-    await triggerScheduleNow(this.eventService, schedule)
   }
 
   /**
@@ -706,7 +691,7 @@ function announceBranchMaintenance(
   console.info(
     `[Sixb] Branch "${branch.name}": cron schedules do not run on their own clock on a branch ` +
       `(${cron.map((schedule) => `'${schedule.id}'`).join(", ")}). Run one now with ` +
-      "`host.runSchedule(id)`; event schedules run as in production."
+      "`sixb schedules run <id> --api-url <this branch's API>`; event schedules run as in production."
   )
 }
 

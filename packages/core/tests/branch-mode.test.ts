@@ -16,6 +16,7 @@ import {
 import { drainActionRuns } from "../src/actions"
 import type { MagicLinkAuthStrategy, OidcAuthStrategy } from "../src/auth"
 import type { AuthStrategyDirectory } from "../src/auth/strategy"
+import { emptyGrantIndex } from "../src/authorization"
 import { putOnBranch, resolveBranchMode, type SixbBranch } from "../src/branch-mode"
 import { reportMaintenancePassFailure } from "../src/error-reporting/capability"
 import { isSixbError } from "../src/errors/internal"
@@ -459,19 +460,59 @@ describe("upkeep on a branch", () => {
     }
   })
 
-  test("still runs a cron schedule now, and refuses to for an event schedule", async () => {
-    const host = upkeepHost(true)
+  // Guard check: drop the `assertAuthorized` loop from `SchedulesRuntime.run`
+  // (`schedules/execution.ts`): a caller without the sync's run grant starts it.
+  test("still runs a cron schedule now, for someone who may run what it starts", async () => {
+    const erp = defineConnector("erp", { type: "sql", connect: () => ({}) })
+    const idle = defineSchedule("idle").cron("0 9 * * *")
+    const importInvoices = defineSync("import-invoices")
+      .when(daily)
+      .from(erp)
+      .read(() => [])
+      .intoDataset(rawInvoices)
+    const host = buildHost(
+      {
+        id: PROJECT_ID,
+        ...createTestRuntimeDeps(),
+        ontology: [Invoice],
+        connectors: [erp],
+        datasets: [rawInvoices],
+        syncs: [importInvoices],
+        schedules: [daily, onInvoice, idle],
+      },
+      BRANCH
+    )
+    const sixb = createTestSixb(host)
 
-    await host.runSchedule(daily.id)
+    const run = await sixb.schedules.run(daily.id)
 
     const triggered = (await host.events.read({ limit: 10 })).filter(
       (event) => event.type === "schedule.triggered"
     )
-    expect(triggered).toHaveLength(1)
-    expect(triggered[0]?.payload).toMatchObject({ scheduleId: daily.id })
+    expect(triggered.map((event) => event.payload)).toEqual([
+      {
+        scheduleId: daily.id,
+        occurrenceAt: run.triggeredAt,
+        triggeredAt: run.triggeredAt,
+        occurrenceKey: run.occurrenceKey,
+      },
+    ])
 
-    await expect(host.runSchedule(onInvoice.id)).rejects.toThrow("runs when its event happens")
-    await expect(host.runSchedule("missing")).rejects.toThrow("Unknown schedule 'missing'")
+    const stranger = createTestSixb(host, {
+      authorization: {
+        principal: { type: "user", id: "usr_stranger" },
+        groupIds: [],
+        roleIds: [],
+        grants: emptyGrantIndex(),
+      },
+    })
+    expect(String(await rejectionOf(stranger.schedules.run(daily.id)))).toContain(
+      "not allowed to run sync 'import-invoices'"
+    )
+
+    await expect(sixb.schedules.run(onInvoice.id)).rejects.toThrow("runs when its event happens")
+    await expect(sixb.schedules.run(idle.id)).rejects.toThrow("starts nothing")
+    await expect(sixb.schedules.run("missing")).rejects.toThrow("Unknown schedule 'missing'")
   })
 
   // Guard check: remove the branch check at the top of `LakeRetention.apply`.

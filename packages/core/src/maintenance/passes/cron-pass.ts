@@ -1,6 +1,5 @@
 import type { DomainEventLog } from "../../events"
 import { PendingTasks } from "../../pending-tasks"
-import { SchedulerValidationError } from "../../scheduler/errors"
 import { nextCronOccurrence } from "../../schedules/next-occurrence"
 import type { CronScheduleDefinition, ScheduleDefinition } from "../../schedules/types"
 import { rejectOnAbort } from "../../shared/backoff"
@@ -216,16 +215,9 @@ class CronOccurrences {
  */
 export async function triggerScheduleNow(
   events: Pick<DomainEventLog, "append">,
-  schedule: ScheduleDefinition,
+  schedule: CronScheduleDefinition,
   now: Date = new Date()
-): Promise<void> {
-  if (!isCronSchedule(schedule)) {
-    throw new SchedulerValidationError(
-      `[Sixb] Schedule '${schedule.id}' runs when its event happens, not on a clock, so it cannot ` +
-        "be run now. Make the event happen instead."
-    )
-  }
-
+): Promise<{ scheduleId: string; occurrenceKey: string; triggeredAt: string }> {
   const at = now.toISOString()
   const occurrenceKey = `${schedule.id}:now:${at}`
 
@@ -238,12 +230,14 @@ export async function triggerScheduleNow(
       },
     ],
   })
+
+  return { scheduleId: schedule.id, occurrenceKey, triggeredAt: at }
 }
 
 function dueAt(next: NextOccurrence): Date {
   return next.retryAt ?? next.at
 }
 
-function isCronSchedule(schedule: ScheduleDefinition): schedule is CronScheduleDefinition {
+export function isCronSchedule(schedule: ScheduleDefinition): schedule is CronScheduleDefinition {
   return schedule.trigger.type === "cron"
 }

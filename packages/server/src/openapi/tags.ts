@@ -59,6 +59,10 @@ export const OPENAPI_TAGS = {
     name: "Pipeline Runs",
     description: "Pipeline run history and requests",
   },
+  schedules: {
+    name: "Schedules",
+    description: "Cron schedules run on request",
+  },
   workflows: {
     name: "Workflows",
     description: "Workflow metadata",
