@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { test as bunTest, describe, expect } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -49,6 +49,12 @@ const salaries = defineDataset("contract.forks.salaries", {
 const later = defineDataset("contract.forks.later", { schema: [col("id", "string")] })
 
 const TOKEN = "contract-slice-token"
+
+/**
+ * Each test seeds a history, cuts a slice and opens a branch on real files: seconds on a slow
+ * runner, past the 5 s default.
+ */
+const test = (name: string, run: () => Promise<void>) => bunTest(name, run, 30_000)
 
 /**
  * What a lake that branches read in place promises: a slice holds exactly the versions it was
