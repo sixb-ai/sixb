@@ -8,7 +8,11 @@ import {
   omitHiddenProperties,
   redactObjectRow,
 } from "../objects/clearance-redaction"
-import { unreadableError } from "../objects/property-clearance"
+import {
+  type ReadableProperties,
+  readableUnder,
+  unreadableError,
+} from "../objects/property-clearance"
 import {
   countObjects,
   type ExecuteObjectCountInput,
@@ -254,9 +258,8 @@ class AuthorizedObjectReaderImpl {
       },
       { ...reader.#queryExecutorOptions(clearance), maxPageSize: input.limit }
     )
-    const objects = clearance
-      ? page.objects.map((row) => redactObjectRow(row, clearance))
-      : page.objects
+    const readable = reader.#readable(clearance)
+    const objects = page.objects.map((row) => redactObjectRow(row, readable))
 
     const links: ObjectLinkRow[] = []
     const objectRefs = objects.map((row) => ({
@@ -396,7 +399,9 @@ class AuthorizedObjectReaderImpl {
     const clearance = await this.#security.clearance.current()
     this.#security.assertObjectTypesViewable([request.objectTypeId], clearance)
 
-    if (hidesProperty(request, clearance)) return false
+    const readable = this.#readable(clearance).ids(request.objectTypeId)
+    if (!readable.has(request.propertyId)) return false
+
     const [selected] = await this.#selectsObjectProperties([request])
     return selected ?? false
   }
@@ -416,9 +421,11 @@ class AuthorizedObjectReaderImpl {
       request.items.map((item) => item.objectTypeId),
       clearance
     )
+    const readable = this.#readable(clearance)
     const selected = await this.#selectsObjectProperties(request.items)
     return request.items.map(
-      (item, index) => !hidesProperty(item, clearance) && selected[index] === true
+      (item, index) =>
+        readable.ids(item.objectTypeId).has(item.propertyId) && selected[index] === true
     )
   }
 
@@ -606,10 +613,8 @@ class AuthorizedObjectReaderImpl {
       throw new Error("[Sixb] Object storage returned a link page outside its authorized scope.")
     }
 
-    return {
-      ...result,
-      objects: result.objects.map((row) => (clearance ? redactObjectRow(row, clearance) : row)),
-    }
+    const readable = this.#readable(clearance)
+    return { ...result, objects: result.objects.map((row) => redactObjectRow(row, readable)) }
   }
 
   async count(
@@ -701,7 +706,8 @@ class AuthorizedObjectReaderImpl {
   ): Promise<<TRow extends ObjectRow>(row: TRow) => TRow> {
     const clearance = await this.#security.clearance.current()
     assertTargetsReadable(clearance, { objectTypeIds: [objectTypeId] })
-    return (row) => (clearance ? redactObjectRow(row, clearance) : row)
+    const readable = this.#readable(clearance)
+    return (row) => redactObjectRow(row, readable)
   }
 
   /**
@@ -875,7 +881,16 @@ class AuthorizedObjectReaderImpl {
   }
 
   #omitHidden<TRow extends ObjectRow>(row: TRow, clearance: Clearance): TRow {
-    return clearance ? omitHiddenProperties(row, clearance) : row
+    return omitHiddenProperties(row, this.#readable(clearance))
+  }
+
+  /**
+   * What rows return under this clearance: the properties each type declares that it can read.
+   * Applied to every row, whatever the clearance, so a key the code no longer declares never
+   * leaves the reader.
+   */
+  #readable(clearance: Clearance): ReadableProperties {
+    return readableUnder(this.#ontology.registry, clearance)
   }
 
   /**
@@ -1122,13 +1137,6 @@ function assertTargetsReadable(clearance: Clearance, targets: ReadTargets): void
     const unreadable = clearance.unreadableLink(link.objectTypeId, link.linkId)
     if (unreadable) throw unreadableError(unreadable)
   }
-}
-
-function hidesProperty(
-  item: { readonly objectTypeId: string; readonly propertyId: string },
-  clearance: Clearance
-): boolean {
-  return clearance?.missingMarking(item.objectTypeId, item.propertyId) !== undefined
 }
 
 function objectStorageForAuthority(

@@ -20,7 +20,9 @@ import {
 } from "../execution/authorized-object-reader"
 import type { ExecutionScope } from "../execution/types"
 import type { DatasetVersionRef } from "../lake-storage/types"
-import type { OntologyObjectRef } from "../materialization/model"
+import type { ObjectOverride, OntologyObjectRef } from "../materialization/model"
+import { readableOnly } from "../objects/clearance-redaction"
+import { declaredProperties } from "../objects/property-clearance"
 import { vectorConfiguration, vectorSources } from "../objects/vectors/profile"
 import { OntologyRegistry } from "../ontology"
 import type { ObjectType } from "../ontology/types"
@@ -548,7 +550,31 @@ function sourceTasks(types: readonly SnapshotTypeManifest[]): ExportTask[] {
   )
 }
 
-/** Every live root of the type's source, a page a frame. */
+/**
+ * An edit with only the properties its type declares. A value it holds under a key the code no
+ * longer declares stays in production, as it does from every read: the markings of its property
+ * are gone with its definition.
+ */
+function declaredEdit(value: ObjectOverride, declared: ReadonlySet<string>): ObjectOverride {
+  switch (value.kind) {
+    case "delete":
+      return value
+    case "create":
+      return { kind: "create", properties: readableOnly(value.properties, declared) }
+    case "patch":
+      return {
+        kind: "patch",
+        set: readableOnly(value.set, declared),
+        unset: value.unset.filter((propertyId) => declared.has(propertyId)),
+      }
+  }
+}
+
+/**
+ * Every live root of the type's source, a page a frame. Roots go unfiltered: a type travels as its
+ * source only when the person reads its dataset version in full and no property of the type is
+ * hidden from them, so a root holds nothing they cannot read.
+ */
 async function exportSourceRoots(work: TypeExport): Promise<void> {
   const projectionId = work.type.projection?.projectionId
   if (projectionId === undefined) return
@@ -576,6 +602,7 @@ async function exportSourceRoots(work: TypeExport): Promise<void> {
 /** The edits over the type's objects, a page a frame, in primary id order. */
 async function exportObjectEdits(work: TypeExport): Promise<void> {
   const objectTypeId = work.type.objectTypeId
+  const declared = declaredProperties(work.source.ontology).ids(objectTypeId)
 
   for (let after: string | undefined; ; ) {
     work.stop.throwIfAborted()
@@ -592,8 +619,8 @@ async function exportObjectEdits(work: TypeExport): Promise<void> {
       objectTypeId,
       objects: part.map((edit) => [
         edit.ref.primaryId,
-        edit.value,
-        edit.editedAt ?? null,
+        declaredEdit(edit.value, declared),
+        edit.editedAt === undefined ? null : readableOnly(edit.editedAt, declared),
         Date.parse(edit.updatedAt),
       ]),
       links: [],

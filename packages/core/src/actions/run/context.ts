@@ -1,6 +1,7 @@
 import { createSixbError } from "../../errors/internal"
 import { uniqueLookupKeyOf } from "../../execution/unique-lookup"
 import type { Logger } from "../../logging"
+import { readableOnly } from "../../objects/clearance-redaction"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import { ObjectNotFoundError, type ObjectRow } from "../../storage"
 import type { ActionReadRecorder } from "../read-facade"
@@ -86,12 +87,13 @@ function toActionTargetObject(
     createdAt: Date
     updatedAt: Date
   },
-  declaredObjectTypeId: string
+  declaredObjectTypeId: string,
+  declaredPropertyIds: ReadonlySet<string>
 ): ActionTargetObject {
   return {
     primaryId: row.primaryId,
     objectTypeId: declaredObjectTypeId,
-    properties: row.properties,
+    properties: readableOnly(row.properties, declaredPropertyIds),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -177,9 +179,15 @@ export async function loadObjectTarget(input: {
     runId: input.run.id,
   })
 
+  // The handler reads what the object's own type declares, as every reader does: a value it still
+  // holds under a property the code no longer has is refused if the handler writes it back. The
+  // commit fences on the row as stored.
+  const rowType = input.runtime.sixb.objects.resolveType(targetRow.objectTypeId)
+  const declared = new Set(rowType.properties.map((property) => property.id))
+
   return {
     subjectObjectType,
-    snapshot: toActionTargetObject(targetRow, input.action.binding.objectType.id),
+    snapshot: toActionTargetObject(targetRow, input.action.binding.objectType.id, declared),
     row: targetRow,
   }
 }

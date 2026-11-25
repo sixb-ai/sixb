@@ -147,6 +147,8 @@ Objects are still returned. Each marked property is omitted and listed in `redac
 
 An omitted property is absent, never `null`, so `null` keeps meaning an empty value. `redactions` lists every marked property the reader cannot read, whether or not the object has a value for it.
 
+Reads return only the properties an object type declares. A value an object still holds under a property you renamed or removed is returned to no one, so it never escapes the markings that property had.
+
 | Request on `amount` without clearance | Result |
 | --- | --- |
 | Read, list, query, expand, upsert response | Returned without `amount` |

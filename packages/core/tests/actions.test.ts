@@ -1486,3 +1486,57 @@ describe("Action effects", () => {
     expect(effects).toBe(0)
   })
 })
+
+describe("an Action's target", () => {
+  // Reproduce: pass `row.properties` as the target's in `toActionTargetObject`, and the handler
+  // reads the `gate` the object still holds.
+  test("holds only the properties its object's type declares", async () => {
+    // Doors kept their code in `gate`; the code renamed it `gateCode` since.
+    const DoorBefore = defineObjectType({
+      id: "Door",
+      name: "Door",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("gate", "string"),
+        prop("status", "string"),
+      ],
+    })
+    const Door = defineObjectType({
+      id: "Door",
+      name: "Door",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("gateCode", "string"),
+        prop("status", "string"),
+      ],
+    })
+    // A writeback hands what it read on to the edits, a handler's way to write it back.
+    const inspect = defineAction("inspect-door")
+      .on(Door)
+      .params({})
+      .writeback(({ target }) => ({ ...target.properties }))
+      .edits(() => {})
+
+    const runtimeDeps = createTestRuntimeDeps()
+    await createTestSixb({ id: "action-target", ontology: [DoorBefore], ...runtimeDeps })
+      .objects(DoorBefore)
+      .upsert({ properties: { id: "d-1", gate: "1234", status: "closed" } })
+    const sixb = createTestSixb({
+      id: "action-target",
+      ontology: [Door],
+      actions: [actionDefinition(inspect)],
+      ...runtimeDeps,
+    })
+
+    const run = await sixb.objects(Door).requestAction({
+      id: "d-1",
+      actionId: inspect.id,
+      params: {},
+    })
+    expect(run).toMatchObject({ status: "succeeded" })
+    expect(run.writeback?.status === "succeeded" && run.writeback.result).toEqual({
+      id: "d-1",
+      status: "closed",
+    })
+  })
+})

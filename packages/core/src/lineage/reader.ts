@@ -4,7 +4,9 @@ import {
   type ResolvedRuntimeAuthorization,
   resolveRuntimeAuthorizationForProject,
 } from "../execution/authorization"
+import { readerClearance } from "../execution/authorized-object-reader"
 import type { OntologyObjectRef } from "../materialization/model"
+import { readableUnder } from "../objects/property-clearance"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { ObjectRow } from "../storage"
 import { objectBatchKey } from "../storage/objects/keys"
@@ -71,6 +73,15 @@ export class LineageReader {
       if (error instanceof AuthorizationError) return null
       throw error
     }
+  }
+
+  /**
+   * The properties of an object type the reader reads, in the type's order: those it declares,
+   * less those it lacks a clearance for. Only these are explained.
+   */
+  async readableProperties(objectTypeId: string): Promise<ReadonlySet<string>> {
+    const clearance = await readerClearance(this.runtime.objectReader)
+    return readableUnder(this.runtime.ontology, clearance).ids(objectTypeId)
   }
 
   /** Whether the reader may read links of this kind: their markings applied. */

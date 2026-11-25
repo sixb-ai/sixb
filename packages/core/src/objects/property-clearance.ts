@@ -10,6 +10,21 @@ import { missingClearanceRedactions } from "../security/redactions"
 import type { Redactions } from "../security/types"
 
 /**
+ * The properties a row or an object event of each type returns to one reader: those its type
+ * declares, inherited ones included, less those the reader cannot read.
+ *
+ * It is an allow-list. A key a stored object holds that its type no longer declares, such as the
+ * old id of a renamed property, is never returned: the markings its property carried are gone with
+ * its definition, so its value would reach readers who lack them.
+ */
+export interface ReadableProperties {
+  /** The properties a row of this type returns; empty for a type the code does not declare. */
+  ids(objectTypeId: string): ReadonlySet<string>
+  /** What the reader cannot read on this object type; `undefined` when it reads every property. */
+  hiddenProperties(objectTypeId: string): HiddenProperties | undefined
+}
+
+/**
  * The marked properties one reader cannot read, resolved once from its clearances.
  *
  * A property is readable when the reader clears every one of its markings. Unreadable properties
@@ -19,9 +34,7 @@ import type { Redactions } from "../security/types"
  * them, and an object type or link whose key column carries markings the reader lacks is
  * unreadable, like a type it has no view grant for.
  */
-export interface PropertyClearance {
-  /** What the reader cannot read on this object type; `undefined` when it reads every property. */
-  hiddenProperties(objectTypeId: string): HiddenProperties | undefined
+export interface PropertyClearance extends ReadableProperties {
   /** First marking on the property that the reader is not cleared for. */
   missingMarking(objectTypeId: string, propertyId: string): string | undefined
   /** Why the reader cannot read this object type at all; `undefined` when it can. */
@@ -67,6 +80,9 @@ export interface HiddenProperties {
   readonly redactions: Redactions
 }
 
+const declaredByOntology = new WeakMap<OntologyDefinitionCatalog, ReadableProperties>()
+const NO_PROPERTIES: ReadonlySet<string> = new Set()
+
 // Readers are built per execution, but few distinct clearance sets exist per ontology.
 const clearancesByOntology = new WeakMap<
   OntologyDefinitionCatalog,
@@ -83,9 +99,36 @@ const NO_UNREADABLE_TARGETS: UnreadableTargets = Object.freeze({
   links: Object.freeze([]),
 })
 
+/** What rows and events return to a reader with this clearance, or with none: every declared one. */
+export function readableUnder(
+  ontology: OntologyDefinitionCatalog,
+  clearance: PropertyClearance | undefined
+): ReadableProperties {
+  return clearance ?? declaredProperties(ontology)
+}
+
+/** Every property each object type declares, for a reader cleared for every marking. */
+export function declaredProperties(ontology: OntologyDefinitionCatalog): ReadableProperties {
+  let declared = declaredByOntology.get(ontology)
+  if (declared) return declared
+
+  const byType = new Map<string, ReadonlySet<string>>()
+  for (const objectType of ontology.listObjectTypes()) {
+    byType.set(objectType.id, new Set(objectType.properties.map((property) => property.id)))
+  }
+
+  declared = Object.freeze({
+    ids: (objectTypeId: string) => byType.get(objectTypeId) ?? NO_PROPERTIES,
+    hiddenProperties: () => undefined,
+  })
+  declaredByOntology.set(ontology, declared)
+  return declared
+}
+
 /**
  * Resolve what a reader with these clearances cannot read. Returns `undefined` when it can read
- * every property, so callers skip redaction entirely.
+ * every property, so callers skip every clearance check; its rows still return only declared
+ * properties, through {@link readableUnder}.
  *
  * A reader cleared for every marking the applied versions add receives the clearance of the code
  * alone, the same object whatever the snapshot.
@@ -186,11 +229,19 @@ function createPropertyClearance(
 
   if (hiddenByType.size === 0 && types.size === 0 && links.length === 0) return undefined
 
+  const declared = declaredProperties(ontology)
+  const readableByType = new Map<string, ReadonlySet<string>>()
+  for (const [objectTypeId, hidden] of hiddenByType) {
+    const readable = [...declared.ids(objectTypeId)].filter((id) => !hidden.ids.has(id))
+    readableByType.set(objectTypeId, new Set(readable))
+  }
+
   const unreadable: UnreadableTargets =
     types.size === 0 && links.length === 0
       ? NO_UNREADABLE_TARGETS
       : Object.freeze({ types, links: Object.freeze(links) })
   return Object.freeze({
+    ids: (objectTypeId: string) => readableByType.get(objectTypeId) ?? declared.ids(objectTypeId),
     hiddenProperties: (objectTypeId: string) => hiddenByType.get(objectTypeId),
     missingMarking: (objectTypeId: string, propertyId: string) =>
       missingByType.get(objectTypeId)?.get(propertyId),

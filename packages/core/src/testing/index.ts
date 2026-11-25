@@ -93,6 +93,10 @@ export {
   runDatasetIngestStorageContractSuite,
 } from "./dataset-ingest-storage-contract"
 export {
+  type DeclaredPropertiesContractProvider,
+  runDeclaredPropertiesContractSuite,
+} from "./declared-properties-contract"
+export {
   type EffectiveStorageContractSuiteOptions,
   runEffectiveStorageContractSuite,
 } from "./effective-storage-contract"

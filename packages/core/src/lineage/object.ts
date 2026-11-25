@@ -48,11 +48,13 @@ export async function explainObject(
   })
   if (!explained) return null
 
-  // A property the reader lacks a clearance for is not explained at all.
-  const redacted = new Set(Object.keys(row.redactions ?? {}))
-  const decided = inTypeOrder(runtime, ref.objectTypeId, explained.properties).filter(
-    ([propertyId]) => !redacted.has(propertyId)
-  )
+  // A property the reader lacks a clearance for, or one the type no longer declares, is not
+  // explained at all.
+  const readable = await reader.readableProperties(ref.objectTypeId)
+  const decided = [...readable].flatMap((propertyId): [string, PropertyAuthority][] => {
+    const authority = explained.properties.get(propertyId)
+    return authority ? [[propertyId, authority]] : []
+  })
 
   const override = state.override
   const created: EditLookup = {
@@ -196,23 +198,4 @@ function resolution(
 
 function candidateValue(candidate: ObjectPropertyCandidate): { readonly value?: JsonValue } {
   return candidate.present ? { value: candidate.value as JsonValue } : {}
-}
-
-/** The decided properties in the object type's order, then any it no longer defines. */
-function inTypeOrder(
-  runtime: SixbRuntimeContext,
-  objectTypeId: string,
-  properties: ReadonlyMap<string, PropertyAuthority>
-): [string, PropertyAuthority][] {
-  const ordered = new Map<string, PropertyAuthority>()
-
-  for (const { id } of runtime.ontology.resolveObjectType(objectTypeId).properties) {
-    const authority = properties.get(id)
-    if (authority) ordered.set(id, authority)
-  }
-  for (const [id, authority] of properties) {
-    if (!ordered.has(id)) ordered.set(id, authority)
-  }
-
-  return [...ordered]
 }
