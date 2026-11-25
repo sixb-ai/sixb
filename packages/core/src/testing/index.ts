@@ -215,6 +215,10 @@ export {
   type ShareSessionStorageContractSuiteOptions,
 } from "./share-session-storage-contract"
 export {
+  runSnapshotLoadContractSuite,
+  type SnapshotLoadContractProvider,
+} from "./snapshot-load-contract"
+export {
   runSnapshotReadContractSuite,
   type SnapshotReadContractProvider,
 } from "./snapshot-read-contract"
