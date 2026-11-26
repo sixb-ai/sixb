@@ -810,3 +810,135 @@ describe("VercelSandboxFactory", () => {
     await sandbox.destroy()
   })
 })
+
+// A hosted branch's runtime is a server the sandbox keeps running, which production reaches on
+// one of the sandbox's ports.
+describe("VercelSandbox serving a port", () => {
+  // Removal proof: drop `ports` from `buildCreateParams`, or `domain` from `createVercelSandbox`:
+  // the SDK has no route for the port and `url` throws.
+  test("creates the sandbox with its ports, and gives each one's public URL through the SDK", async () => {
+    const f = fixture()
+    const sandbox = await f.factory.create({ ports: [3000, 3001] })
+
+    const created = f.requests.find(
+      (request) => request.path.startsWith("/v2/sandboxes?") && request.method === "POST"
+    )
+    expect(created?.body.ports).toEqual([3000, 3001])
+    expect(sandbox.url?.(3000)).toBe("https://sb-3000.vercel.run")
+    expect(() => sandbox.url?.(4000)).toThrow("port 4000")
+    await sandbox.destroy()
+  })
+
+  test("serves the ports of a persistent sandbox too", async () => {
+    const f = fixture()
+    const sandbox = await f.factory.create({ ports: [3000], persistence: { name: "branch-a" } })
+
+    expect(sandbox.url?.(3000)).toBe("https://sb-3000.vercel.run")
+    await sandbox.destroy()
+  })
+
+  // Removal proof: drop the limit from `publicPorts`; the factory provisions and Vercel refuses.
+  test("refuses more than Vercel's four ports before provisioning", async () => {
+    let provisioned = false
+    const factory = new VercelSandboxFactory({ ports: [3000, 3001] }, async () => {
+      provisioned = true
+      return new FakeVercelClient()
+    })
+
+    const error = await factory.create({ ports: [4000, 4001, 4002] }).catch((caught) => caught)
+
+    expect(error).toBeInstanceOf(SandboxError)
+    expect(String(error)).toContain("at most 4 ports")
+    expect(provisioned).toBe(false)
+  })
+
+  // Removal proof: run `start` without `detached: true`, or without the marker.
+  test("starts a detached command, and kills it with everything it started", async () => {
+    const client = new FakeVercelClient()
+    const sandbox = new VercelSandbox({ client, env: { A: "factory" } })
+    client.nextCommandWaitsForKill = true
+
+    const process = await sandbox.start!("sh", ["-c", "serve"], { cwd: "app", env: { B: "call" } })
+    const marker = client.commands[0]?.env?.[COMMAND_MARKER]
+
+    expect(client.commands[0]).toMatchObject({
+      cmd: "sh",
+      args: ["-c", "serve"],
+      cwd: "/vercel/sandbox/app",
+      env: { A: "factory", B: "call" },
+      detached: true,
+    })
+    expect(client.commands[0]).not.toHaveProperty("timeoutMs")
+
+    await process.kill()
+    expect(await process.exited).toBe(137)
+    expect(client.commandHandles[0]?.killed).toBe(true)
+    expect(client.commands[1]?.args).toContain(`${COMMAND_MARKER}=${marker}`)
+  })
+
+  // Removal proof: leave `serving` out of the idle check in `extendSession`: a persistent
+  // sandbox that only serves lets its session end under the server.
+  test("keeps its session alive while a started command serves, however long", async () => {
+    jest.useFakeTimers({ now: new Date("2026-11-17T19:00:00Z") })
+    try {
+      const client = new ExpiringClient(new Date(Date.now() + 5 * 60_000))
+      const sandbox = new VercelSandbox({ client, keepAliveIdleMs: KEEP_ALIVE_IDLE_MS })
+      client.nextCommandWaitsForKill = true
+      await sandbox.start!("serve")
+
+      for (let minute = 0; minute < 3 * 60; minute++) {
+        jest.advanceTimersByTime(KEEP_ALIVE_INTERVAL_MS)
+        await settle()
+      }
+
+      expect(client.expiresAt.getTime()).toBeGreaterThan(Date.now())
+      await sandbox.stop()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  // Removal proof: extend by `ms` whatever the session has left.
+  test("keepAlive extends the session only by what it lacks", async () => {
+    jest.useFakeTimers({ now: new Date("2026-11-17T19:00:00Z") })
+    try {
+      const client = new ExpiringClient(new Date(Date.now() + 20 * 60_000))
+      const sandbox = new VercelSandbox({ client })
+
+      await sandbox.keepAlive!(30 * 60_000)
+      await sandbox.keepAlive!(2 * 60_000)
+
+      expect(client.extensions).toEqual([10 * 60_000])
+      await sandbox.stop()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})
+
+// A hosted branch's sandbox: its production instance by address, its registries by name, and
+// nothing else, which Vercel's firewall denies. PostgreSQL negotiates TLS after it connects, so
+// only its address can be allowed.
+test("allows a branch's PostgreSQL by address and its registries by name, and denies the rest", async () => {
+  let captured: Parameters<VercelCreateSandbox>[0] | undefined
+  const factory = new VercelSandboxFactory({}, async (params) => {
+    captured = params
+    return new FakeVercelClient()
+  })
+
+  await factory.create({
+    network: {
+      mode: "restricted",
+      allow: [
+        { name: "npm registry", origin: "https://registry.npmjs.org" },
+        { name: "production API", origin: "https://api.shop.example" },
+        { name: "production PostgreSQL", origin: "https://203.0.113.7:5432" },
+      ],
+    },
+  })
+
+  expect((captured as { networkPolicy: unknown }).networkPolicy).toEqual({
+    allow: ["registry.npmjs.org", "api.shop.example"],
+    subnets: { allow: ["203.0.113.7/32"] },
+  })
+})

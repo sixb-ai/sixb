@@ -26,6 +26,14 @@ export interface SandboxesContractSuiteOptions {
    * Default 200ms.
    */
   readonly shortTimeoutMs?: number
+  /**
+   * For a provider whose sandboxes `start`, `url` and `keepAlive`: a free port, and the command
+   * that serves `ok` over HTTP on it. Omitted, those tests are skipped.
+   */
+  readonly serve?: {
+    readonly port: () => number | Promise<number>
+    readonly command: (port: number) => readonly [string, ...string[]]
+  }
 }
 
 const SLEEP_BUDGET_SECONDS = 5
@@ -305,6 +313,82 @@ export function runSandboxesContractSuite(
           expect(result.exitCode).not.toBe(0)
           expect(result.stdout).not.toContain("finished")
           expect(elapsed).toBeLessThan(SLEEP_BUDGET_SECONDS * 1000)
+        } finally {
+          await sandbox.destroy()
+        }
+      })
+    })
+
+    describe.skipIf(options.serve === undefined)("long-running processes", () => {
+      const serve = options.serve!
+
+      async function answer(url: string): Promise<string | null> {
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const text = await fetch(url).then(
+            (response) => response.text(),
+            () => null
+          )
+          if (text !== null) return text
+          await new Promise((resolve) => setTimeout(resolve, 50))
+        }
+        return null
+      }
+
+      test("a started server answers at the url of its port, until it is killed", async () => {
+        const port = await serve.port()
+        const sandbox = await factory.create({ ports: [port], network: { mode: "all" } })
+        try {
+          const [command, ...args] = serve.command(port)
+          const server = await sandbox.start!(command, args)
+          await sandbox.keepAlive!(60_000)
+          expect(await answer(sandbox.url!(port))).toBe("ok")
+
+          await server.kill()
+          expect(typeof (await server.exited)).toBe("number")
+          expect(
+            await fetch(sandbox.url!(port)).then(
+              () => "answered",
+              () => "closed"
+            )
+          ).toBe("closed")
+        } finally {
+          await sandbox.destroy()
+        }
+      })
+
+      test("start returns at once, and exited settles with the command's exit code", async () => {
+        const sandbox = await factory.create()
+        try {
+          const started = await sandbox.start!("sh", ["-c", "sleep 0.2; exit 3"])
+          expect(await started.exited).toBe(3)
+        } finally {
+          await sandbox.destroy()
+        }
+      })
+
+      test("stopping the sandbox ends what it started", async () => {
+        const port = await serve.port()
+        const sandbox = await factory.create({ ports: [port], network: { mode: "all" } })
+        const [command, ...args] = serve.command(port)
+        const server = await sandbox.start!(command, args)
+        expect(await answer(sandbox.url!(port))).toBe("ok")
+        const url = sandbox.url!(port)
+
+        await sandbox.destroy()
+        expect(typeof (await server.exited)).toBe("number")
+        expect(
+          await fetch(url).then(
+            () => "answered",
+            () => "closed"
+          )
+        ).toBe("closed")
+      })
+
+      test("url refuses a port the sandbox wasn't created with", async () => {
+        const port = await serve.port()
+        const sandbox = await factory.create()
+        try {
+          expect(() => sandbox.url!(port)).toThrow("[Sandbox]")
         } finally {
           await sandbox.destroy()
         }

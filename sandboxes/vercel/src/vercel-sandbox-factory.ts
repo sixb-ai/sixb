@@ -94,6 +94,7 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
 {
   readonly configuration: SandboxConfig<TParams>
   readonly supportsRequestCredentials = true
+  readonly runsBranches = true
   constructor(
     private readonly defaults: VercelSandboxFactoryOptions<TParams> = {},
     private readonly createRemote: VercelCreateSandbox = createVercelSandbox,
@@ -109,6 +110,7 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
     assertNoLegacyPersistence(options)
     validateSourceOptions(this.defaults)
     const resolved = this.runtimeOptions(options)
+    const ports = publicPorts(this.defaults.ports, options.ports)
     if (options.persistence !== undefined) {
       if (
         options.persistence === null ||
@@ -117,7 +119,13 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
       ) {
         throw new SandboxError("[Sandbox] persistence must contain only a sandbox name.")
       }
-      return this.createPersistent(options.persistence.name, resolved, environment, options.signal)
+      return this.createPersistent(
+        options.persistence.name,
+        resolved,
+        environment,
+        ports,
+        options.signal
+      )
     }
     const { env = {}, network = { mode: "none" }, requestCredentials = [] } = resolved
 
@@ -130,6 +138,7 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
       network,
       name: `${this.defaults.namePrefix ?? DEFAULT_NAME_PREFIX}${randomUUID()}`,
       persistent: false,
+      ports,
     })
 
     let client: VercelSandboxClient | undefined
@@ -218,6 +227,7 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
     name: string,
     options: SandboxSessionOptions,
     environment: NonNullable<CreateSandboxOptions["environment"]>,
+    ports: readonly number[],
     signal?: AbortSignal
   ): Promise<Sandbox> {
     assertPersistentName(name)
@@ -229,6 +239,7 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
       network: { mode: "none" },
       name,
       persistent: true,
+      ports,
     })
     let client: VercelPersistentClient | undefined
     try {
@@ -279,6 +290,7 @@ function buildCreateParams(input: {
   readonly network: SandboxNetworkPolicy
   readonly name: string
   readonly persistent: boolean
+  readonly ports: readonly number[]
 }): VercelCreateSandboxParams {
   const { defaults } = input
   const credentials = resolveCredentials(defaults.credentials)
@@ -287,7 +299,7 @@ function buildCreateParams(input: {
     env: input.env,
     networkPolicy: toVercelNetworkPolicy(input.network),
     persistent: input.persistent,
-    ...(defaults.ports !== undefined ? { ports: [...defaults.ports] } : {}),
+    ...(input.ports.length > 0 ? { ports: [...input.ports] } : {}),
     ...(defaults.sessionTimeoutMs !== undefined ? { timeout: defaults.sessionTimeoutMs } : {}),
     ...(defaults.resources !== undefined ? { resources: defaults.resources } : {}),
     ...(defaults.tags !== undefined ? { tags: defaults.tags } : {}),
@@ -313,6 +325,28 @@ function buildCreateParams(input: {
       ? { image: defaults.image }
       : { runtime: defaults.runtime ?? DEFAULT_VERCEL_SANDBOX_RUNTIME }),
   } as VercelCreateSandboxParams
+}
+
+/** Vercel serves at most this many ports of a sandbox. */
+export const VERCEL_MAX_PORTS = 4
+
+/** The factory's ports and the sandbox's, refused before provisioning past Vercel's limit. */
+function publicPorts(
+  defaults: readonly number[] | undefined,
+  requested: readonly number[] | undefined
+): readonly number[] {
+  const ports = [...new Set([...(defaults ?? []), ...(requested ?? [])])]
+  for (const port of ports) {
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+      throw new SandboxError(`[Sandbox] ${port} is not a port.`)
+    }
+  }
+  if (ports.length > VERCEL_MAX_PORTS) {
+    throw new SandboxError(
+      `[Sandbox] A Vercel sandbox serves at most ${VERCEL_MAX_PORTS} ports, and this one asks for ${ports.length}.`
+    )
+  }
+  return ports
 }
 
 function validateSourceOptions(
@@ -398,6 +432,7 @@ export async function createVercelSandbox(
       return sessionExpiry(session)
     },
     extendTimeout: (durationMs) => session.extendTimeout(durationMs),
+    domain: (port) => session.domain(port),
     runCommand: (command) => session.runCommand({ ...command, args: [...(command.args ?? [])] }),
     writeFiles: (files, opts) => session.writeFiles([...files], opts),
     stop: (opts) => session.stop(opts),

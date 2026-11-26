@@ -8,6 +8,7 @@ import {
   type SandboxFileRecord,
   type SandboxNetworkPolicy,
   SandboxNotRunningError,
+  type SandboxProcess,
   type SandboxRequestCredential,
   type SandboxSessionOptions,
   type SandboxStatus,
@@ -44,7 +45,19 @@ export interface SmolvmSandboxOptions extends SandboxSessionOptions {
    * machines (no image) and for "all"/"none" policies.
    */
   readonly registryHosts?: readonly string[]
+  /** Guest ports the host reaches on the same port of its loopback, through {@link url}. */
+  readonly ports?: readonly number[]
 }
+
+/** How long a killed {@link SmolvmSandbox.start} command has to end before it is killed hard. */
+const START_KILL_GRACE_MS = 5_000
+
+/**
+ * Records the command's process group, then becomes the command: `setsid` made it the group's
+ * leader, so the whole group ends with one signal, whatever it started. The record is in the
+ * working directory, as each exec has a `/tmp` of its own.
+ */
+const START_SCRIPT = 'mkdir -p "$(dirname "$1")" && echo "$$" > "$1"; shift; exec "$@"'
 
 /**
  * Host environment forwarded to the smolvm CLI process itself (not the guest).
@@ -78,6 +91,7 @@ export class SmolvmSandbox implements Sandbox {
   private readonly sandboxEnv: Readonly<Record<string, string>>
   private readonly defaultTimeoutMs: number | undefined
   private readonly inFlight = new Set<AbortController>()
+  private readonly ports: ReadonlySet<number>
 
   private constructor(input: {
     readonly id: string
@@ -85,12 +99,14 @@ export class SmolvmSandbox implements Sandbox {
     readonly cli: SmolvmCliConfig
     readonly env: Readonly<Record<string, string>>
     readonly timeout: number | undefined
+    readonly ports: readonly number[]
   }) {
     this.id = input.id
     this.workingDirectory = input.workingDirectory
     this.cli = input.cli
     this.sandboxEnv = input.env
     this.defaultTimeoutMs = input.timeout
+    this.ports = new Set(input.ports)
   }
 
   get status(): SandboxStatus {
@@ -113,10 +129,16 @@ export class SmolvmSandbox implements Sandbox {
       ? withRegistryEgress(basePolicy, options.registryHosts ?? [])
       : basePolicy
     const network = buildNetworkFlags(policy)
+    const ports = options.ports ?? []
+    for (const port of ports) {
+      if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+        throw new SandboxError(`[Sandbox] ${port} is not a port.`)
+      }
+    }
 
     try {
       const created = await exec({
-        argv: buildCreateArgv(options.cli, { id, network }),
+        argv: buildCreateArgv(options.cli, { id, network, ports }),
         cwd: process.cwd(),
         env: hostEnv(),
       })
@@ -176,7 +198,97 @@ export class SmolvmSandbox implements Sandbox {
       cli: options.cli,
       env: options.env ?? {},
       timeout: options.timeout,
+      ports,
     })
+  }
+
+  /** The host's loopback, where smolvm publishes each of the sandbox's ports on the same port. */
+  readonly url = (port: number): string => {
+    if (!this.ports.has(port)) {
+      throw new SandboxError(
+        `[Sandbox] port ${port} of ${this.id} is not published: create the sandbox with it in \`ports\`.`
+      )
+    }
+    return `http://127.0.0.1:${port}`
+  }
+
+  /** A VM runs until it is stopped: there is no deadline to push. */
+  readonly keepAlive = async (_ms: number): Promise<void> => {}
+
+  /**
+   * Starts a command that keeps running, unprivileged like {@link runCommand}, in a process group
+   * of its own. Its environment reaches the guest from the smolvm process's own (`--secret-env`),
+   * so no value is in any process's arguments. Its output is discarded.
+   */
+  readonly start = async (
+    command: string,
+    args: readonly string[] = [],
+    options: Pick<RunCommandOptions, "cwd" | "env"> = {}
+  ): Promise<SandboxProcess> => {
+    if (this.currentStatus !== "running") {
+      throw new SandboxNotRunningError(
+        `[Sandbox] sandbox ${this.id} is ${this.currentStatus}; cannot start commands`
+      )
+    }
+
+    const env = { ...this.sandboxEnv, ...(options.env ?? {}) }
+    // A name smolvm itself reads from its environment goes in its arguments, as runCommand's do.
+    const hostNames: ReadonlySet<string> = new Set(HOST_ENV_ALLOWLIST)
+    const plain = Object.fromEntries(Object.entries(env).filter(([key]) => hostNames.has(key)))
+    const secret = Object.fromEntries(Object.entries(env).filter(([key]) => !hostNames.has(key)))
+    const group = posix.join(this.workingDirectory, ".sixb", `start-${randomUUID()}.pid`)
+    const [unprivileged = "sh", ...unprivilegedArgs] = unprivilegedGuestArgv("sh", [
+      "-c",
+      START_SCRIPT,
+      "sh",
+      group,
+      command,
+      ...args,
+    ])
+    const argv = buildExecArgv(this.cli, {
+      id: this.id,
+      cwd: posix.resolve(this.workingDirectory, options.cwd ?? "."),
+      command: "setsid",
+      args: [unprivileged, ...unprivilegedArgs],
+      env: plain,
+      secretEnv: Object.keys(secret),
+    })
+
+    const child = Bun.spawn(argv, {
+      cwd: process.cwd(),
+      env: { ...hostEnv(), ...secret },
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+    })
+    const exited = child.exited.then(
+      (code) => code,
+      () => 1
+    )
+
+    // As the command's own user: a record the command rewrote can only point at its own processes.
+    let killing: Promise<void> | undefined
+    const signalGroup = (signal: "TERM" | "KILL") =>
+      this.runCommand("sh", ["-c", `kill -${signal} -"$(cat "$1")" 2>/dev/null; true`, "sh", group])
+
+    return {
+      exited,
+      kill: () => {
+        killing ??= (async () => {
+          await signalGroup("TERM")
+          const ended = await Promise.race([
+            exited.then(() => true),
+            Bun.sleep(START_KILL_GRACE_MS).then(() => false),
+          ])
+          if (!ended) {
+            await signalGroup("KILL")
+            child.kill("SIGKILL")
+          }
+          await exited
+        })()
+        return killing
+      },
+    }
   }
 
   /** Replace the credentials the guest's forwarder adds; see {@link credentialedUrl}. */

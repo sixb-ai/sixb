@@ -27,7 +27,34 @@ export {
   isBranchHostingStorage,
   prepareBranchData,
 } from "./data"
-export { type BranchRuntime, branchRuntimeOf, hostOnBranch } from "./runtime"
+export {
+  BRANCH_COPIES_DIRECTORY,
+  BRANCH_DATABASE_SCHEMA_ENV,
+  BRANCH_DATABASE_URL_ENV,
+  BRANCH_KEY_ENV,
+  BRANCH_KEY_HEADER,
+  BRANCH_PORT_ENV,
+  BRANCH_PUBLIC_ORIGIN_ENV,
+  BRANCH_RUNTIME_COMMAND,
+  BRANCH_STATUS_PATH,
+  type BranchLoadedCopy,
+  type BranchRuntime,
+  type BranchRuntimeStatus,
+  branchRuntimeOf,
+  HOSTED_BRANCH_COPY,
+  hostOnBranch,
+  isBranchApiPath,
+  parseBranchRuntimeStatus,
+  parseLoadedCopy,
+} from "./runtime"
+export {
+  assertGitBranchName,
+  BRANCH_DEPENDENCY_FILES,
+  BRANCH_INSTALL_COMMAND,
+  branchCheckout,
+  type ProjectSource,
+  sourceGitUrl,
+} from "./source"
 export {
   type BranchCopyLake,
   type BranchCopyReader,

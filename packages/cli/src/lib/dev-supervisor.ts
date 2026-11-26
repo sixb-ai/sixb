@@ -3,9 +3,11 @@ import { dirname, resolve } from "node:path"
 import type { DevOptions } from "../commands/dev-runner"
 import { canRunLive } from "../ui/live/can-run-live"
 import { DESKTOP_RUNNER_ENTRY, loadDesktop } from "./desktop"
+import { startBranchFront } from "./dev-branch"
 import { DEV_UI_ENV, type DevChildMessage, loadingLine } from "./dev-messages"
 import { watchDevSource } from "./dev-watch"
 import { errorMessage } from "./errors"
+import { type HostedBranchRuntime, hostedBranchRuntime } from "./hosted-branch"
 
 /**
  * Where the supervisor's news goes. A terminal gets the live footer (`ui/live/dev.tsx`), which
@@ -19,6 +21,8 @@ export interface DevReporter {
   line(text: string): void
   message(message: DevChildMessage, pid: number | undefined): void
   restarting(filename: string | undefined): void
+  /** A new dev process is about to start. */
+  starting?(): void
   exited(code: number | null): void
   timedOut(timeout: DevTimeout): void
   error(text: string): void
@@ -41,16 +45,19 @@ export const DEV_LOAD_STALL_MS = 5 * 60_000
 
 /** Why the supervisor stopped a dev process that did not become ready. */
 export interface DevTimeout {
+  readonly kind: "startup" | "load-stalled"
   readonly message: string
   readonly remediation: string
 }
 
 const STARTUP_TIMED_OUT: DevTimeout = {
+  kind: "startup",
   message: "Startup timed out.",
   remediation: "Edit a source file to retry.",
 }
 
 const LOAD_STALLED: DevTimeout = {
+  kind: "load-stalled",
   message: `Loading this branch's copy made no progress for ${DEV_LOAD_STALL_MS / 60_000} minutes.`,
   remediation:
     "Edit a source file to retry, or run `sixb dev --from production --refresh` for a new copy.",
@@ -160,9 +167,12 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
       requestShutdown()
     },
   }
-  const reporter: DevReporter = canRunLive()
-    ? await (await import("../ui/live/dev")).startDevFooter({ root, controls })
-    : plainDevReporter(root)
+  const hosted = hostedBranchRuntime()
+  const reporter: DevReporter = hosted
+    ? startBranchFront({ ...branchFrontOptions(options, hosted), root }).reporter
+    : canRunLive()
+      ? await (await import("../ui/live/dev")).startDevFooter({ root, controls })
+      : plainDevReporter(root)
   function terminate(current: NonNullable<typeof child>, signal: NodeJS.Signals) {
     try {
       if (process.platform !== "win32" && current.process.pid) {
@@ -211,6 +221,7 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
         // All saves before this spawn are already in its fresh module graph.
         pending = false
         clearTimeout(timer)
+        reporter.starting?.()
         const proc = spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
           env: {
             ...process.env,
@@ -336,6 +347,20 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
     process.off("SIGTERM", requestShutdown)
     await shutdown()
     await reporter.stop()
+  }
+}
+
+/** Where a hosted branch's front listens, and where it forwards. */
+function branchFrontOptions(options: DevOptions, hosted: HostedBranchRuntime) {
+  if (options.desktop) throw new Error("[SixbDev] A branch's runtime has no desktop window.")
+
+  return {
+    branch: hosted.branch,
+    key: hosted.key,
+    host: options.host ?? "127.0.0.1",
+    port: hosted.ports.front,
+    apiPort: hosted.ports.api,
+    appPort: hosted.ports.app,
   }
 }
 

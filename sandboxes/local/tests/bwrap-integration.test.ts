@@ -1,5 +1,6 @@
 import { runSandboxesContractSuite } from "@sixb/core/testing"
 import { LocalSandboxFactory } from "../src/local-sandbox-factory"
+import { serveOk } from "./helpers/serve"
 
 if (process.platform === "linux" && Bun.which("bwrap")) {
   runSandboxesContractSuite("LocalSandbox (bwrap)", {
@@ -11,5 +12,6 @@ if (process.platform === "linux" && Bun.which("bwrap")) {
     },
     // The timer starts after the spawn, so any bound below `sleep`'s runtime proves the kill.
     shortTimeoutMs: 50,
+    serve: serveOk,
   })
 }

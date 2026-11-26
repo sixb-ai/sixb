@@ -1,4 +1,4 @@
-import { dirname, resolve } from "node:path"
+import { dirname, relative, resolve, sep } from "node:path"
 import {
   AppPackagesMissingError,
   type CustomAppDevOptions,
@@ -11,8 +11,10 @@ import {
   branchFromProduction,
   type CopyLoadReport,
   currentGitBranch,
+  hostedBranchFromProduction,
   localGitBranches,
 } from "../lib/branch-from-production"
+import { hostedBranchStorage } from "../lib/branch-providers"
 import {
   apiDocsUrl,
   apiEventsUrl,
@@ -29,6 +31,7 @@ import {
   type DevStartupStep,
 } from "../lib/dev-messages"
 import { errorMessage, errorRemediation } from "../lib/errors"
+import { type HostedBranchRuntime, hostedBranchRuntime } from "../lib/hosted-branch"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { stopQuietly } from "../lib/role-lifecycle"
 import { startSixbRuntime, stopSixbProviders } from "../lib/runtime"
@@ -103,20 +106,38 @@ export async function runDevRuntime(options: DevOptions = {}) {
     sixb = loaded
     abort.signal.throwIfAborted()
 
-    const topology = resolveBrowserTopology({
-      role: "dev",
-      host: options.host,
-      apiHost: options.apiHost,
-      port: options.port,
-      apiPort: options.apiPort,
-      apiPublicOrigin: options.apiPublicOrigin,
-      appPublicOrigin: options.appPublicOrigin,
-    })
-    const branch =
-      options.from === "production"
-        ? await openBranch(loaded, projectRoot, topology, (done, progress) =>
-            send({ type: "loading", done, progress })
-          )
+    // A branch production runs is the same runtime as a laptop's, on the copy production
+    // delivered to it and the schema production made for it.
+    const hosted = hostedBranchRuntime()
+    // A hosted branch's API and app listen only where its front, on the port, forwards to; the
+    // app reaches the API through the front, as a browser does.
+    const topology = resolveBrowserTopology(
+      hosted
+        ? {
+            role: "dev",
+            host: "127.0.0.1",
+            apiHost: "127.0.0.1",
+            port: String(hosted.ports.app),
+            apiPort: String(hosted.ports.api),
+            apiPublicOrigin: hosted.publicOrigin,
+            appPublicOrigin: hosted.publicOrigin,
+          }
+        : {
+            role: "dev",
+            host: options.host,
+            apiHost: options.apiHost,
+            port: options.port,
+            apiPort: options.apiPort,
+            apiPublicOrigin: options.apiPublicOrigin,
+            appPublicOrigin: options.appPublicOrigin,
+          }
+    )
+    // The supervisor's startup deadline waits while the copy loads, and says so.
+    const onLoading: CopyLoadReport = (done, progress) => send({ type: "loading", done, progress })
+    const branch = hosted
+      ? await openHostedBranch(loaded, projectRoot, hosted, onLoading)
+      : options.from === "production"
+        ? await openBranch(loaded, projectRoot, topology, onLoading)
         : null
     const host = branch?.host ?? loaded
     if (branch) {
@@ -124,6 +145,7 @@ export async function runDevRuntime(options: DevOptions = {}) {
       branchBase = loaded
       sixb = host
     }
+
     const customApp = await createCustomApp({
       rootDir: projectRoot,
       apiBaseUrl: topology.apiPublicOrigin,
@@ -212,9 +234,14 @@ export async function runDevRuntime(options: DevOptions = {}) {
   } catch (error) {
     if (!abort.signal.aborted) {
       const remediation = errorRemediation(error)
+      const file = projectFileOf(error, dirname(entry))
       send({
         type: "startup-error",
-        error: { message: errorMessage(error), ...(remediation ? { remediation } : {}) },
+        error: {
+          message: errorMessage(error),
+          ...(remediation ? { remediation } : {}),
+          ...(file ? { file } : {}),
+        },
       })
       task?.stop()
       if (!reportOnly) await renderCliError(error)
@@ -272,7 +299,26 @@ async function openBranch(
     // The branch the supervisor started: a checkout since does not change it.
     gitBranch: process.env.SIXB_BRANCH ?? (await currentGitBranch(projectRoot)),
     gitBranches: await localGitBranches(projectRoot),
-    // The supervisor's startup deadline waits while the copy loads, and says so.
+    onLoading,
+  })
+}
+
+/** A branch production runs: its copy, delivered to it, in the schema production made for it. */
+async function openHostedBranch(
+  host: LoadedSixbHost,
+  projectRoot: string,
+  hosted: HostedBranchRuntime,
+  onLoading: CopyLoadReport
+): Promise<BranchFromProduction> {
+  if (!host.branch) {
+    throw new Error("[SixbDev] A branch production runs starts from its git branch's checkout.")
+  }
+
+  return hostedBranchFromProduction({
+    host,
+    projectRoot,
+    storage: await hostedBranchStorage(projectRoot, host.branch.name),
+    key: hosted.key,
     onLoading,
   })
 }
@@ -288,4 +334,29 @@ function branchNotice(branch: BranchFromProduction, apiUrl: string): string[] {
     ...(branch.lake === "in place" ? [] : [`Datasets: ${branch.lake}.`]),
     ...branch.dropped.map((gitBranch) => `Dropped the copy of deleted git branch ${gitBranch}.`),
   ]
+}
+
+/**
+ * The project file a startup error points at, relative to the project: the first frame of its
+ * stack inside the project and outside its dependencies, so a broken branch names what to fix.
+ */
+export function projectFileOf(error: unknown, root: string): string | undefined {
+  // A loader's error wraps the module's own: its cause holds the frame inside the project.
+  for (let current = error, depth = 0; current instanceof Error && depth < 5; depth += 1) {
+    const file = projectFileInStack(current.stack, root)
+    if (file) return file
+    current = current.cause
+  }
+  return undefined
+}
+
+function projectFileInStack(stack: string | undefined, root: string): string | undefined {
+  if (!stack) return undefined
+  for (const match of stack.matchAll(/(?:\(|at |file:\/\/)(\/[^():\s]+):\d+/g)) {
+    const path = match[1]!
+    if (!path.startsWith(root + sep) || path.includes(`${sep}node_modules${sep}`)) continue
+    if (path.includes(`${sep}.sixb${sep}`)) continue
+    return relative(root, path).split(sep).join("/")
+  }
+  return undefined
 }

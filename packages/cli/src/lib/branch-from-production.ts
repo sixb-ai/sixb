@@ -1,10 +1,17 @@
 import { createHash, randomUUID } from "node:crypto"
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { type BranchRuntime, hostOnBranch, readBranchCopy } from "@sixb/core/internal/branches"
+import {
+  type BranchLoadedCopy,
+  type BranchRuntime,
+  HOSTED_BRANCH_COPY,
+  hostOnBranch,
+  parseLoadedCopy,
+  readBranchCopy,
+} from "@sixb/core/internal/branches"
 import { branchNamespaces, importSnapshot } from "@sixb/core/internal/snapshots"
 import type { LakeStorage } from "@sixb/core/lake-storage"
-import { type BranchNamespace, migrateStorage } from "@sixb/core/storage"
+import { migrateStorage, type Storage } from "@sixb/core/storage"
 import type { LoadedSixbHost } from "./loadSixb"
 
 // `sixb dev --from production` in two steps, so the process that runs the branch's code never
@@ -35,12 +42,18 @@ interface BranchRecord {
   /** The branch's own credential in production. */
   readonly credential?: string
   readonly lake?: { readonly sliceId: string; readonly point: string }
+  /** What the copy held once loaded, and the types it left out: what a hosted branch reports. */
+  readonly objects?: number
+  readonly skipped?: readonly { readonly objectTypeId: string; readonly reason: string }[]
 }
 
 type BranchIndex = Record<string, BranchRecord>
 
-/** A copy fetched by the supervisor and not loaded yet. */
-interface PendingCopy {
+/**
+ * A copy fetched and not loaded yet, beside its spool (`<name>.copy.json`): by the supervisor on a
+ * laptop, by production for a branch it runs.
+ */
+export interface PendingCopy {
   readonly gitBranch: string
   readonly apiUrl: string
   readonly profile: string
@@ -192,7 +205,10 @@ export async function branchFromProduction(
     try {
       await loadCopy({
         host: input.host,
-        storage,
+        target: {
+          open: () => storage.createBranchNamespace(name),
+          discard: () => storage.dropBranchNamespace(name),
+        },
         directory,
         index,
         name,
@@ -231,6 +247,114 @@ export async function branchFromProduction(
   }) as LoadedSixbHost
 
   return { host, namespace: name, copied: fetched, takenAt: record.takenAt, dropped, lake }
+}
+
+export interface HostedBranchFromProductionInput {
+  /** The project's host, loaded as the branch: its gates are on, its providers the project's. */
+  readonly host: LoadedSixbHost
+  readonly projectRoot: string
+  /** The schema production made for the branch, as the role limited to it. */
+  readonly storage: Storage
+  /** The key production's requests carry. */
+  readonly key: string
+  /** Told how far a new copy has loaded, as a laptop's branch is. */
+  readonly onLoading?: CopyLoadReport
+}
+
+/**
+ * A branch production runs: the same step as a laptop's, on the copy production delivered where
+ * the supervisor would spool one, into the schema production made for the branch, empty for each
+ * copy. Production has the copy's slice as received already: it wrote the spool whole.
+ */
+export async function hostedBranchFromProduction(
+  input: HostedBranchFromProductionInput
+): Promise<BranchFromProduction> {
+  const directory = await branchesDirectory(input.projectRoot)
+  const index = await readIndex(directory)
+  const name = HOSTED_BRANCH_COPY
+  const spool = join(directory, `${name}.copy`)
+  const fetched = await stat(spool).then(
+    () => true,
+    () => false
+  )
+  if (fetched) {
+    // Production made the schema anew for this copy: the last one is gone with it, so a load that
+    // fails leaves the branch with no copy, never with the last one's record over an empty schema.
+    delete index[name]
+    await writeIndex(directory, index)
+
+    const load = trackCopyLoad((await stat(spool)).size, input.onLoading ?? (() => {}))
+    try {
+      await loadCopy({
+        host: input.host,
+        // The branch migrates the schema as its role, then loads. A failed load is left to the next
+        // copy, which drops it.
+        target: {
+          open: async () => {
+            await migrateStorage(input.storage, {
+              projectId: input.host.id,
+              ontology: input.host.definitions.ontology as never,
+              security: input.host.definitions.security,
+            })
+            return input.storage
+          },
+          discard: async () => undefined,
+        },
+        directory,
+        index,
+        name,
+        spool,
+        onRead: load.read,
+      })
+    } finally {
+      load.stop()
+    }
+    load.done()
+  }
+
+  const record = index[name]
+  if (!record) {
+    throw new Error(
+      "[SixbDev] This branch has no copy of production: production delivers one when it opens the branch, and a copy that failed to load is gone. Refresh it from production."
+    )
+  }
+
+  const { lakeStorage, lake } = branchLake(input.host, directory, name, record)
+  const credential = record.credential
+  const runtime: BranchRuntime = {
+    person: { userId: record.userId },
+    production: {
+      url: record.apiUrl,
+      authorization: async () => (credential ? `Bearer ${credential}` : ""),
+    },
+    takenAt: record.takenAt,
+    hosted: { key: input.key },
+  }
+  const host = hostOnBranch(input.host, {
+    storage: input.storage,
+    ...(lakeStorage ? { lakeStorage } : {}),
+    runtime,
+  }) as LoadedSixbHost
+
+  return { host, namespace: name, copied: fetched, takenAt: record.takenAt, dropped: [], lake }
+}
+
+/** The copy a branch's runtime loaded, as its index records it, or null before it has. */
+export async function loadedCopyOf(
+  projectRoot: string,
+  name: string
+): Promise<BranchLoadedCopy | null> {
+  const text = await readFile(join(projectRoot, ".sixb", "branches", "index.json"), "utf8").catch(
+    () => null
+  )
+  const record = text ? (JSON.parse(text) as BranchIndex)[name] : undefined
+  if (!record) return null
+  return parseLoadedCopy({
+    takenAt: record.takenAt,
+    objects: record.objects ?? 0,
+    skipped: record.skipped ?? [],
+    lakeSliceId: record.lake?.sliceId ?? null,
+  })
 }
 
 /**
@@ -301,9 +425,8 @@ const BRANCH_LAKE_FILES = ["lake.ducklake", "lake.ducklake.wal", "lake", "lake-c
 
 async function loadCopy(input: {
   readonly host: LoadedSixbHost
-  readonly storage: { createBranchNamespace(name: string): Promise<BranchNamespace> } & {
-    dropBranchNamespace(name: string): Promise<void>
-  }
+  /** Where the copy goes, and how to discard it when it fails: nothing of a failed copy stays. */
+  readonly target: { open(): Promise<Storage>; discard(): Promise<void> }
   readonly directory: string
   readonly index: BranchIndex
   readonly name: string
@@ -312,7 +435,7 @@ async function loadCopy(input: {
   readonly onRead: (count: number) => void
 }): Promise<void> {
   const pending = JSON.parse(await readFile(`${input.spool}.json`, "utf8")) as PendingCopy
-  const namespace = await input.storage.createBranchNamespace(input.name)
+  const namespace = await input.target.open()
   const copy = readBranchCopy(
     counted(Bun.file(input.spool).stream() as unknown as AsyncIterable<Uint8Array>, input.onRead)
   )
@@ -350,6 +473,8 @@ async function loadCopy(input: {
       userId: report.takenBy.id,
       apiUrl: pending.apiUrl,
       profile: pending.profile,
+      objects: report.types.reduce((total, type) => total + type.objects, 0),
+      skipped: report.skipped.map((skip) => ({ ...skip })),
       ...(rest
         ? {
             credential: rest.lake.credential,
@@ -361,7 +486,7 @@ async function loadCopy(input: {
   } catch (error) {
     // Nothing of a failed copy is kept, here or in production. A load that failed before its
     // lake part was read reads it from the spool.
-    await input.storage.dropBranchNamespace(input.name).catch(() => undefined)
+    await input.target.discard().catch(() => undefined)
     const lake = rest === undefined ? await spooledLake(input.spool).catch(() => null) : rest?.lake
     if (lake) {
       await deleteSlice(pending.apiUrl, lake.credential, lake.sliceId).catch(() => undefined)

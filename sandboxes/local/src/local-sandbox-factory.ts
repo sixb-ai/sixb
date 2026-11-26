@@ -42,6 +42,8 @@ export class LocalSandboxFactory<const TParams extends ParamsConfig = Record<nev
 {
   /** Credentials are added by a forwarder in this process; commands never hold them. */
   readonly supportsRequestCredentials = true
+  readonly sharesHost = true
+  readonly runsBranches = true
   readonly configuration: SandboxConfig<TParams>
   constructor(private readonly defaults: LocalSandboxFactoryOptions<TParams> = {}) {
     this.configuration = sandboxConfig<TParams>(defaults)
@@ -57,6 +59,7 @@ export class LocalSandboxFactory<const TParams extends ParamsConfig = Record<nev
       readOnlyPaths: this.defaults.readOnlyPaths,
       readWritePaths: this.defaults.readWritePaths,
       denyReadPaths: this.defaults.denyReadPaths,
+      ...(options.ports === undefined ? {} : { ports: options.ports }),
       timeout: options.timeout ?? this.defaults.timeout,
       network: options.network ?? this.configuration.network,
       ...(options.requestCredentials === undefined

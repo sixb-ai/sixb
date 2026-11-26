@@ -1,15 +1,66 @@
 # Hosted branches
 
 A git branch of the project, run next to production. Production makes the branch a database of
-its own on production's PostgreSQL instance, owned by a role limited to it; the branch's own
-`sixb dev` loads its copy of what its creator reads there, as `sixb dev --from production` does
-on a laptop (`copy.ts`, `wire.ts`, `runtime.ts`).
+its own on production's PostgreSQL instance, owned by a role limited to it. The branch's own
+`sixb dev` runs in a sandbox, behind a front that answers only production, as the same runtime
+`sixb dev --from production` runs on a laptop: it loads its copy of what its creator reads into its
+database, and serves.
 
 | Where | What |
 |---|---|
 | `data.ts` | Production's side: the database made anew for each copy, the role's login and limits |
+| `copy.ts`, `wire.ts`, `credential.ts` | The copy production sends a branch, and the credential it reads production with |
+| `runtime.ts` | The branch runtime, laptop and hosted: what it is started with, and its front's status |
+| `source.ts` | `createSixb({ source })` and the checkout recipe |
 | `@sixb/pg` `hosted-branches.ts` | The database and its role |
 | `storage/branches` | Each branch's row: what is wanted of it, and what its worker found |
+| CLI `dev-branch.ts`, `branch-providers.ts`, `branch-from-production.ts` | The runtime's front, the database it runs on, and its copy's load |
+
+## The runtime
+
+`sixb dev` in the sandbox, started with the project's `dev` values (when the deployment gives the
+worker a credential that reads `dev` only, `SIXB_BRANCH_DEV_ENV_TOKEN_FILE`; else a `no-dev-env`
+notice), then its key, its port and branch mode's variables (`SIXB_BRANCH`,
+`SIXB_BRANCH_DATA_FROM=production`) over them, plus:
+
+| Variable | Read by |
+|---|---|
+| `SIXB_BRANCH_DATABASE_URL`, `SIXB_BRANCH_DATABASE_SCHEMA` | The CLI, which builds the project's own `@sixb/pg` on them: the branch's database, with production's schema name, which it loads its copy into and runs on (`hostOnBranch`) |
+| `SIXB_BRANCH_PUBLIC_ORIGIN` | The project's app, which sends its API requests to the front |
+
+Its copy arrives as a laptop's does: production writes it whole to `.sixb/branches/hosted.copy`
+(0600, in a 0700 folder), and the runtime's first generation loads it into its database, then reads
+production's lake and object files with the branch credential the copy carries, never with a
+production token. The front says what the runtime loaded (its age, objects and types left out)
+in its status, where production reads it.
+
+Nothing of production's environment reaches the sandbox: the worker refuses a sandbox recipe that
+sets `env`, which its provider would give every sandbox, a branch's too.
+
+The front, on the branch's port, never loads project code. It answers with the generation's
+state, the commit, the project file a startup error points at, the copy it loaded, and the
+requests it forwarded; every request needs the branch's key, which only production holds. It sends the API's paths
+(`/api`, `/auth`, `/ws`, `/docs`, `/health`, `/ready`) to the API on the next port, and the rest
+to the project's app on the one after. A runtime that keeps exiting starts again after 5 s, then
+twice as long each time, up to 5 min; one that never answers within 3 min fails the branch.
+
+## The sandbox
+
+In production the worker refuses `@sixb/sandboxes-local`, which runs a branch on its own host.
+`@sixb/sandboxes-vercel` serves a port through its public domain (4 ports at most),
+`@sixb/sandboxes-smolvm` on the host's loopback.
+
+Its network is restricted to production's PostgreSQL instance, production's API, the git host,
+the npm and yarn registries, and the origins `SIXB_BRANCH_ALLOW` adds (the services the `dev`
+values point at). The provider refuses the rest: private ranges, link-local and cloud metadata
+included. PostgreSQL is allowed by its addresses, resolved when the sandbox is made: it negotiates
+TLS after it connects, so no firewall that reads TLS names can match its host name.
+
+| Provider | Enforces | Notes |
+|---|---|---|
+| Vercel | Domains by TLS name, PostgreSQL's addresses as `/32` | Production's PostgreSQL must accept connections from Vercel's addresses |
+| smolvm | Hosts, resolved when the VM starts, every port of each | A real-VM test proves metadata and other private addresses unreachable |
+| local | Nothing (`isolation: "none"`) | Development and tests only |
 
 ## Production's instance
 
