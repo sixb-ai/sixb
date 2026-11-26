@@ -52,7 +52,7 @@ sixb worker branches            reads the remote's heads (git ls-remote, every 1
 | 14 days unopened | Its copy, database and role go; the next open takes a new copy |
 | Delete, or its remote branch deleted | Sandbox, database, role and row go. A saved sandbox is deleted by name (`SandboxFactory.destroy`), without a session or credentials. A delete that fails stays wanted, and the next claim tries again |
 | Worker drained or stopped | Each branch it holds is put back as a stop puts it, at once: the next worker opens it |
-| Worker died | The next worker finds the lease lapsed: a wanted branch it opens, a stopped one loses its login (`settleStopped`) |
+| Nobody holds it, stopped | `settleStopped` takes its login away, whoever left it (a worker that died left its runtime's sessions running, unbounded): it claims the row through its revision first, so a login another worker just opened stays, then writes it stopped. Once per revision and worker |
 
 A merge ends nothing by itself: a branch reset to the default branch looks the same, and would
 lose its data. A branch ends when its remote branch is deleted, as a merged one usually is.

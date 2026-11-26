@@ -56,6 +56,8 @@ export class BranchWorker extends Worker {
   readonly concurrency: number
   private readonly owner = `branch-worker-${randomUUID()}`
   private readonly held = new Map<string, Promise<void>>()
+  /** The revision each stopped branch was at when this worker last took its login away. */
+  private readonly closedAt = new Map<string, number>()
   private readonly branches: BranchStorage
   private readonly settings: HeldBranchSettings
   private readonly mirror: BranchMirror
@@ -213,9 +215,12 @@ export class BranchWorker extends Worker {
   }
 
   /**
-   * A stopped branch nobody holds. Once it went 14 days unopened its copy goes, schema and role
-   * included: taking the copy again is the next open's. One whose owner stopped renewing without
-   * stopping it says so: nobody can reach that runtime now. A failed one keeps saying why.
+   * A stopped branch nobody holds. Once it went 14 days unopened its copy goes, database and role
+   * included: taking the copy again is the next open's. Otherwise its login goes, whoever left it:
+   * a worker that died holding it left its runtime's sessions running, with nothing holding them
+   * to their limits. The worker claims the row first, through its revision, so it never closes a
+   * login another worker just opened, and once per revision, as nothing logs in to a row that
+   * stays put. The row then says it stopped; a failed one keeps saying why.
    */
   private async settleStopped(branch: BranchRecord, now: Date): Promise<void> {
     const ref = { projectId: this.host.id, name: branch.name, revision: branch.revision, at: now }
@@ -233,15 +238,30 @@ export class BranchWorker extends Worker {
       return
     }
 
-    // Its worker died holding it: its runtime is gone, so its login goes too, before the row
-    // says it stopped. A failure leaves the row as it is, and the next pass tries again.
-    if (branch.owner !== null) {
-      await closeBranchData(this.host, branch)
-      await this.branches.update(ref, {
-        ...STOPPED,
-        ...(branch.state === "failed" ? { state: "failed" } : {}),
-      })
+    if (this.closedAt.get(branch.name) === branch.revision) return
+
+    const claimed = await this.branches.update(ref, {
+      owner: this.owner,
+      leaseExpiresAt: new Date(now.getTime() + BRANCH_LEASE_MS),
+    })
+    if (!claimed) return
+
+    try {
+      await closeBranchData(this.host, claimed)
+    } catch (error) {
+      // The claim lapses with its lease, and a later pass tries again.
+      console.error(
+        `[SixbBranchWorker] Could not take branch '${branch.name}''s login away.`,
+        error
+      )
+      return
     }
+
+    const settled = await this.branches.update(
+      { ...ref, revision: claimed.revision },
+      { ...STOPPED, ...(claimed.state === "failed" ? { state: "failed" } : {}) }
+    )
+    if (settled) this.closedAt.set(branch.name, settled.revision)
   }
 
   private hold(name: string, work: Promise<void>): void {

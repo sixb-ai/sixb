@@ -82,6 +82,43 @@ describe("the branch worker", () => {
     expect(await row(host)()).toMatchObject({ state: "stopped", owner: null })
   })
 
+  // A stopped branch's login once went only when its worker had died holding it. Guard check:
+  // close only rows with an owner in `settleStopped`, or close it at every pass.
+  test("takes away the login of every stopped branch nobody holds, once", async () => {
+    const { host, lab, storage } = await setup()
+    const stopped = await storage.hostedBranches.update(
+      { projectId, name: NAME, at: new Date() },
+      { wanted: "stopped" }
+    )
+
+    const worker = new BranchWorker(host, { apiPublicOrigin: "https://api.shop.test" })
+    await worker.start()
+    await pass(BRANCH_TICK_MS * 5)
+    await settled(worker.stop())
+
+    expect(lab.closed).toEqual([stopped!.namespace])
+  })
+
+  // Guard check: close the login before the claim in `settleStopped`.
+  test("leaves the login of a stopped branch it could not claim", async () => {
+    const { host, lab, storage } = await setup()
+    await storage.hostedBranches.update(
+      { projectId, name: NAME, at: new Date() },
+      { wanted: "stopped" }
+    )
+    const rows = host.storage.hostedBranches!
+    const update = rows.update.bind(rows)
+    // Another worker moves the row on between this worker's read and its claim.
+    rows.update = async (input, changes) => ("owner" in changes ? null : update(input, changes))
+
+    const worker = new BranchWorker(host, { apiPublicOrigin: "https://api.shop.test" })
+    await worker.start()
+    await pass(BRANCH_TICK_MS * 3)
+    await settled(worker.stop())
+
+    expect(lab.closed).toEqual([])
+  })
+
   // Guard check: drop the `branchHostingRequirement` check from `start` (`worker.ts`).
   test("refuses to start on a database user that cannot host branches", async () => {
     const { host, storage } = await setup()
