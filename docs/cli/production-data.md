@@ -60,9 +60,8 @@ gets none of that sign-in: it holds only its own credential, which reads product
 objects' files and its datasets, and nothing else. It ends with the copy, or as soon as the
 session or token the copy was taken with is signed out or revoked: revoking a leaked token stops
 the branches it copied for too. `sixb logout`, and a new `sixb login` on the same profile, sign the
-old session out. Production runs two
-copies at a time per server process, one per person, and records each copy in its log, with your
-name, the branch and how you signed in.
+old session out. Production runs two copies at a time per server process, one per person, and
+records each copy in its log, with your name, the branch and how you signed in.
 
 On your machine, the branch's code runs as your OS user and could read your `sixb login` session
 file: run branches whose code you trust.

@@ -124,5 +124,5 @@ async function isWithdrawn(
       ? await auth.sessions.getById({ projectId, id: minter.id })
       : await auth.accessTokens.getById({ projectId, id: minter.id })
 
-  return !record || record.revokedAt !== undefined
+  return !record || record.revokedAt != null
 }

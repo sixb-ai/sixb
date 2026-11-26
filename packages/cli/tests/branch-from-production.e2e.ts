@@ -594,7 +594,8 @@ await Bun.write(import.meta.dir + "/.sixb/runtime-seen.txt", process.env.SIXB_BR
   // branch's code reads the developer's token, from `.env.local` for the latter; drop
   // `BRANCH_RUNTIME_ENV`: the branch runs as no checkout in particular. In
   // lib/branch-from-production.ts, empty the branch's whole directory in `loadCopy` again: the
-  // template's SQLite namespace in it goes, and the second run has no copy.
+  // template's SQLite namespace in it goes while open, and the first `sixb dev` does not start
+  // within 60 s (SQLITE_IOERR on the deleted file).
   test("copies, serves the copy as the person, reuses it, refreshes it, and drops it with its git branch", async () => {
     const root = await checkout()
     const alice = (await signedIn("usr_alice")).authorization
