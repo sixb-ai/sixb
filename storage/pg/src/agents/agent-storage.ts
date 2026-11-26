@@ -11,6 +11,7 @@ import { PgAgentRunStore } from "./runs"
 import { PgAgentApprovalModeStore } from "./settings"
 import { PgAgentThreadStore } from "./threads"
 import { PgAgentTokenRateStore } from "./token-rates"
+import { PgAgentTurnVectorStore } from "./turn-vectors"
 
 export interface PgAgentStorageOptions {
   readonly sql: PgStoreClient
@@ -35,6 +36,7 @@ export class PgAgentStorage implements AgentStorage {
   readonly computers: PgAgentComputerSessionStore
   readonly tokenRates: PgAgentTokenRateStore
   readonly inbox: PgAgentInboxStore
+  readonly turnVectors: PgAgentTurnVectorStore
 
   constructor(options: PgAgentStorageOptions) {
     this.threads = new PgAgentThreadStore(options.sql)
@@ -48,5 +50,6 @@ export class PgAgentStorage implements AgentStorage {
     this.computers = new PgAgentComputerSessionStore(options.sql)
     this.tokenRates = new PgAgentTokenRateStore(options.sql)
     this.inbox = new PgAgentInboxStore(options.sql)
+    this.turnVectors = new PgAgentTurnVectorStore(options.sql)
   }
 }

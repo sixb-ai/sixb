@@ -269,6 +269,15 @@ export type VectorIndexingQueueJob = QueueJob<
   { readonly indexingId: string }
 >
 
+/**
+ * Internal lane hosted by AgentWorker: a conversation's turns need their embeddings. One job per
+ * thread, which indexes what changed since its index was last written.
+ */
+export type TurnIndexingQueueJob = QueueJob<
+  "agent.thread.index.requested",
+  { readonly threadId: string }
+>
+
 /** The `lake-retention` pass asks for one interval's retention; the payload says which. */
 export interface LakeRetentionRequestedQueueJob
   extends QueueJob<
@@ -426,6 +435,12 @@ export interface Queues {
     VectorIndexingQueueJob,
     "internal.unexpected" | "runtime.cancelled"
   >
+  /**
+   * Keeping each conversation's turn vectors current, so the Agent can search earlier
+   * conversations. AgentWorker consumes this lane beside its own, so an embedding model's latency
+   * or a back-fill never takes the slot a turn waits for.
+   */
+  readonly turnIndexing: Queue<TurnIndexingQueueJob, "internal.unexpected" | "runtime.cancelled">
   /**
    * Lake work the framework runs in a worker rather than in the process that asks for it: the
    * retention of replaced dataset versions and their files, and writing ingested changes.

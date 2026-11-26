@@ -9,12 +9,14 @@ import {
 import {
   AgentFinalizationError,
   type AgentRunSessionHost,
+  type AgentTurnIndexing,
   afterAgentRunFinished,
   claimAgentRun,
   createBrokerStreamSink,
   dispatchQueuedAgentRuns,
   endInterruptedAgentRun,
   endLapsedAgentRuns,
+  getAgentTurnIndexing,
   isolateStreamSink,
   repairAgentInboxes,
   sandboxCredentialIssue,
@@ -55,6 +57,7 @@ import {
   waitForAbort,
 } from "./run-fate"
 import { conversationSandbox } from "./run-sandboxes"
+import { TurnIndexingWorker } from "./turn-indexing-worker"
 import type {
   AgentWorkerContext,
   AgentWorkerHost,
@@ -91,6 +94,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   /** Runs the children of this worker's turns, in this process. */
   private readonly children: ChildRunner | null
   private readonly leaseMs: number
+  /** Keeps each conversation's turn vectors current, when the host has search by meaning. */
+  private readonly turnIndexing: AgentTurnIndexing | undefined
+  /** Consumes the `turnIndexing` lane beside this worker's own, for projects with agent work. */
+  private readonly turnIndexingWorker: TurnIndexingWorker | undefined
   /**
    * Sandbox teardowns that outlived their run's dispose() (boot still in flight when the turn
    * ended). stop() drains these so a graceful shutdown does not leave machines mid-teardown.
@@ -110,12 +117,17 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
     this.host = host
     this.leaseMs = leaseMs
+    this.turnIndexing = getAgentTurnIndexing(host)
     const hasAgentWork =
       host.definitions.models?.language !== undefined ||
       host.definitions.workflows
         .list()
         .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))
     this.context = hasAgentWork ? buildAgentContext(host, options) : null
+    this.turnIndexingWorker =
+      hasAgentWork && this.turnIndexing
+        ? new TurnIndexingWorker(host, this.turnIndexing)
+        : undefined
     const context = this.context
     this.children = context
       ? workerChildren({
@@ -156,13 +168,29 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     }
   }
 
+  override async start(): Promise<void> {
+    await Promise.all([super.start(), this.turnIndexingWorker?.start()])
+  }
+
+  override async drain(timeoutMs?: number): Promise<boolean> {
+    const [turns, indexing] = await Promise.all([
+      super.drain(timeoutMs),
+      this.turnIndexingWorker ? this.turnIndexingWorker.drain(timeoutMs) : Promise.resolve(true),
+    ])
+    return turns && indexing
+  }
+
   override async stop(): Promise<void> {
     // super.stop() awaits every in-flight execute() (and thus its dispose()); draining afterwards
     // catches the detached teardowns dispose() left running so we never report stopped while a
     // sandbox machine is still being reaped.
-    await super.stop()
+    await Promise.all([super.stop(), this.turnIndexingWorker?.stop()])
     await this.children?.drain()
     await Promise.allSettled([...this.pendingTeardowns])
+  }
+
+  override async wait(): Promise<void> {
+    await Promise.all([super.wait(), this.turnIndexingWorker?.wait()])
   }
 
   /** Register a detached sandbox teardown so stop() can drain it; self-removes when it settles. */
@@ -413,7 +441,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
    * Republish queued work and cancel orphaned subagents, at start and then every repair interval.
    * Each read covers only active rows, and the deterministic job ids make republication idempotent.
    * Held calls are repaired in the same pass: expired, run after a crash, and their turns resumed.
-   * So are thread inboxes: what a turn's end did not start, it starts.
+   * So are thread inboxes: what a turn's end did not start, it starts. And every conversation whose
+   * turn vectors are behind is asked for, which is how existing conversations get indexed.
    */
   private async runDispatchLoop(context: AgentWorkerContext, signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
@@ -448,6 +477,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         await repairAgentInboxes(this.sessionHost(context))
       } catch (error) {
         console.error("[SixbAgentWorker] Could not repair Agent thread inboxes; retrying.", error)
+      }
+      try {
+        await this.turnIndexing?.repair()
+      } catch (error) {
+        console.error("[SixbAgentWorker] Could not ask to index Agent threads; retrying.", error)
       }
       await waitForAbort(AGENT_DISPATCH_REPAIR_MS, signal)
     }

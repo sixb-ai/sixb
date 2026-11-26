@@ -186,6 +186,20 @@ export interface SixbVectorIndexingFailedContext
 }
 
 /**
+ * A conversation's turns could not be indexed for search, in a way no retry fixes, such as an
+ * embedding model that answers with another number of dimensions than it declares. Indexing stops
+ * for that thread until a message is added or taken, or the embedding configuration changes, so a
+ * thread reports once for each state that fails.
+ */
+export interface SixbAgentTurnIndexingFailedContext
+  extends SixbFailureContext<"agent.turn_indexing.failed"> {
+  readonly failure: SixbFailure<VectorIndexingFailureCode>
+  readonly threadId: string
+  /** The thread's message revision indexing stopped at. */
+  readonly revision: number
+}
+
+/**
  * One pass of the maintenance loop failed, or ran past its budget. It runs again when it is next
  * due, so one report is a blip; `consecutiveFailures` is the field to alert on. `heartbeat` as
  * `passId` means the loop could not write its heartbeat.
@@ -269,6 +283,7 @@ export interface SixbDatasetIngestRejectedContext
 export type SixbErrorContext =
   | SixbArtifactLiveWriteFailedContext
   | SixbVectorIndexingFailedContext
+  | SixbAgentTurnIndexingFailedContext
   | SixbLakeRetentionFailedContext
   | SixbDatasetIngestFlushFailedContext
   | SixbDatasetIngestRejectedContext

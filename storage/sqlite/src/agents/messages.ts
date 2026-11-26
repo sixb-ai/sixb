@@ -20,6 +20,11 @@ import { isUniqueConstraintError } from "../storage-errors"
 import { READER_CONVERSATIONS } from "./readers"
 import { type AgentMessageRow, queryAgentList, rowToMessageRecord } from "./rows"
 
+interface DeletedMessageRow {
+  readonly seq: number
+  readonly parts: string
+}
+
 export class SqliteAgentMessageStore implements AgentMessageStore {
   constructor(private readonly db: Database) {}
 
@@ -108,7 +113,8 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
         .query(
           `
           UPDATE agent_threads
-          SET message_count = message_count + ?, last_message_at = ?, updated_at = ?
+          SET message_count = message_count + ?, message_revision = message_revision + 1,
+            last_message_at = ?, updated_at = ?
           WHERE project_id = ? AND id = ?
         `
         )
@@ -152,13 +158,14 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
 
       const deleted = this.db
         .query(
-          "DELETE FROM agent_messages WHERE project_id = ? AND thread_id = ? AND run_id = ? RETURNING parts"
+          "DELETE FROM agent_messages WHERE project_id = ? AND thread_id = ? AND run_id = ? RETURNING seq, parts"
         )
-        .all(input.projectId, input.threadId, input.runId) as { parts: string }[]
+        .all(input.projectId, input.threadId, input.runId) as DeletedMessageRow[]
       if (deleted.length === 0) {
         return 0
       }
       this.clampReadsToHead(input.projectId, input.threadId)
+      this.indexFromDeletion(input.projectId, input.threadId, deleted)
       // The thread counts only the messages the conversation shows: take back the ones it counted.
       const counted = deleted.filter((row) =>
         countsAsThreadMessage({ parts: JSON.parse(row.parts) })
@@ -171,6 +178,7 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
           UPDATE agent_threads
           SET
             message_count = MAX(message_count - ?, 0),
+            message_revision = message_revision + 1,
             last_message_at = (
               SELECT created_at FROM agent_messages
               WHERE project_id = ? AND thread_id = ?
@@ -204,11 +212,12 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
 
       const deleted = this.db
         .query(
-          "DELETE FROM agent_messages WHERE project_id = ? AND thread_id = ? AND seq >= ? RETURNING parts"
+          "DELETE FROM agent_messages WHERE project_id = ? AND thread_id = ? AND seq >= ? RETURNING seq, parts"
         )
-        .all(input.projectId, input.threadId, input.fromSeq) as { parts: string }[]
+        .all(input.projectId, input.threadId, input.fromSeq) as DeletedMessageRow[]
       if (deleted.length === 0) return 0
       this.clampReadsToHead(input.projectId, input.threadId)
+      this.indexFromDeletion(input.projectId, input.threadId, deleted)
 
       const counted = deleted.filter((row) =>
         countsAsThreadMessage({ parts: JSON.parse(row.parts) })
@@ -221,6 +230,7 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
           UPDATE agent_threads
           SET
             message_count = MAX(message_count - ?, 0),
+            message_revision = message_revision + 1,
             last_message_at = (
               SELECT created_at FROM agent_messages
               WHERE project_id = ? AND thread_id = ?
@@ -235,6 +245,25 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
 
       return deleted.length
     })()
+  }
+
+  /**
+   * After a deletion, indexing goes back to the turn that held the first message taken: a retry
+   * keeps the turn's opening message, so the cascade leaves its vectors, but its answer went.
+   */
+  private indexFromDeletion(
+    projectId: string,
+    threadId: string,
+    deleted: readonly DeletedMessageRow[]
+  ): void {
+    const firstDeleted = Math.min(...deleted.map((row) => row.seq))
+    this.db
+      .query(`
+        UPDATE agent_thread_index_state
+        SET stale_from_seq = MIN(COALESCE(stale_from_seq, ?1), ?1)
+        WHERE project_id = ?2 AND thread_id = ?3
+      `)
+      .run(firstDeleted, projectId, threadId)
   }
 
   /**

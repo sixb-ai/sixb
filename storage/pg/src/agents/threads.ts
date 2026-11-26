@@ -311,6 +311,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
             plan.messages.map((copy) => copy.id),
             input.artifactCopies
           )
+          await copyTurnVectors(tx, input, plan.messages)
         }
 
         if (plan.checkpoint) {
@@ -723,4 +724,53 @@ async function remapCopiedParts(
       WHERE project_id = ${projectId} AND id = ${row.id}
     `
   }
+}
+
+/**
+ * A fork takes the indexed turns of the messages it copies, opening on the copies. Its index is
+ * current when the source's was: no message arrived since, so a turn still running is a retry of
+ * one indexed before, which the fork leaves out whole, vectors with it. Otherwise it goes on from
+ * where the source's stood.
+ */
+async function copyTurnVectors(
+  tx: SQLClient,
+  input: ForkAgentThreadInput,
+  copies: readonly { readonly sourceId: string; readonly id: string }[]
+): Promise<void> {
+  await tx`
+    INSERT INTO agent_turn_vectors (
+      project_id, thread_id, message_id, chunk, first_seq, last_seq, turn_at, text,
+      configuration, embedding, indexed_at
+    )
+    SELECT vector.project_id, ${input.id}, copy.id, vector.chunk, vector.first_seq,
+      vector.last_seq, vector.turn_at, vector.text, vector.configuration, vector.embedding,
+      vector.indexed_at
+    FROM unnest(
+      ${copies.map((copy) => copy.sourceId)}::text[],
+      ${copies.map((copy) => copy.id)}::text[]
+    ) AS copy(source_id, id)
+    JOIN agent_turn_vectors AS vector
+      ON vector.project_id = ${input.projectId} AND vector.message_id = copy.source_id
+  `
+
+  await tx`
+    INSERT INTO agent_thread_index_state (
+      project_id, thread_id, configuration, stale_from_seq, indexed_at
+    )
+    SELECT project_id, ${input.id}, configuration, stale_from_seq, indexed_at
+    FROM agent_thread_index_state
+    WHERE project_id = ${input.projectId} AND thread_id = ${input.sourceThreadId}
+  `
+
+  await tx`
+    UPDATE agent_threads AS fork
+    SET indexed_revision = fork.message_revision
+    FROM agent_threads AS source
+    JOIN agent_thread_index_state AS state
+      ON state.project_id = source.project_id AND state.thread_id = source.id
+    WHERE fork.project_id = ${input.projectId} AND fork.id = ${input.id}
+      AND source.project_id = ${input.projectId} AND source.id = ${input.sourceThreadId}
+      AND source.indexed_revision = source.message_revision
+      AND state.stale_from_seq IS NULL
+  `
 }

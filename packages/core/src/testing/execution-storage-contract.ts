@@ -120,6 +120,8 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
             type: "artifacts.transcribeMedia",
             digest: `sha256:${"a".repeat(64)}`,
           }),
+          // Reproduce by leaving `agents.indexTurns` out of a provider's migration.
+          kernelExecution("turns-execution", { type: "agents.indexTurns", threadId: "thr_1" }),
           scriptExecution("script-execution"),
         ] as const
 

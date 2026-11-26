@@ -38,6 +38,7 @@ type _errorContextIsDiscriminated = Expect<
     | "event.delivery.failed"
     | "rule.evaluation.failed"
     | "vector.indexing.failed"
+    | "agent.turn_indexing.failed"
     | "maintenance.pass.failed"
     | "orchestrator.dispatch.failed"
     | "lake.retention.failed"

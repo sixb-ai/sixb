@@ -30,7 +30,8 @@ without a queue job coming back for it.
 
 What follows a turn's end, its children still at work stopped, its unread steers released and a turn
 paused on calls already decided resumed, is `afterAgentRunFinished` (`run-after-finish.ts`): the worker's session host and
-the API's both run it.
+the API's both run it. It also asks for the conversation's turn vectors to catch up
+([turn-vectors](turn-vectors/README.md)).
 
 A cancel is recorded on the run (`requestAgentRunCancel`) before the broker carries it. The run
 token stops working at once, and a runner that never hears the broker reads the cancel at its next

@@ -10,6 +10,7 @@ import type {
   RenderQueueJob,
   SyncQueueJobFailureCode,
   SyncRunRequestedQueueJob,
+  TurnIndexingQueueJob,
   VectorIndexingQueueJob,
   WorkflowQueueJob,
   WorkflowQueueJobFailureCode,
@@ -80,6 +81,10 @@ export class BullMqQueues implements Queues {
     VectorIndexingQueueJob,
     "internal.unexpected" | "runtime.cancelled"
   >
+  readonly turnIndexing: BullMqQueue<
+    TurnIndexingQueueJob,
+    "internal.unexpected" | "runtime.cancelled"
+  >
   readonly lake: BullMqQueue<LakeQueueJob, "internal.unexpected" | "runtime.cancelled">
   readonly renders: BullMqQueue<RenderQueueJob, "internal.unexpected" | "runtime.cancelled">
   readonly syncRuns: BullMqQueue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>
@@ -104,6 +109,7 @@ export class BullMqQueues implements Queues {
     }
 
     this.vectorIndexing = new BullMqQueue(shared, "vector.indexing")
+    this.turnIndexing = new BullMqQueue(shared, "turn.indexing")
     this.lake = new BullMqQueue(shared, "lake")
     this.renders = new BullMqQueue(shared, "renders")
     this.syncRuns = new BullMqQueue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>(
@@ -138,6 +144,7 @@ export class BullMqQueues implements Queues {
       this.workflows.close(),
       this.agents.close(),
       this.vectorIndexing.close(),
+      this.turnIndexing.close(),
       this.lake.close(),
       this.renders.close(),
     ])

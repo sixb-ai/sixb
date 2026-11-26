@@ -44,6 +44,7 @@ export type {
   RenderQueueJob,
   SyncQueueJobFailureCode,
   SyncRunRequestedQueueJob,
+  TurnIndexingQueueJob,
   VectorIndexingQueueJob,
   WorkflowQueueJob,
   WorkflowQueueJobFailureCode,

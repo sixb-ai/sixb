@@ -1703,6 +1703,161 @@ export interface AgentInboxStore {
   listWaitingThreads(input: ListWaitingAgentInboxThreadsInput): Promise<readonly string[]>
 }
 
+// ── agent_turn_vectors — each conversation turn's embedding, to find it by meaning ──────────────
+
+/**
+ * One turn of a conversation as search finds it: what the person asked, the Agent's final answer
+ * and the titles of what the turn published, embedded. A turn too long for one input is split into
+ * chunks, each starting with the request, numbered from 0.
+ *
+ * Keyed by the message that opens the turn, never by its `seq`: a retry or an edit reuses numbers.
+ * Deleting that message deletes the turn's vectors with it.
+ */
+export interface AgentTurnVectorRecord {
+  readonly projectId: string
+  readonly threadId: string
+  /** The person's message that opens the turn. */
+  readonly messageId: string
+  readonly chunk: number
+  /** The `seq` of the turn's first and last messages. */
+  readonly firstSeq: number
+  readonly lastSeq: number
+  /** When the turn's opening message was written. */
+  readonly turnAt: Date
+  /** What was embedded. */
+  readonly text: string
+  /** The fingerprint of the model and text format that produced it: another one is stale. */
+  readonly configuration: string
+  /** Unit length, float32. */
+  readonly embedding: readonly number[]
+  readonly indexedAt: Date
+}
+
+export type AgentTurnVectorInput = Omit<
+  AgentTurnVectorRecord,
+  "projectId" | "threadId" | "configuration" | "indexedAt"
+>
+
+/** Where a conversation's index stands for one configuration, and where indexing resumes. */
+export interface AgentThreadIndexProgress {
+  readonly threadId: string
+  /**
+   * Changes whenever a message is added to the thread or taken from it: a write made from what
+   * was read at another revision is dropped.
+   */
+  readonly revision: number
+  /** Indexed for this configuration at exactly this revision: nothing to do. */
+  readonly current: boolean
+  /**
+   * The `seq` indexing reads from: the first message of the newest turn indexed, which may have
+   * grown since, or of the turn a deletion changed, whichever comes first. 1 for a thread with no
+   * vector of this configuration.
+   */
+  readonly fromSeq: number
+  /** Failed tries since it was last written: each waits longer before the next. */
+  readonly failures: number
+  /** Until when it waits: an AI limit's reset, or a failure's backoff. */
+  readonly deferredUntil?: Date
+  /**
+   * Indexing failed in a way no retry fixes, at this revision and for this configuration: nothing
+   * asks for it again until a message is added or taken, or the configuration changes.
+   */
+  readonly halted: boolean
+}
+
+export interface GetAgentThreadIndexProgressInput {
+  readonly projectId: string
+  readonly threadId: string
+  readonly configuration: string
+}
+
+export interface WriteAgentTurnVectorsInput {
+  readonly projectId: string
+  readonly threadId: string
+  readonly configuration: string
+  /** The revision the turns were read at: nothing is written once the thread changed since. */
+  readonly revision: number
+  /**
+   * The vectors of every turn opening at or after this `seq` are replaced by `turns`, and every
+   * vector of another configuration goes.
+   */
+  readonly fromSeq: number
+  readonly turns: readonly AgentTurnVectorInput[]
+  /** These turns reach the thread's end: it is then indexed at `revision`. */
+  readonly complete: boolean
+  readonly indexedAt?: Date
+}
+
+export interface ListAgentTurnVectorsInput {
+  readonly projectId: string
+  readonly threadId: string
+  /** Only the turns opening at or after this `seq`. */
+  readonly fromSeq?: number
+}
+
+export interface ListAgentThreadsToIndexInput {
+  readonly projectId: string
+  readonly configuration: string
+  readonly limit: number
+  /** A thread deferred past this is left out. Now by default. */
+  readonly now?: Date
+}
+
+export interface DeferAgentThreadIndexingInput {
+  readonly projectId: string
+  readonly threadId: string
+  /** Recorded only for a thread with no index yet: it does not change an existing one's. */
+  readonly configuration: string
+  readonly until: Date
+  /** A failure, which counts toward the next backoff, rather than an AI limit. */
+  readonly failed: boolean
+}
+
+export interface HaltAgentThreadIndexingInput {
+  readonly projectId: string
+  readonly threadId: string
+  /** The configuration it failed for, which the thread's index state is then about. */
+  readonly configuration: string
+  /** The revision the failing turns were read at: nothing is recorded once the thread moved. */
+  readonly revision: number
+}
+
+/** A conversation whose index is behind, and the revision it is at now. */
+export interface AgentThreadToIndex {
+  readonly threadId: string
+  readonly revision: number
+}
+
+export interface AgentTurnVectorStore {
+  /**
+   * Whether this storage can search the vectors it keeps: PostgreSQL with pgvector in schema
+   * `public`, SQLite with sqlite-vec loadable. A yes is remembered; a no is asked again later.
+   */
+  searchAvailable(): Promise<boolean>
+  /** Null when the thread does not exist. */
+  progress(input: GetAgentThreadIndexProgressInput): Promise<AgentThreadIndexProgress | null>
+  /**
+   * Replace the thread's turns from `fromSeq` on, in one transaction, if its revision is still
+   * `revision`. Answers whether it wrote. A write ends any deferral and resets the failures.
+   */
+  write(input: WriteAgentTurnVectorsInput): Promise<boolean>
+  /** Indexing waits until then: the thread leaves `listThreadsToIndex` meanwhile. */
+  defer(input: DeferAgentThreadIndexingInput): Promise<void>
+  /**
+   * Indexing stops at `revision` for this configuration, if the thread is still at it: answers
+   * whether it recorded. The thread is behind, but leaves `listThreadsToIndex` until it changes or
+   * the configuration does. A write lifts it.
+   */
+  halt(input: HaltAgentThreadIndexingInput): Promise<boolean>
+  /** By `firstSeq`, then chunk. */
+  list(input: ListAgentTurnVectorsInput): Promise<readonly AgentTurnVectorRecord[]>
+  /**
+   * Conversations no turn holds, nothing defers and nothing halted whose index is behind for this
+   * configuration, the most recently active first. A sub-agent's thread is never indexed.
+   */
+  listThreadsToIndex(input: ListAgentThreadsToIndexInput): Promise<readonly AgentThreadToIndex[]>
+}
+
 export interface AgentStorage {
   readonly threads: AgentThreadStore
   readonly reads: AgentThreadReadStore
@@ -1715,4 +1870,5 @@ export interface AgentStorage {
   readonly computers: AgentComputerSessionStore
   readonly tokenRates: AgentTokenRateStore
   readonly inbox: AgentInboxStore
+  readonly turnVectors: AgentTurnVectorStore
 }

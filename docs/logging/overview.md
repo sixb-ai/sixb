@@ -90,6 +90,7 @@ Pass `onError` to `createSixb()`. `reportError` is your monitoring integration. 
 | `event.delivery.failed` | Event delivery failed. |
 | `rule.evaluation.failed` | Rule evaluation failed. |
 | `vector.indexing.failed` | Automatic vector indexing failed. The context identifies the object and profile. |
+| `agent.turn_indexing.failed` | A conversation could not be indexed for search, in a way retrying cannot fix, such as an embedding model that returns another number of dimensions than it declares. `threadId` names it. It is tried again once a message is added or the embedding model changes. |
 | `maintenance.pass.failed` | A background pass of the orchestrator failed. It runs again on its own; alert on `consecutiveFailures`. |
 | `orchestrator.dispatch.failed` | A scheduled or event-triggered run could not be dispatched. `dropped: true`: this event can never start it, often a mapper that throws, and the trigger is gone. `dropped: false`: it has failed for five minutes and keeps retrying. `target` names the run. |
 | `lake.retention.failed` | One automatic lake cleanup failed. The next one, `cleanupEvery` later, tries again. |

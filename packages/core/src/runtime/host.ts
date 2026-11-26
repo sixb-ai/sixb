@@ -14,6 +14,7 @@ import {
   createAgentApprovalExecutor,
   registerAgentApprovalExecutor,
 } from "../agents/approval-executor"
+import { createAgentTurnIndexing, registerAgentTurnIndexing } from "../agents/turn-vectors/indexing"
 import { createMediaTranscriber, registerMediaTranscriber } from "../artifacts/media/transcriber"
 import {
   AuthRuntime,
@@ -402,6 +403,9 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     // The render worker transcribes the media it derives through this, on the project's budget.
     registerMediaTranscriber(this, createMediaTranscriber(this.hostContext, definitions.models))
 
+    // The agent worker keeps each conversation's turn vectors current through it.
+    registerAgentTurnIndexing(this, createAgentTurnIndexing(this.hostContext))
+
     const lakeRetention = new LakeRetention({
       projectId: this.projectId,
       options: options.lakeMaintenance,
@@ -724,6 +728,7 @@ function assertSandboxCredentials<TParams extends ParamsConfig>(
 
 const QUEUE_LANES = [
   "vectorIndexing",
+  "turnIndexing",
   "lake",
   "syncRuns",
   "pipelines",

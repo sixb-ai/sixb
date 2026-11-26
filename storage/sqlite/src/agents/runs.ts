@@ -702,8 +702,8 @@ export class SqliteAgentRunStore implements AgentRunStore {
         .query(
           `
           UPDATE agent_threads
-          SET active_run_id = ?, message_count = message_count + 1, last_message_at = ?,
-            updated_at = ?
+          SET active_run_id = ?, message_count = message_count + 1,
+            message_revision = message_revision + 1, last_message_at = ?, updated_at = ?
           WHERE project_id = ? AND id = ?
         `
         )
@@ -733,9 +733,9 @@ export class SqliteAgentRunStore implements AgentRunStore {
         `
         INSERT INTO agent_threads (
           project_id, id, kind, parent_thread_id, parent_run_id, spawn_key, owner_principal_type,
-          owner_principal_id, status, active_run_id, last_message_at, message_count, created_at,
-          updated_at
-        ) VALUES (?, ?, 'subagent', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          owner_principal_id, status, active_run_id, last_message_at, message_count,
+          message_revision, created_at, updated_at
+        ) VALUES (?, ?, 'subagent', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
       `
       )
       .run(

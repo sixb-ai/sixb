@@ -19,6 +19,7 @@ import type {
   RenderQueueJob,
   SyncQueueJobFailureCode,
   SyncRunRequestedQueueJob,
+  TurnIndexingQueueJob,
   VectorIndexingQueueJob,
   WorkflowQueueJob,
   WorkflowQueueJobFailureCode,
@@ -483,6 +484,10 @@ export class InMemoryQueues implements Queues {
     VectorIndexingQueueJob,
     "internal.unexpected" | "runtime.cancelled"
   >(this.store, "vector.indexing")
+  readonly turnIndexing = new InMemoryQueue<
+    TurnIndexingQueueJob,
+    "internal.unexpected" | "runtime.cancelled"
+  >(this.store, "turn.indexing")
   readonly lake = new InMemoryQueue<LakeQueueJob, "internal.unexpected" | "runtime.cancelled">(
     this.store,
     "lake"

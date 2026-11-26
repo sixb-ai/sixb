@@ -154,6 +154,7 @@ const SHIPPED_MIGRATIONS = [
   "113-video-generation",
   "114-artifact-video-export-asks",
   "115-agent-message-artifact-context",
+  "116-agent-turn-vectors",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -1838,6 +1839,67 @@ describe("Postgres storage migrations", () => {
         "owner_id",
         "slot",
       ])
+    })
+  })
+
+  test("leaves every existing conversation to index, its turns going with their messages", async () => {
+    // Removal proofs: drop ON DELETE CASCADE from either foreign key, and the rewound turn's
+    // vector or the deleted thread's index state outlives it; drop `0::real <> ANY(embedding)`
+    // and a zero vector, which no cosine can score, is kept.
+    const index = indexOf("116-agent-turn-vectors")
+    await withDatabase({ migrateThrough: index }, async ({ sql, migrateThrough }) => {
+      const at = "2026-01-01T00:00:00.000Z"
+      await sql.unsafe(
+        `INSERT INTO agent_threads (
+          project_id, id, owner_principal_type, owner_principal_id, status, created_at, updated_at
+        ) VALUES ('p', 'thr_1', 'user', 'usr_alice', 'active', $1, $1)`,
+        [at]
+      )
+      await sql.unsafe(
+        `INSERT INTO agent_messages (
+          project_id, id, thread_id, role, seq, parts, content_version, created_at
+        ) VALUES ('p', 'msg_1', 'thr_1', 'user', 1, '[]'::jsonb, 1, $1)`,
+        [at]
+      )
+
+      await migrateThrough(index + 1)
+
+      // Never indexed, so behind its revision: the repair pass asks for it.
+      const revisions = await sql.unsafe<
+        { message_revision: string; indexed_revision: string | null }[]
+      >("SELECT message_revision, indexed_revision FROM agent_threads")
+      expect([...revisions]).toEqual([{ message_revision: "0", indexed_revision: null }])
+
+      const vector = (embedding: string) =>
+        sql.unsafe(
+          `INSERT INTO agent_turn_vectors (
+            project_id, thread_id, message_id, chunk, first_seq, last_seq, turn_at, text,
+            configuration, embedding, indexed_at
+          ) VALUES ('p', 'thr_1', 'msg_1', 0, 1, 1, $1, 'Question', 'cfg', $2::real[], $1)`,
+          [at, embedding]
+        )
+      const zero = await vector("{0,0}").catch((error: unknown) => error)
+      expect(zero).toBeInstanceOf(Error)
+      await vector("{0.5,0.25}")
+      await sql.unsafe(
+        `INSERT INTO agent_thread_index_state (
+          project_id, thread_id, configuration, indexed_at
+        ) VALUES ('p', 'thr_1', 'cfg', $1)`,
+        [at]
+      )
+
+      const count = async (table: string) => {
+        const [row] = await sql.unsafe<{ count: number }[]>(
+          `SELECT COUNT(*)::int AS count FROM ${table}`
+        )
+        return row?.count
+      }
+
+      await sql.unsafe("DELETE FROM agent_messages WHERE id = 'msg_1'")
+      expect(await count("agent_turn_vectors")).toBe(0)
+
+      await sql.unsafe("DELETE FROM agent_threads WHERE id = 'thr_1'")
+      expect(await count("agent_thread_index_state")).toBe(0)
     })
   })
 

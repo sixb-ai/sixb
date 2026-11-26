@@ -625,7 +625,8 @@ async function claimChildThread(
     await tx`
       UPDATE agent_threads
       SET active_run_id = ${input.id}, message_count = message_count + 1,
-        last_message_at = ${createdAt}, updated_at = ${createdAt}
+        message_revision = message_revision + 1, last_message_at = ${createdAt},
+        updated_at = ${createdAt}
       WHERE project_id = ${input.projectId} AND id = ${input.thread.id}
     `
     return
@@ -645,12 +646,12 @@ async function claimChildThread(
   await tx`
     INSERT INTO agent_threads (
       project_id, id, kind, parent_thread_id, parent_run_id, spawn_key, owner_principal_type,
-      owner_principal_id, status, active_run_id, last_message_at, message_count, created_at,
-      updated_at
+      owner_principal_id, status, active_run_id, last_message_at, message_count,
+      message_revision, created_at, updated_at
     ) VALUES (
       ${thread.projectId}, ${thread.id}, ${"subagent"}, ${conversation.id}, ${input.parentRunId},
       ${input.spawnKey}, ${thread.ownerPrincipal.type}, ${thread.ownerPrincipal.id},
-      ${thread.status}, ${input.id}, ${createdAt}, ${thread.messageCount}, ${createdAt},
+      ${thread.status}, ${input.id}, ${createdAt}, ${thread.messageCount}, 1, ${createdAt},
       ${createdAt}
     )
   `

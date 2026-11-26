@@ -100,6 +100,7 @@ export class PgAgentMessageStore implements AgentMessageStore {
           UPDATE agent_threads
           SET
             message_count = message_count + ${countsAsThreadMessage(input) ? 1 : 0},
+            message_revision = message_revision + 1,
             last_message_at = ${createdAt},
             updated_at = ${createdAt}
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
@@ -149,17 +150,18 @@ export class PgAgentMessageStore implements AgentMessageStore {
         )
       }
 
-      const deleted = await tx<{ id: string; parts: AgentMessageRecord["parts"] | string }[]>`
+      const deleted = await tx<DeletedMessageRow[]>`
         DELETE FROM agent_messages
         WHERE project_id = ${input.projectId}
           AND thread_id = ${input.threadId}
           AND run_id = ${input.runId}
-        RETURNING id, parts
+        RETURNING id, seq, parts
       `
       if (deleted.length === 0) {
         return 0
       }
       await clampReadsToHead(tx, input)
+      await indexFromDeletion(tx, input, deleted)
       // The thread counts only the messages the conversation shows: take back the ones it counted.
       const counted = deleted.filter((row) =>
         countsAsThreadMessage({
@@ -172,6 +174,7 @@ export class PgAgentMessageStore implements AgentMessageStore {
         UPDATE agent_threads
         SET
           message_count = GREATEST(message_count - ${counted}, 0),
+          message_revision = message_revision + 1,
           last_message_at = (
             SELECT created_at FROM agent_messages
             WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
@@ -203,15 +206,16 @@ export class PgAgentMessageStore implements AgentMessageStore {
         )
       }
 
-      const deleted = await tx<{ id: string; parts: AgentMessageRecord["parts"] | string }[]>`
+      const deleted = await tx<DeletedMessageRow[]>`
         DELETE FROM agent_messages
         WHERE project_id = ${input.projectId}
           AND thread_id = ${input.threadId}
           AND seq >= ${input.fromSeq}
-        RETURNING id, parts
+        RETURNING id, seq, parts
       `
       if (deleted.length === 0) return 0
       await clampReadsToHead(tx, input)
+      await indexFromDeletion(tx, input, deleted)
 
       const counted = deleted.filter((row) =>
         countsAsThreadMessage({
@@ -224,6 +228,7 @@ export class PgAgentMessageStore implements AgentMessageStore {
         UPDATE agent_threads
         SET
           message_count = GREATEST(message_count - ${counted}, 0),
+          message_revision = message_revision + 1,
           last_message_at = (
             SELECT created_at FROM agent_messages
             WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
@@ -321,6 +326,29 @@ export class PgAgentMessageStore implements AgentMessageStore {
     `
     return rows.map((row) => row.thread_id)
   }
+}
+
+interface DeletedMessageRow {
+  readonly id: string
+  readonly seq: number | string
+  readonly parts: AgentMessageRecord["parts"] | string
+}
+
+/**
+ * After a deletion, indexing goes back to the turn that held the first message taken: a retry
+ * keeps the turn's opening message, so the cascade leaves its vectors, but its answer went.
+ */
+async function indexFromDeletion(
+  tx: SQLClient,
+  input: { readonly projectId: string; readonly threadId: string },
+  deleted: readonly DeletedMessageRow[]
+): Promise<void> {
+  const firstDeleted = Math.min(...deleted.map((row) => Number(row.seq)))
+  await tx`
+    UPDATE agent_thread_index_state
+    SET stale_from_seq = LEAST(COALESCE(stale_from_seq, ${firstDeleted}), ${firstDeleted})
+    WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
+  `
 }
 
 /**
