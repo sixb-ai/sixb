@@ -120,10 +120,23 @@ interface InMemoryObjectMaterializerAdapter {
   markUniquePropertyPrepared(input: InMemoryPreparedUniqueProperty): void
   deleteArtifactHolder(projectId: string, value: ExactArtifactHolderWrite): void
   insertArtifactHolder(projectId: string, value: ExactArtifactHolderWrite): void
-  /** Drops a property's unique values and preparation, and how many values it held. */
-  dropUniqueProperty(projectId: string, objectTypeId: string, propertyId: string): number
-  /** Drops every artifact holder of a property, and how many there were. */
-  dropArtifactHolders(projectId: string, objectTypeId: string, propertyId: string): number
+  /**
+   * Moves a property's unique values and preparation to `to`, replacing its own, or drops them
+   * when `to` is `null`; returns how many values it held.
+   */
+  moveUniqueProperty(
+    projectId: string,
+    objectTypeId: string,
+    from: string,
+    to: string | null
+  ): number
+  /** Moves every artifact holder of a property to `to`, or drops them; returns how many. */
+  moveArtifactHolders(
+    projectId: string,
+    objectTypeId: string,
+    from: string,
+    to: string | null
+  ): number
 }
 
 const materializerAdapters = new WeakMap<InMemoryObjectStorage, InMemoryObjectMaterializerAdapter>()
@@ -222,26 +235,39 @@ export class InMemoryObjectStorage implements ObjectStorage {
         const { objectTypeId, primaryId, propertyId } = value
         holders.set(artifactHolderKey(value), { objectTypeId, primaryId, propertyId })
       },
-      dropUniqueProperty: (projectId, objectTypeId, propertyId) => {
-        const key = uniquePropertyKey(projectId, objectTypeId, propertyId)
-        const values = this.uniqueValues.get(key)?.size ?? 0
+      moveUniqueProperty: (projectId, objectTypeId, from, to) => {
+        const key = uniquePropertyKey(projectId, objectTypeId, from)
+        const values = this.uniqueValues.get(key)
+        const prepared = this.uniqueProperties.get(key)
         this.uniqueValues.delete(key)
         this.uniqueProperties.delete(key)
-        return values
+
+        if (to !== null) {
+          const moved = uniquePropertyKey(projectId, objectTypeId, to)
+          this.uniqueValues.delete(moved)
+          this.uniqueProperties.delete(moved)
+          if (values) this.uniqueValues.set(moved, values)
+          if (prepared) this.uniqueProperties.set(moved, { ...prepared, propertyId: to })
+        }
+        return values?.size ?? 0
       },
-      dropArtifactHolders: (projectId, objectTypeId, propertyId) => {
-        let dropped = 0
+      moveArtifactHolders: (projectId, objectTypeId, from, to) => {
+        let moved = 0
         for (const [key, holders] of this.artifactHolders) {
           if ((JSON.parse(key) as [string, string])[0] !== projectId) continue
 
-          for (const [holderKey, holder] of holders) {
-            if (holder.objectTypeId !== objectTypeId || holder.propertyId !== propertyId) continue
+          for (const [holderKey, holder] of [...holders]) {
+            if (holder.objectTypeId !== objectTypeId || holder.propertyId !== from) continue
             holders.delete(holderKey)
-            dropped += 1
+            if (to !== null) {
+              const renamed = { ...holder, propertyId: to }
+              holders.set(artifactHolderKey(renamed), renamed)
+            }
+            moved += 1
           }
           if (holders.size === 0) this.artifactHolders.delete(key)
         }
-        return dropped
+        return moved
       },
     })
   }

@@ -3,13 +3,37 @@
  * database has settled. `packages/core/src/migrations/README.md` describes the flow.
  */
 
+import { vectorSources } from "../../objects/vectors/profile"
 import type { TypeShape } from "../../ontology/type-shapes"
 import type { OntologyCommitRecord } from "./commits"
 
 /** One step as storage applies it, on every store that holds its key. */
-export type OntologyMigrationStoreStep = {
-  readonly kind: "removeProperty"
-  readonly propertyId: string
+export type OntologyMigrationStoreStep =
+  | { readonly kind: "removeProperty"; readonly propertyId: string }
+  | {
+      readonly kind: "renameProperty"
+      readonly from: string
+      readonly to: string
+      /**
+       * `move`: `from`'s unique values become `to`'s, as they were prepared the way `to`'s
+       * compare. `drop`: they go, and if `to` is unique its values are built after the run, once
+       * a dry run under `from` found no duplicate.
+       */
+      readonly unique: "move" | "drop"
+    }
+  | { readonly kind: "removeLink"; readonly linkId: string }
+
+/**
+ * A vector profile whose source names a renamed property: its stored vectors keep their
+ * embedding, under the source and configuration the code gives the profile.
+ */
+export interface OntologyMigrationVectorMove {
+  readonly profile: string
+  /** The profile's configuration with the old keys, which the stored vectors were built with. */
+  readonly fromConfiguration: string
+  readonly toConfiguration: string
+  readonly fromSource: readonly string[]
+  readonly toSource: readonly string[]
 }
 
 export interface OntologyMigrationRunType {
@@ -20,6 +44,8 @@ export interface OntologyMigrationRunType {
   readonly toShape: TypeShape
   /** In the order they apply. */
   readonly steps: readonly (OntologyMigrationStoreStep & { readonly migrationId: string })[]
+  /** The vector profiles the type's renames move, if any. */
+  readonly vectors?: readonly OntologyMigrationVectorMove[]
 }
 
 /** What a run applies, fixed when it starts: a resume never reads the code again. */
@@ -35,10 +61,10 @@ export interface OntologyMigrationRunPlan {
  * provider may apply them side by side:
  *
  * - `objects`: one primary-id range of a type, `after` excluded and `through` included, either
- *   open when absent: its objects, edits and the vectors of those objects.
+ *   open when absent: its objects, edits, links and link edits, and the vectors of those objects.
  * - `sources`: one root-key range of a type's source roots, every version's, bounded the same way:
  *   the rows of those roots.
- * - `derived`: a type's unique values and artifact refs.
+ * - `derived`: a type's unique values, artifact refs and source rows of removed links.
  */
 export type OntologyMigrationLane =
   | {
@@ -55,7 +81,8 @@ export type OntologyMigrationLaneCursor =
   | { readonly kind: "sources"; readonly versionId?: string; readonly afterRootKey?: string }
   | {
       readonly kind: "derived"
-      readonly store: "uniqueValues" | "artifactRefs"
+      /** Unique values, then artifact refs, then the source rows of removed links. */
+      readonly store: "uniqueValues" | "artifactRefs" | "sourceLinks"
       /** The provider's key of the last row deleted, in its own terms. */
       readonly after?: readonly string[]
     }
@@ -64,6 +91,8 @@ export type OntologyMigrationLaneCursor =
 export interface OntologyMigrationCounts {
   readonly objects: number
   readonly edits: number
+  /** Links and link edits deleted. */
+  readonly links: number
   readonly vectors: number
   readonly uniqueValues: number
   readonly artifactRefs: number
@@ -153,9 +182,10 @@ export interface OntologyMigrationStorage {
   startRun(input: StartOntologyMigrationRunInput): Promise<OntologyMigrationRunRecord>
 
   /**
-   * Applies the lane's next batch in one transaction: only rows that hold a key the steps remove,
-   * set-based, each rewritten object at `version + 1`; the commit when an object or an edit
-   * changed, and no outbox row; the lane's cursor, batches and counts saved last.
+   * Applies the lane's next batch in one transaction: only rows that hold a key the steps remove
+   * or rename, or a link they remove, set-based, each rewritten object at `version + 1`; the
+   * commit when an object or an edit changed, and no outbox row; the lane's cursor, batches and
+   * counts saved last.
    */
   applyBatch(input: ApplyOntologyMigrationBatchInput): Promise<OntologyMigrationLaneRecord>
 
@@ -174,6 +204,7 @@ export interface OntologyMigrationStorage {
 export const EMPTY_MIGRATION_COUNTS: OntologyMigrationCounts = {
   objects: 0,
   edits: 0,
+  links: 0,
   vectors: 0,
   uniqueValues: 0,
   artifactRefs: 0,
@@ -261,26 +292,87 @@ export function rangeBoundaries(sorted: readonly string[], parts: number): strin
   return boundaries
 }
 
-/** What a type's steps remove, compiled into the keys each store drops in one statement. */
+/** What a type's steps do, compiled into what each store drops and moves in one statement. */
 export interface CompiledMigrationSteps {
+  /** Every key a row is rewritten for: the removed ones and each rename's `from`. */
+  readonly keys: readonly string[]
   readonly removedPropertyIds: readonly string[]
+  /** Disjoint from the removed ids: a `from` is undeclared, a `to` declared. */
+  readonly renames: readonly { readonly from: string; readonly to: string }[]
+  /** Renames whose unique values move, by `from`. */
+  readonly uniqueMoves: readonly { readonly from: string; readonly to: string }[]
+  readonly removedLinkIds: readonly string[]
 }
 
 /** One expression per store, never one statement per step. */
 export function compileMigrationSteps(type: OntologyMigrationRunType): CompiledMigrationSteps {
   const removedPropertyIds: string[] = []
+  const renames: { readonly from: string; readonly to: string }[] = []
+  const uniqueMoves: { readonly from: string; readonly to: string }[] = []
+  const removedLinkIds: string[] = []
 
   for (const step of type.steps) {
     switch (step.kind) {
       case "removeProperty":
         removedPropertyIds.push(step.propertyId)
         break
+      case "renameProperty":
+        renames.push({ from: step.from, to: step.to })
+        if (step.unique === "move") uniqueMoves.push({ from: step.from, to: step.to })
+        break
+      case "removeLink":
+        removedLinkIds.push(step.linkId)
+        break
       default:
-        unknownStep(step.kind)
+        unknownStep(step)
     }
   }
 
-  return { removedPropertyIds }
+  const keys = [...removedPropertyIds, ...renames.map((rename) => rename.from)]
+  return { keys, removedPropertyIds, renames, uniqueMoves, removedLinkIds }
+}
+
+/** `values` with the compiled keys dropped and each renamed value under its `to`. */
+export function moveKeys<T>(
+  values: Readonly<Record<string, T>>,
+  compiled: CompiledMigrationSteps
+): Record<string, T> {
+  const moved: Record<string, T> = {}
+  for (const [key, value] of Object.entries(values)) {
+    if (!compiled.keys.includes(key)) moved[key] = value
+  }
+  for (const { from, to } of compiled.renames) {
+    if (Object.hasOwn(values, from)) moved[to] = values[from]!
+  }
+  return moved
+}
+
+/** A list of property ids with the compiled keys dropped and renamed ones replaced. */
+export function moveKeyList(ids: readonly string[], compiled: CompiledMigrationSteps): string[] {
+  return ids.flatMap((id) => {
+    const rename = compiled.renames.find((candidate) => candidate.from === id)
+    if (rename) return [rename.to]
+    return compiled.keys.includes(id) ? [] : [id]
+  })
+}
+
+/**
+ * The fingerprint a stored vector of a moved profile takes, from its object's properties as
+ * stored before the batch, or `null` when the vector no longer matches them and goes.
+ */
+export function movedVectorFingerprint(
+  move: OntologyMigrationVectorMove,
+  sourceFingerprint: string,
+  properties: Readonly<Record<string, unknown>>
+): string | null {
+  if (vectorSources(move.fromSource, properties).sourceFingerprint !== sourceFingerprint) {
+    return null
+  }
+
+  const values = Object.fromEntries(
+    move.toSource.map((id, index) => [id, properties[move.fromSource[index]!]])
+  )
+  return vectorSources(move.toSource, values).sourceFingerprint
 }
 
 /** The planned type a lane applies to. */
@@ -312,6 +404,7 @@ export function addMigrationCounts(
   return {
     objects: counts.objects + (batch.objects ?? 0),
     edits: counts.edits + (batch.edits ?? 0),
+    links: counts.links + (batch.links ?? 0),
     vectors: counts.vectors + (batch.vectors ?? 0),
     uniqueValues: counts.uniqueValues + (batch.uniqueValues ?? 0),
     artifactRefs: counts.artifactRefs + (batch.artifactRefs ?? 0),
@@ -347,6 +440,6 @@ export function migrationRunAlreadyOpen(runId: string): Error {
   )
 }
 
-function unknownStep(kind: never): never {
-  throw new Error(`[Sixb] This build can't apply a '${String(kind)}' step.`)
+function unknownStep(step: never): never {
+  throw new Error(`[Sixb] This build can't apply a '${(step as { kind: string }).kind}' step.`)
 }

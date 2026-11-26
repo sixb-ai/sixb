@@ -165,7 +165,11 @@ export class PgMaterializationStateReader {
           SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter})
             AS requested_values(object_type_id TEXT, primary_id TEXT)
         )
-        SELECT objects.* FROM objects
+        -- Named, not objects.*: query preparation adds and drops generated columns, which
+        -- would change the result of this cached statement.
+        SELECT object_type_id, primary_id, properties, created_at, updated_at, version,
+          last_commit_id
+        FROM objects
         JOIN requested USING (object_type_id, primary_id)
         WHERE objects.project_id = ${this.projectId}
       `,

@@ -292,8 +292,12 @@ export class PgObjectStorage implements ObjectStorage {
     limit: number
   }): Promise<{ objects: readonly ObjectRow[]; nextPrimaryId?: string }> {
     assertReconciliationPageLimit(params.limit)
+    // Named, not `*`: query preparation and migrations add and drop generated columns, which
+    // would change the result of this cached statement in a transaction that reads it.
     const rows = await this.sql<ObjectDatabaseRow[]>`
-      SELECT * FROM objects
+      SELECT project_id, object_type_id, primary_id, properties, created_at, updated_at, version,
+        last_commit_id
+      FROM objects
       WHERE project_id = ${params.projectId}
         AND object_type_id = ${params.objectTypeId}
         ${params.afterPrimaryId ? this.sql`AND primary_id > ${params.afterPrimaryId}` : this.sql``}

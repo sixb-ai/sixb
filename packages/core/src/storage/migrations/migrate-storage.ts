@@ -1,4 +1,4 @@
-import { applyOntologyMigrations, resumeOntologyMigration } from "../../migrations/run"
+import { applyOntologyMigrations, resumeOntologyMigration, runRenames } from "../../migrations/run"
 import {
   isQueryPreparationCapableStorage,
   type ObjectQueryPreparationResult,
@@ -142,9 +142,11 @@ export async function applyTypeShapes(
 
   // Everything that can fail runs before the run starts, while the old release can still start
   // again: a preparation left by a failed deploy would be stale under the old release's writes,
-  // and trusted by the next deploy. A step that computes values plans them here too, before the
-  // run, which then applies what it planned.
-  await checkUniqueProperties({ ...options, storage, keepObjectTypeIds, rebuild })
+  // and trusted by the next deploy. A rename's values are read under its old id, unless the run
+  // moves them as they are. A step that computes values plans them here too, before the run,
+  // which then applies what it planned.
+  const renames = runRenames(shapes, migrations)
+  await checkUniqueProperties({ ...options, storage, keepObjectTypeIds, rebuild, renames })
 
   // A run records the code's shapes as it finishes: a crash before the preparation below leaves
   // them recorded, and the next deploy would trust what a failed one built. Values the recorded
@@ -164,10 +166,16 @@ export async function applyTypeShapes(
     ...(options.onMigrationRunStarted ? { onStarted: options.onMigrationRunStarted } : {}),
   })
 
-  // Past the point of no return, or with no run at all: the values a run dropped are gone, and the
-  // others are built from the objects it left. Not part of the status: it only reads and writes
+  // Past the point of no return, or with no run at all: the values a run moved are current, those
+  // it dropped are gone, and the others are built from the objects it left. Not part of the status: it only reads and writes
   // rows, and says when it builds values.
   await prepareUniqueProperties({ ...options, storage, keepObjectTypeIds, rebuild })
+
+  // The run dropped the query structures on the keys it removed or renamed: preparation builds
+  // what the code needs that went with them.
+  if (migration && isQueryPreparationCapableStorage(storage)) {
+    await prepareObjectQueries({ ...options, storage })
+  }
 
   await recordTypeShapes(storage, shapes)
   return migration

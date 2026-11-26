@@ -69,7 +69,7 @@ async function dockerCompose(args: readonly string[]): Promise<void> {
   }
 }
 
-type Release = "first" | "withNote" | "withoutGate" | "retypedGate" | "uniqueGate"
+type Release = "first" | "withNote" | "withoutGate" | "retypedGate" | "uniqueGate" | "renamed"
 
 /** One CLI run of `release`, on the test's schema. */
 function sixb(
@@ -127,6 +127,48 @@ async function createJob(schema: string, properties: Readonly<Record<string, str
       .objects(Job)
       .upsert({ properties: { ref: "J-12", ...properties } })
   } finally {
+    await storage.close()
+  }
+}
+
+/** The `renamed` release's `Job`, as the fixture defines it. */
+const RenamedJob = defineObjectType({
+  id: "Job",
+  name: "Job",
+  properties: [
+    prop("ref", "string", { primary: true, required: true }),
+    prop("gateCode", "string", {
+      unique: true,
+      query: { searchable: true, filterable: true, sortable: true },
+    }),
+    prop("hours", "string"),
+  ],
+})
+
+function renamedJobs(host: SixbHost) {
+  return createTestSixb(host).objects(RenamedJob)
+}
+
+/** The `renamed` release's jobs, as its actions read and write them. */
+async function withRenamedJobs(
+  schema: string,
+  run: (jobs: ReturnType<typeof renamedJobs>, storage: PostgresStorage) => Promise<void>
+): Promise<void> {
+  const storage = new PostgresStorage({ connectionString: databaseUrl, schemaName: schema })
+  const host = new SixbHost({
+    id: "cli-type-shapes",
+    ontology: [RenamedJob],
+    storage,
+    broker: new InMemoryBroker(),
+    queues: new InMemoryQueues(),
+    lakeStorage: new InMemoryLakeStorage(),
+    blobStorage: new InMemoryBlobStorage(),
+    auth: { id: "test", kind: "dev" },
+  })
+  try {
+    await run(renamedJobs(host), storage)
+  } finally {
+    await host.closeBroker()
     await storage.close()
   }
 }
@@ -355,6 +397,55 @@ describe("the deploy step", () => {
       expect(Object.keys((await storedShape(schema))?.properties ?? {})).not.toContain("gate")
     },
     CLI_TIMEOUT_MS * 3
+  )
+
+  // The rename runs end to end: `gateCode` is newly unique, so its values are built after the run,
+  // from those `gate` held, once a dry run found no duplicate.
+  test(
+    "`sixb check --migrate` renames a property: reads, filters, sorts, unique lookups and writes",
+    async () => {
+      const schema = await deployedSchema("rename")
+      await createJob(schema, { gate: "B12", hours: "3" })
+
+      const deployed = await sixb(schema, "renamed", ["check", "--migrate"], {
+        SIXB_SHAPES_MIGRATION: "renameGate",
+      })
+      expect(deployed.exitCode).toBe(0)
+      expect(await storedJob(schema)).toEqual({ ref: "J-12", gateCode: "B12", hours: "3" })
+
+      await withRenamedJobs(schema, async (jobs, storage) => {
+        await jobs.upsert({ properties: { ref: "J-13", gateCode: "A7" } })
+
+        const filtered = await jobs
+          .query()
+          .where((job) => job.p.gateCode.eq("B12"))
+          .list()
+        expect(filtered.objects.map((job) => job.primaryId)).toEqual(["J-12"])
+        const sorted = await jobs.query().orderBy(RenamedJob.p.gateCode, "asc").list()
+        expect(sorted.objects.map((job) => job.primaryId)).toEqual(["J-13", "J-12"])
+
+        const held = await storage.objects.getByUniqueValue({
+          projectId: "cli-type-shapes",
+          objectTypeId: "Job",
+          propertyId: "gateCode",
+          valueKey: "B12",
+        })
+        expect(held?.primaryId).toBe("J-12")
+        const taken = await jobs
+          .upsert({ properties: { ref: "J-14", gateCode: "B12" } })
+          .catch((error: unknown) => error)
+        expect(String(taken)).toContain("already has this 'gateCode'")
+      })
+
+      // Revert check: in a provider's `startRun` and `finishRun`, keep `previous_shape`: the
+      // release before the rename then starts on the data the run renamed.
+      const rolledBack = await sixb(schema, "first", ["orchestrator", "--no-migrate"])
+      expect(rolledBack.exitCode).not.toBe(0)
+      expect(rolledBack.stdout + rolledBack.stderr).toContain(
+        "Job: 'gateCode' was removed since its shape was recorded."
+      )
+    },
+    CLI_TIMEOUT_MS * 4
   )
 
   // Removal proof: in `runCheck`, record the shapes before `probe()`; the narrowed shape is then

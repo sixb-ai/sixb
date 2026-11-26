@@ -22,6 +22,36 @@ interface DeclaredUniqueProperty extends UniquePropertyDefinition {
   readonly objectTypeId: string
 }
 
+/** A rename a migration run is about to apply: its values are still stored under `from`. */
+export interface PendingUniqueRename {
+  readonly objectTypeId: string
+  readonly from: string
+  readonly to: string
+  /**
+   * Whether the recorded shape has `from` unique: only then did the release writing it keep its
+   * prepared values current. Others may be a failed deploy's, written past since: see
+   * {@link madeUnique}.
+   */
+  readonly fromUnique: boolean
+}
+
+/**
+ * Whether the run moves `from`'s unique values to `to` as they are: they were prepared with the
+ * keys `to`'s values compare by, and kept current. Otherwise they are dropped, and `to`'s built
+ * after the run, once a dry run under `from` found no duplicate.
+ */
+export function uniqueValuesMove(
+  prepared: readonly PreparedUniqueProperty[],
+  rename: PendingUniqueRename,
+  kind: UniquePropertyDefinition["kind"] | undefined
+): boolean {
+  const from = prepared.find(
+    (candidate) =>
+      candidate.objectTypeId === rename.objectTypeId && candidate.propertyId === rename.from
+  )
+  return rename.fromUnique && kind !== undefined && from !== undefined && isCurrent(from, { kind })
+}
+
 /**
  * Brings the stored unique values in line with the ontology: builds those of a property that is
  * newly unique (or whose keys changed kind or version) from the objects already stored, and drops
@@ -96,6 +126,9 @@ class DryRunRollback extends Error {}
  * property it would build is built in a transaction that always rolls back. A deploy runs this
  * while the old release can still start again, and prepares for real once nothing else can fail:
  * a preparation left behind by a failed deploy would be trusted, stale, by the next one.
+ *
+ * A rename about to run is read under its `from`, where the objects still hold the values, unless
+ * the run moves them as they are.
  */
 export async function checkUniqueProperties(input: UniqueDryRunInput): Promise<void> {
   const [duplicate] = await findUniqueDuplicates(input)
@@ -108,6 +141,7 @@ export interface UniqueDryRunInput {
   readonly ontology: OntologyDefinitionCatalog
   readonly keepObjectTypeIds?: ReadonlySet<string>
   readonly rebuild?: readonly UniquePropertyRef[]
+  readonly renames?: readonly PendingUniqueRename[]
 }
 
 /** Two objects sharing a value of a property the code makes unique. */
@@ -129,15 +163,24 @@ export async function findUniqueDuplicates(
   const declared = declaredUniqueProperties(input.ontology).filter(
     (property) => !(input.keepObjectTypeIds?.has(property.objectTypeId) ?? false)
   )
+  const prepared = await storage.ontology.uniqueValues.listPrepared({ projectId })
   const duplicates: UniqueDuplicate[] = []
 
   for (const property of declared) {
+    const rename = input.renames?.find(
+      (candidate) =>
+        candidate.objectTypeId === property.objectTypeId && candidate.to === property.propertyId
+    )
+    if (rename && uniqueValuesMove(prepared, rename, property.kind)) continue
+
+    const storedKey = rename?.from ?? property.propertyId
     const checked = withRetries(property, () =>
       storage.transaction(
         async (tx) => {
           await backfillProperty(tx, projectId, property, {
             announce: false,
             rebuild: rebuild.has(propertyKey(property)),
+            storedKey,
           })
           throw new DryRunRollback()
         },
@@ -207,22 +250,25 @@ async function withRetries(
 
 /**
  * `announce`: say when values are built, which a dry run doesn't. `rebuild`: build them even when
- * the prepared ones look current.
+ * the prepared ones look current. `storedKey`: where the objects hold the values, the old id of a
+ * rename's dry run, which is always built again.
  */
 async function backfillProperty(
   tx: Storage,
   projectId: string,
   property: DeclaredUniqueProperty,
-  options: { readonly announce: boolean; readonly rebuild: boolean }
+  options: { readonly announce: boolean; readonly rebuild: boolean; readonly storedKey?: string }
 ): Promise<void> {
   const { objectTypeId, propertyId } = property
+  const storedKey = options.storedKey ?? propertyId
   const values = tx.ontology.uniqueValues
   await values.lockPreparation({ projectId })
 
   const current = (await values.listPrepared({ projectId })).find(
     (prepared) => propertyKey(prepared) === propertyKey(property)
   )
-  if (current && isCurrent(current, property) && !options.rebuild) return
+  const rebuilt = options.rebuild || storedKey !== propertyId
+  if (current && isCurrent(current, property) && !rebuilt) return
 
   await values.clear({ projectId, objectTypeId, propertyId })
 
@@ -240,7 +286,7 @@ async function backfillProperty(
 
     const entries: UniqueValueEntry[] = []
     for (const object of page.objects) {
-      const valueKey = uniqueValueKey(property.kind, object.properties[propertyId])
+      const valueKey = uniqueValueKey(property.kind, object.properties[storedKey])
       if (valueKey !== null) entries.push({ valueKey, primaryId: object.primaryId })
     }
     if (entries.length > 0) await values.insert({ projectId, objectTypeId, propertyId, entries })

@@ -11,12 +11,15 @@
 4. **Query preparation**, which only adds indexes.
 5. **Unique preparation, first as a dry run** (`checkUniqueProperties`): each property preparation
    would build is built in a transaction that rolls back, so a duplicate fails the deploy while
-   nothing is written and the old release can still start.
+   nothing is written and the old release can still start. A renamed property is read under its
+   old id, unless the run moves its values as they are.
 6. **Migration steps** the check found data for run (`deploy`, `dev`; `applyTypeShapes`): the
    point of no return.
 7. **Unique preparation** for real (`prepare-unique-properties.ts`), from the objects the run
-   left: the values a run dropped are gone. It leaves alone the types whose data the code doesn't
-   fit: their values rebuilt for the code's shape would drop what a migration has to move.
+   left: the values a run moved are current, those it dropped are gone. It leaves alone the types
+   whose data the code doesn't fit: their values rebuilt for the code's shape would drop what a
+   migration has to move. Query preparation then builds what the code needs that the run dropped
+   on old keys.
 8. **Recording** the new shapes, last, so nothing that can fail runs after it, and settling the
    migrations past which they are recorded (`migrations/README.md`).
 
@@ -25,9 +28,10 @@ A deploy that fails before the point of no return therefore leaves no unique val
 old release, started again, would write such a property without keeping its values, and the next
 deploy would trust them. One that fails after building them, before recording the shapes, still
 can: a property the deploy makes unique, from the recorded shape to the code's, is built again
-from the objects, its dry run included, whatever is prepared (`madeUnique`). A run records the
-code's shapes as it finishes, so a crash before the preparation would leave such values trusted:
-right before the point of no return, those the recorded shape doesn't keep unique are dropped. A
+from the objects, its dry run included, whatever is prepared (`madeUnique`). So is a rename's,
+unless the recorded shape has its old id unique (`uniqueValuesMove`). A run records the code's
+shapes as it finishes, so a crash before the preparation would leave such values trusted: right
+before the point of no return, those the recorded shape doesn't keep unique are dropped. A
 property made unique is a narrowing for the same reason: it pauses writes, so the old release
 can't write a value another object holds while the values are built.
 

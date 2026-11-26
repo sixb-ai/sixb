@@ -26,6 +26,14 @@ const releases = {
   retypedGate: [prop("gate", "integer"), prop("hours", "string")],
   /** Makes `gate` unique: a narrowing unique preparation checks. */
   uniqueGate: [prop("gate", "string", { unique: true }), prop("hours", "string")],
+  /** Renames `gate`, now unique and queried. */
+  renamed: [
+    prop("gateCode", "string", {
+      unique: true,
+      query: { searchable: true, filterable: true, sortable: true },
+    }),
+    prop("hours", "string"),
+  ],
 }
 
 const release = (process.env.SIXB_SHAPES_RELEASE ?? "first") as keyof typeof releases
@@ -48,6 +56,8 @@ const migrations = {
   none: [],
   /** Covers `withoutGate`'s removal. */
   removeGate: [defineMigration("job-gate", Job).removeProperty("gate")],
+  /** Covers `renamed`'s rename. */
+  renameGate: [defineMigration("job-gate-code", Job).renameProperty("gate", "gateCode")],
   /** Gives the primary property a value: refused at load. */
   invalid: [defineMigration("job-ref", Job).fillProperty("ref", () => "R")],
   /** Removes a property `Job` declares again: inert, and `sixb check` says it can go. */

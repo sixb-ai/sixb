@@ -60,4 +60,11 @@ export const renameProperty: StepKind<RenameProperty> = {
     if (change.kind !== "property-removed" || change.effect !== "narrowing") return null
     return { verb: "rename", call: `renameProperty(${quoted(change.propertyId)}, "<new id>")` }
   },
+
+  storeStep: (step, context) => ({
+    kind: "renameProperty",
+    from: step.from,
+    to: step.to,
+    unique: context.uniqueMoves.has(step.from) ? "move" : "drop",
+  }),
 }

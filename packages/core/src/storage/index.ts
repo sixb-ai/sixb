@@ -822,6 +822,7 @@ export type {
   OntologyMigrationRunType,
   OntologyMigrationStorage,
   OntologyMigrationStoreStep,
+  OntologyMigrationVectorMove,
   OntologyOutboxFailure,
   OntologyOutboxFailureCode,
   OntologyOutboxRecord,

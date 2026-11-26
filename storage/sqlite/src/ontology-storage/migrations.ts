@@ -1,11 +1,13 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite"
 import {
   addMigrationCounts,
+  type CompiledMigrationSteps,
   compileMigrationSteps,
   migrationBatchConflict,
   migrationLanes,
   migrationRunAlreadyOpen,
   migrationRunType,
+  movedVectorFingerprint,
   rootKeyEnd,
   rootKeyPrefix,
 } from "@sixb/core/internal/storage"
@@ -17,6 +19,7 @@ import type {
   OntologyMigrationLaneRecord,
   OntologyMigrationRunPlan,
   OntologyMigrationRunRecord,
+  OntologyMigrationRunType,
   OntologyMigrationStorage,
   SettledMigration,
   StartOntologyMigrationRunInput,
@@ -51,8 +54,8 @@ interface LaneOutcome {
 /**
  * Each root call runs in its own write transaction (the root ontology scope opens one), or in the
  * caller's. SQLite has one writer, so lanes run one after another and a type is one range. A batch
- * applies the same ranges as PostgreSQL with `json_remove`, on the rows that hold a removed key;
- * touches are selected back from the rows the batch stamped.
+ * applies the same ranges as PostgreSQL with `json_remove` and `json_set`, on the rows that hold a
+ * key.
  */
 export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage {
   readonly parallelism = 1
@@ -282,10 +285,10 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
     input: ApplyOntologyMigrationBatchInput
   ): LaneOutcome {
     const { projectId } = input
-    const type = lane.objectTypeId
-    const through = laneThrough(lane)
-    const keys = compileMigrationSteps(migrationRunType(plan, type)).removedPropertyIds
+    const type = migrationRunType(plan, lane.objectTypeId)
+    const compiled = compileMigrationSteps(type)
     const after = cursor.afterPrimaryId
+    const through = laneThrough(lane)
 
     const ofType = "project_id = ? AND object_type_id = ?"
     const afterSql = after === undefined ? "" : "AND primary_id > ?"
@@ -295,77 +298,245 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
     const nth = (table: string) =>
       `(SELECT primary_id FROM ${table} WHERE ${ofType} ${afterSql} ${laneEnd}
         ORDER BY primary_id LIMIT 1 OFFSET ?)`
-    const nthParams = [projectId, type, ...afterParams, ...laneEndParams, input.batchRows - 1]
+    const nthParams = [projectId, type.objectTypeId, ...afterParams, ...laneEndParams]
     const bound = this.db
       .query(
         `SELECT CASE WHEN o IS NULL THEN e WHEN e IS NULL OR o < e THEN o ELSE e END AS through
          FROM (SELECT ${nth("objects")} AS o, ${nth("ontology_object_overrides")} AS e)`
       )
-      .get(...nthParams, ...nthParams) as { readonly through: string | null }
+      .get(...nthParams, input.batchRows - 1, ...nthParams, input.batchRows - 1) as {
+      readonly through: string | null
+    }
     const last = bound.through ?? undefined
 
     const end = last ?? through
-    const range = `${ofType} ${afterSql} ${end === undefined ? "" : "AND primary_id <= ?"}`
-    const rangeParams = [projectId, type, ...afterParams, ...(end === undefined ? [] : [end])]
-    const removedList = keys.map(quote).join(", ")
-    const commitId = input.commit.id
+    const range = (column: string) =>
+      `${after === undefined ? "" : `AND ${column} > ?`} ${end === undefined ? "" : `AND ${column} <= ?`}`
+    const rangeParams = [...afterParams, ...(end === undefined ? [] : [end])]
+    const batch = {
+      sql: `${ofType} ${range("primary_id")}`,
+      params: [projectId, type.objectTypeId, ...rangeParams],
+    }
 
-    const objects = this.db
-      .query(
-        `UPDATE objects
-         SET properties = ${removeKeys("objects.properties", keys)}, version = version + 1,
-           last_commit_id = ?
-         WHERE ${range} AND ${holdsKey("objects.properties", keys)}`
-      )
-      .run(commitId, ...rangeParams).changes
-
-    // Qualified: inside `json_each(...)`, a bare `value` is json_each's own column.
-    const edit = "ontology_object_overrides.value"
-    const unsetKept = `(SELECT json_group_array(item.value) FROM json_each(${edit}, '$.unset') AS item
-      WHERE item.value NOT IN (${removedList}))`
-    const unsetHolds = `EXISTS (SELECT 1 FROM json_each(${edit}, '$.unset') AS item
-      WHERE item.value IN (${removedList}))`
-    const edits = this.db
-      .query(
-        `UPDATE ontology_object_overrides
-         SET value = CASE json_extract(value, '$.kind')
-             WHEN 'create' THEN json_set(
-               value, '$.properties', ${removeKeys(`${edit} -> '$.properties'`, keys)}
-             )
-             WHEN 'patch' THEN json_set(
-               value, '$.set', ${removeKeys(`${edit} -> '$.set'`, keys)},
-               '$.unset', json(${unsetKept})
-             )
-             ELSE value
-           END,
-           edited_at = ${removeKeys("ontology_object_overrides.edited_at", keys)},
-           last_commit_id = ?
-         WHERE ${range} AND (${holdsKey(`${edit} -> '$.properties'`, keys)}
-           OR ${holdsKey(`${edit} -> '$.set'`, keys)} OR ${unsetHolds}
-           OR ${holdsKey("ontology_object_overrides.edited_at", keys)})`
-      )
-      .run(commitId, ...rangeParams).changes
-
-    const vectors = this.db
-      .query(
-        `DELETE FROM object_vectors WHERE ${range}
-         AND EXISTS (SELECT 1 FROM json_each(source) AS item WHERE item.value IN (${removedList}))`
-      )
-      .run(...rangeParams).changes
+    // Before the objects: a moved vector, or queued indexing, is checked against the values it
+    // was built or asked for.
+    const moved =
+      this.moveVectors(projectId, type, batch) + this.moveIndexingWork(projectId, type, batch)
+    const { objects, edits, vectors } = this.rewriteObjects(input, compiled, batch)
+    const links = this.deleteLinks(projectId, type.objectTypeId, compiled, range, rangeParams)
 
     // No touch: `startRun` dropped every plan that would read one.
     if (objects + edits > 0) insertSqliteRuntimeCommit(this.db, input.commit)
 
     return {
-      counts: { objects, edits, vectors },
+      counts: { objects, edits, links, vectors: vectors + moved },
       cursor: last === undefined ? null : { kind: "objects", afterPrimaryId: last },
     }
   }
 
+  /** Objects and edits that hold a key, and the vectors whose source held one. */
+  private rewriteObjects(
+    input: ApplyOntologyMigrationBatchInput,
+    compiled: CompiledMigrationSteps,
+    batch: { readonly sql: string; readonly params: readonly SQLQueryBindings[] }
+  ): { readonly objects: number; readonly edits: number; readonly vectors: number } {
+    const { keys } = compiled
+    if (keys.length === 0) return { objects: 0, edits: 0, vectors: 0 }
+
+    const keyList = keys.map(quote).join(", ")
+    const commitId = input.commit.id
+
+    const objects = this.db
+      .query(
+        `UPDATE objects
+         SET properties = ${moved("objects.properties", compiled)}, version = version + 1,
+           last_commit_id = ?
+         WHERE ${batch.sql} AND ${holdsKey("objects.properties", keys)}`
+      )
+      .run(commitId, ...batch.params).changes
+
+    // Qualified: inside `json_each(...)`, a bare `value` is json_each's own column.
+    const edit = "ontology_object_overrides.value"
+    const unset = `${edit} -> '$.unset'`
+    const unsetHolds = `EXISTS (SELECT 1 FROM json_each(${unset}) AS item
+      WHERE item.value IN (${keyList}))`
+    const edits = this.db
+      .query(
+        `UPDATE ontology_object_overrides
+         SET value = CASE json_extract(value, '$.kind')
+             WHEN 'create' THEN
+               json_set(value, '$.properties', ${moved(`${edit} -> '$.properties'`, compiled)})
+             WHEN 'patch' THEN json_set(
+               value, '$.set', ${moved(`${edit} -> '$.set'`, compiled)},
+               '$.unset', ${movedList(unset, compiled)}
+             )
+             ELSE value
+           END,
+           edited_at = ${moved("ontology_object_overrides.edited_at", compiled)},
+           last_commit_id = ?
+         WHERE ${batch.sql} AND (${holdsKey(`${edit} -> '$.properties'`, keys)}
+           OR ${holdsKey(`${edit} -> '$.set'`, keys)} OR ${unsetHolds}
+           OR ${holdsKey("ontology_object_overrides.edited_at", keys)})`
+      )
+      .run(commitId, ...batch.params).changes
+
+    const vectors = this.db
+      .query(
+        `DELETE FROM object_vectors WHERE ${batch.sql}
+         AND EXISTS (SELECT 1 FROM json_each(source) AS item WHERE item.value IN (${keyList}))`
+      )
+      .run(...batch.params).changes
+
+    return { objects, edits, vectors }
+  }
+
   /**
-   * Up to `batchRows` unique values, then artifact refs, of the removed properties; the
-   * properties' preparation goes with the last unique values. SQLite deletes rows in place, so a
-   * value batch seeks the key prefix again; refs, keyed by artifact first, walk by rowid.
+   * The batch's vectors of a moved profile: their fingerprint hashes key names, so it is computed
+   * again here, from the values the object holds before the batch, for these rows only. A vector
+   * that no longer matches them is left for the delete that follows.
+   */
+  private moveVectors(
+    projectId: string,
+    type: OntologyMigrationRunType,
+    batch: { readonly sql: string; readonly params: readonly SQLQueryBindings[] }
+  ): number {
+    const moves = type.vectors ?? []
+    if (moves.length === 0) return 0
+
+    const rows = this.db
+      .query(
+        `SELECT vectors.primary_id, vectors.profile, vectors.configuration,
+           vectors.source_fingerprint, objects.properties
+         FROM object_vectors AS vectors
+         JOIN objects USING (project_id, object_type_id, primary_id)
+         WHERE vectors.${batch.sql} AND vectors.profile IN (${moves.map(() => "?").join(", ")})`
+      )
+      .all(...batch.params, ...moves.map((move) => move.profile)) as {
+      readonly primary_id: string
+      readonly profile: string
+      readonly configuration: string
+      readonly source_fingerprint: string
+      readonly properties: string
+    }[]
+
+    const update = this.db.query(
+      `UPDATE object_vectors SET source = ?, configuration = ?, source_fingerprint = ?
+       WHERE project_id = ? AND object_type_id = ? AND primary_id = ? AND profile = ?`
+    )
+    let rewritten = 0
+    for (const row of rows) {
+      const move = moves.find(
+        (candidate) =>
+          candidate.profile === row.profile && candidate.fromConfiguration === row.configuration
+      )
+      const fingerprint =
+        move && movedVectorFingerprint(move, row.source_fingerprint, JSON.parse(row.properties))
+      if (!move || !fingerprint) continue
+
+      update.run(
+        JSON.stringify(move.toSource),
+        move.toConfiguration,
+        fingerprint,
+        projectId,
+        type.objectTypeId,
+        row.primary_id,
+        row.profile
+      )
+      rewritten += 1
+    }
+    return rewritten
+  }
+
+  /**
+   * The batch's queued indexing of a moved profile, asked for under the old keys: it takes the
+   * profile's new configuration and the fingerprint of the same values under the new keys, or
+   * goes when its object no longer holds the values it was asked for.
+   */
+  private moveIndexingWork(
+    projectId: string,
+    type: OntologyMigrationRunType,
+    batch: { readonly sql: string; readonly params: readonly SQLQueryBindings[] }
+  ): number {
+    const moves = type.vectors ?? []
+    if (moves.length === 0) return 0
+
+    const rows = this.db
+      .query(
+        `SELECT work.id, work.profile, json_extract(work.request, '$.configuration') AS configuration,
+           json_extract(work.request, '$.sourceFingerprint') AS source_fingerprint,
+           objects.properties
+         FROM object_vector_indexing AS work
+         JOIN objects USING (project_id, object_type_id, primary_id)
+         WHERE work.${batch.sql} AND work.profile IN (${moves.map(() => "?").join(", ")})`
+      )
+      .all(...batch.params, ...moves.map((move) => move.profile)) as {
+      readonly id: string
+      readonly profile: string
+      readonly configuration: string
+      readonly source_fingerprint: string
+      readonly properties: string
+    }[]
+
+    const update = this.db.query(
+      `UPDATE object_vector_indexing
+       SET request = json_set(request, '$.configuration', ?, '$.sourceFingerprint', ?)
+       WHERE project_id = ? AND id = ?`
+    )
+    const remove = this.db.query(
+      `DELETE FROM object_vector_indexing WHERE project_id = ? AND id = ?`
+    )
+    let rewritten = 0
+    for (const row of rows) {
+      const move = moves.find(
+        (candidate) =>
+          candidate.profile === row.profile && candidate.fromConfiguration === row.configuration
+      )
+      if (!move) continue
+
+      const fingerprint = movedVectorFingerprint(
+        move,
+        row.source_fingerprint,
+        JSON.parse(row.properties)
+      )
+      if (fingerprint) update.run(move.toConfiguration, fingerprint, projectId, row.id)
+      else remove.run(projectId, row.id)
+      rewritten += 1
+    }
+    return rewritten
+  }
+
+  /** The batch's links of a removed link, by source, and their edits: edges and every slot. */
+  private deleteLinks(
+    projectId: string,
+    objectTypeId: string,
+    compiled: CompiledMigrationSteps,
+    range: (column: string) => string,
+    rangeParams: readonly SQLQueryBindings[]
+  ): number {
+    const linkIds = compiled.removedLinkIds
+    if (linkIds.length === 0) return 0
+
+    const ofLink = `project_id = ? AND source_type_id = ?
+      AND link_id IN (${linkIds.map(() => "?").join(", ")})`
+    const params = [projectId, objectTypeId, ...linkIds, ...rangeParams]
+
+    const links = this.db
+      .query(`DELETE FROM links WHERE ${ofLink} ${range("source_id")}`)
+      .run(...params).changes
+    const edits = this.db
+      .query(`DELETE FROM ontology_link_overrides WHERE ${ofLink} ${range("source_primary_id")}`)
+      .run(...params).changes
+
+    return links + edits
+  }
+
+  /**
+   * Up to `batchRows` unique values, then artifact refs, of the removed and renamed properties,
+   * then source rows of removed links. A renamed property's refs move to its new id; its unique
+   * values move when the plan says they compare as the new id's do, and go otherwise, to be built
+   * after the run. The properties' preparation follows with the last unique values. SQLite
+   * rewrites rows in place, so a value batch seeks the key prefix again; refs, keyed by artifact
+   * first, walk by rowid.
    */
   private applyDerived(
     plan: OntologyMigrationRunPlan,
@@ -374,24 +545,68 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
     input: ApplyOntologyMigrationBatchInput
   ): LaneOutcome {
     const { projectId, batchRows } = input
-    const keys = compileMigrationSteps(migrationRunType(plan, objectTypeId)).removedPropertyIds
-    const ofProperty = `project_id = ? AND object_type_id = ?
-      AND property_id IN (${keys.map(() => "?").join(", ")})`
-    const params: SQLQueryBindings[] = [projectId, objectTypeId, ...keys]
+    const compiled = compileMigrationSteps(migrationRunType(plan, objectTypeId))
+    const ofType = "project_id = ? AND object_type_id = ?"
+    const ofProperties = (ids: readonly string[]) =>
+      `${ofType} AND property_id IN (${ids.map(quote).join(", ")})`
+    const renamed = (pairs: readonly { readonly from: string; readonly to: string }[]) =>
+      `CASE property_id ${pairs.map(({ from, to }) => `WHEN ${quote(from)} THEN ${quote(to)}`).join(" ")} END`
+    const moves = compiled.uniqueMoves
+    const dropped = compiled.keys.filter((key) => !moves.some((move) => move.from === key))
+
+    if (cursor.store === "sourceLinks") {
+      const sources = this.deleteSourceLinks(projectId, objectTypeId, compiled, batchRows)
+      return { counts: { sources }, cursor: sources === batchRows ? cursor : null }
+    }
 
     if (cursor.store === "uniqueValues") {
-      const uniqueValues = this.db
-        .query(
-          `DELETE FROM object_unique_values WHERE rowid IN (
-             SELECT rowid FROM object_unique_values WHERE ${ofProperty} LIMIT ?
-           )`
-        )
-        .run(...params, batchRows).changes
-      if (uniqueValues === batchRows) {
-        return { counts: { uniqueValues }, cursor: { kind: "derived", store: "uniqueValues" } }
+      // What a moved property's new id may already hold goes first, before any value moves there.
+      const toIds = moves.map((move) => move.to)
+      if (cursor.after === undefined && moves.length > 0) {
+        for (const table of ["object_unique_values", "object_unique_properties"]) {
+          this.db
+            .query(`DELETE FROM ${table} WHERE ${ofProperties(toIds)}`)
+            .run(projectId, objectTypeId)
+        }
       }
 
-      this.db.query(`DELETE FROM object_unique_properties WHERE ${ofProperty}`).run(...params)
+      const batch = `SELECT rowid FROM object_unique_values WHERE ${ofProperties(compiled.keys)} LIMIT ?`
+      const rows = this.db
+        .query(`SELECT json_group_array(rowid) AS ids, count(*) AS rows FROM (${batch})`)
+        .get(projectId, objectTypeId, batchRows) as { readonly ids: string; readonly rows: number }
+      const inBatch = "rowid IN (SELECT value FROM json_each(?))"
+      if (moves.length > 0) {
+        this.db
+          .query(
+            `UPDATE object_unique_values SET property_id = ${renamed(moves)}
+             WHERE ${inBatch} AND ${ofProperties(moves.map((move) => move.from))}`
+          )
+          .run(rows.ids, projectId, objectTypeId)
+      }
+      this.db
+        .query(`DELETE FROM object_unique_values WHERE ${inBatch} AND ${ofProperties(dropped)}`)
+        .run(rows.ids, projectId, objectTypeId)
+
+      // Moved rows leave the keys, dropped ones go: the next batch seeks the prefix again.
+      const uniqueValues = rows.rows
+      if (uniqueValues === batchRows) {
+        return {
+          counts: { uniqueValues },
+          cursor: { kind: "derived", store: "uniqueValues", after: [] },
+        }
+      }
+
+      if (moves.length > 0) {
+        this.db
+          .query(
+            `UPDATE object_unique_properties SET property_id = ${renamed(moves)}
+             WHERE ${ofProperties(moves.map((move) => move.from))}`
+          )
+          .run(projectId, objectTypeId)
+      }
+      this.db
+        .query(`DELETE FROM object_unique_properties WHERE ${ofProperties(dropped)}`)
+        .run(projectId, objectTypeId)
       return { counts: { uniqueValues }, cursor: { kind: "derived", store: "artifactRefs" } }
     }
 
@@ -403,28 +618,90 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
          )`
       )
       .get(after, batchRows) as { readonly rows: number; readonly last: number | null }
-    const artifactRefs =
-      batch.last === null
-        ? 0
-        : this.db
-            .query(
-              `DELETE FROM object_artifact_refs WHERE rowid > ? AND rowid <= ? AND ${ofProperty}`
-            )
-            .run(after, batch.last, ...params).changes
+    const window = "rowid > ? AND rowid <= ?"
 
-    if (batch.rows < batchRows || batch.last === null)
-      return { counts: { artifactRefs }, cursor: null }
+    let artifactRefs = 0
+    if (batch.last !== null) {
+      artifactRefs += this.db
+        .query(
+          `DELETE FROM object_artifact_refs
+           WHERE ${window} AND ${ofProperties(compiled.removedPropertyIds)}`
+        )
+        .run(after, batch.last, projectId, objectTypeId).changes
+      if (compiled.renames.length > 0) {
+        artifactRefs += this.db
+          .query(
+            `UPDATE object_artifact_refs SET property_id = ${renamed(compiled.renames)}
+             WHERE ${window} AND ${ofProperties(compiled.renames.map((rename) => rename.from))}`
+          )
+          .run(after, batch.last, projectId, objectTypeId).changes
+      }
+    }
+
+    if (batch.rows === batchRows && batch.last !== null) {
+      return {
+        counts: { artifactRefs },
+        cursor: { kind: "derived", store: "artifactRefs", after: [String(batch.last)] },
+      }
+    }
+
+    const links = compiled.removedLinkIds.length > 0
     return {
       counts: { artifactRefs },
-      cursor: { kind: "derived", store: "artifactRefs", after: [String(batch.last)] },
+      cursor: links ? { kind: "derived", store: "sourceLinks" } : null,
     }
+  }
+
+  /**
+   * Up to `batchRows` source rows, of every version, of a removed link whose source is of the
+   * type, through the link-source index, and their versions' assertion counts with them. The rows
+   * go, so the next batch starts where this one left off without a cursor.
+   */
+  private deleteSourceLinks(
+    projectId: string,
+    objectTypeId: string,
+    compiled: CompiledMigrationSteps,
+    batchRows: number
+  ): number {
+    const linkIds = compiled.removedLinkIds
+    const batch = this.db
+      .query(
+        `SELECT json_group_array(rowid) AS ids, count(*) AS rows FROM (
+           SELECT rows.rowid FROM ontology_source_rows AS rows
+           JOIN ontology_source_roots AS roots ON roots.id = rows.root_id
+           WHERE rows.entity_kind = 'link' AND rows.source_type_id = ?
+             AND rows.link_id IN (${linkIds.map(() => "?").join(", ")}) AND roots.project_id = ?
+           LIMIT ?
+         )`
+      )
+      .get(objectTypeId, ...linkIds, projectId, batchRows) as {
+      readonly ids: string
+      readonly rows: number
+    }
+    const inBatch = "SELECT value FROM json_each(?)"
+
+    this.db
+      .query(
+        `UPDATE ontology_sources SET assertion_count = assertion_count - removed.rows
+         FROM (
+           SELECT roots.version_id, count(*) AS rows FROM ontology_source_rows AS rows
+           JOIN ontology_source_roots AS roots ON roots.id = rows.root_id
+           WHERE rows.rowid IN (${inBatch}) GROUP BY roots.version_id
+         ) AS removed
+         WHERE ontology_sources.version_id = removed.version_id`
+      )
+      .run(batch.ids)
+    this.db.query(`DELETE FROM ontology_source_rows WHERE rowid IN (${inBatch})`).run(batch.ids)
+
+    return batch.rows
   }
 
   /**
    * Up to `batchRows` source roots of the lane's root-key range in one version, by root key, every
    * version in turn (active, candidates and retired, deletions included), found through
    * `(version_id, root_key)`. Their rows lose the keys from their values and from
-   * `absentSourcePropertyIds`, which goes once empty, as a staged row never holds an empty one.
+   * `absentSourcePropertyIds`, renamed ones under their new id, and the list goes once empty, as a
+   * staged row never holds an empty one.
    */
   private applySources(
     plan: OntologyMigrationRunPlan,
@@ -434,8 +711,9 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
   ): LaneOutcome {
     const { projectId, batchRows } = input
     const { objectTypeId } = lane
+    const compiled = compileMigrationSteps(migrationRunType(plan, objectTypeId))
     const versionId = cursor.versionId ?? this.nextVersion(projectId, undefined)
-    if (versionId === undefined) return { counts: {}, cursor: null }
+    if (versionId === undefined || compiled.keys.length === 0) return { counts: {}, cursor: null }
 
     // One lower and one upper bound each: SQLite seeks the index on one of each, and a second
     // upper bound would leave the rest of the type's keys to scan.
@@ -457,13 +735,14 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
       readonly last: string | null
     }
 
-    const keys = compileMigrationSteps(migrationRunType(plan, objectTypeId)).removedPropertyIds
+    const { keys } = compiled
     const removedList = keys.map(quote).join(", ")
-    const absentKept = `(SELECT json_group_array(item.value)
-      FROM json_each(payload, '$.absentSourcePropertyIds') AS item
-      WHERE item.value NOT IN (${removedList}))`
+    const absentKept = movedList(
+      "ontology_source_rows.payload -> '$.absentSourcePropertyIds'",
+      compiled
+    )
     const values = `json_set(payload, '$.properties',
-      ${removeKeys("coalesce(ontology_source_rows.payload -> '$.properties', '{}')", keys)})`
+      ${moved("coalesce(ontology_source_rows.payload -> '$.properties', '{}')", compiled)})`
     const holds = holdsKey("ontology_source_rows.payload -> '$.properties'", keys)
 
     const sources = bound.last
@@ -473,7 +752,7 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
              SET payload = CASE
                WHEN json_array_length(${absentKept}) = 0
                  THEN json_remove(${values}, '$.absentSourcePropertyIds')
-               ELSE json_set(${values}, '$.absentSourcePropertyIds', json(${absentKept}))
+               ELSE json_set(${values}, '$.absentSourcePropertyIds', ${absentKept})
              END
              WHERE root_id IN (
                  SELECT id FROM ontology_source_roots
@@ -603,4 +882,42 @@ function jsonPath(propertyId: string): string {
 /** A SQL string literal: property ids are definition data, never input, and few. */
 function quote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
+}
+
+/**
+ * A JSON object with the compiled keys dropped and each renamed value under its new id, rebuilt
+ * from its members once: the expression grows by one `WHEN` per rename, where wrapping it once per
+ * rename overflowed SQLite's parser at a dozen. Only a member the object holds moves, so an absent
+ * one stays absent, and a `to` the object holds beside its `from` gives way to it. `column` must
+ * be qualified: inside `json_each`, a bare `value` or `key` is json_each's own.
+ */
+function moved(column: string, compiled: CompiledMigrationSteps): string {
+  const { renames } = compiled
+  if (renames.length === 0) return removeKeys(column, compiled.keys)
+
+  const cases = (value: (rename: { readonly from: string; readonly to: string }) => string) =>
+    renames.map((rename) => `WHEN ${quote(rename.from)} THEN ${value(rename)}`).join(" ")
+  const key = `CASE item.key ${cases(({ to }) => quote(to))} ELSE item.key END`
+  // A `to` gives way to its `from`, found through one flat `CASE`: an `OR` per rename reaches
+  // SQLite's expression depth of 1,000 at a few hundred.
+  const fromOf = `CASE item.key ${renames
+    .map(({ from, to }) => `WHEN ${quote(to)} THEN ${quote(jsonPath(from))}`)
+    .join(" ")} END`
+
+  return `(SELECT json_group_object(${key}, ${column} -> item.fullkey)
+    FROM json_each(${column}) AS item
+    WHERE item.key NOT IN (${compiled.removedPropertyIds.map(quote).join(", ")})
+      AND NOT (item.key IN (${renames.map(({ to }) => quote(to)).join(", ")})
+        AND json_type(${column}, ${fromOf}) IS NOT NULL))`
+}
+
+/** A JSON array of property ids with the compiled keys dropped and renamed ones replaced. */
+function movedList(column: string, compiled: CompiledMigrationSteps): string {
+  const renamed = compiled.renames
+    .map(({ from, to }) => `WHEN ${quote(from)} THEN ${quote(to)}`)
+    .join(" ")
+  const value = renamed ? `CASE item.value ${renamed} ELSE item.value END` : "item.value"
+
+  return `json((SELECT json_group_array(${value}) FROM json_each(${column}) AS item
+    WHERE item.value NOT IN (${compiled.removedPropertyIds.map(quote).join(", ")})))`
 }

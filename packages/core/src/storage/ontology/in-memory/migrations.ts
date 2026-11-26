@@ -1,5 +1,9 @@
 import type { JsonValue } from "../../../json"
-import type { ObjectOverride, ProjectionSourceAssertion } from "../../../materialization/model"
+import type {
+  ObjectOverride,
+  OntologyObjectRef,
+  ProjectionSourceAssertion,
+} from "../../../materialization/model"
 import {
   getInMemoryObjectMaterializerAdapter,
   type InMemoryObjectStorage,
@@ -7,16 +11,21 @@ import {
 import {
   type ApplyOntologyMigrationBatchInput,
   addMigrationCounts,
+  type CompiledMigrationSteps,
   compileMigrationSteps,
   migrationBatchConflict,
   migrationLanes,
   migrationRunAlreadyOpen,
   migrationRunType,
+  movedVectorFingerprint,
+  moveKeyList,
+  moveKeys,
   type OntologyMigrationCounts,
   type OntologyMigrationLane,
   type OntologyMigrationLaneCursor,
   type OntologyMigrationLaneRecord,
   type OntologyMigrationRunRecord,
+  type OntologyMigrationRunType,
   type OntologyMigrationStorage,
   rangeBoundaries,
   type SettledMigration,
@@ -218,14 +227,16 @@ export class InMemoryOntologyMigrationStorage implements OntologyMigrationStorag
     cursor: Extract<OntologyMigrationLaneCursor, { kind: "objects" }>,
     input: ApplyOntologyMigrationBatchInput
   ): LaneOutcome {
-    const through = "through" in lane ? lane.through : undefined
+    const laneEnd = "through" in lane ? lane.through : undefined
     const { projectId } = run
     const { objectTypeId } = lane
-    const keys = compileMigrationSteps(migrationRunType(run.plan, objectTypeId)).removedPropertyIds
+    const type = migrationRunType(run.plan, objectTypeId)
+    const compiled = compileMigrationSteps(type)
+    const { keys } = compiled
     const adapter = getInMemoryObjectMaterializerAdapter(this.objects)
     const inLane = (primaryId: string) =>
       (cursor.afterPrimaryId === undefined || primaryId > cursor.afterPrimaryId) &&
-      (through === undefined || primaryId <= through)
+      (laneEnd === undefined || primaryId <= laneEnd)
 
     const objects: Parameters<Parameters<typeof adapter.visitExactObjects>[2]>[0][] = []
     adapter.visitExactObjects(projectId, objectTypeId, (row) => {
@@ -240,16 +251,19 @@ export class InMemoryOntologyMigrationStorage implements OntologyMigrationStorag
     objects.sort((left, right) => compare(left.primaryId, right.primaryId))
     overrides.sort(([, left], [, right]) => compare(left.ref.primaryId, right.ref.primaryId))
 
-    const last = lowest(
+    const through = lowest(
       objects[input.batchRows - 1]?.primaryId,
       overrides[input.batchRows - 1]?.[1].ref.primaryId
     )
-    const inBatch = (primaryId: string) => last === undefined || primaryId <= last
+    const inBatch = (primaryId: string) =>
+      inLane(primaryId) && (through === undefined || primaryId <= through)
     const commitId = input.commit.id
     let changed = false
     let rewrittenObjects = 0
     let rewrittenEdits = 0
-    let droppedVectors = 0
+
+    // Before the objects: a moved vector is checked against the values it was built from.
+    const vectors = this.applyVectors(run, type, compiled, inBatch)
 
     for (const row of objects) {
       if (!inBatch(row.primaryId) || !holdsAny(row.properties, keys)) continue
@@ -258,7 +272,7 @@ export class InMemoryOntologyMigrationStorage implements OntologyMigrationStorag
       adapter.applyExactObject(
         {
           ref,
-          properties: without(row.properties as Record<string, JsonValue>, keys),
+          properties: moveKeys(row.properties as Record<string, JsonValue>, compiled),
           version: row.version + 1,
           createdAt: row.createdAt.toISOString(),
           updatedAt: row.updatedAt.toISOString(),
@@ -273,56 +287,227 @@ export class InMemoryOntologyMigrationStorage implements OntologyMigrationStorag
     for (const [key, row] of overrides) {
       if (!inBatch(row.ref.primaryId)) continue
 
-      const value = withoutInOverride(row.value, keys)
+      const value = movedOverride(row.value, compiled)
       const editedAt = row.editedAt ?? {}
       if (value === row.value && !holdsAny(editedAt, keys)) continue
 
+      // Edit times move with their values: lineage still finds the edit that set it.
       this.state.objectOverrides.set(key, {
         ...row,
         value,
-        editedAt: without(editedAt, keys),
+        editedAt: moveKeys(editedAt, compiled),
         lastCommitId: commitId,
       })
       changed = true
       rewrittenEdits += 1
     }
 
-    for (const [key, vectors] of this.state.vectors) {
-      const [vectorProjectId, vectorTypeId, primaryId] = JSON.parse(key) as string[]
-      if (vectorProjectId !== projectId || vectorTypeId !== objectTypeId) continue
-      if (!inLane(primaryId!) || !inBatch(primaryId!)) continue
+    const links = this.deleteLinks(projectId, objectTypeId, compiled.removedLinkIds, inBatch)
+    if (changed) this.snapshots.commit(input.commit)
 
+    return {
+      counts: { objects: rewrittenObjects, edits: rewrittenEdits, links, vectors },
+      cursor: through === undefined ? null : { kind: "objects", afterPrimaryId: through },
+    }
+  }
+
+  /**
+   * The batch's vectors whose source held a key: one of a moved profile takes its new source,
+   * configuration and fingerprint, and keeps its embedding; every other one goes.
+   */
+  private applyVectors(
+    run: OntologyMigrationRunRecord,
+    type: OntologyMigrationRunType,
+    compiled: CompiledMigrationSteps,
+    inBatch: (primaryId: string) => boolean
+  ): number {
+    const adapter = getInMemoryObjectMaterializerAdapter(this.objects)
+    let rewritten = 0
+
+    for (const [key, vectors] of this.state.vectors) {
+      const [projectId, objectTypeId, primaryId] = JSON.parse(key) as [string, string, string]
+      if (projectId !== run.projectId || objectTypeId !== type.objectTypeId) continue
+      if (!inBatch(primaryId)) continue
+
+      const properties = adapter.getExactObjectRow(projectId, objectTypeId, primaryId)?.properties
       for (const [profile, vector] of vectors) {
-        if (!vector.source.some((source) => keys.includes(source))) continue
-        vectors.delete(profile)
-        droppedVectors += 1
+        if (!vector.source.some((source) => compiled.keys.includes(source))) continue
+        rewritten += 1
+
+        const move = type.vectors?.find(
+          (candidate) =>
+            candidate.profile === profile && candidate.fromConfiguration === vector.configuration
+        )
+        const fingerprint =
+          move && properties
+            ? movedVectorFingerprint(move, vector.sourceFingerprint, properties)
+            : null
+        if (!move || fingerprint === null) {
+          vectors.delete(profile)
+          continue
+        }
+
+        vectors.set(profile, {
+          ...vector,
+          source: [...move.toSource],
+          configuration: move.toConfiguration,
+          sourceFingerprint: fingerprint,
+        })
       }
       if (vectors.size === 0) this.state.vectors.delete(key)
     }
 
-    if (changed) this.snapshots.commit(input.commit)
-
-    return {
-      counts: { objects: rewrittenObjects, edits: rewrittenEdits, vectors: droppedVectors },
-      cursor: last === undefined ? null : { kind: "objects", afterPrimaryId: last },
-    }
+    return rewritten + this.moveIndexingWork(run, type, inBatch)
   }
 
+  /**
+   * The batch's queued indexing of a moved profile, asked for under the old keys: it takes the
+   * profile's new configuration and the fingerprint of the same values under the new keys, or
+   * goes when its object no longer holds the values it was asked for.
+   */
+  private moveIndexingWork(
+    run: OntologyMigrationRunRecord,
+    type: OntologyMigrationRunType,
+    inBatch: (primaryId: string) => boolean
+  ): number {
+    const moves = type.vectors ?? []
+    if (moves.length === 0) return 0
+
+    const adapter = getInMemoryObjectMaterializerAdapter(this.objects)
+    let rewritten = 0
+
+    for (const [key, work] of this.state.vectorIndexing) {
+      if (work.projectId !== run.projectId || work.ref.objectTypeId !== type.objectTypeId) continue
+      if (!inBatch(work.ref.primaryId)) continue
+
+      const move = moves.find(
+        (candidate) =>
+          candidate.profile === work.profile && candidate.fromConfiguration === work.configuration
+      )
+      if (!move) continue
+
+      const properties = adapter.getExactObjectRow(
+        run.projectId,
+        work.ref.objectTypeId,
+        work.ref.primaryId
+      )?.properties
+      const fingerprint =
+        properties && movedVectorFingerprint(move, work.sourceFingerprint, properties)
+      rewritten += 1
+
+      if (!fingerprint) {
+        this.state.vectorIndexing.delete(key)
+        continue
+      }
+      this.state.vectorIndexing.set(key, {
+        ...work,
+        configuration: move.toConfiguration,
+        sourceFingerprint: fingerprint,
+      })
+    }
+
+    return rewritten
+  }
+
+  /** The batch's links of a removed link, and their edits: edges, and slots of every kind. */
+  private deleteLinks(
+    projectId: string,
+    objectTypeId: string,
+    linkIds: readonly string[],
+    inBatch: (primaryId: string) => boolean
+  ): number {
+    if (linkIds.length === 0) return 0
+
+    const adapter = getInMemoryObjectMaterializerAdapter(this.objects)
+    const removed = (source: OntologyObjectRef, linkId: string) =>
+      source.objectTypeId === objectTypeId && linkIds.includes(linkId) && inBatch(source.primaryId)
+
+    const links: Parameters<Parameters<typeof adapter.visitExactLinks>[1]>[0][] = []
+    adapter.visitExactLinks(projectId, (row) => {
+      const source = { objectTypeId: row.sourceTypeId, primaryId: row.sourceId }
+      if (removed(source, row.linkId)) links.push(row)
+    })
+    for (const row of links) adapter.deleteExactLink(row)
+
+    let edits = 0
+    for (const overrides of [this.state.linkOverrides, this.state.linkSlotOverrides]) {
+      for (const [key, row] of overrides) {
+        if (row.projectId !== projectId || !removed(row.ref.source, row.ref.linkId)) continue
+        overrides.delete(key)
+        edits += 1
+      }
+    }
+
+    return links.length + edits
+  }
+
+  /** Unique values and artifact refs, by property, and the source rows of removed links. */
   private applyDerived(
     run: OntologyMigrationRunRecord,
     objectTypeId: string
   ): Partial<OntologyMigrationCounts> {
-    const keys = compileMigrationSteps(migrationRunType(run.plan, objectTypeId)).removedPropertyIds
+    const compiled = compileMigrationSteps(migrationRunType(run.plan, objectTypeId))
     const adapter = getInMemoryObjectMaterializerAdapter(this.objects)
     let uniqueValues = 0
     let artifactRefs = 0
 
-    for (const propertyId of keys) {
-      uniqueValues += adapter.dropUniqueProperty(run.projectId, objectTypeId, propertyId)
-      artifactRefs += adapter.dropArtifactHolders(run.projectId, objectTypeId, propertyId)
+    for (const { from, to } of derivedMoves(compiled)) {
+      const uniqueTo = compiled.uniqueMoves.some((move) => move.from === from) ? to : null
+      uniqueValues += adapter.moveUniqueProperty(run.projectId, objectTypeId, from, uniqueTo)
+      artifactRefs += adapter.moveArtifactHolders(run.projectId, objectTypeId, from, to)
     }
 
-    return { uniqueValues, artifactRefs }
+    const sources = this.deleteSourceLinks(run.projectId, objectTypeId, compiled.removedLinkIds)
+    return { uniqueValues, artifactRefs, sources }
+  }
+
+  /** Every version's rows of a removed link whose source is of the type, active ones included. */
+  private deleteSourceLinks(
+    projectId: string,
+    objectTypeId: string,
+    linkIds: readonly string[]
+  ): number {
+    if (linkIds.length === 0) return 0
+
+    const removed = (assertion: ProjectionSourceAssertion) =>
+      assertion.kind === "link" &&
+      assertion.ref.source.objectTypeId === objectTypeId &&
+      linkIds.includes(assertion.ref.linkId)
+    let deleted = 0
+
+    for (const [key, materialization] of this.state.sourceMaterializations) {
+      if (materialization.projectId !== projectId) continue
+
+      let fromVersion = 0
+      for (const [entityKey, row] of materialization.rowsByEntity) {
+        if (!removed(row.assertion)) continue
+        materialization.rowsByEntity.delete(entityKey)
+        for (const root of materialization.roots.values()) root.entityKeys.delete(entityKey)
+        fromVersion += 1
+      }
+
+      // As pg and SQLite do: the version's count is its rows'.
+      if (fromVersion > 0 && materialization.assertionCount !== null) {
+        this.state.sourceMaterializations.set(key, {
+          ...materialization,
+          assertionCount: materialization.assertionCount - fromVersion,
+        })
+      }
+      deleted += fromVersion
+    }
+
+    for (const index of [this.state.activeSourceRows, this.state.activeSourceLinkScopes]) {
+      for (const [key, rows] of index) {
+        if ((JSON.parse(key) as [string, string])[0] !== projectId) continue
+
+        for (const [rowKey, row] of rows) {
+          if (removed(row.assertion)) rows.delete(rowKey)
+        }
+        if (rows.size === 0) index.delete(key)
+      }
+    }
+
+    return deleted
   }
 
   /** Every version's rows, the active index's included: assertions are shared, so replaced. */
@@ -330,7 +515,8 @@ export class InMemoryOntologyMigrationStorage implements OntologyMigrationStorag
     run: OntologyMigrationRunRecord,
     objectTypeId: string
   ): Partial<OntologyMigrationCounts> {
-    const keys = compileMigrationSteps(migrationRunType(run.plan, objectTypeId)).removedPropertyIds
+    const compiled = compileMigrationSteps(migrationRunType(run.plan, objectTypeId))
+    const { keys } = compiled
     const rewrite = (assertion: ProjectionSourceAssertion): ProjectionSourceAssertion | null => {
       if (assertion.kind !== "object" || assertion.ref.objectTypeId !== objectTypeId) return null
       const absent = assertion.absentSourcePropertyIds ?? []
@@ -339,10 +525,10 @@ export class InMemoryOntologyMigrationStorage implements OntologyMigrationStorag
       }
 
       const { absentSourcePropertyIds: _absent, ...rest } = assertion
-      const kept = absent.filter((id) => !keys.includes(id))
+      const kept = moveKeyList(absent, compiled)
       return {
         ...rest,
-        properties: without(assertion.properties, keys),
+        properties: moveKeys(assertion.properties, compiled),
         ...(kept.length > 0 ? { absentSourcePropertyIds: kept } : {}),
       }
     }
@@ -372,32 +558,35 @@ export class InMemoryOntologyMigrationStorage implements OntologyMigrationStorag
   }
 }
 
-function withoutInOverride(value: ObjectOverride, keys: readonly string[]): ObjectOverride {
+/** The override with the compiled keys dropped and renamed, or itself when it holds none. */
+function movedOverride(value: ObjectOverride, compiled: CompiledMigrationSteps): ObjectOverride {
+  const { keys } = compiled
+
   switch (value.kind) {
     case "create":
       if (!holdsAny(value.properties, keys)) return value
-      return { ...value, properties: without(value.properties, keys) }
+      return { ...value, properties: moveKeys(value.properties, compiled) }
     case "patch":
       if (!holdsAny(value.set, keys) && !value.unset.some((id) => keys.includes(id))) return value
       return {
         ...value,
-        set: without(value.set, keys),
-        unset: value.unset.filter((id) => !keys.includes(id)),
+        set: moveKeys(value.set, compiled),
+        unset: moveKeyList(value.unset, compiled),
       }
     case "delete":
       return value
   }
 }
 
-function holdsAny(values: Readonly<Record<string, unknown>>, keys: readonly string[]): boolean {
-  return keys.some((key) => Object.hasOwn(values, key))
+/** Each removed property and renamed `from`, with where its derived rows go: `null` drops them. */
+function derivedMoves(
+  compiled: CompiledMigrationSteps
+): { readonly from: string; readonly to: string | null }[] {
+  return [...compiled.removedPropertyIds.map((from) => ({ from, to: null })), ...compiled.renames]
 }
 
-function without<T>(
-  values: Readonly<Record<string, T>>,
-  keys: readonly string[]
-): Record<string, T> {
-  return Object.fromEntries(Object.entries(values).filter(([key]) => !keys.includes(key)))
+function holdsAny(values: Readonly<Record<string, unknown>>, keys: readonly string[]): boolean {
+  return keys.some((key) => Object.hasOwn(values, key))
 }
 
 function lowest(...keys: readonly (string | undefined)[]): string | undefined {
