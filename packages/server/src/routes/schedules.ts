@@ -8,7 +8,8 @@ import { RunScheduleResponseSchema, ScheduleParamsSchema } from "../schemas/sche
 import { handleRouteError } from "../utils/http"
 
 /**
- * Run a cron schedule now, as its next occurrence would. It takes the run grant of every sync,
+ * Run a cron schedule now, as its next occurrence would. What it starts runs as the schedule, not
+ * as the caller, so it takes `can.manage(project.source)` besides the run grant of every sync,
  * pipeline and workflow the schedule starts, and stays session-only as running those does.
  */
 export function registerScheduleRoutes(app: Elysia, _host: SixbHostView) {

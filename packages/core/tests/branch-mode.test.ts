@@ -16,7 +16,6 @@ import {
 import { drainActionRuns } from "../src/actions"
 import type { MagicLinkAuthStrategy, OidcAuthStrategy } from "../src/auth"
 import type { AuthStrategyDirectory } from "../src/auth/strategy"
-import { emptyGrantIndex } from "../src/authorization"
 import { putOnBranch, resolveBranchMode, type SixbBranch } from "../src/branch-mode"
 import { reportMaintenancePassFailure } from "../src/error-reporting/capability"
 import { isSixbError } from "../src/errors/internal"
@@ -473,9 +472,8 @@ describe("upkeep on a branch", () => {
     }
   })
 
-  // Guard check: drop the `assertAuthorized` loop from `SchedulesRuntime.run`
-  // (`schedules/execution.ts`): a caller without the sync's run grant starts it.
-  test("still runs a cron schedule now, for someone who may run what it starts", async () => {
+  // Who may run one now is `sixb.schedules.run`'s own test (`schedules.test.ts`).
+  test("still runs a cron schedule now", async () => {
     const erp = defineConnector("erp", { type: "sql", connect: () => ({}) })
     const idle = defineSchedule("idle").cron("0 9 * * *")
     const importInvoices = defineSync("import-invoices")
@@ -510,18 +508,6 @@ describe("upkeep on a branch", () => {
         occurrenceKey: run.occurrenceKey,
       },
     ])
-
-    const stranger = createTestSixb(host, {
-      authorization: {
-        principal: { type: "user", id: "usr_stranger" },
-        groupIds: [],
-        roleIds: [],
-        grants: emptyGrantIndex(),
-      },
-    })
-    expect(String(await rejectionOf(stranger.schedules.run(daily.id)))).toContain(
-      "not allowed to run sync 'import-invoices'"
-    )
 
     await expect(sixb.schedules.run(onInvoice.id)).rejects.toThrow("runs when its event happens")
     await expect(sixb.schedules.run(idle.id)).rejects.toThrow("starts nothing")

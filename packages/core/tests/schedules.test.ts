@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test"
+import { col, defineConnector, defineDataset, defineSync, SixbHost } from "../src"
+import { emptyGrantIndex, type GrantIndex } from "../src/authorization"
 import {
   CronValidationError,
   defineSchedule,
   isScheduleDefinition,
   ScheduleValidationError,
 } from "../src/schedules"
+import { createTestSixb } from "../src/testing"
+import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 describe("defineSchedule", () => {
   test.each([
@@ -65,4 +69,76 @@ test.each([
   ["a missing id", { kind: "schedule", trigger: { type: "cron" } }, false],
 ] as const)("isScheduleDefinition recognizes %s", (_name, value, expected) => {
   expect(isScheduleDefinition(value)).toBe(expected)
+})
+
+describe("sixb.schedules.run", () => {
+  const nightly = defineSchedule("nightly").cron("0 2 * * *")
+  const erp = defineConnector("erp", { type: "sql", connect: () => ({}) })
+  const rawInvoices = defineDataset("raw.invoices", { schema: [col("id", "string")] })
+  const importInvoices = defineSync("import-invoices")
+    .when(nightly)
+    .from(erp)
+    .read(() => [])
+    .intoDataset(rawInvoices)
+
+  function project() {
+    return new SixbHost({
+      id: "schedules-run",
+      ...createTestRuntimeDeps(),
+      ontology: [],
+      connectors: [erp],
+      datasets: [rawInvoices],
+      syncs: [importInvoices],
+      schedules: [nightly],
+    })
+  }
+
+  function personWith(host: SixbHost, grants: Partial<GrantIndex>) {
+    return createTestSixb(host, {
+      authorization: {
+        principal: { type: "user", id: "usr_ada" },
+        groupIds: [],
+        roleIds: [],
+        grants: { ...emptyGrantIndex(), ...grants },
+      },
+    })
+  }
+
+  async function triggered(host: SixbHost) {
+    const events = await host.events.read({ limit: 10 })
+    return events.filter((event) => event.type === "schedule.triggered")
+  }
+
+  // What a schedule starts runs as on its clock, not as the caller: a member who may run the
+  // sync for their own account would start it for everyone's. Guard check: drop the
+  // `source.manage` assertion from `SchedulesRuntime.run` (`schedules/execution.ts`): Ada fires
+  // the schedule with the sync's run grant alone.
+  test("takes managing the project's source, besides the run grant of what it starts", async () => {
+    const host = project()
+    const runsTheSync: Partial<GrantIndex> = { "run:sync": new Set([importInvoices.id]) }
+
+    const ada = personWith(host, runsTheSync)
+    expect(String(await ada.schedules.run(nightly.id).catch((error) => error))).toContain(
+      "not allowed to manage the project's source"
+    )
+
+    const developer = personWith(host, { "manage:source": true })
+    expect(String(await developer.schedules.run(nightly.id).catch((error) => error))).toContain(
+      "not allowed to run sync 'import-invoices'"
+    )
+
+    expect(await triggered(host)).toEqual([])
+
+    const both = personWith(host, { ...runsTheSync, "manage:source": true })
+    const run = await both.schedules.run(nightly.id)
+
+    expect((await triggered(host)).map((event) => event.payload)).toEqual([
+      {
+        scheduleId: nightly.id,
+        occurrenceAt: run.triggeredAt,
+        triggeredAt: run.triggeredAt,
+        occurrenceKey: run.occurrenceKey,
+      },
+    ])
+  })
 })

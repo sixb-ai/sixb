@@ -17,8 +17,9 @@ export interface ScheduleRunResult {
 export interface SchedulesRuntime extends DefinitionCatalog<ScheduleDefinition> {
   /**
    * Run a cron schedule now, as its next occurrence would: what it starts runs as on any
-   * occurrence. It takes the run grant of every sync, pipeline and workflow it starts. This is how
-   * a cron schedule runs on a branch, where none runs on its own clock.
+   * occurrence, not as the caller. So it takes `can.manage(project.source)`, as changing the
+   * schedule in code would, and the run grant of every sync, pipeline and workflow it starts. This
+   * is how a cron schedule runs on a branch, where none runs on its own clock.
    */
   run(scheduleId: string): Promise<ScheduleRunResult>
 }
@@ -75,6 +76,9 @@ export function createSchedulesRuntime(
         )
       }
 
+      // What it starts runs as the schedule, not as the caller: only someone who could change the
+      // schedule in code may fire it.
+      assertAuthorized(runtime, { kind: "source.manage" })
       for (const request of starts) assertAuthorized(runtime, request)
 
       return triggerScheduleNow(runtime.events, schedule)

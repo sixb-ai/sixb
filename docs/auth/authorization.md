@@ -59,7 +59,7 @@ Pass a definition, an array of definitions, or a selector such as `every.object(
 | `can.observe(project.console)` | Open the app's [Console](../apps/overview.md#choose-who-sees-the-console). Each of its pages still takes its own grants. |
 | `can.observe(agent.threads)` | Read other users' [agent conversations](../apps/activity.md#read-a-conversation), read-only. It shows everything the agent showed them, whatever the reader's own permissions. |
 | `can.view(project.users)` | Read the [member directory](members.md#read-the-member-directory): names, emails, avatars, and status. |
-| `can.manage(project.source)` | Copy what you read in production to a branch, with `sixb dev --from production`. Grant it to the people who work on the project's code. |
+| `can.manage(project.source)` | Copy what you read in production to a branch, with `sixb dev --from production`, and [run a cron schedule now](../schedules/overview.md#run-now). Grant it to the people who work on the project's code. |
 | `can.share(invoiceShare)` | Issue and revoke links from a [Share definition](shared-access.md). |
 
 `agent`, `can`, `every`, and `project` are exported from `@sixb/core`.

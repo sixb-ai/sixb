@@ -60,9 +60,13 @@ sixb schedules run hourly-invoices
 
 | | |
 | --- | --- |
-| Who may | Someone who may run every sync, pipeline and workflow the schedule starts, signed in |
+| Who may | Someone signed in with [`can.manage(project.source)`](../auth/authorization.md), who may also run every sync, pipeline and workflow the schedule starts |
 | From code | `sixb.schedules.run("hourly-invoices")` |
 | API | `POST /api/schedules/:scheduleId/runs` |
+
+What it starts runs as on the schedule's clock, not as you: a sync of personal accounts reads
+everyone's, and a workflow starts with no requester. That is why it takes managing the project's
+source, not only the run grants.
 
 An event schedule, or one attached to nothing, is refused.
 
