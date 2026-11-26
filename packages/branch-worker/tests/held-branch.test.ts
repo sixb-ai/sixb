@@ -2,6 +2,11 @@ import { describe, expect, jest, test } from "bun:test"
 import type { LanguageModel } from "@sixb/core"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { registerModelOrigin } from "@sixb/core/internal/model-origins"
+import {
+  SandboxError,
+  SandboxStateUnavailableError,
+  SandboxStillRunningError,
+} from "@sixb/core/sandboxes"
 import { BRANCH_IDLE_MS, BRANCH_TICK_MS } from "../src/held-branch"
 import { BRANCH_RUNTIME_PORTS } from "../src/ports"
 import {
@@ -20,6 +25,9 @@ import {
 } from "./helpers/lab"
 
 useLab()
+
+const stillRunning = () =>
+  new SandboxStillRunningError("[Sandbox] Vercel sandbox must be stopped before resume.")
 
 describe("a held branch", () => {
   // Guard check: start the runtime without `hostBranchDatabase` or the branch mode's variables
@@ -398,6 +406,70 @@ describe("a held branch", () => {
     expect(lab.created).toHaveLength(1)
     expect(lab.imports).toHaveLength(1)
     expect(reopened?.notices).toEqual([])
+  })
+
+  // A worker killed with its branches up left their Vercel sessions running: the next one made a
+  // sandbox under the same name (409), then served on a port Vercel did not route.
+  // Guard check: treat `SandboxStillRunningError` as any other failure in `resumeSaved`.
+  test("waits for its saved sandbox's last session to stop, then resumes it", async () => {
+    const { lab, host, bo } = await setup({ resumable: true })
+    const first = await hold(host)
+    const opened = await ready(host)
+    await bo.branches.stop(NAME)
+    await settled(first.life)
+
+    lab.resumeFailures = [stillRunning(), stillRunning()]
+    await bo.branches.open(NAME)
+    const second = await hold(host)
+    const reopened = await ready(host)
+    await second.stop()
+
+    expect(lab.created).toHaveLength(1)
+    expect(lab.resumed).toEqual([opened!.sandbox!])
+    expect(reopened).toMatchObject({ sandbox: opened!.sandbox, port: opened!.port, notices: [] })
+  })
+
+  // Guard check: drop the `destroySaved` before `create` in `createSandbox`, or draw a new port.
+  test("makes its sandbox anew under its name and port once its saved state is gone", async () => {
+    const { lab, host, bo } = await setup({ resumable: true })
+    const first = await hold(host)
+    const opened = await ready(host)
+    await bo.branches.stop(NAME)
+    await settled(first.life)
+
+    lab.resumeFailures = [new SandboxStateUnavailableError("[Sandbox] Its snapshot expired.")]
+    await bo.branches.open(NAME)
+    const second = await hold(host)
+    const reopened = await ready(host)
+    await second.stop()
+
+    expect(lab.destroyed).toEqual([opened!.sandbox!])
+    expect(lab.created.map((options) => options.ports)).toEqual([[opened!.port], [opened!.port]])
+    expect(reopened?.notices.map((notice) => notice.code)).toEqual(["data-reset"])
+  })
+
+  // Only a provider that says the state is gone lets the name go. Guard check: catch every
+  // failure of `resume` in `resumeSaved` and make the sandbox anew.
+  test("fails and keeps its sandbox's name when it cannot resume it for another reason", async () => {
+    const { lab, host, bo } = await setup({ resumable: true })
+    const first = await hold(host)
+    const opened = await ready(host)
+    await bo.branches.stop(NAME)
+    await settled(first.life)
+
+    lab.resumeFailures = [new SandboxError("[Sandbox] Vercel persistent sandbox resume failed.")]
+    await bo.branches.open(NAME)
+    const second = await hold(host)
+    await settled(second.life)
+
+    expect(await row(host)()).toMatchObject({
+      state: "failed",
+      error: { message: expect.stringContaining("resume failed") },
+      sandbox: opened!.sandbox,
+      port: opened!.port,
+    })
+    expect(lab.created).toHaveLength(1)
+    expect([...lab.saved]).toEqual([opened!.sandbox!])
   })
 
   // A port drawn from the kernel's ephemeral range collided with an outgoing connection's.

@@ -256,7 +256,10 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage
   readonly queues: Queues
-  readonly sandboxes?: Pick<SandboxFactory, "create" | "resume" | "sharesHost" | "runsBranches">
+  readonly sandboxes?: Pick<
+    SandboxFactory,
+    "create" | "resume" | "destroy" | "sharesHost" | "runsBranches"
+  >
   /**
    * The variables the sandbox recipe sets, by name. Its provider gives them to every sandbox it
    * makes, so a hosted branch refuses a recipe that sets any.

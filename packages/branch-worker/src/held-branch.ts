@@ -1,10 +1,12 @@
 import { posix } from "node:path"
 import {
   type Sandbox,
+  type SandboxFactory,
   type SandboxNetworkTarget,
   SandboxNotRunningError,
   type SandboxProcess,
   type SandboxRequestCredential,
+  type SandboxSessionOptions,
   type SixbHostView,
 } from "@sixb/core"
 import {
@@ -32,6 +34,7 @@ import { dropLakeSlice } from "@sixb/core/internal/lake-slices"
 import { modelOriginsOf } from "@sixb/core/internal/model-origins"
 import { BRANCH_RUNTIME_ENV } from "@sixb/core/internal/runtime"
 import { waitUnlessAborted } from "@sixb/core/internal/workers"
+import { SandboxStateUnavailableError, SandboxStillRunningError } from "@sixb/core/sandboxes"
 import type { BranchChanges, BranchNotice, BranchRecord, BranchStorage } from "@sixb/core/storage"
 import { type BranchSandboxFiles, copyIntoSandbox } from "./copy"
 import { branchNetwork } from "./network"
@@ -56,6 +59,13 @@ const ANSWER_DEADLINE_MS = 3 * 60_000
 const CREDENTIALS_MARGIN_MS = 5 * 60_000
 /** How long a reinstall after a push may take. */
 const INSTALL_TIMEOUT_MS = 10 * 60_000
+/**
+ * How long a branch waits for the last session of its saved sandbox to stop: that session's
+ * worker died holding it, and its provider ends it once its last push of the deadline runs out.
+ */
+const RESUME_WAIT_MS = KEEP_ALIVE_MS + 2 * 60_000
+/** How often it asks again meanwhile. */
+const RESUME_RETRY_MS = 15_000
 /** A runtime that keeps exiting is started again after 5 s, then twice as long, up to 5 min. */
 const RESTART_BACKOFF_MS = { first: 5_000, max: 5 * 60_000 } as const
 
@@ -187,7 +197,7 @@ export class HeldBranch {
     try {
       await this.releaseSlices()
       await dropBranchData(this.host, this.branch)
-      await this.destroySavedSandbox()
+      if (this.branch.sandbox) await destroySaved(this.host, this.branch.sandbox)
       await this.write({ ...STOPPED, data: null, sandbox: null, port: null })
     } catch (error) {
       console.error(`[SixbBranchWorker] Branch '${this.branch.name}' kept its expired copy.`, error)
@@ -368,33 +378,13 @@ export class HeldBranch {
         : {}),
     }
 
-    let resumed = false
-    if (sandboxes.resume && this.branch.sandbox && this.branch.port !== null) {
-      try {
-        this.sandbox = await sandboxes.resume(this.branch.sandbox, session)
-        resumed = true
-      } catch (error) {
-        // Its saved state is gone, or its last session never stopped: start over from the branch.
-        console.error(
-          `[SixbBranchWorker] Branch '${this.branch.name}' could not resume; checking it out again.`,
-          error
-        )
-      }
-    }
+    this.sandbox = (await this.resumeSaved(sandboxes, session)) ?? undefined
+    // The worker is stopping: the branch is the next worker's to open, and `close` saves what
+    // was resumed.
+    if (this.signal.aborted) return
 
-    if (!this.sandbox) {
-      const port = await freeRuntimePort()
-      const name = sandboxes.resume ? `sixb-branch-${host.id}-${this.branch.namespace}` : null
-      // Written first, so a crash during creation still names what it left behind.
-      await this.write({ sandbox: name, port })
-      this.sandbox = await sandboxes.create({
-        ...session,
-        signal: this.signal,
-        environment: branchCheckout({ source, branch: this.branch.name }),
-        ports: [port],
-        ...(name ? { persistence: { name } } : {}),
-      })
-    }
+    const resumed = this.sandbox !== undefined
+    this.sandbox ??= await this.createSandbox(sandboxes, session)
 
     const { start, url } = this.sandbox
     if (!start || !url) {
@@ -420,6 +410,67 @@ export class HeldBranch {
     const waiting = (lost || this.needsCopy()) && !(await this.copy())
     if (!waiting) await this.startRuntime()
     await this.write({ url: this.url, notices: this.notices })
+  }
+
+  /**
+   * The branch's saved sandbox, resumed with this session; null when there is none to resume, as
+   * its provider has no saved state or its state is gone. One whose last session still runs, its
+   * worker gone without stopping it, is waited for until its provider stops it: a sandbox made
+   * meanwhile could not take its name. Anything else fails the branch, and the name stays.
+   */
+  private async resumeSaved(
+    sandboxes: SandboxFactory,
+    session: SandboxSessionOptions
+  ): Promise<Sandbox | null> {
+    const name = this.branch.sandbox
+    if (!sandboxes.resume || !name || this.branch.port === null) return null
+
+    const deadline = Date.now() + RESUME_WAIT_MS
+    for (;;) {
+      try {
+        return await sandboxes.resume(name, session)
+      } catch (error) {
+        if (error instanceof SandboxStateUnavailableError) {
+          console.error(
+            `[SixbBranchWorker] Branch '${this.branch.name}' has no saved sandbox left; making it anew.`
+          )
+          return null
+        }
+        if (!(error instanceof SandboxStillRunningError) || Date.now() >= deadline) throw error
+      }
+
+      console.error(
+        `[SixbBranchWorker] The last session of branch '${this.branch.name}''s sandbox still runs; waiting for it to stop.`
+      )
+      await waitUnlessAborted(RESUME_RETRY_MS, this.signal)
+      if (this.signal.aborted) return null
+    }
+  }
+
+  /**
+   * A new sandbox for the branch. A provider that saves sandboxes keeps one under the branch's
+   * name, which it makes only once: whatever an earlier sandbox left there goes first. It serves
+   * the ports a sandbox was made with, so the name keeps its port.
+   */
+  private async createSandbox(
+    sandboxes: SandboxFactory,
+    session: SandboxSessionOptions
+  ): Promise<Sandbox> {
+    const { host } = this
+    const name = sandboxes.resume ? `sixb-branch-${host.id}-${this.branch.namespace}` : null
+    const port = name && this.branch.port !== null ? this.branch.port : await freeRuntimePort()
+
+    if (name) await destroySaved(host, name)
+
+    // Written first, so a crash during creation still names what it left behind.
+    await this.write({ sandbox: name, port })
+    return await sandboxes.create({
+      ...session,
+      signal: this.signal,
+      environment: branchCheckout({ source: requireSource(host), branch: this.branch.name }),
+      ports: [port],
+      ...(name ? { persistence: { name } } : {}),
+    })
   }
 
   /**
@@ -694,7 +745,7 @@ export class HeldBranch {
     await this.credentials?.revoke().catch(() => {})
     await this.sandbox?.destroy()
     this.sandbox = undefined
-    await this.destroySavedSandbox()
+    if (this.branch.sandbox) await destroySaved(this.host, this.branch.sandbox)
     await this.releaseSlices()
     await dropBranchData(this.host, this.branch)
     await this.branches.delete({ projectId: this.host.id, name: this.branch.name })
@@ -710,15 +761,6 @@ export class HeldBranch {
       if (id) await dropLakeSlice(this.host, id)
     }
     this.deliveredSlice = null
-  }
-
-  private async destroySavedSandbox(): Promise<void> {
-    const { resume } = this.host.sandboxes ?? {}
-    if (!resume || !this.branch.sandbox) return
-
-    const saved = await resume.call(this.host.sandboxes, this.branch.sandbox).catch(() => null)
-    // None to resume: its saved state is gone already.
-    await saved?.destroy()
   }
 
   /**
@@ -793,7 +835,20 @@ export class HeldBranch {
   }
 }
 
-/** The branch has no copy yet, or one older than the refresh someone asked for. */
+/**
+ * Deletes the sandbox a provider saved under `name`, by name: no session, no credentials. One
+ * already gone is done; a failure throws, so the branch keeps the name and tries again.
+ */
+async function destroySaved(host: SixbHostView, name: string): Promise<void> {
+  const destroy = host.sandboxes?.destroy
+  if (!destroy) {
+    throw new Error(
+      `[SixbBranchWorker] The sandbox provider cannot delete the saved sandbox '${name}': it needs destroy(name).`
+    )
+  }
+  await destroy.call(host.sandboxes, name)
+}
+
 function requireSource(host: SixbHostView) {
   if (!host.source) throw new Error("[SixbBranchWorker] The project names no repository.")
   return host.source

@@ -107,6 +107,31 @@ describe("the branch worker", () => {
     expect(lab.destroyed).toEqual([failed?.sandbox as string])
   })
 
+  // Vercel refuses to resume a private repository's sandbox without its credentials: the delete
+  // once swallowed that, and dropped the row while the sandbox kept the copy and its name.
+  // Guard check: resume the saved sandbox to destroy it in `teardown`, or catch the failure of
+  // `destroySaved`.
+  test("deletes a stopped branch's saved sandbox by name, and keeps the branch until it is gone", async () => {
+    const { host, lab, bo } = await setup({ resumable: true })
+    const held = await hold(host)
+    const opened = await ready(host)
+    await bo.branches.stop(NAME)
+    await settled(held.life)
+
+    lab.resumeFailures = [new Error("[Sandbox] Authenticated sandbox needs its credentials.")]
+    lab.destroyFailure = new Error("sandbox API unavailable")
+    await bo.branches.delete(NAME)
+    const worker = new BranchWorker(host, { apiPublicOrigin: "https://api.shop.test" })
+    await worker.start()
+    const kept = await until(row(host), (branch) => branch?.error !== null)
+    expect(kept).toMatchObject({ wanted: "deleted", sandbox: opened!.sandbox })
+
+    await until(row(host), (branch) => branch === null)
+    await settled(worker.stop())
+    expect(lab.destroyed).toEqual([opened!.sandbox!])
+    expect(lab.resumed).toEqual([])
+  })
+
   // A delete whose drop failed once read `stopped`: the schema and role stayed, and nobody tried
   // again. Guard check: let a failed teardown fall through to the failure write in `failed`.
   test("tries a failed delete again until the branch is gone", async () => {
@@ -194,6 +219,19 @@ describe("the branch worker", () => {
 
     expect(BranchWorker.unmetRequirement(commandsOnly, "development")).toContain(
       "a sandbox provider that runs branches"
+    )
+  })
+
+  // A branch's saved sandbox goes with it, by name. Guard check: drop the `destroy` check from
+  // `unmetRequirement`.
+  test("refuses a provider that resumes sandboxes but cannot delete one by name", async () => {
+    const { host } = await setup({ resumable: true })
+    const undeletable = hostWith(host, {
+      sandboxes: { ...host.sandboxes!, destroy: undefined },
+    })
+
+    expect(BranchWorker.unmetRequirement(undeletable, "development")).toContain(
+      "deletes a saved sandbox by name"
     )
   })
 

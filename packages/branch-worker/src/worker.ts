@@ -78,6 +78,9 @@ export class BranchWorker extends Worker {
     if (!host.sandboxes.runsBranches) {
       return "needs a sandbox provider that runs branches, serving their ports: @sixb/sandboxes-vercel or @sixb/sandboxes-smolvm"
     }
+    if (host.sandboxes.resume && !host.sandboxes.destroy) {
+      return "needs a sandbox provider that deletes a saved sandbox by name (destroy), as it resumes them: a branch's sandbox is deleted with the branch"
+    }
     if (environment === "production" && host.sandboxes.sharesHost) {
       return "needs a sandbox that keeps branches from this host's network and files in production: use @sixb/sandboxes-vercel or @sixb/sandboxes-smolvm, as @sixb/sandboxes-local runs a branch on this host itself"
     }

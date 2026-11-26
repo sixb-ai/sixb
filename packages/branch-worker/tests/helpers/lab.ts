@@ -103,6 +103,12 @@ export interface Lab {
   dropFailure: Error | null
   /** Thrown by the next sandbox destroy, once. */
   destroyFailure: Error | null
+  /** Thrown by the next resumes, one each, before a resume succeeds again. */
+  resumeFailures: Error[]
+  /** The names the provider keeps a saved sandbox under. */
+  readonly saved: Set<string>
+  /** The names resumed, in order. */
+  readonly resumed: string[]
   /** Whether production may cap a branch role's temporary files. */
   tempFileLimit: boolean
   readonly created: CreateSandboxOptions[]
@@ -125,7 +131,7 @@ function fakeSandboxes(
   ontology: () => OntologyRegistry,
   recipeEnv: Readonly<Record<string, string>> | undefined
 ): SandboxFactory {
-  const sandbox = (id: string): Sandbox => ({
+  const sandbox = (id: string, name?: string): Sandbox => ({
     id,
     provider: "fake",
     get status() {
@@ -226,8 +232,25 @@ function fakeSandboxes(
       lab.destroyFailure = null
       if (failure) throw failure
       lab.destroyed.push(id)
+      if (name) lab.saved.delete(name)
     },
   })
+
+  // A provider that saves sandboxes, as Vercel does: by name, deleted by name.
+  const saving: Pick<SandboxFactory, "resume" | "destroy"> = {
+    async resume(name) {
+      const failure = lab.resumeFailures.shift()
+      if (failure) throw failure
+      lab.resumed.push(name)
+      return sandbox(name, name)
+    },
+    async destroy(name) {
+      const failure = lab.destroyFailure
+      lab.destroyFailure = null
+      if (failure) throw failure
+      if (lab.saved.delete(name)) lab.destroyed.push(name)
+    },
+  }
 
   return {
     supportsRequestCredentials: true,
@@ -235,10 +258,14 @@ function fakeSandboxes(
     ...(recipeEnv ? { configuration: { env: recipeEnv } } : {}),
     async create(options) {
       await lab.createGate
+      const name = options?.persistence?.name
+      if (name && lab.saved.has(name)) throw new Error(`A sandbox named '${name}' already exists.`)
+
       lab.created.push(options ?? {})
-      return sandbox(`sandbox-${lab.created.length}`)
+      if (name) lab.saved.add(name)
+      return sandbox(`sandbox-${lab.created.length}`, name)
     },
-    ...(lab.resumable ? { resume: async (name: string) => sandbox(name) } : {}),
+    ...(lab.resumable ? saving : {}),
   }
 }
 
@@ -278,6 +305,9 @@ export async function setup(
     enforced: 0,
     dropFailure: null,
     destroyFailure: null,
+    resumeFailures: [],
+    saved: new Set(),
+    resumed: [],
     tempFileLimit: true,
     created: [],
     destroyed: [],
