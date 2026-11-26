@@ -21,7 +21,13 @@ export const BranchSchema = z.object({
   /** What its creator should know: a copy taken anew because its machine was lost, or no dev values. */
   notices: z.array(
     z.object({
-      code: z.enum(["data-reset", "no-dev-env", "machine-ended", "temp-files-uncapped"]),
+      code: z.enum([
+        "data-reset",
+        "no-dev-env",
+        "machine-ended",
+        "temp-files-uncapped",
+        "database-limit",
+      ]),
       message: z.string(),
     })
   ),

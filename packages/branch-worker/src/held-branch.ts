@@ -21,8 +21,11 @@ import {
   BRANCH_PUBLIC_ORIGIN_ENV,
   BRANCH_RUNTIME_COMMAND,
   BRANCH_STATUS_PATH,
+  type BranchClosure,
   branchCheckout,
+  branchClosureNotice,
   branchDatabaseAddress,
+  closeBranchData,
   dropBranchData,
   enforceBranchLimits,
   hostBranchDatabase,
@@ -128,6 +131,8 @@ export class HeldBranch {
   private readonly controller = new AbortController()
   /** Whether the hold ended because another worker may hold the branch now. */
   private lost = false
+  /** Why production closed the branch: its runtime can log in no more, so it stops. */
+  private closure: BranchClosure | null = null
   private sandbox: Sandbox | undefined
   private runtime: { readonly process: SandboxProcess; exited: boolean } | undefined
   private url: string | undefined
@@ -344,7 +349,9 @@ export class HeldBranch {
   /** Holds the branch's role to its limits: it may SET its own timeouts away. */
   private enforceLimits(): Promise<void> {
     this.enforcing ??= enforceBranchLimits(this.host, this.branch)
-      .then(() => {})
+      .then((enforced) => {
+        this.closure ??= enforced.closed
+      })
       .catch((error: unknown) => {
         console.error(
           `[SixbBranchWorker] Could not hold branch '${this.branch.name}' to its limits.`,
@@ -369,6 +376,15 @@ export class HeldBranch {
     }
     if (branch.wanted === "stopped") {
       await this.close({})
+      return true
+    }
+    // Production closed it for what it took: it stops, and says why.
+    if (this.closure) {
+      const notice = branchClosureNotice(this.closure)
+      await this.close({
+        wanted: "stopped",
+        notices: [...this.notices.filter((known) => known.code !== notice.code), notice],
+      })
       return true
     }
     if (now - branch.lastSeenAt.getTime() > BRANCH_IDLE_MS) {
@@ -613,7 +629,8 @@ export class HeldBranch {
   /** Starts the runtime with its role's new password, the branch's key and its lake's files. */
   private async startRuntime(): Promise<void> {
     const { sandbox } = this
-    if (!sandbox?.start) return
+    // A closed branch logs in no more: a new start would give its role a new login.
+    if (!sandbox?.start || this.closure) return
 
     const process = await sandbox.start("sh", ["-c", BRANCH_RUNTIME_COMMAND], {
       cwd: this.projectDirectory(),
@@ -831,6 +848,8 @@ export class HeldBranch {
       await sandbox.stop()
       if (!this.host.sandboxes?.resume) await sandbox.destroy()
     }
+    // A password the branch's code kept opens nothing until its next start.
+    await closeBranchData(this.host, this.branch)
     await this.write({ ...STOPPED, ...changes })
   }
 
@@ -890,6 +909,15 @@ export class HeldBranch {
     await this.stopRuntime()
     await this.releaseUnloaded()
     await this.credentials?.revoke().catch(() => {})
+    // A hold that lost the branch leaves its login to the worker that took it.
+    if (!options.lost) {
+      await closeBranchData(this.host, this.branch).catch((error: unknown) => {
+        console.error(
+          `[SixbBranchWorker] Could not take branch '${this.branch.name}''s login away; the next stop tries again.`,
+          error
+        )
+      })
+    }
     if (options.lost && this.host.sandboxes?.resume) return
     await this.sandbox?.stop().catch(() => {})
     if (!this.host.sandboxes?.resume) await this.sandbox?.destroy().catch(() => {})

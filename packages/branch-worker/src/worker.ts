@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto"
 import type { SandboxNetworkTarget, SixbHostView } from "@sixb/core"
-import { isBranchHostingStorage } from "@sixb/core/internal/branches"
+import {
+  branchHostingRequirement,
+  closeBranchData,
+  isBranchHostingStorage,
+} from "@sixb/core/internal/branches"
 import { Worker, waitUnlessAborted } from "@sixb/core/internal/workers"
 import type { BranchRecord, BranchStorage } from "@sixb/core/storage"
 import {
@@ -113,6 +117,17 @@ export class BranchWorker extends Worker {
     }
   }
 
+  /**
+   * Starts once production's PostgreSQL can host branches: a database user without `CREATEROLE`
+   * or `CREATEDB` is refused before the worker claims anything.
+   */
+  override async start(): Promise<void> {
+    const unmet = await branchHostingRequirement(this.host)
+    if (unmet) throw new Error(`[SixbBranchWorker] The branch worker ${unmet}.`)
+
+    await super.start()
+  }
+
   /** Waits for the branches this worker holds to be put back, at most `timeoutMs`. */
   drain(timeoutMs?: number): Promise<boolean> {
     return this.drainRunning(timeoutMs)
@@ -218,7 +233,10 @@ export class BranchWorker extends Worker {
       return
     }
 
+    // Its worker died holding it: its runtime is gone, so its login goes too, before the row
+    // says it stopped. A failure leaves the row as it is, and the next pass tries again.
     if (branch.owner !== null) {
+      await closeBranchData(this.host, branch)
       await this.branches.update(ref, {
         ...STOPPED,
         ...(branch.state === "failed" ? { state: "failed" } : {}),

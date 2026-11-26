@@ -247,7 +247,7 @@ describe("a branch production runs", () => {
     READY_MS + 10_000
   )
 
-  test("reaches its own schema only, as its role", async () => {
+  test("reaches its own database only, as its role", async () => {
     const branch = (await row())!
     const roles = await admin<{ rolname: string; rolconnlimit: number; rolconfig: string[] }[]>`
       SELECT rolname, rolconnlimit, rolconfig FROM pg_roles WHERE rolname LIKE 'sixb_branch_%'
@@ -258,7 +258,7 @@ describe("a branch production runs", () => {
     expect(roles[0]?.rolconfig).toContain("idle_in_transaction_session_timeout=60000")
 
     const [owner] = await admin<{ owner: string }[]>`
-      SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname = ${roles[0]!.rolname}
+      SELECT pg_get_userbyid(datdba) AS owner FROM pg_database WHERE datname = ${roles[0]!.rolname}
     `
     expect(owner?.owner).toBe(roles[0]?.rolname)
     expect(roles[0]!.rolname).toBe(await storage.hostedBranchRole(branch.namespace))
@@ -296,10 +296,13 @@ describe("a branch production runs", () => {
       expect(await branchOrders()).toEqual(["ord-1", "ord-2"])
 
       // The branch writes an order of its own; production gets a new one meanwhile.
-      // As the instance's superuser: the test's stand-in for the branch's own writes.
+      // As the instance's superuser, in the branch's own database under production's schema
+      // name: the test's stand-in for the branch's own writes.
+      const database = new URL(process.env.DATABASE_URL!)
+      database.pathname = `/${await storage.hostedBranchRole(before.namespace)}`
       const namespace = new PostgresStorage({
-        connectionString: process.env.DATABASE_URL,
-        schemaName: await storage.hostedBranchRole(before.namespace),
+        connectionString: database.toString(),
+        schemaName: "shop_prod",
       })
       const onBranch = new SixbHost({
         id: projectId,
@@ -336,17 +339,17 @@ describe("a branch production runs", () => {
   )
 
   test(
-    "drops its sandbox, its schema and its role once its git branch is deleted",
+    "drops its sandbox, its database and its role once its git branch is deleted",
     async () => {
       const branch = (await row())!
       await git(origin, "branch", "--quiet", "-D", NAME)
 
       await until(row, (current) => current === null)
       const left = await admin`SELECT 1 FROM pg_roles WHERE rolname LIKE 'sixb_branch_%'`
-      const schemas = await admin`SELECT 1 FROM pg_namespace WHERE nspname LIKE 'sixb_branch_%'`
+      const databases = await admin`SELECT 1 FROM pg_database WHERE datname LIKE 'sixb_branch_%'`
 
       expect(left).toHaveLength(0)
-      expect(schemas).toHaveLength(0)
+      expect(databases).toHaveLength(0)
       expect(await fetch(branch.url!).catch(() => null)).toBeNull()
     },
     READY_MS

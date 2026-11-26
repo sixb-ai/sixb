@@ -498,6 +498,60 @@ describe("a held branch", () => {
     expect(await row(host)()).toMatchObject({ wanted, state: "stopped", owner: null })
   })
 
+  // Production closes a branch that takes what its instance cannot spare: its role can log in no
+  // more, so a restart would give it a new login. Guard check: ignore `enforced.closed` in
+  // `enforceLimits` (`held-branch.ts`).
+  test("stops, without starting again, once production closed it, and says why", async () => {
+    const { lab, host } = await setup()
+    const held = await hold(host)
+    const opened = await ready(host)
+
+    lab.closure = { reason: "disk", bytes: 21 * 1024 ** 3, limitBytes: 20 * 1024 ** 3 }
+    lab.exits.at(-1)?.(1)
+    await settled(held.life)
+
+    expect(await row(host)()).toMatchObject({ wanted: "stopped", state: "stopped", owner: null })
+    expect((await row(host)())?.notices).toEqual([
+      expect.objectContaining({
+        code: "database-limit",
+        message: expect.stringContaining("20 GB"),
+      }),
+    ])
+    expect(lab.started).toHaveLength(1)
+    expect(lab.closed).toEqual([opened!.namespace])
+  })
+
+  // A password the branch's code kept once logged in after its runtime stopped, with nothing
+  // holding it to its limits. Guard check: drop `closeBranchData` from `close` or `release`, or
+  // call it on a lost hold too (`held-branch.ts`).
+  test("takes its login away when it stops or fails, and leaves it to the worker that took it over", async () => {
+    const stopped = await setup()
+    const first = await hold(stopped.host)
+    const opened = await ready(stopped.host)
+    await stopped.bo.branches.stop(NAME)
+    await settled(first.life)
+    expect(stopped.lab.closed).toEqual([opened!.namespace])
+
+    const failing = await setup()
+    failing.lab.answering = false
+    const second = await hold(failing.host)
+    await until(row(failing.host), (branch) => branch?.state === "failed", { stepMs: 60_000 })
+    await settled(second.life)
+    expect(failing.lab.closed).toHaveLength(1)
+
+    const taken = await setup({ resumable: true })
+    const third = await hold(taken.host)
+    await ready(taken.host)
+    jest.setSystemTime(Date.now() + 2 * 60_000)
+    await taken.host.storage.hostedBranches!.update(
+      { projectId, name: NAME, at: new Date() },
+      { owner: "worker-b", leaseExpiresAt: new Date(Date.now() + 60_000) }
+    )
+    await pass(BRANCH_TICK_MS * 2)
+    await settled(third.life)
+    expect(taken.lab.closed).toEqual([])
+  })
+
   // A Vercel session at its plan's maximum once failed the branch, as if its code were broken.
   // Guard check: treat `SandboxNotRunningError` as any other failure in `failed`.
   test("stops, and says so, when its provider ends its machine", async () => {

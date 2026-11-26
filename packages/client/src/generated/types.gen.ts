@@ -8455,7 +8455,7 @@ export type DeleteBranchResponses = {
     } | null
     remoteError: string | null
     notices: Array<{
-      code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
+      code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped" | "database-limit"
       message: string
     }>
     data: {
@@ -8523,7 +8523,12 @@ export type ListBranchesResponses = {
       } | null
       remoteError: string | null
       notices: Array<{
-        code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
+        code:
+          | "data-reset"
+          | "no-dev-env"
+          | "machine-ended"
+          | "temp-files-uncapped"
+          | "database-limit"
         message: string
       }>
       data: {
@@ -8593,7 +8598,7 @@ export type OpenBranchResponses = {
     } | null
     remoteError: string | null
     notices: Array<{
-      code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
+      code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped" | "database-limit"
       message: string
     }>
     data: {
@@ -8662,7 +8667,7 @@ export type RefreshBranchResponses = {
     } | null
     remoteError: string | null
     notices: Array<{
-      code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
+      code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped" | "database-limit"
       message: string
     }>
     data: {
@@ -8731,7 +8736,7 @@ export type StopBranchResponses = {
     } | null
     remoteError: string | null
     notices: Array<{
-      code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
+      code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped" | "database-limit"
       message: string
     }>
     data: {

@@ -64,6 +64,37 @@ describe("the branch worker", () => {
     expect(await storage.lakeSlices.get({ projectId, id: "slice_expired" })).toBeNull()
   })
 
+  // A worker that died holding a branch left its role able to log in, with nothing holding it to
+  // its limits. Guard check: drop `closeBranchData` from `settleStopped` (`worker.ts`).
+  test("takes away the login of a stopped branch whose worker died holding it", async () => {
+    const { host, lab, storage } = await setup()
+    const crashed = await storage.hostedBranches.update(
+      { projectId, name: NAME, at: new Date() },
+      { wanted: "stopped", owner: "branch-worker-gone", leaseExpiresAt: new Date(Date.now() - 1) }
+    )
+
+    const worker = new BranchWorker(host, { apiPublicOrigin: "https://api.shop.test" })
+    await worker.start()
+    await until(row(host), (branch) => branch?.owner === null)
+    await settled(worker.stop())
+
+    expect(lab.closed).toEqual([crashed!.namespace])
+    expect(await row(host)()).toMatchObject({ state: "stopped", owner: null })
+  })
+
+  // Guard check: drop the `branchHostingRequirement` check from `start` (`worker.ts`).
+  test("refuses to start on a database user that cannot host branches", async () => {
+    const { host, storage } = await setup()
+    Object.assign(storage, {
+      unmetHostedBranchRequirement: async () => "needs a database user with CREATEDB",
+    })
+    const worker = new BranchWorker(host, { apiPublicOrigin: "https://api.shop.test" })
+
+    const refused = await worker.start().catch((error: unknown) => error)
+
+    expect(String(refused)).toContain("The branch worker needs a database user with CREATEDB.")
+  })
+
   // A failed branch once read `stopped` a tick later, and nobody learned why it stopped.
   // Guard check: rewrite any lapsed stopped row to `STOPPED` in `settleStopped` (`worker.ts`).
   test("leaves a failed branch failed, with why", async () => {

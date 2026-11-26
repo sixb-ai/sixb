@@ -24,6 +24,7 @@ import {
   BRANCH_INSTALL_COMMAND,
   BRANCH_KEY_HEADER,
   BRANCH_STATUS_PATH,
+  type BranchClosure,
   readBranchCopy,
 } from "@sixb/core/internal/branches"
 import { importSnapshot } from "@sixb/core/internal/snapshots"
@@ -104,8 +105,12 @@ export interface Lab {
   changedFiles: string[]
   /** How many times production held the branch's role to its limits. */
   enforced: number
-  /** How many times production made the branch's schema and role anew, for a copy. */
+  /** How many times production made the branch's database and role anew, for a copy. */
   prepared: number
+  /** The branches whose login production took away, in order. */
+  readonly closed: string[]
+  /** What the next round of the limits finds: production closes the branch, once. */
+  closure: BranchClosure | null
   /** What the next drop of the branch's data throws, once. */
   dropFailure: Error | null
   /** Thrown by the next sandbox destroy, once. */
@@ -344,6 +349,8 @@ export async function setup(
     changedFiles: [],
     enforced: 0,
     prepared: 0,
+    closed: [],
+    closure: null,
     dropFailure: null,
     destroyFailure: null,
     resumeFailures: [],
@@ -408,8 +415,14 @@ export async function setup(
     },
     enforceHostedBranchLimits: async () => {
       lab.enforced += 1
-      return 0
+      const closed = lab.closure
+      lab.closure = null
+      return { stopped: 0, closed }
     },
+    closeHostedBranch: async (name: string) => {
+      lab.closed.push(name)
+    },
+    unmetHostedBranchRequirement: async () => null,
     hostedBranchDatabaseAddress: () => ({ host: "10.0.0.7", port: 5432 }),
   })
 
