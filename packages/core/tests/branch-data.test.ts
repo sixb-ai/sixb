@@ -9,6 +9,7 @@ import {
   type SixbHostOptions,
 } from "../src"
 import {
+  type BranchClosure,
   branchClosureNotice,
   branchHostingRequirement,
   branchNamespaceName,
@@ -162,6 +163,29 @@ describe("a branch's data", () => {
     })
     expect(branchClosureNotice({ reason: "locks", locks: 15_000 }).message).toContain(
       "held 15000 database locks at once"
+    )
+  })
+
+  // Past its disk limit a restart closes it again; any other closure leaves data fit to start
+  // again, which a refresh would throw away. Guard check: return `database-limit` for every
+  // reason in `branchClosureNotice` (`branches/data.ts`).
+  test("asks for a new copy only when the branch's data grew past its limit", () => {
+    const closures: readonly BranchClosure[] = [
+      { reason: "locks", locks: 15_000 },
+      { reason: "crowded", locks: 900 },
+      { reason: "blocking" },
+      { reason: "elsewhere", database: "postgres" },
+    ]
+
+    for (const closure of closures) {
+      const notice = branchClosureNotice(closure)
+
+      expect(notice.code).toBe("database-closed")
+      expect(notice.message).toEndWith("Start it again to keep going.")
+    }
+
+    expect(branchClosureNotice({ reason: "elsewhere", database: "postgres" }).message).toBe(
+      "This branch stopped: its code connected to another database of production's instance ('postgres'), which a branch may not do. Start it again to keep going."
     )
   })
 })

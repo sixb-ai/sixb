@@ -87,6 +87,7 @@ const NOTICES: readonly BranchNotice["code"][] = [
   "machine-ended",
   "temp-files-uncapped",
   "database-limit",
+  "database-closed",
 ]
 
 function parseNotices(value: unknown): readonly BranchNotice[] {

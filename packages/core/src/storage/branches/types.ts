@@ -73,8 +73,10 @@ export interface BranchError {
  * `machine-ended`: its sandbox reached its provider's time limit, and the branch stopped.
  * `temp-files-uncapped`: production may not cap its role's temporary files (`temp_file_limit`),
  * so one heavy query of the branch's can fill production's disk.
- * `database-limit`: the branch took more of production's database than it may (disk, locks), and
- * production stopped it.
+ * `database-limit`: its data grew past its disk limit, so production stopped it; only a new copy
+ * starts it again.
+ * `database-closed`: it held up production's database (locks) or reached another of its databases,
+ * so production stopped it; it keeps its data, and starting it again gives it a new login.
  */
 export interface BranchNotice {
   readonly code:
@@ -83,6 +85,7 @@ export interface BranchNotice {
     | "machine-ended"
     | "temp-files-uncapped"
     | "database-limit"
+    | "database-closed"
   readonly message: string
 }
 

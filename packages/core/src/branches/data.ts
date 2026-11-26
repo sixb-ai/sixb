@@ -188,9 +188,14 @@ function objectTypesOf(host: SixbHostView): number {
   return host.definitions.ontology.listObjectTypes().length
 }
 
-/** What a branch's row says once production closed it. */
+/**
+ * What a branch's row says once production closed it. Past its disk limit, a restart would close it
+ * again, so only a new copy starts it over; any other closure leaves its data fit to start again.
+ */
 export function branchClosureNotice(closure: BranchClosure): BranchNotice {
-  return { code: "database-limit", message: closureMessage(closure) }
+  const code = closure.reason === "disk" ? "database-limit" : "database-closed"
+
+  return { code, message: closureMessage(closure) }
 }
 
 function closureMessage(closure: BranchClosure): string {
@@ -207,7 +212,7 @@ function closureMessage(closure: BranchClosure): string {
     case "blocking":
       return `${stopped} another session on production's database waited on a lock it held. ${again}`
     case "elsewhere":
-      return `${stopped} it connected to another database of production's instance ('${closure.database}'), which a branch may not do.`
+      return `${stopped} its code connected to another database of production's instance ('${closure.database}'), which a branch may not do. ${again}`
   }
 }
 

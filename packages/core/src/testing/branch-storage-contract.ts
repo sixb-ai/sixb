@@ -63,6 +63,7 @@ export function runBranchStorageContractSuite<TStorage extends BranchStorage>(
           notices: [
             { code: "data-reset", message: "Its machine was lost." },
             { code: "database-limit", message: "Its data grew past its limit." },
+            { code: "database-closed", message: "It held up production's database." },
           ],
           owner: "branch-worker-1",
           leaseExpiresAt: new Date("2026-11-24T12:05:00.000Z"),
