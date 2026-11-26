@@ -112,13 +112,16 @@ describe("materializer write ownership", () => {
 
     // A snapshot's load and a migration run are the other writers, as kernel operations whose
     // commits no event announces: a load fills an empty branch namespace with one base commit, a run
-    // rewrites the keys a type no longer has, so there is no materialization to go through. Both
-    // insert their commits through `insert*RuntimeCommit` in `commits.ts`.
+    // rewrites the keys a type no longer has and applies the values its steps staged, so there is
+    // no materialization to go through. Both insert their commits through `insert*RuntimeCommit`
+    // in `commits.ts`.
     const kernelWriters = [
       "storage/pg/src/snapshot-load.ts",
       "storage/sqlite/src/snapshot-load.ts",
       "storage/pg/src/ontology-storage/migrations.ts",
       "storage/sqlite/src/ontology-storage/migrations.ts",
+      "storage/pg/src/ontology-storage/migration-values.ts",
+      "storage/sqlite/src/ontology-storage/migration-values.ts",
     ]
     const runtimeCommits = [
       "storage/pg/src/ontology-storage/commits.ts",

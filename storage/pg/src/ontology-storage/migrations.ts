@@ -1,5 +1,6 @@
 import {
   addMigrationCounts,
+  afterUniqueValues,
   type CompiledMigrationSteps,
   compileMigrationSteps,
   migrationBatchConflict,
@@ -27,6 +28,13 @@ import { objectPartitionName } from "../objects/partitions"
 import type { SQL, SQLClient } from "../pg-client"
 import { insertPgRuntimeCommit } from "./commits"
 import { dropMigratedQueryStructures } from "./migration-query-structures"
+import {
+  applyStagedObjects,
+  applyStagedUnique,
+  discardStaged,
+  PgOntologyMigrationValueStorage,
+  stagedBound,
+} from "./migration-values"
 import { jsonParameter as json, type PgRootOperation, toIsoString } from "./shared"
 
 type Fragment = ReturnType<SQL["unsafe"]>
@@ -83,12 +91,14 @@ export class PgOntologyMigrationStorage implements OntologyMigrationStorage {
    * to {@link MAX_PARALLELISM}.
    */
   readonly parallelism: number
+  readonly values: PgOntologyMigrationValueStorage
 
   constructor(
     private readonly runRootOperation: PgRootOperation,
     poolSize: number
   ) {
     this.parallelism = Math.max(1, Math.min(MAX_PARALLELISM, poolSize - 1))
+    this.values = new PgOntologyMigrationValueStorage(runRootOperation)
   }
 
   async getOpenRun(input: { readonly projectId: string }) {
@@ -190,6 +200,7 @@ export class PgOntologyMigrationStorage implements OntologyMigrationStorage {
         `
         await sql`DELETE FROM ontology_replacement_plans WHERE version_id = ANY(${ids}::bigint[])`
       }
+      await discardStaged(sql, { projectId, runId: run.id, others: true })
 
       return run
     })
@@ -274,6 +285,7 @@ export class PgOntologyMigrationStorage implements OntologyMigrationStorage {
         UPDATE ontology_migration_runs SET status = 'applied', applied_at = ${input.appliedAt}
         WHERE project_id = ${row.project_id} AND id = ${row.id}
       `
+      await discardStaged(sql, { projectId: row.project_id, runId: row.id })
 
       return { ...runRecord(row, all), status: "applied" as const, appliedAt: input.appliedAt }
     })
@@ -394,6 +406,11 @@ function applyLane(
   }
 }
 
+/** Steps that rewrite no key and remove no link: their batches only apply staged values. */
+function valuesOnly(compiled: CompiledMigrationSteps): boolean {
+  return compiled.keys.length === 0 && compiled.removedLinkIds.length === 0
+}
+
 /** A range's end, when the lane has one. */
 function laneThrough(lane: OntologyMigrationLane): string | undefined {
   return "through" in lane ? lane.through : undefined
@@ -419,17 +436,22 @@ async function applyObjects(
   const through = laneThrough(lane)
   const ofType = sql`project_id = ${projectId} AND object_type_id = ${type.objectTypeId}`
   const offset = input.batchRows - 1
+  const laneRange = within(sql, "primary_id", cursor.afterPrimaryId, through)
 
-  const [bound] = await sql<{ readonly through: string | null }[]>`
-    SELECT LEAST(
-      (SELECT primary_id FROM objects
-       WHERE ${ofType} ${within(sql, "primary_id", cursor.afterPrimaryId, through)}
-       ORDER BY primary_id OFFSET ${offset} LIMIT 1),
-      (SELECT primary_id FROM ontology_object_overrides
-       WHERE ${ofType} ${within(sql, "primary_id", cursor.afterPrimaryId, through)}
-       ORDER BY primary_id OFFSET ${offset} LIMIT 1)
-    ) AS through
-  `
+  // Steps that only stage values rewrite only the staged rows: their batches are counted there.
+  const staged = { projectId, runId: input.runId, objectTypeId: type.objectTypeId }
+  const [bound] = valuesOnly(compiled)
+    ? [{ through: (await stagedBound(sql, staged, laneRange, input.batchRows)) ?? null }]
+    : await sql<{ readonly through: string | null }[]>`
+        SELECT LEAST(
+          (SELECT primary_id FROM objects
+           WHERE ${ofType} ${laneRange}
+           ORDER BY primary_id OFFSET ${offset} LIMIT 1),
+          (SELECT primary_id FROM ontology_object_overrides
+           WHERE ${ofType} ${laneRange}
+           ORDER BY primary_id OFFSET ${offset} LIMIT 1)
+        ) AS through
+      `
   const last = bound?.through ?? undefined
   const range = (column: string) => within(sql, column, cursor.afterPrimaryId, last ?? through)
   const batch = sql`${ofType} ${range("primary_id")}`
@@ -441,10 +463,20 @@ async function applyObjects(
     (await moveIndexingWork(sql, projectId, type, batch))
   const { objects, edits, vectors } = await rewriteObjects(sql, input, compiled, batch)
   const links = await deleteLinks(sql, projectId, type.objectTypeId, compiled, range)
-  if (objects + edits > 0) await insertPgRuntimeCommit(sql, input.commit)
+
+  // After the key steps: their moves leave each staged value's key in place.
+  const values = await applyStagedObjects(sql, {
+    ...staged,
+    compiled,
+    range: range("primary_id"),
+    commitId: input.commit.id,
+    committedAt: input.commit.committedAt,
+  })
+  const rewritten = { objects: objects + (values.objects ?? 0), edits: edits + (values.edits ?? 0) }
+  if (rewritten.objects + rewritten.edits > 0) await insertPgRuntimeCommit(sql, input.commit)
 
   return {
-    counts: { objects, edits, links, vectors: vectors + moved },
+    counts: { ...rewritten, links, vectors: vectors + moved + (values.vectors ?? 0) },
     cursor: last === undefined ? null : { kind: "objects", afterPrimaryId: last },
   }
 }
@@ -687,6 +719,15 @@ async function applyDerived(
     return applyUniqueValues(sql, ofType, compiled, cursor.after, batchRows)
   }
 
+  if (cursor.store === "stagedUnique") {
+    const { runId } = input
+    const after = cursor.after
+    const step = await applyStagedUnique(sql, {
+      ...{ projectId, runId, objectTypeId, compiled, after, batchRows },
+    })
+    return { counts: { uniqueValues: step.rows }, cursor: step.cursor }
+  }
+
   // Refs are keyed by artifact first: the batch walks the project's refs in key order once.
   const renames = compiled.renames
   const after =
@@ -786,10 +827,7 @@ async function applyUniqueValues(
   }
 
   await finishUniqueProperties(sql, ofType, compiled)
-  return {
-    counts: { uniqueValues: step.rows },
-    cursor: { kind: "derived", store: "artifactRefs" },
-  }
+  return { counts: { uniqueValues: step.rows }, cursor: afterUniqueValues(compiled) }
 }
 
 interface UniqueValuesStep {

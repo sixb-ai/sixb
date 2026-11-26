@@ -3,7 +3,6 @@ import { coverChanges, type MigrationCoverage } from "../../migrations/coverage"
 import { CONFLICT_REMEDY } from "../../migrations/messages"
 import { concerningMigrations, type PlannedStep } from "../../migrations/pending"
 import { runRenames, runValueProperties } from "../../migrations/run"
-import { stepKindOf } from "../../migrations/steps"
 import type { MigrationDefinition } from "../../migrations/types"
 import type { OntologyDefinitionCatalog } from "../../ontology/registry"
 import {
@@ -552,7 +551,6 @@ async function migrationFindings(
     migrations,
     settled,
     appliesMigrations: input.storage.ontology.migrations !== undefined,
-    appliesValues: input.storage.ontology.migrations?.values !== undefined,
   })
   if (classes.conflicts.length > 0) return { findings: [...classes.conflicts], run: [] }
 
@@ -611,8 +609,6 @@ function classifyTypeChanges(input: {
   readonly settled: ReadonlySet<string>
   /** Whether the storage provider applies migrations: without it, no covered change runs. */
   readonly appliesMigrations: boolean
-  /** Whether it also stages the values of fills and converts (`migrations.values`). */
-  readonly appliesValues: boolean
 }): TypeChangeClasses {
   const { objectTypeId, from, code, ontology, migrations, settled } = input
   const coverage = coverChanges({
@@ -633,19 +629,14 @@ function classifyTypeChanges(input: {
     remedy: [CONFLICT_REMEDY],
   }))
 
-  // A covered change runs when storage applies every step that resolves it: none without
-  // migrations, and no fill or convert without the staging they need (`migrations.values`).
-  const applies = (change: ProbedChange) =>
-    input.appliesMigrations &&
-    (input.appliesValues ||
-      coverage.stepsFor(change).every((planned) => !stepKindOf(planned.step).stagesValues))
+  // A covered change runs when the storage provider applies migrations, and is a finding otherwise.
   const covered = [...coverage.covered, ...coverage.valueChanges.filter(needsData)]
 
   return {
     conflicts,
     missing: coverage.missing.filter(needsData),
-    runnable: covered.filter(applies),
-    blocked: covered.filter((change) => !applies(change)),
+    runnable: input.appliesMigrations ? covered : [],
+    blocked: input.appliesMigrations ? [] : covered,
     coverage,
   }
 }

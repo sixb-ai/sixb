@@ -239,6 +239,7 @@ const shippedMigrationIds = [
   "117-ontology-type-shapes",
   "118-ontology-migrate-executions",
   "119-ontology-migration-runs",
+  "120-ontology-migration-staged-values",
 ]
 
 afterEach(async () => {
@@ -2553,6 +2554,7 @@ describe("SQLite storage migrations", () => {
         "ontology_link_overrides",
         "ontology_migration_run_lanes",
         "ontology_migration_runs",
+        "ontology_migration_staged_values",
         "ontology_migrations_settled",
         "ontology_object_overrides",
         "ontology_outbox",

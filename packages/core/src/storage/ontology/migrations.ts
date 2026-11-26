@@ -284,12 +284,8 @@ export interface OntologyMigrationStorage {
     readonly settledAt: string
   }): Promise<void>
 
-  /**
-   * The staging value steps need, on a provider that applies them. Without it, a deploy refuses a
-   * pending fill or convert data needs, as it refuses every migration on a provider without
-   * `migrations`.
-   */
-  readonly values?: OntologyMigrationValueStorage
+  /** The staging a run's fills and converts write before it starts. */
+  readonly values: OntologyMigrationValueStorage
 
   /**
    * The point of no return, in the caller's transaction: records the run `applying` with its

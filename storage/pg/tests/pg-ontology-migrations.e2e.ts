@@ -34,6 +34,14 @@ runOntologyMigrationContractSuite("PostgreSQL storage", {
     return created.storage
   },
   cleanup: (storage) => disposeTestStorage(storage),
+  clearEditTimes: (storage, ref) =>
+    withClient(storage, async (sql) => {
+      await sql`
+        UPDATE ontology_object_overrides SET edited_at = '{}'::jsonb
+        WHERE project_id = ${ref.projectId} AND object_type_id = ${ref.objectTypeId}
+          AND primary_id = ${ref.primaryId}
+      `
+    }),
   writeLegacyLinkConflict: async (storage, slot) => {
     await withClient(
       storage,

@@ -125,22 +125,6 @@ function create(
   }
 }
 
-/** `storage`, as a provider that applies migrations but stages no values. */
-function withoutValueStaging(storage: Storage): Storage {
-  const migrations = storage.ontology.migrations!
-  const without = Object.create(migrations, { values: { value: undefined } })
-  const ontology = new Proxy(storage.ontology, {
-    get: (target, key) => (key === "migrations" ? without : Reflect.get(target, key)),
-  })
-  return new Proxy(storage, {
-    get(target, key) {
-      if (key === "ontology") return ontology
-      const value = Reflect.get(target, key)
-      return typeof value === "function" ? value.bind(target) : value
-    },
-  })
-}
-
 /** A store on v1, with `jobs` created by actions. */
 async function deployed(jobs: readonly OntologyEditOperation[], code = v1): Promise<Storage> {
   const storage = new InMemoryStorage()
@@ -398,21 +382,6 @@ describe("a change pending migrations cover", () => {
     expect(job?.properties.status).toBe("open")
   })
 
-  // Removal proof: in the gate, let every step run on a provider with `migrations`; the deploy then
-  // goes past its point of no return and fails, as the plan finds no staging to write to.
-  test("refuses a fill data needs on a provider without the staging value steps need", async () => {
-    const optionalText = release([prop("hours", "string")])
-    const storage = withoutValueStaging(await deployed([create("J-1")], optionalText))
-
-    const required = release([prop("hours", "string", { required: true })])
-    const fill = defineMigration("job-hours", required.Job).fillProperty("hours", () => "0")
-
-    expect(await messageOf(deploy(storage, required, [fill]))).toContain(
-      "Migration 'job-hours' is pending; this storage provider can't apply it."
-    )
-    expect(await storage.ontology.migrations?.getOpenRun({ projectId: PROJECT })).toBeNull()
-  })
-
   // The first deploy's baseline holds only the keys data holds: a legacy key can be renamed.
   test("covers a rename on the first deploy, when no shape is recorded yet", async () => {
     const storage = new InMemoryStorage()
@@ -642,6 +611,7 @@ describe("a migration run", () => {
       const migrations = storage.ontology.migrations!
       const killed: OntologyMigrationStorage = {
         parallelism: migrations.parallelism,
+        values: migrations.values,
         getOpenRun: (input) => migrations.getOpenRun(input),
         listSettled: (input) => migrations.listSettled(input),
         settle: (input) => migrations.settle(input),

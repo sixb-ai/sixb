@@ -76,11 +76,10 @@ alone.
   pauses writes: the old release may still write keys the code drops.
 - **Migrations.** Given the project's migrations, `classifyTypeChanges` sorts the changes from the
   shapes alone, through `coverChanges` (`migrations/coverage.ts`): missing a migration, runnable,
-  or blocked (no migration applied by this storage, or a fill or a convert on one without
-  `migrations.values`). Each is read under the key a pending rename leaves. A missing one data
-  holds gets the `defineMigration(...)` lines that would cover it; a runnable one goes to the type's
-  `run` steps, on a probe alone, since the run counts what it rewrites; a blocked one names the
-  migrations.
+  or blocked (on a storage provider that applies no migration). Each is read under the key a
+  pending rename leaves. A missing one data holds gets the `defineMigration(...)` lines that would
+  cover it; a runnable one goes to the type's `run` steps, on a probe alone, since the run counts
+  what it rewrites; a blocked one names the migrations.
 
 `next` says what recording writes: the code's shape, the baseline (`dev` only, when data doesn't
 fit), the row's removal (a type gone from code that holds nothing), or nothing, when the stored
