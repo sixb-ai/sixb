@@ -185,7 +185,20 @@ export function createBranchesRuntime(
       })
       if (created) return toBranchView(branch)
 
-      return want(name, () => ({ wanted: "running", openedAt: now, lastSeenAt: now }), deleting)
+      // A branch that failed and stopped, its machine lost or its git branch missing, starts over:
+      // nothing holds it, and its old failure would read as the code failing to start again.
+      return want(
+        name,
+        (current) => ({
+          wanted: "running",
+          openedAt: now,
+          lastSeenAt: now,
+          ...(current.state === "failed" && current.wanted !== "running"
+            ? { state: "stopped" as const, error: null }
+            : {}),
+        }),
+        deleting
+      )
     },
 
     refresh: (name) => {

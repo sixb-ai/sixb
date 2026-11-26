@@ -149,6 +149,40 @@ describe("sixb.branches", () => {
     )
   })
 
+  // Its machine failed, so the worker stopped it as failed. Opened again, it once kept that
+  // failure while wanted running, which the Console reads as code that failed to start: "fix the
+  // code and push". Red check: drop the `state: "stopped"` reset from `open`.
+  test("starts a branch that failed and stopped over, without its old failure", async () => {
+    const host = await deploy()
+    const branches = as(host, ["staff"]).branches
+    await branches.open(BRANCH.name)
+    await host.storage.hostedBranches?.update(
+      { projectId, name: BRANCH.name, at: new Date() },
+      { wanted: "stopped", state: "failed", error: { message: "The sandbox was lost." } }
+    )
+
+    expect(await branches.open(BRANCH.name)).toMatchObject({
+      wanted: "running",
+      state: "stopped",
+      error: null,
+    })
+  })
+
+  // A runtime whose code failed stays wanted, held by its worker: opening it again changes
+  // nothing of what the worker reports. Red check: reset whatever `wanted` was, in `open`.
+  test("leaves a running branch's failure to its worker", async () => {
+    const host = await deploy()
+    const branches = as(host, ["staff"]).branches
+    await branches.open(BRANCH.name)
+    const failure = { message: "SyntaxError", file: "ontology/order.ts" }
+    await host.storage.hostedBranches?.update(
+      { projectId, name: BRANCH.name, at: new Date() },
+      { state: "failed", error: failure }
+    )
+
+    expect(await branches.open(BRANCH.name)).toMatchObject({ state: "failed", error: failure })
+  })
+
   // A stop read the row, then wrote over it after a delete landed: the branch came back stopped,
   // with its schema dropped under it.
   // Guard check: drop `revision` from the update in `want` (`branches/execution.ts`).
