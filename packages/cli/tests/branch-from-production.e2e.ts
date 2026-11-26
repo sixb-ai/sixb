@@ -369,6 +369,42 @@ describe.each(laptops)("a laptop branch on %s", (_name, localStorage) => {
     await local.storage.close?.()
   }, 60_000)
 
+  // Red check: in `loadCopy` (lib/branch-from-production.ts), read `copy.rest()` again in the
+  // catch instead of keeping its first result: the spent stream yields nothing, and production
+  // keeps the failed copy's slice, and its files, two weeks.
+  test("releases production's slice when the copy fails to load", async () => {
+    const local = await laptop()
+    const alice = await signedIn("usr_alice")
+    // Its own git branch on each laptop: a slice left behind by one is not another's.
+    const gitBranch = `feature/broken-${local.projectRoot.split("-").at(-1)}`
+    const live = async () =>
+      (
+        await production.storage.lakeSlices.listLive({ projectId: PROJECT, liveAfter: new Date(0) })
+      ).filter((slice) => slice.branch === gitBranch)
+
+    await fetchBranchCopy({
+      projectRoot: local.projectRoot,
+      gitBranch,
+      profile: "alice",
+      connect: async () => alice,
+    })
+    expect(await live()).toHaveLength(1)
+
+    // The load fails once the copy is read through: the index cannot be written.
+    await mkdir(join(local.projectRoot, ".sixb/branches/index.json"))
+    const failed = await branchFromProduction({
+      host: local.host,
+      projectRoot: local.projectRoot,
+      gitBranch,
+      gitBranches: [gitBranch],
+    }).catch((error: unknown) => error)
+
+    expect(String(failed)).toContain("EISDIR")
+    expect(await live()).toEqual([])
+    await local.lake.close()
+    await local.storage.close?.()
+  }, 60_000)
+
   // Red check: in routes/branches.ts, drop the grant check of the copy route alone: the copy
   // starts and breaks off. (`copyForBranch`'s own is `packages/core/tests/branch-copy.test.ts`'s.)
   test("refuses a person who may not copy", async () => {

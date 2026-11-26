@@ -261,6 +261,8 @@ async function loadCopy(input: {
   const copy = readBranchCopy(
     Bun.file(input.spool).stream() as unknown as AsyncIterable<Uint8Array>
   )
+  // Read once: the copy's stream is spent after it.
+  let rest: Awaited<ReturnType<typeof copy.rest>> | undefined
 
   try {
     const report = await importSnapshot({
@@ -269,7 +271,7 @@ async function loadCopy(input: {
       ontology: input.host.definitions.ontology as never,
       projections: input.host.definitions.projections,
     })
-    const rest = await copy.rest()
+    rest = await copy.rest()
     await migrateStorage(namespace, {
       projectId: input.host.id,
       ontology: input.host.definitions.ontology as never,
@@ -302,13 +304,12 @@ async function loadCopy(input: {
     }
     await writeIndex(input.directory, input.index)
   } catch (error) {
-    // Nothing of a failed copy is kept, here or in production.
+    // Nothing of a failed copy is kept, here or in production. A load that failed before its
+    // lake part was read reads it from the spool.
     await input.storage.dropBranchNamespace(input.name).catch(() => undefined)
-    const rest = await copy.rest().catch(() => null)
-    if (rest) {
-      await deleteSlice(pending.apiUrl, rest.lake.credential, rest.lake.sliceId).catch(
-        () => undefined
-      )
+    const lake = rest === undefined ? await spooledLake(input.spool).catch(() => null) : rest?.lake
+    if (lake) {
+      await deleteSlice(pending.apiUrl, lake.credential, lake.sliceId).catch(() => undefined)
     }
     throw error
   } finally {
