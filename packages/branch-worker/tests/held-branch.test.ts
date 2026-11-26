@@ -173,6 +173,7 @@ describe("a held branch", () => {
   test("follows no redirect of its runtime's front", async () => {
     const reached: string[] = []
     const inside = Bun.serve({
+      hostname: "127.0.0.1",
       port: 0,
       fetch(request) {
         reached.push(request.headers.get(BRANCH_KEY_HEADER) ?? "")
@@ -382,14 +383,14 @@ describe("a held branch", () => {
       credentialHash: "slice_delivered",
       receivedAt: new Date(),
     })
-    // The copy reads production's lake through that slice, as a copy of a forked lake does.
-    const deliver = copyModule.copyIntoSandbox
+    // The copy reads production's lake through that slice, as a copy of a forked lake does. The
+    // lab already wraps the copy, and puts it back after the test.
     const copy = spyOn(copyModule, "copyIntoSandbox")
+    const deliver = copy.getMockImplementation()!
     copy.mockImplementation(async (...args) => {
       const delivered = await deliver(...args)
       return delivered ? { ...delivered, lakeSliceId: "slice_delivered" } : null
     })
-    onCleanup(() => copy.mockRestore())
     // The runtime never gets through its load.
     lab.importGate = new Promise<void>(() => {})
 

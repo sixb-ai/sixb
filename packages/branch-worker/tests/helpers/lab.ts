@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, jest } from "bun:test"
+import { afterEach, beforeEach, jest, spyOn } from "bun:test"
 import {
   can,
   defineGroup,
@@ -30,12 +30,14 @@ import {
 import { importSnapshot } from "@sixb/core/internal/snapshots"
 import type { CreateSandboxOptions, SandboxSourceAuth } from "@sixb/core/sandboxes"
 import { createTestSixb } from "@sixb/core/testing"
+import * as copyModule from "../../src/copy"
 import {
   BRANCH_LEASE_MS,
   BRANCH_TICK_MS,
   HeldBranch,
   type HeldBranchSettings,
 } from "../../src/held-branch"
+import * as stagingModule from "../../src/staging"
 import { gitRepository } from "./git"
 
 // A shop's production, a fake sandbox provider and a fake runtime front: what the worker does
@@ -57,10 +59,72 @@ const staff = defineRole("staff", {
 
 const cleanups: (() => Promise<unknown> | unknown)[] = []
 
+// The clock is fake, the worker's I/O is not: it reads its runtime's front over HTTP, stages a
+// copy on disk and clears what a dead worker staged. Work still running when the clock moves on
+// sees time jump under it on a busy runner: the branch never answers, nobody ever used it, the
+// copy outlasts its bound. `flush` waits for that work, except where a test's gate holds it.
+// To see it fail without: have the front answer 50 ms late (`await Bun.spawn(["sleep", "0.05"])
+// .exited` in its `fetch`), and most of the worker's tests fail.
+
+// Each test's own: work a test left behind is no later test's to wait for.
+let pending = { work: new Set<Promise<unknown>>(), held: 0 }
+
+function track<T>(promise: Promise<T>): Promise<T> {
+  const { work } = pending
+  work.add(promise)
+  void promise.catch(() => {}).finally(() => work.delete(promise))
+  return promise
+}
+
+/**
+ * Waits at a test's gate inside the work `flush` waits for: the copy held there on purpose is not
+ * waited for. Gates outside that work (a sandbox's create, the runtime's load) need none.
+ */
+export async function atGate(gate: Promise<void> | null): Promise<void> {
+  if (!gate) return
+  const counted = pending
+  counted.held += 1
+  try {
+    await gate
+  } finally {
+    counted.held -= 1
+  }
+}
+
 /** Runs each test of the file on a fake clock, and cleans up after it. */
 export function useLab(): void {
   beforeEach(() => {
     jest.useFakeTimers({ now: new Date("2026-11-24T12:00:00.000Z") })
+    pending = { work: new Set(), held: 0 }
+
+    const realFetch = globalThis.fetch
+    const fetchWhole = async (...args: Parameters<typeof fetch>) => {
+      const response = await realFetch(...args)
+      return new Response(await response.arrayBuffer(), response)
+    }
+    const reads = spyOn(globalThis, "fetch").mockImplementation(((
+      ...args: Parameters<typeof fetch>
+    ) => {
+      const url = args[0] instanceof Request ? args[0].url : String(args[0])
+      if (new URL(url).pathname !== BRANCH_STATUS_PATH) return realFetch(...args)
+      return track(fetchWhole(...args))
+    }) as typeof fetch)
+
+    const deliver = copyModule.copyIntoSandbox
+    const copies = spyOn(copyModule, "copyIntoSandbox").mockImplementation((...args) =>
+      track(deliver(...args))
+    )
+
+    const clear = stagingModule.clearStaleStaging
+    const clears = spyOn(stagingModule, "clearStaleStaging").mockImplementation(() =>
+      track(clear())
+    )
+
+    onCleanup(() => {
+      reads.mockRestore()
+      copies.mockRestore()
+      clears.mockRestore()
+    })
   })
   afterEach(async () => {
     jest.useRealTimers()
@@ -218,7 +282,7 @@ function fakeSandboxes(
       return result()
     },
     async writeFiles(files) {
-      if (files.some((file) => file.path.includes(".parts/"))) await lab.copyGate
+      if (files.some((file) => file.path.includes(".parts/"))) await atGate(lab.copyGate)
       for (const file of files) lab.files.set(file.path, file.contents)
     },
     start: async (_command, _args, options) => {
@@ -383,7 +447,10 @@ export async function setup(
     exits: [],
   }
 
+  // On the address the worker reads, not every address: a port the kernel hands out on every
+  // address can still be held on loopback by another process, which then answers the read.
   const front = Bun.serve({
+    hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
       if (request.headers.get(BRANCH_KEY_HEADER) === null) {
@@ -529,11 +596,15 @@ export async function hold(host: SixbHost, overrides: Partial<HeldBranchSettings
   }
 }
 
-/** Lets callbacks and I/O run, the clock still. */
+/** Lets callbacks and I/O run, the clock still, until no work but what a gate holds is left. */
 export async function flush(turns = 2_000): Promise<void> {
-  for (let turn = 0; turn < turns; turn += 1) {
-    await new Promise<void>((resolve) => setImmediate(resolve))
-  }
+  const busy = () => pending.work.size > pending.held
+  do {
+    while (busy()) await new Promise<void>((resolve) => setImmediate(resolve))
+    for (let turn = 0; turn < turns; turn += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve))
+    }
+  } while (busy())
 }
 
 /** Ticks the clock until `done`, letting the work of each tick finish first. */

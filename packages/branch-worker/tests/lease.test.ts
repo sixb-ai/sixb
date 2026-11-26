@@ -6,6 +6,7 @@ import { BRANCH_LEASE_MS, BRANCH_TICK_MS } from "../src/held-branch"
 import * as stagingModule from "../src/staging"
 import { BranchWorker } from "../src/worker"
 import {
+  atGate,
   flush,
   hold,
   NAME,
@@ -143,7 +144,7 @@ describe("the lease on a branch", () => {
     })
     const staging = spyOn(stagingModule, "stagingDirectory")
     staging.mockImplementation(async () => {
-      await asleep
+      await atGate(asleep)
       return mkdtemp(join(tmpdir(), "sixb-branch-staging-test-"))
     })
     onCleanup(() => staging.mockRestore())
