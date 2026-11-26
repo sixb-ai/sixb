@@ -12,8 +12,13 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { type ChildRunner, ComputerRunner, runApiCredential } from "@sixb/agent"
-import { AGENT_RUNTIME_PROFILE, agentMemoryFileHash } from "@sixb/cli-core"
+import {
+  AGENT_RUNTIME_PROFILE,
+  type ChildRunner,
+  ComputerRunner,
+  runApiCredential,
+} from "@sixb/agent"
+import { agentMemoryFileHash } from "@sixb/cli-core"
 import {
   AgentDefinitionError,
   type AgentMessagePart,
@@ -1354,14 +1359,15 @@ class RecordingSandbox implements Sandbox {
         durationMs: 1,
       }
     }
-    if (command === "bash" && script === "sixb status") {
+    if (command === "bash" && (script === "sixb status" || script === "sixb status --json")) {
       return {
         exitCode: 0,
         stdout: JSON.stringify({
           ok: true,
-          profile: AGENT_RUNTIME_PROFILE,
+          connected: true,
+          apiUrl: "http://localhost",
           cli: { version: "1" },
-          javascript: { name: "node", version: "22.0.0" },
+          runtime: { name: "node", version: "22.0.0" },
           project: { id: PROJECT_ID },
         }),
         stderr: "",
@@ -7101,7 +7107,7 @@ describe("AgentWorker", () => {
       // Its unfinished last line goes, and the summary says where the rest is.
       const checkpoint = await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
       expect(checkpoint?.summary).toBe(
-        "## Goal\n\n[The summary was cut short here. `sixb history` prints the earlier conversation.]"
+        "## Goal\n\n[The summary was cut short here. `sixb threads messages` prints the earlier conversation.]"
       )
     } finally {
       await worker.stop()
@@ -18027,9 +18033,9 @@ describe("context of a child and of a workflow step", () => {
       const [replayed] = childRequests.splice(0)
       expect(replayed && isSummaryRequest(replayed)).toBe(false)
       expectReplayedPrefix(secondRun.at(-1), replayed, CHILD.provider)
-      // Its summary sends it to no `sixb history`, which does not answer a child.
+      // Its summary sends it to no `sixb threads messages`, which does not answer a child.
       // Reproduce: read the child's thread as a conversation's in subagentThreadContext.
-      expect(JSON.stringify(replayed?.messages)).not.toContain("sixb history")
+      expect(JSON.stringify(replayed?.messages)).not.toContain("sixb threads messages")
     } finally {
       await stopUnderFakeTime(worker)
       setSystemTime()
@@ -18170,7 +18176,7 @@ describe("context of a child and of a workflow step", () => {
       // It goes on from what its summary kept, which sends it nowhere it cannot read.
       const resumed = JSON.stringify(childRequests[1]?.messages)
       expect(resumed).toContain(input.kept)
-      expect(resumed).not.toContain("sixb history")
+      expect(resumed).not.toContain("sixb threads messages")
     } finally {
       await stopUnderFakeTime(worker)
       setSystemTime()

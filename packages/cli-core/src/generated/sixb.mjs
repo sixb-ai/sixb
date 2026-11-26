@@ -187,13 +187,11 @@ var SANDBOX_MAIN_HELP = `Sixb CLI
 Usage:
   sixb <command> [options]
 
-The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.
 API commands emit JSON. Help, version, and examples emit text. Downloads write to --output and
 emit a JSON receipt.
 
 Discovery:
-  sixb status                         Check the sandbox and its API access
-  sixb context                        Print the current run context
+  sixb status                         Check API connection, project, and runtime
   sixb project show                   Show project metadata
   sixb ontology list                  Compact visible type and relationship catalog
   sixb ontology get <type>            Inspect one object type, properties, links, and actions
@@ -240,6 +238,10 @@ Files:
 Members:
   sixb users search <text>            Find members by name or email
   sixb users list|get ...
+
+Threads and memory:
+  sixb threads list|get|messages|runs|approvals ...
+  sixb memory get|pull|save ...
 
 Artifacts:
   sixb artifacts comments list <artifact-id>
@@ -383,15 +385,30 @@ identities. Put limits and pages inside the query tree.
 Vector profile names are the keys of the type's search.vectors. Vector input is a start node,
 optionally under filters; k bounds the ranked matches and results carry a score.`;
 var GROUP_HELP = {
-  status: "Usage: sixb status",
-  context: "Usage: sixb context",
-  history: `Usage:
-  sixb history [--offset <n>] [--limit <1-${CLI_LIMITS.history.maximum}>]
-  sixb history <seq>
+  status: "Usage: sixb status [--json]",
+  threads: `Usage:
+  sixb threads list [--limit <1-${CLI_LIMITS.list.maximum}>] [--offset <n>]
+  sixb threads get [thread-id]
+  sixb threads messages [thread-id] [--offset <n>] [--limit <1-${CLI_LIMITS.history.maximum}>] [--seq <n>] [--json]
+  sixb threads runs [thread-id]
+  sixb threads approvals [thread-id]
 
-Prints this conversation's messages as text, oldest first, including those summarized when it
-was compacted: what was said, the files sent, and each tool call with its result. A page holds
-${CLI_LIMITS.history.default} messages by default and cuts long text; \`sixb history <seq>\` prints one message whole.`,
+When [thread-id] is omitted, SIXB_THREAD_ID is used.
+
+\`threads messages\` prints the conversation as text, oldest first, including turns summarized
+when it was compacted: what was said, files sent, and each tool call with its result. A page
+holds ${CLI_LIMITS.history.default} messages by default and cuts long text; pass \`--seq <n>\` to print one message
+whole, or \`--json\` for raw JSON.`,
+  memory: `Usage:
+  sixb memory get <repo>
+  sixb memory pull [repo] [--dir <path>]
+  sixb memory save <repo> -m <message> [--dir <path>]
+
+<repo> is user or project. --dir defaults to $SIXB_MEMORY_DIR.
+
+A save is rejected for files another conversation changed since they were loaded. Their
+current contents are written next to yours as <file>.theirs: merge each into its file, delete
+it, then save again. Changes others made to other files are brought in by save and pull.`,
   project: "Usage: sixb project show",
   ontology: `Usage:
   sixb ontology list [--full]
@@ -1186,9 +1203,312 @@ function parseContentUrl(value) {
   return url;
 }
 
+// src/commands/memory.ts
+import { lstat, mkdir, readdir, readFile as readFile2, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+
+// src/memory.ts
+import { createHash as createHash2 } from "node:crypto";
+var AGENT_MEMORY_MANIFEST = "context/memory.json";
+var AGENT_MEMORY_ENTRY = "MEMORY.md";
+var AGENT_MEMORY_STARTER = `# Memory
+
+`;
+function agentMemoryFileHash(contents) {
+  return createHash2("sha256").update(contents).digest("hex");
+}
+
+// src/commands/memory.ts
+var THEIRS = ".theirs";
+var LOCAL_MANIFEST_NAME = ".sixb-memory.json";
+var CONFLICT_HINT = "Merge each .theirs file into its file, delete it, then save again.";
+async function memory(api, args) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP.memory);
+  if (sub === "get")
+    return get(api, rest);
+  if (sub === "save")
+    return save(api, rest);
+  if (sub === "pull")
+    return pull(api, rest);
+  fail(`Unknown memory command '${sub}'. Run 'sixb memory --help'.`);
+}
+async function get(api, args) {
+  const { positionals } = parseCommandArgs(args, {}, "memory get", 1);
+  const repo = parseRepo(positionals[0] ?? "");
+  const remote = await fetchRepo(api, repo);
+  writeJson({
+    repo,
+    revision: remote.revision,
+    files: [...remote.files.entries()].map(([path, contents]) => ({ path, contents }))
+  });
+}
+async function save(api, args) {
+  const { repo, message, dir } = parseSaveArgs(args);
+  const local = localMemory(dir);
+  const manifest = await local.readManifest();
+  const loaded = manifest.repos[repo];
+  if (!loaded)
+    fail(`Memory repo '${repo}' is not installed.`, "invalid_arguments", `Run 'sixb memory pull ${repo}'.`);
+  const files = await local.readRepo(repo);
+  const unresolved = [...files.keys()].filter((path) => path.endsWith(THEIRS));
+  if (unresolved.length > 0) {
+    fail(`Resolve ${unresolved.join(", ")} first.`, "unresolved_conflicts", CONFLICT_HINT);
+  }
+  const changes = [...new Set([...files.keys(), ...Object.keys(loaded.files)])].sort().flatMap((path) => {
+    const contents = files.get(path);
+    const changed = (contents === undefined ? undefined : agentMemoryFileHash(contents)) !== loaded.files[path];
+    return changed ? [{ path, contents: contents ?? null }] : [];
+  });
+  if (changes.length === 0) {
+    return writeJson({
+      repo,
+      saved: false,
+      changed: [],
+      hint: "No file changed since it was loaded."
+    });
+  }
+  let saved;
+  try {
+    saved = asRecord(await api.post(`/api/agent-memory/${repo}/revisions`, {
+      baseRevision: loaded.revision,
+      message,
+      changes
+    }));
+  } catch (error) {
+    if (!(error instanceof CliError) || error.body.status !== 409)
+      throw error;
+    const { revision, conflicts } = await update(local, repo, manifest, await fetchRepo(api, repo));
+    process.exitCode = 1;
+    return writeJson({ repo, saved: false, revision, conflicts, hint: CONFLICT_HINT });
+  }
+  const savedFiles = { ...loaded.files };
+  for (const change of changes) {
+    if (change.contents === null)
+      delete savedFiles[change.path];
+    else
+      savedFiles[change.path] = agentMemoryFileHash(change.contents);
+  }
+  const after = {
+    repos: { ...manifest.repos, [repo]: { ...loaded, files: savedFiles } }
+  };
+  const { revision, conflicts } = await update(local, repo, after, await fetchRepo(api, repo));
+  const warnings = Array.isArray(saved.warnings) ? saved.warnings : [];
+  writeJson({
+    repo,
+    saved: true,
+    revision,
+    changed: changes.map((change) => change.path),
+    ...warnings.length > 0 ? { warnings } : {},
+    ...conflicts.length > 0 ? { conflicts, hint: CONFLICT_HINT } : {}
+  });
+}
+async function pull(api, args) {
+  const { positionals, options } = parseCommandArgs(args, { "--dir": "string" }, "memory pull", [0, 1]);
+  const local = localMemory(options["--dir"]);
+  const manifest = await local.readManifest();
+  const repos = positionals[0] === undefined ? installedRepos(manifest) : [parseRepo(positionals[0])];
+  if (repos.length === 0) {
+    fail("No memory repo is installed.", "invalid_arguments", "Run 'sixb memory pull user'.");
+  }
+  let current = manifest;
+  for (const repo of repos) {
+    const result = await update(local, repo, current, await fetchRepo(api, repo));
+    current = result.manifest;
+    writeJson({
+      repo,
+      revision: result.revision,
+      updated: result.updated,
+      conflicts: result.conflicts,
+      ...result.conflicts.length > 0 ? { hint: CONFLICT_HINT } : {}
+    });
+  }
+}
+async function update(local, repo, manifest, remote) {
+  const base = manifest.repos[repo]?.files ?? {};
+  const files = await local.readRepo(repo);
+  const updated = [];
+  const conflicts = [];
+  for (const path of [
+    ...new Set([...files.keys(), ...remote.files.keys(), ...Object.keys(base)])
+  ].sort()) {
+    if (path.endsWith(THEIRS))
+      continue;
+    const mine = files.get(path);
+    const theirs = remote.files.get(path);
+    const mineHash = mine === undefined ? undefined : agentMemoryFileHash(mine);
+    const theirsHash = theirs === undefined ? undefined : agentMemoryFileHash(theirs);
+    if (theirsHash === base[path] || theirsHash === mineHash)
+      continue;
+    if (mineHash === base[path]) {
+      await local.write(repo, path, theirs);
+      updated.push(path);
+    } else if (theirs === undefined) {
+      conflicts.push({ path, theirs: null });
+    } else {
+      await local.write(repo, `${path}${THEIRS}`, theirs);
+      conflicts.push({ path, theirs: `${path}${THEIRS}` });
+    }
+  }
+  if (!remote.files.has(AGENT_MEMORY_ENTRY) && !(await local.readRepo(repo)).has(AGENT_MEMORY_ENTRY)) {
+    await local.write(repo, AGENT_MEMORY_ENTRY, AGENT_MEMORY_STARTER);
+  }
+  const next = {
+    repos: {
+      ...manifest.repos,
+      [repo]: {
+        revision: remote.revision,
+        files: Object.fromEntries([...remote.files].map(([path, contents]) => [path, agentMemoryFileHash(contents)]))
+      }
+    }
+  };
+  await local.writeManifest(next);
+  return { manifest: next, revision: remote.revision, updated, conflicts };
+}
+async function fetchRepo(api, repo) {
+  const body = asRecord(await api.get(`/api/agent-memory/${repo}`));
+  const files = Array.isArray(body.files) ? body.files.map(asRecord) : null;
+  if (typeof body.revision !== "number" || !files?.every((file) => typeof file.path === "string" && typeof file.contents === "string")) {
+    throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid memory repo." }, EXIT_API);
+  }
+  return {
+    revision: body.revision,
+    files: new Map(files.map((file) => [String(file.path), String(file.contents)]))
+  };
+}
+function localMemory(explicitDir) {
+  const root = explicitDir || process.env.SIXB_MEMORY_DIR;
+  const contextDir = explicitDir ? undefined : process.env.SIXB_CONTEXT_DIR;
+  if (!root) {
+    fail("Specify --dir <path> or set SIXB_MEMORY_DIR.", "invalid_arguments", "Run 'sixb memory get user' to read memory without a local directory.");
+  }
+  const manifestPath = contextDir ? join(contextDir, ...AGENT_MEMORY_MANIFEST.split("/")) : join(root, LOCAL_MANIFEST_NAME);
+  const fileOf = (repo, path) => join(root, repo, ...path.split("/"));
+  return {
+    async readManifest() {
+      let text;
+      try {
+        text = await readFile2(manifestPath, "utf8");
+      } catch (error) {
+        if (isFileError(error, "ENOENT"))
+          return { repos: {} };
+        throw error;
+      }
+      try {
+        return parseManifest(JSON.parse(text));
+      } catch {
+        fail(`Memory manifest '${manifestPath}' is not valid.`, "invalid_json");
+      }
+    },
+    async writeManifest(manifest) {
+      await mkdir(dirname(manifestPath), { recursive: true });
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}
+`);
+    },
+    async readRepo(repo) {
+      const files = new Map;
+      const walk = async (directory, prefix) => {
+        let entries;
+        try {
+          entries = await readdir(directory);
+        } catch (error) {
+          if (isFileError(error, "ENOENT"))
+            return;
+          throw error;
+        }
+        for (const name of entries) {
+          const path = prefix ? `${prefix}/${name}` : name;
+          const stats = await lstat(join(directory, name));
+          if (stats.isDirectory())
+            await walk(join(directory, name), path);
+          else if (stats.isFile())
+            files.set(path, await readFile2(join(directory, name), "utf8"));
+          else
+            fail(`Memory file '${repo}/${path}' is not a regular file.`);
+        }
+      };
+      await walk(join(root, repo), "");
+      return files;
+    },
+    async write(repo, path, contents) {
+      const file = fileOf(repo, path);
+      if (contents === undefined) {
+        await rm(file, { force: true });
+        return;
+      }
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, contents);
+    }
+  };
+}
+function parseSaveArgs(args) {
+  const positionals = [];
+  let message;
+  let dir;
+  for (let index = 0;index < args.length; index++) {
+    const argument = args[index] ?? "";
+    if (argument === "-m" || argument === "--message") {
+      if (message !== undefined)
+        fail(`${argument} may only be provided once.`);
+      message = args[++index];
+      if (!message)
+        fail(`${argument} requires a value.`);
+    } else if (argument === "--dir") {
+      if (dir !== undefined)
+        fail("--dir may only be provided once.");
+      dir = args[++index];
+      if (!dir)
+        fail("--dir requires a value.");
+    } else if (argument.startsWith("--dir=")) {
+      if (dir !== undefined)
+        fail("--dir may only be provided once.");
+      dir = argument.slice("--dir=".length);
+      if (!dir)
+        fail("--dir requires a value.");
+    } else if (argument.startsWith("-")) {
+      fail(`Unknown memory save option '${argument}'.`);
+    } else {
+      positionals.push(argument);
+    }
+  }
+  if (positionals.length !== 1)
+    fail("Invalid arguments for 'memory save'.");
+  if (message === undefined || message.trim().length === 0) {
+    fail("memory save requires -m <what you learned>.");
+  }
+  return { repo: parseRepo(positionals[0] ?? ""), message, ...dir ? { dir } : {} };
+}
+function parseRepo(value) {
+  if (value === "user" || value === "project")
+    return value;
+  fail(`Unknown memory repo '${value}'. Use 'user' or 'project'.`);
+}
+function installedRepos(manifest) {
+  return ["user", "project"].filter((repo) => manifest.repos[repo] !== undefined);
+}
+function parseManifest(value) {
+  const repos = asRecord(asRecord(value).repos);
+  const parsed = {};
+  for (const repo of ["user", "project"]) {
+    if (repos[repo] === undefined)
+      continue;
+    const entry = asRecord(repos[repo]);
+    const files = asRecord(entry.files);
+    if (typeof entry.revision !== "number" || !Object.values(files).every((digest) => typeof digest === "string")) {
+      throw new Error("invalid memory manifest");
+    }
+    parsed[repo] = {
+      revision: entry.revision,
+      files
+    };
+  }
+  return { repos: parsed };
+}
+
 // src/commands/models.ts
-import { access, mkdir, stat as stat2 } from "node:fs/promises";
-import { dirname, extname, join, parse } from "node:path";
+import { access, mkdir as mkdir2, stat as stat2 } from "node:fs/promises";
+import { dirname as dirname2, extname, join as join2, parse } from "node:path";
 var MODEL_KINDS = ["language", "image", "video", "speech", "transcription"];
 async function models(api, args) {
   const [sub, ...rest] = args;
@@ -1543,12 +1863,12 @@ async function saveFiles(api, callId, files, output) {
     const number = files.length > 1 ? `-${index + 1}` : "";
     const extension = (file.mediaType && EXTENSIONS[file.mediaType]) ?? "";
     if (directory)
-      return join(output, `${callId}${number}${extension || ".bin"}`);
+      return join2(output, `${callId}${number}${extension || ".bin"}`);
     const { dir, name, ext } = parse(output);
-    return join(dir, `${name}${number}${extension || ext}`);
+    return join2(dir, `${name}${number}${extension || ext}`);
   });
   for (const [index, path] of paths.entries()) {
-    await mkdir(dirname(path), { recursive: true });
+    await mkdir2(dirname2(path), { recursive: true });
     await api.download(`/api/ai/model-calls/${idSegment(callId)}/files/content`, path, {
       path: `/files/${index}`
     });
@@ -2274,6 +2594,42 @@ async function runs(api, kind, args) {
   fail(`Unknown ${group} command '${sub}'.`);
 }
 
+// src/commands/status.ts
+async function fetchStatus(api, context = {}) {
+  const project = asRecord(await api.get("/api/project"));
+  if (typeof project.id !== "string" || project.id.length === 0) {
+    throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid project." }, EXIT_API);
+  }
+  return {
+    ok: true,
+    connected: true,
+    apiUrl: context.apiUrl ?? api.baseUrl,
+    cli: { version: INSTANCE_CLI_VERSION },
+    runtime: javascriptRuntime(),
+    project: {
+      id: project.id,
+      ...typeof project.locale === "string" ? { locale: project.locale } : {},
+      ...typeof project.timeZone === "string" ? { timeZone: project.timeZone } : {}
+    },
+    ...context.authenticated === undefined ? {} : { authenticated: context.authenticated },
+    ...context.profile === undefined ? {} : { profile: context.profile },
+    ...context.source === undefined ? {} : { source: context.source }
+  };
+}
+async function status(api, args, context = {}) {
+  if (isHelp(args[0]))
+    return writeText(GROUP_HELP.status);
+  if (args.some((arg) => arg !== "--json"))
+    fail("status accepts no arguments but --json.");
+  writeJson(await fetchStatus(api, context));
+}
+function javascriptRuntime() {
+  if (typeof globalThis.Bun === "object") {
+    return { name: "bun", version: globalThis.Bun.version };
+  }
+  return { name: "node", version: process.versions.node };
+}
+
 // src/commands/telemetry.ts
 async function telemetry(api, args) {
   const [sub, ...rest] = args;
@@ -2340,6 +2696,150 @@ function normalizeTelemetryQueryInput(input) {
   }
   requireOrderedRange("from", body.from, "to", body.to);
   return body;
+}
+
+// src/commands/threads.ts
+var PAGE_TEXT_CHARS = 4000;
+var PAGE_TOOL_CHARS = 1000;
+async function threads(api, args) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP.threads);
+  if (sub === "list") {
+    const { options } = parseCommandArgs(rest, { "--limit": "string", "--offset": "string" }, "threads list");
+    const limit = integerInRange("--limit", options["--limit"] ?? String(CLI_LIMITS.list.default), 1, CLI_LIMITS.list.maximum);
+    const offset = options["--offset"] === undefined ? undefined : nonNegativeInteger("--offset", options["--offset"]);
+    return writeJson(await api.get("/api/agent-threads", {
+      limit: String(limit),
+      ...offset === undefined ? {} : { offset: String(offset) }
+    }));
+  }
+  if (sub === "get") {
+    const { positionals } = parseCommandArgs(rest, {}, "threads get", [0, 1]);
+    const threadId = resolveThreadId(positionals[0]);
+    return writeJson(await api.get(`/api/agent-threads/${idSegment(threadId)}`));
+  }
+  if (sub === "runs") {
+    const { positionals } = parseCommandArgs(rest, {}, "threads runs", [0, 1]);
+    const threadId = resolveThreadId(positionals[0]);
+    return writeJson(await api.get(`/api/agent-threads/${idSegment(threadId)}/runs`));
+  }
+  if (sub === "approvals") {
+    const { positionals } = parseCommandArgs(rest, {}, "threads approvals", [0, 1]);
+    const threadId = resolveThreadId(positionals[0]);
+    return writeJson(await api.get(`/api/agent-threads/${idSegment(threadId)}/approvals`));
+  }
+  if (sub === "messages") {
+    return threadMessages(api, rest);
+  }
+  fail(`Unknown threads command '${sub}'. Run 'sixb threads --help'.`);
+}
+async function threadMessages(api, args) {
+  const { positionals, options } = parseCommandArgs(args, { "--offset": "string", "--limit": "string", "--seq": "string", "--json": "boolean" }, "threads messages", [0, 1]);
+  const threadId = resolveThreadId(positionals[0]);
+  const explicitThread = positionals[0] !== undefined;
+  const path = `/api/agent-threads/${idSegment(threadId)}/messages`;
+  const asJson = options["--json"] === true;
+  const seqRaw = options["--seq"];
+  if (seqRaw !== undefined) {
+    const wanted = integerInRange("--seq", seqRaw, 1, Number.MAX_SAFE_INTEGER);
+    const page = messagePage(await api.get(path, { order: "asc", offset: String(wanted - 1), limit: "1" }));
+    const message = page.messages[0];
+    if (message?.seq !== wanted) {
+      throw new CliError({ code: "not_found", message: `The conversation has no message #${wanted}.` }, EXIT_API);
+    }
+    if (asJson)
+      return writeJson(message);
+    return writeText(renderMessage(message, page, threadId, { whole: true }));
+  }
+  const offset = nonNegativeInteger("--offset", options["--offset"] ?? "0");
+  const limit = integerInRange("--limit", options["--limit"] ?? String(CLI_LIMITS.history.default), 1, CLI_LIMITS.history.maximum);
+  const page = messagePage(await api.get(path, { order: "asc", offset: String(offset), limit: String(limit) }));
+  if (asJson)
+    return writeJson(page);
+  const cmdPrefix = explicitThread ? `sixb threads messages ${threadId}` : "sixb threads messages";
+  const shown = page.messages.map((message) => renderMessage(message, page, threadId, { whole: false, cmdPrefix }));
+  const end = offset + page.messages.length;
+  const footer = page.messages.length === 0 ? `No messages from offset ${offset}: the conversation has ${page.total}.` : page.hasMore ? `Messages ${offset + 1}–${end} of ${page.total}. Next: ${cmdPrefix} --offset ${end}` : `Messages ${offset + 1}–${end} of ${page.total}: the end of the conversation.`;
+  writeText([...shown, footer].join(`
+
+`));
+}
+function resolveThreadId(explicit) {
+  const threadId = explicit?.trim() || process.env.SIXB_THREAD_ID?.trim();
+  if (!threadId) {
+    fail("Specify a thread id, or set SIXB_THREAD_ID.");
+  }
+  return threadId;
+}
+function renderMessage(message, page, threadId, options) {
+  const author = message.authorPrincipal ? page.authors.find((person) => person.id === message.authorPrincipal?.id)?.displayName : undefined;
+  const heading = [`#${message.seq} ${message.role}`, author, message.createdAt].filter(Boolean).join(" · ");
+  const bounds = {
+    seq: message.seq,
+    cmdPrefix: options.cmdPrefix ?? "sixb threads messages",
+    textChars: options.whole ? Number.POSITIVE_INFINITY : PAGE_TEXT_CHARS,
+    toolChars: options.whole ? Number.POSITIVE_INFINITY : PAGE_TOOL_CHARS
+  };
+  return [
+    `── ${heading}`,
+    ...message.parts.flatMap((part, index) => [
+      ...renderPart(part, bounds),
+      ...renderOutputFile(part, message, threadId, index)
+    ])
+  ].join(`
+`);
+}
+function renderOutputFile(part, message, threadId, index) {
+  const file = part.type === "tool-call" ? record(part.outputFile) : undefined;
+  const fileRef = record(file?.fileRef);
+  if (typeof file?.path !== "string" || typeof fileRef?.sizeBytes !== "number")
+    return [];
+  const contextDir = process.env.SIXB_CONTEXT_DIR;
+  const path = contextDir ? `${contextDir.replace(/\/$/, "")}/${file.path}` : file.path;
+  const apiBaseUrl = process.env.SIXB_API_URL || process.env.SIXB_API_BASE_URL;
+  const download = apiBaseUrl && message.id ? `; else: sixb files download url ${apiBaseUrl.replace(/\/$/, "")}/api/agent-threads/${idSegment(threadId)}/messages/${idSegment(message.id)}/files/content?path=${encodeURIComponent(`/parts/${index}/outputFile/fileRef`)} --output <file>` : "";
+  return [
+    `  [whole output, ${fileRef.sizeBytes.toLocaleString("en-US")} bytes: ${path}, written back to the sandbox at each run while the conversation shows this call${download}]`
+  ];
+}
+function renderPart(part, bounds) {
+  const cut = (value, max) => value.length <= max ? value : `${value.slice(0, max)}… [${(value.length - max).toLocaleString("en-US")} more characters: ${bounds.cmdPrefix} --seq ${bounds.seq}]`;
+  switch (part.type) {
+    case "text":
+      return typeof part.text === "string" && part.text.trim() ? [cut(part.text, bounds.textChars)] : [];
+    case "file": {
+      const file = record(part.fileRef);
+      const name = file?.fileName ?? file?.logicalPath ?? file?.blobId;
+      return [`[file ${String(name)}${file?.mediaType ? `, ${String(file.mediaType)}` : ""}]`];
+    }
+    case "tool-call": {
+      const input = cut(JSON.stringify(part.input ?? {}), bounds.toolChars);
+      const outcome = part.state === "output-error" ? `error: ${cut(String(part.errorText ?? ""), bounds.toolChars)}` : part.state === "output-available" ? cut(typeof part.output === "string" ? part.output : JSON.stringify(part.output), bounds.toolChars) : String(part.state ?? "");
+      return [`[${String(part.toolName)}] ${input}`, `→ ${outcome}`];
+    }
+    case "continuation":
+      return ["[asked to continue]"];
+    case "approval-outcome":
+      return [`[approval ${String(part.status)}]`];
+    default:
+      return [];
+  }
+}
+function messagePage(value) {
+  const page = record(value);
+  if (!page || !Array.isArray(page.messages) || typeof page.total !== "number") {
+    throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid message page." }, EXIT_API);
+  }
+  return {
+    messages: page.messages,
+    authors: Array.isArray(page.authors) ? page.authors : [],
+    hasMore: page.hasMore === true,
+    total: page.total
+  };
+}
+function record(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : undefined;
 }
 
 // src/commands/users.ts
@@ -2429,6 +2929,7 @@ async function workflows(api, args) {
 
 // src/commands/index.ts
 var INSTANCE_COMMANDS = [
+  "status",
   "project",
   "ontology",
   "objects",
@@ -2445,13 +2946,17 @@ var INSTANCE_COMMANDS = [
   "syncs",
   "sync-runs",
   "pipelines",
-  "pipeline-runs"
+  "pipeline-runs",
+  "threads",
+  "memory"
 ];
 function isInstanceCommand(command) {
   return INSTANCE_COMMANDS.includes(command);
 }
 async function dispatch(api, command, args) {
   switch (command) {
+    case "status":
+      return status(api, args);
     case "project":
       return project(api, args);
     case "ontology":
@@ -2486,133 +2991,21 @@ async function dispatch(api, command, args) {
       return runnables(api, "pipelines", args);
     case "pipeline-runs":
       return runs(api, "pipeline", args);
+    case "threads":
+      return threads(api, args);
+    case "memory":
+      return memory(api, args);
     default:
       fail(`Unknown command '${command}'. Run 'sixb --help'.`);
   }
 }
 
-// src/commands/history.ts
-var PAGE_TEXT_CHARS = 4000;
-var PAGE_TOOL_CHARS = 1000;
-async function history(api, args) {
-  if (isHelp(args[0]) || requestsHelp(args))
-    return writeText(GROUP_HELP.history);
-  const { positionals, options } = parseCommandArgs(args, { "--offset": "string", "--limit": "string" }, "history", [0, 1]);
-  const threadId = process.env.SIXB_THREAD_ID;
-  if (!threadId)
-    fail("This run has no conversation to read: SIXB_THREAD_ID is not set.");
-  const path = `/api/agent-threads/${idSegment(threadId)}/messages`;
-  const seq = positionals[0];
-  if (seq !== undefined) {
-    const wanted = integerInRange("<seq>", seq, 1, Number.MAX_SAFE_INTEGER);
-    const page = messagePage(await api.get(path, { order: "asc", offset: String(wanted - 1), limit: "1" }));
-    const message = page.messages[0];
-    if (message?.seq !== wanted) {
-      throw new CliError({ code: "not_found", message: `The conversation has no message #${wanted}.` }, EXIT_API);
-    }
-    return writeText(renderMessage(message, page, { whole: true }));
-  }
-  const offset = nonNegativeInteger("--offset", options["--offset"] ?? "0");
-  const limit = integerInRange("--limit", options["--limit"] ?? String(CLI_LIMITS.history.default), 1, CLI_LIMITS.history.maximum);
-  const page = messagePage(await api.get(path, { order: "asc", offset: String(offset), limit: String(limit) }));
-  const shown = page.messages.map((message) => renderMessage(message, page, { whole: false }));
-  const end = offset + page.messages.length;
-  const footer = page.messages.length === 0 ? `No messages from offset ${offset}: the conversation has ${page.total}.` : page.hasMore ? `Messages ${offset + 1}–${end} of ${page.total}. Next: sixb history --offset ${end}` : `Messages ${offset + 1}–${end} of ${page.total}: the end of the conversation.`;
-  writeText([...shown, footer].join(`
-
-`));
-}
-function renderMessage(message, page, options) {
-  const author = message.authorPrincipal ? page.authors.find((person) => person.id === message.authorPrincipal?.id)?.displayName : undefined;
-  const heading = [`#${message.seq} ${message.role}`, author, message.createdAt].filter(Boolean).join(" · ");
-  const bounds = {
-    seq: message.seq,
-    textChars: options.whole ? Number.POSITIVE_INFINITY : PAGE_TEXT_CHARS,
-    toolChars: options.whole ? Number.POSITIVE_INFINITY : PAGE_TOOL_CHARS
-  };
-  return [
-    `── ${heading}`,
-    ...message.parts.flatMap((part, index) => [
-      ...renderPart(part, bounds),
-      ...renderOutputFile(part, message, index)
-    ])
-  ].join(`
-`);
-}
-function renderOutputFile(part, message, index) {
-  const file = part.type === "tool-call" ? record(part.outputFile) : undefined;
-  const fileRef = record(file?.fileRef);
-  if (typeof file?.path !== "string" || typeof fileRef?.sizeBytes !== "number")
-    return [];
-  const contextDir = process.env.SIXB_CONTEXT_DIR;
-  const path = contextDir ? `${contextDir.replace(/\/$/, "")}/${file.path}` : file.path;
-  const apiBaseUrl = process.env.SIXB_API_BASE_URL;
-  const threadId = process.env.SIXB_THREAD_ID;
-  const download = apiBaseUrl && threadId && message.id ? `; else: sixb files download url ${apiBaseUrl.replace(/\/$/, "")}/api/agent-threads/${idSegment(threadId)}/messages/${idSegment(message.id)}/files/content?path=${encodeURIComponent(`/parts/${index}/outputFile/fileRef`)} --output <file>` : "";
-  return [
-    `  [whole output, ${fileRef.sizeBytes.toLocaleString("en-US")} bytes: ${path}, written back to the sandbox at each run while the conversation shows this call${download}]`
-  ];
-}
-function renderPart(part, bounds) {
-  const cut = (value, max) => value.length <= max ? value : `${value.slice(0, max)}… [${(value.length - max).toLocaleString("en-US")} more characters: sixb history ${bounds.seq}]`;
-  switch (part.type) {
-    case "text":
-      return typeof part.text === "string" && part.text.trim() ? [cut(part.text, bounds.textChars)] : [];
-    case "file": {
-      const file = record(part.fileRef);
-      const name = file?.fileName ?? file?.logicalPath ?? file?.blobId;
-      return [`[file ${String(name)}${file?.mediaType ? `, ${String(file.mediaType)}` : ""}]`];
-    }
-    case "tool-call": {
-      const input = cut(JSON.stringify(part.input ?? {}), bounds.toolChars);
-      const outcome = part.state === "output-error" ? `error: ${cut(String(part.errorText ?? ""), bounds.toolChars)}` : part.state === "output-available" ? cut(typeof part.output === "string" ? part.output : JSON.stringify(part.output), bounds.toolChars) : String(part.state ?? "");
-      return [`[${String(part.toolName)}] ${input}`, `→ ${outcome}`];
-    }
-    case "continuation":
-      return ["[asked to continue]"];
-    case "approval-outcome":
-      return [`[approval ${String(part.status)}]`];
-    default:
-      return [];
-  }
-}
-function messagePage(value) {
-  const page = record(value);
-  if (!page || !Array.isArray(page.messages) || typeof page.total !== "number") {
-    throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid message page." }, EXIT_API);
-  }
-  return {
-    messages: page.messages,
-    authors: Array.isArray(page.authors) ? page.authors : [],
-    hasMore: page.hasMore === true,
-    total: page.total
-  };
-}
-function record(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : undefined;
-}
-
-// src/commands/memory.ts
-import { lstat, mkdir as mkdir2, readdir, readFile as readFile3, rm as rm2, writeFile } from "node:fs/promises";
-import { dirname as dirname3, join as join3 } from "node:path";
-
-// src/memory.ts
-import { createHash as createHash2 } from "node:crypto";
-var AGENT_MEMORY_MANIFEST = "context/memory.json";
-var AGENT_MEMORY_ENTRY = "MEMORY.md";
-var AGENT_MEMORY_STARTER = `# Memory
-
-`;
-function agentMemoryFileHash(contents) {
-  return createHash2("sha256").update(contents).digest("hex");
-}
-
 // src/api-client.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { readFile as readFile2, rename, rm } from "node:fs/promises";
+import { readFile as readFile3, rename, rm as rm2 } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
-import { basename as basename3, dirname as dirname2, join as join2 } from "node:path";
+import { basename as basename3, dirname as dirname3, join as join3 } from "node:path";
 import { Readable as Readable2 } from "node:stream";
 import { pipeline } from "node:stream/promises";
 var UNIX_BASE_URL_PREFIX = "unix:";
@@ -2661,7 +3054,7 @@ class ApiClient {
   }
   async upload(path, source, logicalPath, mediaType) {
     const form = new FormData;
-    const bytes = new Uint8Array(await readFile2(source));
+    const bytes = new Uint8Array(await readFile3(source));
     form.append("file", new Blob([bytes], mediaType ? { type: mediaType } : undefined), basename3(source));
     if (logicalPath)
       form.append("logicalPath", logicalPath);
@@ -2669,13 +3062,13 @@ class ApiClient {
   }
   async download(path, output, query) {
     const response = await this.fetch(this.url(path, query), { method: "GET" });
-    const temporary = join2(dirname2(output), `.${basename3(output)}.sixb-${randomUUID3()}.tmp`);
+    const temporary = join3(dirname3(output), `.${basename3(output)}.sixb-${randomUUID3()}.tmp`);
     try {
       const body = response.body ? Readable2.fromWeb(response.body) : Readable2.from([]);
       await pipeline(body, createWriteStream(temporary, { flags: "wx" }));
       await rename(temporary, output);
     } catch (error) {
-      await rm(temporary, { force: true }).catch(() => {});
+      await rm2(temporary, { force: true }).catch(() => {});
       throw error;
     }
   }
@@ -2826,349 +3219,17 @@ function createInstanceApiClient(connection) {
   });
 }
 
-// src/commands/memory.ts
-var HELP = `Usage:
-  sixb memory save <repo> -m <message>   Save local edits as one revision
-  sixb memory pull [repo]                Bring the local copy up to the latest revision
-
-<repo> is user or project. Files live under $SIXB_MEMORY_DIR/<repo>/.
-
-A save is rejected for files another conversation changed since they were loaded. Their
-current contents are written next to yours as <file>.theirs: merge each into its file, delete
-it, then save again. Changes others made to other files are brought in by save and pull.`;
-var THEIRS = ".theirs";
-var CONFLICT_HINT = "Merge each .theirs file into its file, delete it, then save again.";
-async function memory(args, connection) {
-  const [sub, ...rest] = args;
-  if (!sub || isHelp(sub) || rest.some(isHelp))
-    return writeText(HELP);
-  const local = localMemory();
-  if (sub === "save")
-    return save(local, rest, connection);
-  if (sub === "pull")
-    return pull(local, rest, connection);
-  fail(`Unknown memory command '${sub}'. Run 'sixb memory --help'.`);
-}
-async function save(local, args, connection) {
-  const { repo, message } = parseSaveArgs(args);
-  const manifest = await local.readManifest();
-  const loaded = manifest.repos[repo];
-  if (!loaded)
-    fail(`Memory repo '${repo}' is not installed.`, "invalid_arguments", `Run 'sixb memory pull ${repo}'.`);
-  const files = await local.readRepo(repo);
-  const unresolved = [...files.keys()].filter((path) => path.endsWith(THEIRS));
-  if (unresolved.length > 0) {
-    fail(`Resolve ${unresolved.join(", ")} first.`, "unresolved_conflicts", CONFLICT_HINT);
-  }
-  const changes = [...new Set([...files.keys(), ...Object.keys(loaded.files)])].sort().flatMap((path) => {
-    const contents = files.get(path);
-    const changed = (contents === undefined ? undefined : agentMemoryFileHash(contents)) !== loaded.files[path];
-    return changed ? [{ path, contents: contents ?? null }] : [];
-  });
-  if (changes.length === 0) {
-    return writeJson({
-      repo,
-      saved: false,
-      changed: [],
-      hint: "No file changed since it was loaded."
-    });
-  }
-  const api = createInstanceApiClient(connection);
-  let saved;
-  try {
-    saved = asRecord(await api.post(`/api/agent-memory/${repo}/revisions`, {
-      baseRevision: loaded.revision,
-      message,
-      changes
-    }));
-  } catch (error) {
-    if (!(error instanceof CliError) || error.body.status !== 409)
-      throw error;
-    const { revision, conflicts } = await update(local, repo, manifest, await fetchRepo(api, repo));
-    process.exitCode = 1;
-    return writeJson({ repo, saved: false, revision, conflicts, hint: CONFLICT_HINT });
-  }
-  const savedFiles = { ...loaded.files };
-  for (const change of changes) {
-    if (change.contents === null)
-      delete savedFiles[change.path];
-    else
-      savedFiles[change.path] = agentMemoryFileHash(change.contents);
-  }
-  const after = {
-    repos: { ...manifest.repos, [repo]: { ...loaded, files: savedFiles } }
-  };
-  const { revision, conflicts } = await update(local, repo, after, await fetchRepo(api, repo));
-  const warnings = Array.isArray(saved.warnings) ? saved.warnings : [];
-  writeJson({
-    repo,
-    saved: true,
-    revision,
-    changed: changes.map((change) => change.path),
-    ...warnings.length > 0 ? { warnings } : {},
-    ...conflicts.length > 0 ? { conflicts, hint: CONFLICT_HINT } : {}
-  });
-}
-async function pull(local, args, connection) {
-  if (args.length > 1)
-    fail("Invalid arguments for 'memory pull'.");
-  const manifest = await local.readManifest();
-  const repos = args[0] === undefined ? installedRepos(manifest) : [parseRepo(args[0])];
-  if (repos.length === 0) {
-    fail("No memory repo is installed.", "invalid_arguments", "Run 'sixb memory pull user'.");
-  }
-  const api = createInstanceApiClient(connection);
-  let current = manifest;
-  for (const repo of repos) {
-    const result = await update(local, repo, current, await fetchRepo(api, repo));
-    current = result.manifest;
-    writeJson({
-      repo,
-      revision: result.revision,
-      updated: result.updated,
-      conflicts: result.conflicts,
-      ...result.conflicts.length > 0 ? { hint: CONFLICT_HINT } : {}
-    });
-  }
-}
-async function update(local, repo, manifest, remote) {
-  const base = manifest.repos[repo]?.files ?? {};
-  const files = await local.readRepo(repo);
-  const updated = [];
-  const conflicts = [];
-  for (const path of [
-    ...new Set([...files.keys(), ...remote.files.keys(), ...Object.keys(base)])
-  ].sort()) {
-    if (path.endsWith(THEIRS))
-      continue;
-    const mine = files.get(path);
-    const theirs = remote.files.get(path);
-    const mineHash = mine === undefined ? undefined : agentMemoryFileHash(mine);
-    const theirsHash = theirs === undefined ? undefined : agentMemoryFileHash(theirs);
-    if (theirsHash === base[path] || theirsHash === mineHash)
-      continue;
-    if (mineHash === base[path]) {
-      await local.write(repo, path, theirs);
-      updated.push(path);
-    } else if (theirs === undefined) {
-      conflicts.push({ path, theirs: null });
-    } else {
-      await local.write(repo, `${path}${THEIRS}`, theirs);
-      conflicts.push({ path, theirs: `${path}${THEIRS}` });
-    }
-  }
-  if (!remote.files.has(AGENT_MEMORY_ENTRY) && !(await local.readRepo(repo)).has(AGENT_MEMORY_ENTRY)) {
-    await local.write(repo, AGENT_MEMORY_ENTRY, AGENT_MEMORY_STARTER);
-  }
-  const next = {
-    repos: {
-      ...manifest.repos,
-      [repo]: {
-        revision: remote.revision,
-        files: Object.fromEntries([...remote.files].map(([path, contents]) => [path, agentMemoryFileHash(contents)]))
-      }
-    }
-  };
-  await local.writeManifest(next);
-  return { manifest: next, revision: remote.revision, updated, conflicts };
-}
-async function fetchRepo(api, repo) {
-  const body = asRecord(await api.get(`/api/agent-memory/${repo}`));
-  const files = Array.isArray(body.files) ? body.files.map(asRecord) : null;
-  if (typeof body.revision !== "number" || !files?.every((file) => typeof file.path === "string" && typeof file.contents === "string")) {
-    throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid memory repo." }, EXIT_API);
-  }
-  return {
-    revision: body.revision,
-    files: new Map(files.map((file) => [String(file.path), String(file.contents)]))
-  };
-}
-function localMemory() {
-  const root = process.env.SIXB_MEMORY_DIR;
-  const contextDir = process.env.SIXB_CONTEXT_DIR;
-  if (!root || !contextDir) {
-    fail("Agent memory is not available in this run.", "runtime_unavailable");
-  }
-  const manifestPath = join3(contextDir, ...AGENT_MEMORY_MANIFEST.split("/"));
-  const fileOf = (repo, path) => join3(root, repo, ...path.split("/"));
-  return {
-    async readManifest() {
-      let text;
-      try {
-        text = await readFile3(manifestPath, "utf8");
-      } catch (error) {
-        if (isFileError(error, "ENOENT"))
-          return { repos: {} };
-        throw error;
-      }
-      try {
-        return parseManifest(JSON.parse(text));
-      } catch {
-        fail(`Memory manifest '${manifestPath}' is not valid.`, "invalid_json");
-      }
-    },
-    async writeManifest(manifest) {
-      await mkdir2(dirname3(manifestPath), { recursive: true });
-      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}
-`);
-    },
-    async readRepo(repo) {
-      const files = new Map;
-      const walk = async (directory, prefix) => {
-        let entries;
-        try {
-          entries = await readdir(directory);
-        } catch (error) {
-          if (isFileError(error, "ENOENT"))
-            return;
-          throw error;
-        }
-        for (const name of entries) {
-          const path = prefix ? `${prefix}/${name}` : name;
-          const stats = await lstat(join3(directory, name));
-          if (stats.isDirectory())
-            await walk(join3(directory, name), path);
-          else if (stats.isFile())
-            files.set(path, await readFile3(join3(directory, name), "utf8"));
-          else
-            fail(`Memory file '${repo}/${path}' is not a regular file.`);
-        }
-      };
-      await walk(join3(root, repo), "");
-      return files;
-    },
-    async write(repo, path, contents) {
-      const file = fileOf(repo, path);
-      if (contents === undefined) {
-        await rm2(file, { force: true });
-        return;
-      }
-      await mkdir2(dirname3(file), { recursive: true });
-      await writeFile(file, contents);
-    }
-  };
-}
-function parseSaveArgs(args) {
-  const positionals = [];
-  let message;
-  for (let index = 0;index < args.length; index++) {
-    const argument = args[index] ?? "";
-    if (argument === "-m" || argument === "--message") {
-      if (message !== undefined)
-        fail(`${argument} may only be provided once.`);
-      message = args[++index];
-      if (!message)
-        fail(`${argument} requires a value.`);
-    } else if (argument.startsWith("-")) {
-      fail(`Unknown memory save option '${argument}'.`);
-    } else {
-      positionals.push(argument);
-    }
-  }
-  if (positionals.length !== 1)
-    fail("Invalid arguments for 'memory save'.");
-  if (message === undefined || message.trim().length === 0) {
-    fail("memory save requires -m <what you learned>.");
-  }
-  return { repo: parseRepo(positionals[0] ?? ""), message };
-}
-function parseRepo(value) {
-  if (value === "user" || value === "project")
-    return value;
-  fail(`Unknown memory repo '${value}'. Use 'user' or 'project'.`);
-}
-function installedRepos(manifest) {
-  return ["user", "project"].filter((repo) => manifest.repos[repo] !== undefined);
-}
-function parseManifest(value) {
-  const repos = asRecord(asRecord(value).repos);
-  const parsed = {};
-  for (const repo of ["user", "project"]) {
-    if (repos[repo] === undefined)
-      continue;
-    const entry = asRecord(repos[repo]);
-    const files = asRecord(entry.files);
-    if (typeof entry.revision !== "number" || !Object.values(files).every((digest) => typeof digest === "string")) {
-      throw new Error("invalid memory manifest");
-    }
-    parsed[repo] = {
-      revision: entry.revision,
-      files
-    };
-  }
-  return { repos: parsed };
-}
-
-// src/commands/system.ts
-import { readFile as readFile4 } from "node:fs/promises";
-var AGENT_RUNTIME_PROFILE = "sixb-agent-runtime/v1";
-async function status(args, connection) {
-  if (isHelp(args[0]))
-    return writeText("Usage: sixb status");
-  if (args.some((arg) => arg !== "--json"))
-    fail("status accepts no arguments but --json.");
-  const project = asRecord(await createInstanceApiClient(connection).get("/api/project"));
-  if (typeof project.id !== "string" || project.id.length === 0) {
-    throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid project." }, EXIT_API);
-  }
-  const report = {
-    ok: true,
-    profile: AGENT_RUNTIME_PROFILE,
-    cli: { version: INSTANCE_CLI_VERSION },
-    javascript: javascriptRuntime(),
-    project: { id: project.id }
-  };
-  writeJson(report);
-}
-async function context(args) {
-  if (isHelp(args[0]))
-    return writeText("Usage: sixb context");
-  if (args.length !== 0)
-    fail("context accepts no arguments.");
-  const path = process.env.SIXB_RUN_CONTEXT;
-  if (!path)
-    fail("SIXB_RUN_CONTEXT is not set.");
-  let text;
-  try {
-    text = await readFile4(path, "utf8");
-  } catch (error) {
-    if (isFileError(error, "ENOENT"))
-      fail(`Run context '${path}' does not exist.`);
-    throw error;
-  }
-  try {
-    writeJson(JSON.parse(text));
-  } catch {
-    fail(`Run context '${path}' is not valid JSON.`, "invalid_json");
-  }
-}
-function javascriptRuntime() {
-  if (typeof globalThis.Bun === "object") {
-    return { name: "bun", version: globalThis.Bun.version };
-  }
-  return { name: "node", version: process.versions.node };
-}
-
 // src/main.ts
 async function main(args) {
-  const [command, ...rest] = args;
+  const [command] = args;
   if (!command || isHelp(command))
     return writeText(renderInstanceHelp());
   if (command === "--version" || command === "version") {
     return writeText(`sixb CLI ${INSTANCE_CLI_VERSION}`);
   }
-  const connection = envConnection();
-  if (command === "status")
-    return status(rest, connection);
-  if (command === "context")
-    return context(rest);
-  if (command === "memory")
-    return memory(rest, connection);
-  if (command === "history")
-    return history(createInstanceApiClient(connection), rest);
   if (!isInstanceCommand(command))
     fail(`Unknown command '${command}'. Run 'sixb --help'.`);
-  await runInstanceCli({ args, connection });
+  await runInstanceCli({ args, connection: envConnection() });
 }
 function envConnection() {
   const baseUrl = process.env.SIXB_API_URL || process.env.SIXB_API_BASE_URL || "";

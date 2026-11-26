@@ -9,10 +9,10 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # Its own commands stay here, talking to the instance the run belongs to. Keep this list in step
 # with src/main.ts; tests/sandbox-cli.test.ts checks it.
 case "${1:-}" in
-  "" | -h | --help | help | --version | version | status | context | memory | history) ;;
-  project | ontology | objects | telemetry | actions | action-runs | files) ;;
+  "" | -h | --help | help | --version | version) ;;
+  status | project | ontology | objects | telemetry | actions | action-runs | files) ;;
   workflows | workflow-runs | users | artifacts | models | datasets) ;;
-  syncs | sync-runs | pipelines | pipeline-runs) ;;
+  syncs | sync-runs | pipelines | pipeline-runs | threads | memory) ;;
   *)
     dir=$(pwd)
     while :; do

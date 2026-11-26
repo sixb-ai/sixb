@@ -3,7 +3,6 @@ import {
   AGENT_MEMORY_ENTRY,
   AGENT_MEMORY_MANIFEST,
   AGENT_MEMORY_STARTER,
-  AGENT_RUNTIME_PROFILE,
   type AgentMemoryManifest,
   agentMemoryFileHash,
   loadSandboxCliAssets,
@@ -16,6 +15,7 @@ import type {
   SandboxFileRecord,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
+import { AGENT_RUNTIME_PROFILE } from "./agent-runtime/profile"
 import type { MaterializedArtifacts } from "./artifacts/materialize"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 import { SEARCH_SCRIPT_SOURCE } from "./search-script"

@@ -159,7 +159,6 @@ export function runSandboxCliContractSuite(implementation: SandboxCliContractImp
       const commands = [
         ["--help"],
         ["status", "--help"],
-        ["context", "--help"],
         ["project", "--help"],
         ["project", "show", "--help"],
         ["ontology", "--help"],
@@ -174,6 +173,8 @@ export function runSandboxCliContractSuite(implementation: SandboxCliContractImp
         ["files", "--help"],
         ["workflows", "--help"],
         ["workflow-runs", "--help"],
+        ["threads", "--help"],
+        ["memory", "--help"],
       ] as const
 
       for (const args of commands) {
@@ -249,9 +250,10 @@ export function runSandboxCliContractSuite(implementation: SandboxCliContractImp
         const report = JSON.parse(result.stdout)
         expect(report).toEqual({
           ok: true,
-          profile: "sixb-agent-runtime/v1",
+          connected: true,
+          apiUrl: api.baseUrl.startsWith("unix:") ? "http://localhost" : api.baseUrl,
           cli: { version: implementation.version.split(" ").at(-1) },
-          javascript: {
+          runtime: {
             name: implementation.runtime,
             version: expect.stringMatching(/^\d+\.\d+(?:\.\d+)?/),
           },
@@ -1270,7 +1272,7 @@ export function runSandboxCliProcessSmoke(runtime: SandboxCliProcess): void {
 
         expect(version).toEqual({ exitCode: 0, stdout: `${runtime.version}\n`, stderr: "" })
         expect(status).toMatchObject({ exitCode: 0, stderr: "" })
-        expect(JSON.parse(status.stdout).javascript.name).toBe(runtime.runtime)
+        expect(JSON.parse(status.stdout).runtime.name).toBe(runtime.runtime)
         expect(invalid).toMatchObject({ exitCode: 2, stdout: "" })
         expect(JSON.parse(invalid.stderr).error.code).toBe("invalid_arguments")
         expect(missing).toMatchObject({ exitCode: 3, stdout: "" })

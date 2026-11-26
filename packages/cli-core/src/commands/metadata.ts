@@ -10,13 +10,11 @@ const SANDBOX_MAIN_HELP = `Sixb CLI
 Usage:
   sixb <command> [options]
 
-The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.
 API commands emit JSON. Help, version, and examples emit text. Downloads write to --output and
 emit a JSON receipt.
 
 Discovery:
-  sixb status                         Check the sandbox and its API access
-  sixb context                        Print the current run context
+  sixb status                         Check API connection, project, and runtime
   sixb project show                   Show project metadata
   sixb ontology list                  Compact visible type and relationship catalog
   sixb ontology get <type>            Inspect one object type, properties, links, and actions
@@ -63,6 +61,10 @@ Files:
 Members:
   sixb users search <text>            Find members by name or email
   sixb users list|get ...
+
+Threads and memory:
+  sixb threads list|get|messages|runs|approvals ...
+  sixb memory get|pull|save ...
 
 Artifacts:
   sixb artifacts comments list <artifact-id>
@@ -214,15 +216,30 @@ Vector profile names are the keys of the type's search.vectors. Vector input is 
 optionally under filters; k bounds the ranked matches and results carry a score.`
 
 export const GROUP_HELP = {
-  status: "Usage: sixb status",
-  context: "Usage: sixb context",
-  history: `Usage:
-  sixb history [--offset <n>] [--limit <1-${CLI_LIMITS.history.maximum}>]
-  sixb history <seq>
+  status: "Usage: sixb status [--json]",
+  threads: `Usage:
+  sixb threads list [--limit <1-${CLI_LIMITS.list.maximum}>] [--offset <n>]
+  sixb threads get [thread-id]
+  sixb threads messages [thread-id] [--offset <n>] [--limit <1-${CLI_LIMITS.history.maximum}>] [--seq <n>] [--json]
+  sixb threads runs [thread-id]
+  sixb threads approvals [thread-id]
 
-Prints this conversation's messages as text, oldest first, including those summarized when it
-was compacted: what was said, the files sent, and each tool call with its result. A page holds
-${CLI_LIMITS.history.default} messages by default and cuts long text; \`sixb history <seq>\` prints one message whole.`,
+When [thread-id] is omitted, SIXB_THREAD_ID is used.
+
+\`threads messages\` prints the conversation as text, oldest first, including turns summarized
+when it was compacted: what was said, files sent, and each tool call with its result. A page
+holds ${CLI_LIMITS.history.default} messages by default and cuts long text; pass \`--seq <n>\` to print one message
+whole, or \`--json\` for raw JSON.`,
+  memory: `Usage:
+  sixb memory get <repo>
+  sixb memory pull [repo] [--dir <path>]
+  sixb memory save <repo> -m <message> [--dir <path>]
+
+<repo> is user or project. --dir defaults to $SIXB_MEMORY_DIR.
+
+A save is rejected for files another conversation changed since they were loaded. Their
+current contents are written next to yours as <file>.theirs: merge each into its file, delete
+it, then save again. Changes others made to other files are brought in by save and pull.`,
   project: "Usage: sixb project show",
   ontology: `Usage:
   sixb ontology list [--full]

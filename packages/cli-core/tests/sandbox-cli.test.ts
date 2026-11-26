@@ -191,7 +191,6 @@ describe("Sixb sandbox CLI launcher in a Sixb project", () => {
   // What src/main.ts answers itself. Every other command belongs to a project's own `sixb`.
   const SANDBOX_COMMANDS = [
     ...["--help", "-h", "help", "--version", "version"],
-    ...["status", "context", "memory", "history"],
     ...INSTANCE_COMMANDS,
   ]
 

@@ -4,16 +4,20 @@ import { actions } from "./actions"
 import { artifacts } from "./artifacts"
 import { datasets, runnables } from "./data"
 import { files } from "./files"
+import { memory } from "./memory"
 import { models } from "./models"
 import { objects } from "./objects"
 import { ontology } from "./ontology"
 import { project } from "./project"
 import { runs } from "./runs"
+import { status } from "./status"
 import { telemetry } from "./telemetry"
+import { threads } from "./threads"
 import { users } from "./users"
 import { workflows } from "./workflows"
 
 export const INSTANCE_COMMANDS = [
+  "status",
   "project",
   "ontology",
   "objects",
@@ -31,6 +35,8 @@ export const INSTANCE_COMMANDS = [
   "sync-runs",
   "pipelines",
   "pipeline-runs",
+  "threads",
+  "memory",
 ] as const
 
 export type InstanceCommand = (typeof INSTANCE_COMMANDS)[number]
@@ -45,6 +51,8 @@ export async function dispatch(
   args: readonly string[]
 ): Promise<void> {
   switch (command) {
+    case "status":
+      return status(api, args)
     case "project":
       return project(api, args)
     case "ontology":
@@ -79,6 +87,10 @@ export async function dispatch(
       return runnables(api, "pipelines", args)
     case "pipeline-runs":
       return runs(api, "pipeline", args)
+    case "threads":
+      return threads(api, args)
+    case "memory":
+      return memory(api, args)
     default:
       fail(`Unknown command '${command}'. Run 'sixb --help'.`)
   }

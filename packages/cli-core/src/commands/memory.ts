@@ -1,6 +1,7 @@
 import { lstat, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import { isHelp } from "../arguments"
+import type { ApiClient } from "../api-client"
+import { isHelp, parseCommandArgs, requestsHelp } from "../arguments"
 import {
   AGENT_MEMORY_ENTRY,
   AGENT_MEMORY_MANIFEST,
@@ -11,18 +12,8 @@ import {
   agentMemoryFileHash,
 } from "../memory"
 import { CliError, EXIT_API, fail, writeJson, writeText } from "../output"
-import { type ApiConnection, createInstanceApiClient } from "../run"
+import { GROUP_HELP } from "./metadata"
 import { asRecord, isFileError } from "./shared"
-
-const HELP = `Usage:
-  sixb memory save <repo> -m <message>   Save local edits as one revision
-  sixb memory pull [repo]                Bring the local copy up to the latest revision
-
-<repo> is user or project. Files live under $SIXB_MEMORY_DIR/<repo>/.
-
-A save is rejected for files another conversation changed since they were loaded. Their
-current contents are written next to yours as <file>.theirs: merge each into its file, delete
-it, then save again. Changes others made to other files are brought in by save and pull.`
 
 interface RemoteRepo {
   readonly revision: number
@@ -36,23 +27,32 @@ interface MemoryConflict {
 }
 
 const THEIRS = ".theirs"
+const LOCAL_MANIFEST_NAME = ".sixb-memory.json"
 const CONFLICT_HINT = "Merge each .theirs file into its file, delete it, then save again."
 
-export async function memory(args: readonly string[], connection: ApiConnection): Promise<void> {
+export async function memory(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
-  if (!sub || isHelp(sub) || rest.some(isHelp)) return writeText(HELP)
-  const local = localMemory()
-  if (sub === "save") return save(local, rest, connection)
-  if (sub === "pull") return pull(local, rest, connection)
+  if (!sub || isHelp(sub) || requestsHelp(rest)) return writeText(GROUP_HELP.memory)
+  if (sub === "get") return get(api, rest)
+  if (sub === "save") return save(api, rest)
+  if (sub === "pull") return pull(api, rest)
   fail(`Unknown memory command '${sub}'. Run 'sixb memory --help'.`)
 }
 
-async function save(
-  local: LocalMemory,
-  args: readonly string[],
-  connection: ApiConnection
-): Promise<void> {
-  const { repo, message } = parseSaveArgs(args)
+async function get(api: ApiClient, args: readonly string[]): Promise<void> {
+  const { positionals } = parseCommandArgs(args, {}, "memory get", 1)
+  const repo = parseRepo(positionals[0] ?? "")
+  const remote = await fetchRepo(api, repo)
+  writeJson({
+    repo,
+    revision: remote.revision,
+    files: [...remote.files.entries()].map(([path, contents]) => ({ path, contents })),
+  })
+}
+
+async function save(api: ApiClient, args: readonly string[]): Promise<void> {
+  const { repo, message, dir } = parseSaveArgs(args)
+  const local = localMemory(dir)
   const manifest = await local.readManifest()
   const loaded = manifest.repos[repo]
   if (!loaded)
@@ -83,7 +83,6 @@ async function save(
     })
   }
 
-  const api = createInstanceApiClient(connection)
   let saved: Record<string, unknown>
   try {
     saved = asRecord(
@@ -121,19 +120,21 @@ async function save(
   })
 }
 
-async function pull(
-  local: LocalMemory,
-  args: readonly string[],
-  connection: ApiConnection
-): Promise<void> {
-  if (args.length > 1) fail("Invalid arguments for 'memory pull'.")
+async function pull(api: ApiClient, args: readonly string[]): Promise<void> {
+  const { positionals, options } = parseCommandArgs(
+    args,
+    { "--dir": "string" },
+    "memory pull",
+    [0, 1]
+  )
+  const local = localMemory(options["--dir"])
   const manifest = await local.readManifest()
-  const repos = args[0] === undefined ? installedRepos(manifest) : [parseRepo(args[0])]
+  const repos =
+    positionals[0] === undefined ? installedRepos(manifest) : [parseRepo(positionals[0])]
   if (repos.length === 0) {
     fail("No memory repo is installed.", "invalid_arguments", "Run 'sixb memory pull user'.")
   }
 
-  const api = createInstanceApiClient(connection)
   let current = manifest
   for (const repo of repos) {
     const result = await update(local, repo, current, await fetchRepo(api, repo))
@@ -211,10 +212,7 @@ async function update(
   return { manifest: next, revision: remote.revision, updated, conflicts }
 }
 
-async function fetchRepo(
-  api: ReturnType<typeof createInstanceApiClient>,
-  repo: AgentMemoryRepo
-): Promise<RemoteRepo> {
+async function fetchRepo(api: ApiClient, repo: AgentMemoryRepo): Promise<RemoteRepo> {
   const body = asRecord(await api.get(`/api/agent-memory/${repo}`))
   const files = Array.isArray(body.files) ? body.files.map(asRecord) : null
   if (
@@ -241,13 +239,19 @@ interface LocalMemory {
   write(repo: AgentMemoryRepo, path: string, contents: string | undefined): Promise<void>
 }
 
-function localMemory(): LocalMemory {
-  const root = process.env.SIXB_MEMORY_DIR
-  const contextDir = process.env.SIXB_CONTEXT_DIR
-  if (!root || !contextDir) {
-    fail("Agent memory is not available in this run.", "runtime_unavailable")
+function localMemory(explicitDir?: string): LocalMemory {
+  const root = explicitDir || process.env.SIXB_MEMORY_DIR
+  const contextDir = explicitDir ? undefined : process.env.SIXB_CONTEXT_DIR
+  if (!root) {
+    fail(
+      "Specify --dir <path> or set SIXB_MEMORY_DIR.",
+      "invalid_arguments",
+      "Run 'sixb memory get user' to read memory without a local directory."
+    )
   }
-  const manifestPath = join(contextDir, ...AGENT_MEMORY_MANIFEST.split("/"))
+  const manifestPath = contextDir
+    ? join(contextDir, ...AGENT_MEMORY_MANIFEST.split("/"))
+    : join(root, LOCAL_MANIFEST_NAME)
   const fileOf = (repo: AgentMemoryRepo, path: string) => join(root, repo, ...path.split("/"))
 
   return {
@@ -305,15 +309,28 @@ function localMemory(): LocalMemory {
   }
 }
 
-function parseSaveArgs(args: readonly string[]): { repo: AgentMemoryRepo; message: string } {
+function parseSaveArgs(args: readonly string[]): {
+  repo: AgentMemoryRepo
+  message: string
+  dir?: string
+} {
   const positionals: string[] = []
   let message: string | undefined
+  let dir: string | undefined
   for (let index = 0; index < args.length; index++) {
     const argument = args[index] ?? ""
     if (argument === "-m" || argument === "--message") {
       if (message !== undefined) fail(`${argument} may only be provided once.`)
       message = args[++index]
       if (!message) fail(`${argument} requires a value.`)
+    } else if (argument === "--dir") {
+      if (dir !== undefined) fail("--dir may only be provided once.")
+      dir = args[++index]
+      if (!dir) fail("--dir requires a value.")
+    } else if (argument.startsWith("--dir=")) {
+      if (dir !== undefined) fail("--dir may only be provided once.")
+      dir = argument.slice("--dir=".length)
+      if (!dir) fail("--dir requires a value.")
     } else if (argument.startsWith("-")) {
       fail(`Unknown memory save option '${argument}'.`)
     } else {
@@ -324,7 +341,7 @@ function parseSaveArgs(args: readonly string[]): { repo: AgentMemoryRepo; messag
   if (message === undefined || message.trim().length === 0) {
     fail("memory save requires -m <what you learned>.")
   }
-  return { repo: parseRepo(positionals[0] ?? ""), message }
+  return { repo: parseRepo(positionals[0] ?? ""), message, ...(dir ? { dir } : {}) }
 }
 
 function parseRepo(value: string): AgentMemoryRepo {

@@ -367,7 +367,7 @@ describe("agent thread model-context projection", () => {
         {
           type: "text",
           text: [
-            "The earlier conversation was compacted into this continuation summary. Its messages are still stored: `sixb history` prints them.",
+            "The earlier conversation was compacted into this continuation summary. Its messages are still stored: `sixb threads messages` prints them.",
             "",
             "<sixb_thread_summary>",
             'User chose &lt;priority&gt; &amp; asked to "continue".',

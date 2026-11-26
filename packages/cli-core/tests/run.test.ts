@@ -9,9 +9,11 @@ afterEach(() => {
 })
 
 describe("instance CLI connections", () => {
-  test("the sandbox help names the sandbox's own commands", () => {
-    expect(renderInstanceHelp()).toContain("sixb context")
-    expect(renderInstanceHelp()).toContain("Check the sandbox and its API access")
+  test("the main help lists the unified commands without sandbox-only context", () => {
+    expect(renderInstanceHelp()).toContain("sixb status")
+    expect(renderInstanceHelp()).toContain("sixb threads")
+    expect(renderInstanceHelp()).toContain("sixb memory")
+    expect(renderInstanceHelp()).not.toContain("sixb context")
   })
 
   test("sends the configured bearer token when provided", async () => {

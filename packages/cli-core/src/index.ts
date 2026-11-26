@@ -4,8 +4,8 @@ export { requestsHelp } from "./arguments"
 export type { InstanceCommand } from "./commands"
 export { INSTANCE_COMMANDS, isInstanceCommand } from "./commands"
 export { renderInstanceHelp } from "./commands/metadata"
-export type { SandboxStatusReport } from "./commands/system"
-export { AGENT_RUNTIME_PROFILE } from "./commands/system"
+export type { StatusContext, StatusReport } from "./commands/status"
+export { fetchStatus, status } from "./commands/status"
 export type { AgentMemoryManifest, AgentMemoryRepo } from "./memory"
 export {
   AGENT_MEMORY_ENTRY,

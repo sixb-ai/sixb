@@ -300,6 +300,7 @@ const SERVICE_ACCOUNT_CREATE_OPTIONS = [
 ] as const
 
 const INSTANCE_SUMMARIES = {
+  status: "Check API connection, project, and runtime",
   project: "Show project metadata",
   ontology: "Inspect the visible ontology",
   objects: "Inspect, list, search, and query objects",
@@ -317,9 +318,13 @@ const INSTANCE_SUMMARIES = {
   "sync-runs": "Inspect sync run history",
   pipelines: "List the pipelines you may run",
   "pipeline-runs": "Inspect pipeline runs and their steps",
+  threads: "List threads, messages, runs, and approvals",
+  memory: "Read, pull, and save memory repos",
 } as const satisfies Record<InstanceCommand, string>
 
-const instanceNodes: readonly CommandNode[] = INSTANCE_COMMANDS.map((name) => ({
+const instanceNodes: readonly CommandNode[] = INSTANCE_COMMANDS.filter(
+  (name) => name !== "status"
+).map((name) => ({
   name,
   summary: INSTANCE_SUMMARIES[name],
   usage: `sixb ${name} --help`,
@@ -745,7 +750,11 @@ const ROOT_HELP_GROUP_COMMANDS: readonly {
     title: "Connect to an instance",
     names: ["login", "logout", "status", "profile", "token", "service-account"],
   },
-  { title: "Work with an instance", names: INSTANCE_COMMANDS, compact: true },
+  {
+    title: "Work with an instance",
+    names: INSTANCE_COMMANDS.filter((name) => name !== "status"),
+    compact: true,
+  },
 ]
 
 export const ROOT_HELP_GROUPS: readonly {

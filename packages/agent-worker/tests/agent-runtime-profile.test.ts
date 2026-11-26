@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
 import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { runApiCredential } from "@sixb/agent"
-import { AGENT_RUNTIME_PROFILE } from "@sixb/cli-core"
+import { AGENT_RUNTIME_PROFILE, runApiCredential } from "@sixb/agent"
 import type { CommandResult, RunCommandOptions, Sandbox } from "@sixb/core"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { AgentRuntimeProfileError } from "../../agent/src/agent-runtime/errors"
@@ -28,9 +27,10 @@ const SUCCESSFUL_GATEWAY_PROBE: CommandResult = {
   exitCode: 0,
   stdout: JSON.stringify({
     ok: true,
-    profile: AGENT_RUNTIME_PROFILE,
+    connected: true,
+    apiUrl: "http://localhost",
     cli: { version: "1" },
-    javascript: { name: "node", version: "22.1.0" },
+    runtime: { name: "node", version: "22.1.0" },
     project: { id: PROJECT_ID },
   }),
   stderr: "",
@@ -101,7 +101,7 @@ describe("sixb-agent-runtime/v1 preflight", () => {
     expect(sandbox.commands[1]).toMatchObject({
       command: "bash",
       args: ["-lc", LOGIN_SHELL_SCRIPT, "bash"],
-      options: { env: { ...ENV, SIXB_SCRIPT: "sixb status" }, timeout: 15_000 },
+      options: { env: { ...ENV, SIXB_SCRIPT: "sixb status --json" }, timeout: 15_000 },
     })
   })
 
