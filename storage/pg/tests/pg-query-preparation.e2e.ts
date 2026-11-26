@@ -221,3 +221,30 @@ test("a prepared sorted page expands links of indexed and overflow rows alike", 
   expect(authors.get("short")).toBe("ann")
   expect(authors.get("long")).toBe("bo")
 })
+
+// The extension's key spans the database, and a hosted branch's production ended any session of
+// the branch's that held it: a branch whose database has pg_trgm from the start never takes it.
+// Guard check: drop the `pg_extension` check from `ensureTrigrams`: preparation then waits on the
+// key the other session holds, and this test times out.
+test("text preparation takes no database-wide key once pg_trgm is there", async () => {
+  const created = await createTestStorage()
+  const holder = createPgClient({
+    connectionString: created.connectionString,
+    schemaName: created.schemaName,
+    max: 1,
+  })
+  try {
+    await holder.unsafe("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public")
+    await holder`SELECT pg_advisory_lock(hashtextextended('sixb.extension.pg_trgm', 0))`
+
+    const result = await prepareObjectQueries({
+      projectId: "publication",
+      ontology,
+      storage: created.storage,
+    })
+    expect(result.indexes).toBeGreaterThan(0)
+  } finally {
+    await holder.end()
+    await disposeTestStorage(created.storage)
+  }
+})

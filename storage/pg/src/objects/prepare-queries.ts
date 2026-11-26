@@ -225,6 +225,14 @@ function compilePreparationPlan(plan: ObjectQueryPreparationPlan) {
 
 // Extension creation is database-wide, whereas index preparation is schema-scoped.
 async function ensureTrigrams(sql: ReservedSQL): Promise<void> {
+  // The database-wide key is for creating it only: most databases have it already, a hosted
+  // branch's from the start, and their preparations need not take turns on it.
+  const [present] = await sql`
+    SELECT 1 FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace
+    WHERE e.extname = 'pg_trgm' AND n.nspname = 'public'
+  `
+  if (present) return
+
   await lockPgPreparation(sql, "sixb.extension.pg_trgm")
   const unlock = () => sql`SELECT pg_advisory_unlock(hashtextextended('sixb.extension.pg_trgm', 0))`
   await undoOnFailure(async () => {
