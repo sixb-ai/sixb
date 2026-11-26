@@ -50,7 +50,8 @@ export interface ComposerSettingsProps {
 
 /**
  * How the agent works on the next message, as one quiet chip that names it: "Auto", or the pinned
- * model with its provider's mark, then the permissions' icon unless the agent has full access. Its
+ * model with its provider's mark, then the permissions' icon unless the agent has full access. In a
+ * narrow composer it drops the name to its mark alone so the action buttons stay on one row. Its
  * menu holds the model, with the chosen model's thinking under it, and the permissions.
  */
 export const ComposerSettings = memo(function ComposerSettings(props: ComposerSettingsProps) {
@@ -88,6 +89,9 @@ export const ComposerSettings = memo(function ComposerSettings(props: ComposerSe
         ? agentMessages.models.auto
         : (selectedModel?.name ??
           (modelsError ? agentMessages.models.unavailable : agentMessages.models.defaultModel))
+  const hasIcon =
+    (choosesModel && (auto || selectedModel !== undefined)) ||
+    (!choosesModel && ModeIcon !== undefined)
   const level = auto
     ? undefined
     : reasoningLabel(selectedModel, selectedReasoning, agentMessages.reasoning)
@@ -112,18 +116,36 @@ export const ComposerSettings = memo(function ComposerSettings(props: ComposerSe
           aria-expanded={open}
           title={summary.length > 0 ? summary.join(" · ") : undefined}
           data-approval-mode={approvalMode}
-          className="group/settings mb-0.5 flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-full pr-[9px] pl-[11px] text-[13.5px] font-medium text-foreground/80 outline-none transition-colors hover:bg-black/[0.05] focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-60 aria-expanded:bg-black/[0.05] dark:hover:bg-white/[0.08] dark:aria-expanded:bg-white/[0.08]"
+          className={cn(
+            "group/settings mb-0.5 flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-full pr-[9px] pl-[11px] text-[13.5px] font-medium text-foreground/80 outline-none transition-colors hover:bg-black/[0.05] focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-60 aria-expanded:bg-black/[0.05] dark:hover:bg-white/[0.08] dark:aria-expanded:bg-white/[0.08]",
+            hasIcon && "@max-md/composer:gap-1 @max-md/composer:px-2"
+          )}
         >
+          {choosesModel && auto ? (
+            <AutoMark className="hidden shrink-0 text-foreground @max-md/composer:block" />
+          ) : null}
           {choosesModel && !auto && selectedModel ? (
-            <ProviderLogo model={selectedModel} className="size-3.5" />
+            <ProviderLogo model={selectedModel} className="size-3.5 @max-md/composer:size-4" />
           ) : null}
           {!choosesModel && ModeIcon ? (
             <ModeIcon className="size-[15px] shrink-0" strokeWidth={1.9} aria-hidden="true" />
           ) : null}
-          {name ? <span className="max-w-[11rem] truncate max-sm:max-w-[7rem]">{name}</span> : null}
+          {name ? (
+            <span
+              className={cn(
+                "max-w-[11rem] truncate @max-lg/composer:max-w-[7rem] max-sm:max-w-[7rem]",
+                hasIcon && "@max-md/composer:hidden"
+              )}
+            >
+              {name}
+            </span>
+          ) : null}
           {choosesModel && choosesMode && approvalMode !== "auto" && ModeIcon ? (
             <>
-              <span aria-hidden="true" className="mx-px h-[13px] w-px bg-current opacity-20" />
+              <span
+                aria-hidden="true"
+                className="mx-px h-[13px] w-px bg-current opacity-20 @max-md/composer:mx-0"
+              />
               <ModeIcon className="size-[15px] shrink-0" strokeWidth={1.9} aria-hidden="true" />
             </>
           ) : null}
@@ -367,9 +389,14 @@ function AutoRow({
 }
 
 /** Auto's mark: a four-pointed star with narrow waists, filled as the provider marks are. */
-function AutoMark() {
+function AutoMark({ className }: { readonly className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="size-4">
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      className={cn("size-4", className)}
+    >
       <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
     </svg>
   )

@@ -1094,7 +1094,7 @@ export const Composer = memo(function Composer({
             // The composer focuses itself on arrival and after each answer; on a phone that raises
             // the keyboard only after a tap on it (TouchViewport).
             data-focus-on-tap=""
-            className="group/composer sixb-composer-surface relative flex flex-wrap items-end gap-0.5 rounded-[30px] p-2.5 data-[expanded]:gap-y-1 data-[expanded]:rounded-[26px]"
+            className="group/composer @container/composer sixb-composer-surface relative flex flex-wrap items-end gap-0.5 rounded-[30px] p-2.5 data-[expanded]:gap-y-1 data-[expanded]:rounded-[26px]"
           >
             {/*
               The text on one line, to tell when it stops fitting beside the controls: as wide as

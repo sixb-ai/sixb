@@ -105,7 +105,71 @@ describe("Composer", () => {
     )
     expect(elements(container).some((node) => node.tagName === "textarea")).toBe(true)
   })
+
+  test("collapses the settings chip to its icon in a narrow composer so actions stay on one row", () => {
+    // Removal proof: drop `@container/composer` from Composer or `@max-md/composer:hidden` /
+    // AutoMark from ComposerSettings; the label stays visible on narrow screens or Auto loses its
+    // mark.
+    const pinned = renderComposer({
+      models: [model],
+      selectedModel: model,
+      onSelectModel: () => undefined,
+      onSelectReasoning: () => undefined,
+    })
+    expect(pinned).toContain("@container/composer")
+    const pinnedButton = settingsButton(pinned)
+    expect(classOf(pinnedButton)).toContain("@max-md/composer:px-2")
+    expect(classOf(findSpanWithText(pinnedButton, "GPT-5.4"))).toContain("@max-md/composer:hidden")
+
+    const auto = renderComposer({
+      models: [{ ...model, tier: "standard" }],
+      onSelectModel: () => undefined,
+      onSelectReasoning: () => undefined,
+      onResetModelSelection: () => undefined,
+    })
+    const autoButton = settingsButton(auto)
+    expect(classOf(findSpanWithText(autoButton, "Auto"))).toContain("@max-md/composer:hidden")
+    expect(
+      elements(autoButton).some(
+        (node) => node.tagName === "svg" && classOf(node).includes("@max-md/composer:block")
+      )
+    ).toBe(true)
+
+    // Without an icon to fall back to, keep the error label visible rather than an empty chevron.
+    const unavailable = renderComposer({
+      models: [],
+      modelsError: true,
+      onSelectModel: () => undefined,
+      onSelectReasoning: () => undefined,
+    })
+    expect(
+      classOf(findSpanWithText(settingsButton(unavailable), "Models unavailable"))
+    ).not.toContain("@max-md/composer:hidden")
+  })
 })
+
+function classOf(node: DefaultTreeAdapterTypes.Element | undefined): string {
+  return node?.attrs.find((attribute) => attribute.name === "class")?.value ?? ""
+}
+
+function settingsButton(html: string): DefaultTreeAdapterTypes.Element {
+  const button = elements(parseFragment(html)).find(
+    (node) => node.tagName === "button" && classOf(node).includes("group/settings")
+  )
+  if (!button) throw new Error("Missing settings button")
+  return button
+}
+
+function findSpanWithText(
+  root: DefaultTreeAdapterTypes.Element,
+  text: string
+): DefaultTreeAdapterTypes.Element | undefined {
+  return elements(root).find(
+    (node) =>
+      node.tagName === "span" &&
+      node.childNodes.some((child) => "value" in child && child.value === text)
+  )
+}
 
 function elements(node: DefaultTreeAdapterTypes.Node): DefaultTreeAdapterTypes.Element[] {
   return [

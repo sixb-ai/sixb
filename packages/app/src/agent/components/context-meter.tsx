@@ -111,7 +111,7 @@ export const ContextMeter = memo(function ContextMeter({
           data-tone={reading.tone}
           data-condensing={condensing || undefined}
           className={cn(
-            "group/meter mb-0.5 flex h-9 shrink-0 items-center gap-1.5 rounded-full pr-2.5 pl-2 text-foreground/70 outline-none transition-colors",
+            "group/meter mb-0.5 flex h-9 shrink-0 items-center gap-1.5 rounded-full pr-2.5 pl-2 text-foreground/70 outline-none transition-colors @max-md/composer:gap-1 @max-md/composer:px-1.5",
             "hover:bg-black/[0.05] hover:text-foreground/90 focus-visible:ring-2 focus-visible:ring-ring/40 aria-expanded:bg-black/[0.05] dark:hover:bg-white/[0.08] dark:aria-expanded:bg-white/[0.08]",
             "data-[tone=near]:text-amber-600 data-[tone=over]:text-red-600 dark:data-[tone=near]:text-amber-400 dark:data-[tone=over]:text-red-400"
           )}
