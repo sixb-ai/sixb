@@ -42,7 +42,7 @@ SIXB_BRANCH_ALLOW=https://redis.dev.shop.example \
 | A direct connection to PostgreSQL | A pooler bound to one user (DigitalOcean's pools) refuses the branch's role, and a certificate file (`sslrootcert=/path`) does not reach the sandbox: use `sslmode=verify-full` with the system's roots, or `require` |
 | `@sixb/pg` in the project's dependencies | The branch reaches its database with the project's own copy |
 | `SIXB_BRANCH_DEV_ENV_TOKEN_FILE` (optional) | A credential your env source scopes to `dev` only. Without it, branches run without dev values, and say so |
-| `SIXB_BRANCH_ALLOW` (optional) | `https://` origins the branch may reach beyond production's database and API, the git host, the npm and yarn registries and the project's model providers: the services its `dev` values point at, and a model provider of your own. A plain TCP service (`redis://`) cannot be allowed by name, and is refused |
+| `SIXB_BRANCH_ALLOW` (optional) | `https://` origins the branch may reach beyond production's database and API, the git host, the npm and yarn registries and the project's model providers: the services its `dev` values point at, and a model provider of your own. Plain HTTP and a TCP service (`redis://`) cannot be allowed by name, and are refused |
 
 ## Open a branch
 

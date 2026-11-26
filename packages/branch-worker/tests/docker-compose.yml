@@ -1,4 +1,4 @@
-# Production's PostgreSQL, where each branch gets a schema and a role, and the Redis production and
+# Production's PostgreSQL, where each branch gets a database and a role, and the Redis production and
 # its branches share, as a team's infrastructure would.
 services:
   postgres:

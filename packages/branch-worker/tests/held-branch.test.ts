@@ -35,7 +35,7 @@ const stillRunning = () =>
 describe("a held branch", () => {
   // Guard check: start the runtime without `hostBranchDatabase` or the branch mode's variables
   // in `runtimeEnv` (`held-branch.ts`): the runtime would run on its configuration's storage.
-  test("copies production, starts the runtime on its schema, and reports what it serves", async () => {
+  test("copies production, starts the runtime on its database, and reports what it serves", async () => {
     const { lab, host } = await setup()
     const held = await hold(host)
 
@@ -269,7 +269,7 @@ describe("a held branch", () => {
     )
   })
 
-  // A copy under way once left the old copy's numbers on the row, over a schema made anew.
+  // A copy under way once left the old copy's numbers on the row, over a database made anew.
   // Guard check: drop `data: null` from the write that starts `copy`.
   test("has no copy while it takes one, rather than half of one", async () => {
     const { lab, host, bo } = await setup()
@@ -310,7 +310,7 @@ describe("a held branch", () => {
   })
 
   // Guard check: drop `dropBranchData` or the row's delete from `teardown` (`held-branch.ts`).
-  test("drops its sandbox, its schema and its row when deleted", async () => {
+  test("drops its sandbox, its database and its row when deleted", async () => {
     const { lab, host, bo, storage } = await setup()
     const held = await hold(host)
     const branch = await ready(host)
@@ -574,7 +574,7 @@ describe("a held branch", () => {
     expect((await row(host)())?.notices.map((notice) => notice.code)).toEqual(["machine-ended"])
   })
 
-  // A sandbox made anew has lost what the branch wrote outside its schema: half a copy is worse
+  // A sandbox made anew has lost what the branch wrote outside its database: half a copy is worse
   // than a new one. Guard check: open on the old copy when `resumed` is false (`open`).
   test("takes a whole new copy when its machine was lost, and says its data was reset", async () => {
     const { lab, host, bo } = await setup()

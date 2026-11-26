@@ -339,7 +339,7 @@ export class HeldBranch {
 
   /**
    * Goes on only while this hold owns the branch, for long enough: right before each step that
-   * destroys what the branch has, its schema, its role or its sandbox. A worker paused past its
+   * destroys what the branch has, its database, its role or its sandbox. A worker paused past its
    * lease (a machine asleep) wakes to I/O that runs before its heartbeat: renewing first tells
    * it whether another worker took the branch meanwhile.
    */
@@ -477,7 +477,7 @@ export class HeldBranch {
       ...this.branch.notices.filter((notice) => notice.code === TEMP_FILES_UNCAPPED.code),
     ]
 
-    // A sandbox made anew lost what the branch wrote outside its schema, its lake catalog among
+    // A sandbox made anew lost what the branch wrote outside its database, its lake catalog among
     // it: a whole new copy, rather than half of one.
     const lost = !resumed && this.branch.data !== null
     if (lost) this.notices = [...this.notices, DATA_RESET]
@@ -622,7 +622,7 @@ export class HeldBranch {
    * `copy.ts` says how. False while there is no place for it: the next tick asks again.
    */
   private async copy(): Promise<boolean> {
-    // A copy drops the schema first: only the branch's owner may. Until it ends, the branch has
+    // A copy drops the database first: only the branch's owner may. Until it ends, the branch has
     // no copy, rather than half of one. The last copy's slice is read no more.
     await this.read()
     await this.releaseSlices()
@@ -885,7 +885,7 @@ export class HeldBranch {
   }
 
   /**
-   * Drops everything the branch has: its sandbox, its schema and role, then its row. A step that
+   * Drops everything the branch has: its sandbox, its database and role, then its row. A step that
    * fails keeps the row, wanted deleted, so the next claim tries again: a sandbox still running
    * branch code is never left without one.
    */

@@ -33,7 +33,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "prepack": "bun run build",
-    "test:e2e": "bun ../../scripts/ci-guard.ts --stall 120 --max 900 bun test --preload ./tests/setup.ts ./tests/*.e2e.ts"
+    "test:e2e": "bun ../../scripts/ci-guard.ts --stall 120 --max 720 bun test --preload ./tests/setup.ts ./tests/*.e2e.ts"
   },
   "peerDependencies": {
     "@sixb/core": "workspace:*"

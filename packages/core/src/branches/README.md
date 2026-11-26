@@ -47,7 +47,7 @@ sixb worker branches            reads the remote's heads (git ls-remote, every 1
 | Refresh | A new copy: the database and its role are made anew, so what the branch wrote goes. The row has no copy until the new one is loaded |
 | Stop, or 20 min unused | The runtime stops and the role's login goes (`closeBranchData`); a provider that persists sandboxes keeps its state. A copy delivered and not loaded yet lets its lake slice go |
 | Closed by production | `enforceBranchLimits` found it taking what the instance cannot spare: it stops, without a restart, with a `database-limit` notice |
-| Reopen | A resumed sandbox runs on its copy. One whose last session still runs (its worker died) is waited for, up to 12 min. One whose state is gone, or whose first checkout never finished, is deleted by name and made anew under the same name and port, as Vercel serves only the ports a sandbox was made with. A sandbox made anew takes a whole new copy, with a `data-reset` notice: what the branch wrote is gone |
+| Reopen | A resumed sandbox runs on its copy. One whose last session still runs (its worker died) is waited for, up to 12 min. One whose state is gone, or whose first checkout never finished, is deleted by name and made anew under the same name and port: the port is the sandbox's route, set when it was made, and the worker never changes it. A sandbox made anew takes a whole new copy, with a `data-reset` notice: what the branch wrote is gone |
 | Machine ended | A provider that ends a session at its limit (Vercel's plan maximum) stops the branch, with a `machine-ended` notice |
 | 14 days unopened | Its copy, database and role go; the next open takes a new copy |
 | Delete, or its remote branch deleted | Sandbox, database, role and row go. A saved sandbox is deleted by name (`SandboxFactory.destroy`), without a session or credentials. A delete that fails stays wanted, and the next claim tries again |
@@ -127,8 +127,8 @@ Its network is restricted to production's PostgreSQL instance, production's API,
 the npm and yarn registries, `https://extensions.duckdb.org` when the project's lake is DuckLake,
 the providers of the project's models (each says where it calls when
 it is made: `models/origins.ts`), and the origins `SIXB_BRANCH_ALLOW` adds (the services the `dev`
-values point at, a model provider of the project's own; HTTP(S) only, as no provider allows a
-plain TCP service by name). The provider refuses the rest: private ranges, link-local and cloud metadata
+values point at, a model provider of the project's own; HTTPS only, as Vercel allows neither
+plain HTTP nor a TCP service by name). The provider refuses the rest: private ranges, link-local and cloud metadata
 included. PostgreSQL is allowed by its addresses, resolved when the sandbox is made: it negotiates
 TLS after it connects, so no firewall that reads TLS names can match its host name.
 

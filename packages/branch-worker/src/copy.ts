@@ -27,7 +27,7 @@ export interface BranchSandboxFiles {
 
 /**
  * A new copy of production for the branch, as `sixb dev --from production` takes one: production
- * makes the branch's schema anew, so what it wrote goes, and copies what its creator reads now
+ * makes the branch's database anew, so what it wrote goes, and copies what its creator reads now
  * (`copyForBranch`, under the same limit as a laptop's copy). The copy reaches the sandbox whole,
  * where a laptop's supervisor spools one, before production keeps its lake slice as received. The
  * branch's runtime loads it when it starts, as its role, and its front says what it loaded.

@@ -23,7 +23,7 @@ import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { BranchWorker } from "../src"
 
 // Production on PostgreSQL and Redis, its repository a git origin on this machine, and the branch
-// run for real: cloned in a local sandbox, its own `sixb dev` on its schema of production's
+// run for real: cloned in a local sandbox, its own `sixb dev` on its database on production's
 // instance, as the role limited to it.
 
 const projectId = "shop"

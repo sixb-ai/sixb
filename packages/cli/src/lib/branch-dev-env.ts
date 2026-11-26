@@ -18,9 +18,9 @@ export const BRANCH_DEV_ENV_TOKEN_FILE_ENV = "SIXB_BRANCH_DEV_ENV_TOKEN_FILE"
 export const BRANCH_ALLOW_ENV = "SIXB_BRANCH_ALLOW"
 
 /**
- * The origins `SIXB_BRANCH_ALLOW` names. Only HTTP(S): a sandbox provider allows a host by the
- * name its TLS handshake gives (Vercel) or by an HTTP proxy, so a plain TCP service such as
- * `redis://` cannot be allowed by name, and is refused rather than allowed as nothing.
+ * The origins `SIXB_BRANCH_ALLOW` names. Only HTTPS: Vercel allows a host by the name its TLS
+ * handshake gives, so neither plain HTTP nor a TCP service such as `redis://` can be allowed by
+ * name, and each is refused here rather than allowed as nothing.
  */
 export function branchAllowedTargets(
   value: string | undefined = process.env[BRANCH_ALLOW_ENV]
@@ -36,7 +36,7 @@ export function branchAllowedTargets(
           `[SixbWorker] ${BRANCH_ALLOW_ENV} holds '${origin}', which is no origin.`
         )
       }
-      if (url.protocol !== "https:" && url.protocol !== "http:") {
+      if (url.protocol !== "https:") {
         throw new SixbCliError(
           `[SixbWorker] ${BRANCH_ALLOW_ENV} holds '${origin}': a branch's sandbox allows https:// origins only, such as https://redis.dev.shop.example. A ${url.protocol.replace(/:$/, "")} service cannot be allowed by name: reach it over HTTPS, or keep it out of the project's dev values.`
         )
