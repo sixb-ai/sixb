@@ -8582,6 +8582,7 @@ export type ListBranchesResponses = {
       code: "storage" | "source" | "sandboxes" | "sandbox-shares-host" | "sandbox-env"
       message: string
     } | null
+    now: string
   }
 }
 

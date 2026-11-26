@@ -37,6 +37,7 @@ export function registerHostedBranchRoutes(app: Elysia, host: SixbHostView) {
           return {
             branches: branches.map(serializeBranch),
             unavailable: branchesUnavailable(host),
+            now: new Date().toISOString(),
           }
         } catch (error) {
           return handleRouteError(error, context.set)

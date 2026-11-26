@@ -63,6 +63,8 @@ export const BranchListResponseSchema = z.object({
       message: z.string(),
     })
     .nullable(),
+  /** Production's time as it answered: how long a branch has waited, whatever the reader's clock. */
+  now: z.string(),
 })
 
 export const BranchSignInResponseSchema = z.object({

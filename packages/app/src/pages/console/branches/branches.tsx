@@ -75,7 +75,13 @@ import {
 import { SkeletonBlock } from "../skeletons"
 import { type BranchesMessages, useBranchesMessages } from "./messages"
 
-export type Branch = ListBranchesResponse["branches"][number]
+export type Branch = ListBranchesResponse["branches"][number] & {
+  /**
+   * Why production can't get the branch from its repository, as its last read of the remote
+   * said: a branch that waits for it says so. Optional: a server may not send it.
+   */
+  readonly remoteError?: string | null
+}
 type Unavailable = NonNullable<ListBranchesResponse["unavailable"]>
 
 /** What a branch is doing, in the words a person reads on its pill. */
@@ -86,7 +92,7 @@ export type BranchStep = "preparing" | "copying" | "starting"
 
 const STEPS: readonly BranchStep[] = ["preparing", "copying", "starting"]
 
-/** How long a branch waits for a worker before the page says nothing is running branches. */
+/** How long a branch waits for a worker before the page says it is waiting for a free one. */
 export const WORKER_WAIT_MS = 60_000
 
 /** How often the list is read while a branch moves, and while none does. */
@@ -105,16 +111,32 @@ const SETUP_GUIDE = "https://docs.sixb.ai/deployment/branches"
 /** The command that runs branches next to production. */
 const WORKER_COMMAND = "sixb worker branches"
 
-/** The pill a branch shows: what a person can do with it now. */
+/**
+ * The pill a branch shows: what a person can do with it now. `now` is production's time, which
+ * the branch's own times were written in: a reader's clock ahead of it would make a branch wait.
+ */
 export function branchStatus(branch: Branch, now = Date.now()): BranchStatus {
   if (branch.wanted === "deleted") return "deleting"
   if (branch.state === "failed") return "attention"
   if (branch.wanted === "stopped") return branch.state === "stopped" ? "stopped" : "stopping"
+  if (unclaimed(branch, now)) return "waiting"
   if (refreshPending(branch)) return "refreshing"
   if (branch.state === "ready") return "ready"
-  // Nothing has picked it up: no worker runs branches on production.
-  const unclaimed = branch.state === "stopped" && now - Date.parse(branch.openedAt) > WORKER_WAIT_MS
-  return unclaimed ? "waiting" : "starting"
+  return "starting"
+}
+
+/**
+ * Nothing has taken the branch up a minute after it was last asked for, opened or refreshed. Its
+ * workers may be busy with other branches, restarting or not running: the page can't tell which.
+ * One production can't get from the repository waits at once, and says why.
+ */
+function unclaimed(branch: Branch, now: number): boolean {
+  if (branch.state !== "stopped") return false
+  if (branch.remoteError) return true
+
+  const opened = Date.parse(branch.openedAt)
+  const refreshed = branch.refreshRequestedAt ? Date.parse(branch.refreshRequestedAt) : opened
+  return now - Math.max(opened, refreshed) > WORKER_WAIT_MS
 }
 
 /** The step a branch on its way up is on, or null when it isn't on its way. */
@@ -190,6 +212,8 @@ export function ConsoleBranchesPage() {
   const listed = branchesQuery.data?.branches
   const branches = useMemo(() => listed && sortBranches(listed), [listed])
   const unavailable = branchesQuery.data?.unavailable ?? null
+  // Production's clock, as of its last answer: the one the branches' times were written in.
+  const now = branchesQuery.data ? Date.parse(branchesQuery.data.now) : Date.now()
 
   // The banner of a branch's app links here to refresh it: ask once the branch is listed.
   const wantsRefresh = searchParams.get("refresh") === "1"
@@ -265,12 +289,14 @@ export function ConsoleBranchesPage() {
   // What changes while the page is open is said aloud, and a branch that becomes ready offers to
   // open it. The first read only sets what was there. Read through a ref: the effect follows the
   // list alone.
-  const latest = useRef({ messages, openInTab })
-  latest.current = { messages, openInTab }
+  const latest = useRef({ messages, openInTab, now })
+  latest.current = { messages, openInTab, now }
   const seen = useRef<Map<string, BranchStatus> | null>(null)
   useEffect(() => {
     if (!branches) return
-    const statuses = new Map(branches.map((branch) => [branch.name, branchStatus(branch)]))
+    const statuses = new Map(
+      branches.map((branch) => [branch.name, branchStatus(branch, latest.current.now)])
+    )
     const before = seen.current
     seen.current = statuses
     if (!before) return
@@ -331,6 +357,7 @@ export function ConsoleBranchesPage() {
             <BranchRow
               key={branch.name}
               branch={branch}
+              now={now}
               highlighted={branch.name === highlighted}
               opening={opening === branch.name}
               onOpen={() => openInTab(branch.name)}
@@ -448,6 +475,7 @@ function SetupNeeded({ unavailable }: { readonly unavailable: Unavailable }) {
 
 function BranchRow({
   branch,
+  now,
   highlighted,
   opening,
   onOpen,
@@ -457,6 +485,8 @@ function BranchRow({
   onDelete,
 }: {
   readonly branch: Branch
+  /** Production's time, which the branch's own times are in. */
+  readonly now: number
   readonly highlighted: boolean
   readonly opening: boolean
   readonly onOpen: () => void
@@ -466,8 +496,8 @@ function BranchRow({
   readonly onDelete: () => void
 }) {
   const messages = useBranchesMessages()
-  const status = branchStatus(branch)
-  const step = branchStep(branch)
+  const status = branchStatus(branch, now)
+  const step = branchStep(branch, now)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -571,7 +601,7 @@ function BranchRow({
       {step || status === "attention" || branch.notices.length > 0 || hasSkips(branch) ? (
         <div className="flex flex-col gap-2 sm:pl-[3.125rem]">
           {step ? <Progress step={step} waiting={status === "waiting"} /> : null}
-          {status === "waiting" ? <WaitingForWorker /> : null}
+          {status === "waiting" ? <Waiting branch={branch} /> : null}
           {status === "attention" ? <NeedsAttention branch={branch} /> : null}
           {branch.notices.map((notice) => (
             <Callout key={notice.code} icon={Info}>
@@ -689,9 +719,23 @@ function Progress({ step, waiting }: { readonly step: BranchStep; readonly waiti
   )
 }
 
-/** No worker has picked the branch up: who can fix it, and the command they run. */
-function WaitingForWorker() {
+/**
+ * Why the branch waits: production can't get it from the repository, with its error folded under
+ * Details; or no worker took it up yet, and what to check if that lasts.
+ */
+function Waiting({ branch }: { readonly branch: Branch }) {
   const messages = useBranchesMessages()
+
+  if (branch.remoteError) {
+    return (
+      <Callout icon={Clock}>
+        <span className="block font-medium text-foreground">{messages.remote.title}</span>
+        <span className="mt-0.5 block">{messages.remote.hint}</span>
+        <ErrorDetails message={branch.remoteError} />
+      </Callout>
+    )
+  }
+
   return (
     <Callout icon={Clock}>
       <span className="block">{messages.waitingForWorker}</span>
@@ -727,27 +771,45 @@ function NeedsAttention({ branch }: { readonly branch: Branch }) {
             </p>
           ) : null}
           {error ? (
-            <Collapsible>
-              <CollapsibleTrigger className="group mt-1.5 flex items-center gap-1 rounded text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                <ChevronRight
-                  aria-hidden
-                  className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
-                />
-                {messages.details}
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-border bg-background p-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap text-red-700 dark:text-red-300">
-                  {error.message}
-                </pre>
-                <div className="mt-1.5">
-                  <CopyButton value={file ? `${file}\n\n${error.message}` : error.message} />
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
+            <ErrorDetails
+              message={error.message}
+              copy={file ? `${file}\n\n${error.message}` : error.message}
+            />
           ) : null}
         </div>
       </div>
     </div>
+  )
+}
+
+/** An error as it was written, folded under Details, with a way to copy it. */
+function ErrorDetails({
+  message,
+  copy = message,
+}: {
+  readonly message: string
+  readonly copy?: string
+}) {
+  const messages = useBranchesMessages().attention
+
+  return (
+    <Collapsible>
+      <CollapsibleTrigger className="group mt-1.5 flex items-center gap-1 rounded text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <ChevronRight
+          aria-hidden
+          className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
+        />
+        {messages.details}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-border bg-background p-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap text-red-700 dark:text-red-300">
+          {message}
+        </pre>
+        <div className="mt-1.5">
+          <CopyButton value={copy} />
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 

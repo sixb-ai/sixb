@@ -138,6 +138,7 @@ describe("branch routes", () => {
     expect(await listed.json()).toMatchObject({
       branches: [],
       unavailable: { code: "storage", message: expect.stringContaining("@sixb/pg") },
+      now: expect.any(String),
     })
   })
 

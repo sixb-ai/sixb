@@ -46,7 +46,11 @@ export const en = {
     waiting: "Not started",
   },
   waitingForWorker:
-    "Nothing is running branches on production yet. Ask a developer to start the branch worker:",
+    "Waiting for a free worker: the branch starts as soon as one is free. If it keeps waiting, ask a developer to check the branch worker:",
+  remote: {
+    title: "Production can't get this branch from the git repository.",
+    hint: "Check that the branch is pushed, and that production may read the repository.",
+  },
   dataFrom: (age: string) => `Production data from ${age}`,
   dataJustNow: "Production data from just now",
   copyingData: "Copying production data…",
@@ -180,7 +184,11 @@ export const fr: Translation<BranchesMessages> = {
     waiting: "Pas encore commencé",
   },
   waitingForWorker:
-    "Rien n’exécute encore les branches en production. Demandez à un développeur de lancer le worker de branches :",
+    "En attente d’un worker libre : la branche démarre dès qu’il y en a un. Si l’attente dure, demandez à un développeur de vérifier le worker de branches :",
+  remote: {
+    title: "La production n’arrive pas à récupérer cette branche depuis le dépôt git.",
+    hint: "Vérifiez que la branche est poussée et que la production peut lire le dépôt.",
+  },
   dataFrom: (age: string) => `Données de production copiées ${age}`,
   dataJustNow: "Données de production copiées à l’instant",
   copyingData: "Copie des données de production…",

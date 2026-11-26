@@ -70,6 +70,8 @@ afterAll(() => {
 
 const now = Date.now()
 const ago = (ms: number) => new Date(now - ms).toISOString()
+/** Production's time as the list says it. */
+const NOW = new Date(now).toISOString()
 
 const ada = {
   id: "usr_ada",
@@ -168,6 +170,17 @@ describe("a branch's status", () => {
     expect(branchStatus(branch({ refreshRequestedAt: ago(3 * 60 * 60_000) }))).toBe("ready")
   })
 
+  // A stopped branch refreshed long after it was opened: nothing took the refresh up, and it once
+  // spun as "Refreshing" for good. Red check: measure from `openedAt` alone in `unclaimed`, or
+  // check `refreshPending` before it in `branchStatus`.
+  test("waits from the refresh it was last asked for", () => {
+    const refreshed = (at: number) =>
+      branch({ state: "stopped", openedAt: ago(3 * 60 * 60_000), refreshRequestedAt: ago(at) })
+
+    expect(branchStatus(refreshed(10_000))).toBe("refreshing")
+    expect(branchStatus(refreshed(WORKER_WAIT_MS + 1))).toBe("waiting")
+  })
+
   test("walks the steps of a branch on its way up", () => {
     expect(branchStep(branch({ state: "stopped" }))).toBe("preparing")
     expect(branchStep(branch({ state: "copying" }))).toBe("copying")
@@ -195,7 +208,7 @@ describe("a branch's status", () => {
 
 describe("Console › Branches", () => {
   test("says what a branch is and the one next step when there is none", () => {
-    const { view } = renderPage({ branches: [], unavailable: null })
+    const { view } = renderPage({ branches: [], unavailable: null, now: NOW })
 
     expect(view.getByText("No branches yet")).toBeDefined()
     expect(view.getByRole("button", { name: "New branch" })).toBeDefined()
@@ -205,6 +218,7 @@ describe("Console › Branches", () => {
     const { view } = renderPage({
       branches: [],
       unavailable: { code: "source", message: "the project's repository" },
+      now: NOW,
     })
 
     expect(view.getByText("Branches aren't set up yet")).toBeDefined()
@@ -217,9 +231,13 @@ describe("Console › Branches", () => {
 
   // Hiding the page protects no data: the page says why there is nothing, rather than leave.
   test("tells someone without the grant that they don't have access", () => {
-    const { view } = renderPage({ branches: [branch()], unavailable: null }, "/console/branches", {
-      branches: false,
-    })
+    const { view } = renderPage(
+      { branches: [branch()], unavailable: null, now: NOW },
+      "/console/branches",
+      {
+        branches: false,
+      }
+    )
 
     expect(view.getByText("You don't have access to Branches. Ask a project admin.")).toBeDefined()
     expect(view.queryByText("feature/route-planner")).toBeNull()
@@ -250,6 +268,7 @@ describe("Console › Branches", () => {
         branch({ name: "fix/driver-hours", wanted: "stopped", state: "stopped" }),
       ],
       unavailable: null,
+      now: NOW,
     })
 
     // The pill is drawn twice, beside the name and, on a phone, before the facts: CSS shows one.
@@ -275,6 +294,7 @@ describe("Console › Branches", () => {
     const { view } = renderPage({
       branches: [branch({ state: "copying", data: null, openedAt: ago(10_000) })],
       unavailable: null,
+      now: NOW,
     })
 
     const steps = view.getByRole("list", { name: "Progress" })
@@ -292,33 +312,78 @@ describe("Console › Branches", () => {
     expect(view.queryByRole("button", { name: "Open" })).toBeNull()
   })
 
-  // A branch nothing picks up would otherwise spin forever. Removal proof: drop "waiting" from
-  // `branchStatus`, and the page spins on with no word on why.
-  test("says when nothing runs branches, who can fix it, and the command", () => {
+  // A branch nothing picks up would otherwise spin forever. Its worker may be busy, restarting or
+  // missing: the page says what it knows, a wait, and what to check. Removal proof: drop
+  // "waiting" from `branchStatus`, and the page spins on with no word on why.
+  test("says a branch waits for a free worker, and what to check if it lasts", () => {
     const { view } = renderPage({
       branches: [branch({ state: "stopped", data: null, openedAt: ago(5 * 60_000) })],
       unavailable: null,
+      now: NOW,
     })
 
     expect(view.getAllByText("Waiting")).toHaveLength(2)
     expect(
       view.getByText(
-        "Nothing is running branches on production yet. Ask a developer to start the branch worker:"
+        "Waiting for a free worker: the branch starts as soon as one is free. If it keeps waiting, ask a developer to check the branch worker:"
       )
     ).toBeDefined()
     expect(view.getByText("sixb worker branches")).toBeDefined()
     expect(view.container.querySelector("[class*='animate-spin']")).toBeNull()
   })
 
+  // Production wrote the branch's times on its own clock: a browser five minutes ahead once said a
+  // branch opened 10 s before was waiting. Red check: read `Date.now()` rather than the list's
+  // `now` in `ConsoleBranchesPage`.
+  test("measures a wait on production's clock, not the browser's", () => {
+    const openedAt = ago(5 * 60_000)
+    const { view } = renderPage({
+      branches: [branch({ state: "stopped", data: null, openedAt })],
+      unavailable: null,
+      now: new Date(Date.parse(openedAt) + 10_000).toISOString(),
+    })
+
+    expect(view.getAllByText("Starting")).toHaveLength(2)
+    expect(view.queryByText("Waiting")).toBeNull()
+  })
+
+  // The worker's last read of the repository failed: the row says so at once, rather than wait
+  // a minute and blame a worker. Red check: drop the `remoteError` case from `unclaimed` and
+  // `Waiting` (`branches.tsx`).
+  test("says at once when production can't get the branch from the repository", () => {
+    const { view } = renderPage({
+      branches: [
+        branch({
+          state: "stopped",
+          data: null,
+          openedAt: ago(5_000),
+          remoteError: "fatal: could not read Username for 'https://github.com'",
+        }),
+      ],
+      unavailable: null,
+      now: NOW,
+    })
+
+    expect(view.getAllByText("Waiting")).toHaveLength(2)
+    expect(
+      view.getByText("Production can't get this branch from the git repository.")
+    ).toBeDefined()
+    expect(view.queryByText("sixb worker branches")).toBeNull()
+
+    fireEvent.click(view.getByRole("button", { name: "Details" }))
+    expect(view.getByText("fatal: could not read Username for 'https://github.com'")).toBeDefined()
+  })
+
   // Removal proof: drop the toast from the status effect, and a branch turns ready unseen.
   test("says when a branch it was watching is ready, and offers to open it", async () => {
     const starting = branch({ state: "starting", openedAt: ago(10_000) })
-    const { view, queryClient } = renderPage({ branches: [starting], unavailable: null })
+    const { view, queryClient } = renderPage({ branches: [starting], unavailable: null, now: NOW })
 
     act(() => {
       queryClient.setQueryData(listBranchesQueryKey(), {
         branches: [{ ...starting, state: "ready" }],
         unavailable: null,
+        now: NOW,
       })
     })
 
@@ -335,6 +400,7 @@ describe("Console › Branches", () => {
         }),
       ],
       unavailable: null,
+      now: NOW,
     })
 
     expect(view.getAllByText("Needs attention")).toHaveLength(2)
@@ -367,6 +433,7 @@ describe("Console › Branches", () => {
         }),
       ],
       unavailable: null,
+      now: NOW,
     })
 
     expect(
@@ -389,10 +456,10 @@ describe("Console › Branches", () => {
     const seen = answerWith((request) =>
       request.method === "POST"
         ? Response.json(branch({ refreshRequestedAt: ago(0) }), { status: 202 })
-        : Response.json({ branches: [branch()], unavailable: null })
+        : Response.json({ branches: [branch()], unavailable: null, now: NOW })
     )
     const { view } = renderPage(
-      { branches: [branch()], unavailable: null },
+      { branches: [branch()], unavailable: null, now: NOW },
       "/console/branches?branch=feature%2Froute-planner&refresh=1"
     )
 
@@ -437,7 +504,7 @@ describe("Console › Branches", () => {
     const original = browser.open
     ;(browser as unknown as { open: typeof open }).open = open
     try {
-      const { view } = renderPage({ branches: [branch()], unavailable: null })
+      const { view } = renderPage({ branches: [branch()], unavailable: null, now: NOW })
       fireEvent.click(view.getByRole("button", { name: "Open" }))
       expect(open).toHaveBeenCalledTimes(1)
 

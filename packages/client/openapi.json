@@ -25486,9 +25486,12 @@
                       "required": ["code", "message"],
                       "additionalProperties": false,
                       "nullable": true
+                    },
+                    "now": {
+                      "type": "string"
                     }
                   },
-                  "required": ["branches", "unavailable"],
+                  "required": ["branches", "unavailable", "now"],
                   "additionalProperties": false
                 }
               }
