@@ -360,12 +360,12 @@ function contentSecurityPolicy(baseType: string): string {
   return FILE_CONTENT_SECURITY_POLICY
 }
 
-interface ParsedByteRange {
+export interface ParsedByteRange {
   readonly start: number
   readonly endInclusive: number
 }
 
-function parseSingleByteRange(header: string, sizeBytes: number): ParsedByteRange | null {
+export function parseSingleByteRange(header: string, sizeBytes: number): ParsedByteRange | null {
   const normalized = header.trim()
   if (!normalized.startsWith("bytes=") || normalized.includes(",")) {
     return null
@@ -425,7 +425,7 @@ function partialFileContentHeaders(
   return headers
 }
 
-function rangeNotSatisfiableResponse(sizeBytes: number): Response {
+export function rangeNotSatisfiableResponse(sizeBytes: number): Response {
   const headers = new Headers()
   headers.set("accept-ranges", "bytes")
   headers.set("content-range", `bytes */${sizeBytes}`)

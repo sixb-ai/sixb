@@ -1,4 +1,5 @@
 import { type BlobStorage, supportsDirectUpload } from "../blob-storage"
+import { LAKE_SLICE_KEEP_MS } from "../datasets/lake-slices"
 import type { OntologyOutboxDispatcher } from "../events"
 import type { VectorIndexingDispatcher } from "../objects/vectors/indexing-dispatch"
 import {
@@ -205,6 +206,20 @@ export class OntologyMaintenance {
           downloads.deleteExpired({
             projectId: this.projectId,
             expiredBefore: new Date(started.getTime() - EXPIRED_FILE_DOWNLOAD_RETENTION_MS),
+            limit: this.cleanupLimit,
+          }),
+        failures
+      )
+    }
+
+    // A slice stays live, with its versions and files, while its branch may still be opened.
+    const slices = this.storage.lakeSlices
+    if (slices) {
+      await captureFailure(
+        () =>
+          slices.deleteExpired({
+            projectId: this.projectId,
+            before: new Date(started.getTime() - LAKE_SLICE_KEEP_MS),
             limit: this.cleanupLimit,
           }),
         failures

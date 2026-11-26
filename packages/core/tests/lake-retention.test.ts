@@ -74,7 +74,7 @@ function runtime(input: {
   options?: LakeMaintenanceOptions
   datasetCount?: number
   lakeRetentionRuns?: InMemoryLakeRetentionRunStorage
-  storage?: Pick<Storage, "syncRuns" | "pipelineRuns" | "datasetIngest">
+  storage?: Pick<Storage, "syncRuns" | "pipelineRuns" | "datasetIngest" | "lakeSlices">
 }) {
   return new LakeRetention({
     projectId: "project",
@@ -548,5 +548,33 @@ describe("what retention keeps for a commit nobody recorded", () => {
 
       expect(passes[0]?.keepVersionsForMs).toBeLessThan(72 * HOUR)
     })
+  })
+})
+
+describe("what retention keeps for a branch", () => {
+  // Reproduce: drop `holdFiles` from `LakeRetention.apply`, or the slices from `protect`. A
+  // production compaction then lets retention delete the files the branch was handed.
+  test("keeps a live slice's versions and the files it lists, until its record expires", async () => {
+    const storage = new InMemoryStorage()
+    const slice = async (id: string, createdAt: Date, files: string[]) =>
+      storage.lakeSlices.create({
+        id,
+        projectId: "project",
+        userId: "usr_alice",
+        branch: "invoice-reminders",
+        point: "ducklake:4",
+        versions: [{ datasetId: "erp.invoices", versionId: `ducklake:${id}` }],
+        files,
+        createdAt,
+      })
+    await slice("4", new Date(NOW.getTime() - HOUR), ["main/t/a.parquet"])
+    await slice("2", new Date(NOW.getTime() - 15 * 24 * HOUR), ["main/t/old.parquet"])
+
+    const { maintenance, passes } = fakeMaintenance()
+    const retention = runtime({ maintenance, storage })
+    await drive(retention.apply({ keepVersionsForMs: HOUR, deleteFilesAfterMs: HOUR }))
+
+    expect(passes[0]?.protect).toEqual([{ datasetId: "erp.invoices", versionId: "ducklake:4" }])
+    expect(passes[0]?.holdFiles).toEqual(["main/t/a.parquet"])
   })
 })

@@ -345,6 +345,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("111-artifact-video-export-asks", artifactVideoExportAsksSql),
     sqliteSql("112-agent-message-artifact-context", agentMessageArtifactContextSql),
     sqliteSql("113-snapshot-load-executions", snapshotLoadExecutionsSql),
+    sqliteSql("114-lake-slices", lakeSlicesSql),
   ],
 })
 
@@ -803,3 +804,4 @@ import agentMessageArtifactContextSql from "./migrations/112-agent-message-artif
 import snapshotLoadExecutionsSql from "./migrations/113-snapshot-load-executions.sql" with {
   type: "text",
 }
+import lakeSlicesSql from "./migrations/114-lake-slices.sql" with { type: "text" }

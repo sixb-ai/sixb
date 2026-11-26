@@ -1,3 +1,4 @@
+import { liveLakeSlices, releaseLakeSliceFiles } from "../datasets/lake-slices"
 import type {
   DatasetVersionRef,
   LakeMaintenance,
@@ -93,10 +94,15 @@ export function resolveLakeMaintenanceSettings(
 interface LakeRetentionInput {
   readonly projectId: string
   readonly options: LakeMaintenanceOptions | undefined
-  readonly lakeStorage: Pick<LakeStorage, "maintenance">
+  readonly lakeStorage: Pick<LakeStorage, "maintenance" | "forks">
   readonly storage: Pick<
     Storage,
-    "lakeRetentionRuns" | "maintenanceHeartbeats" | "syncRuns" | "pipelineRuns" | "datasetIngest"
+    | "lakeRetentionRuns"
+    | "maintenanceHeartbeats"
+    | "syncRuns"
+    | "pipelineRuns"
+    | "datasetIngest"
+    | "lakeSlices"
   >
   readonly sources: Pick<OntologySourceStorage, "listActive">
   readonly datasetCount: number
@@ -135,12 +141,21 @@ export class LakeRetention {
       throw new RuntimeError("[Sixb] The lake storage provider has no maintenance.")
     }
 
-    return runRetentionPasses({
+    const report = await runRetentionPasses({
       maintenance: this.maintenance,
       protect: () => this.protect(),
+      holdFiles: async () => (await this.slices()).flatMap((slice) => slice.files),
       keepVersionsForMs: () => this.keepVersionsForMs(options.keepVersionsForMs),
       options,
     })
+
+    // Files production made for branches' slices go once no branch may read them.
+    if (!options.dryRun) {
+      const { projectId, lakeStorage, storage } = this.input
+      await releaseLakeSliceFiles({ id: projectId, lakeStorage, storage })
+    }
+
+    return report
   }
 
   /**
@@ -201,16 +216,28 @@ export class LakeRetention {
 
   /**
    * Objects hold the rows of the version each projection applied, and their markings are read from
-   * it: the lake keeps those versions too. Read before every pass, since a projection may apply a
-   * version between two of them.
+   * it: the lake keeps those versions too, and those of live branches' slices. Read before every
+   * pass, since a projection may apply a version between two of them.
    */
   private async protect(): Promise<readonly DatasetVersionRef[]> {
     const applied = await this.input.sources.listActive({ projectId: this.input.projectId })
 
-    return applied.map(({ datasetVersion }) => ({
-      datasetId: datasetVersion.datasetId,
-      versionId: datasetVersion.versionId,
-    }))
+    return [
+      ...applied.map(({ datasetVersion }) => ({
+        datasetId: datasetVersion.datasetId,
+        versionId: datasetVersion.versionId,
+      })),
+      ...(await this.slices()).flatMap((slice) => slice.versions),
+    ]
+  }
+
+  /**
+   * The slices a branch may still open: their versions are kept, and their files too, even once
+   * compaction replaced them, so a branch never finds its base gone.
+   */
+  private slices() {
+    const { projectId, storage } = this.input
+    return liveLakeSlices({ id: projectId, storage })
   }
 
   /**
@@ -282,10 +309,11 @@ async function oldestUnrecordedCommit(
 async function runRetentionPasses(input: {
   readonly maintenance: LakeMaintenance
   readonly protect: () => Promise<readonly DatasetVersionRef[]>
+  readonly holdFiles: () => Promise<readonly string[]>
   readonly keepVersionsForMs: () => Promise<number>
   readonly options: LakeRetentionPassOptions
 }): Promise<LakeRetentionReport> {
-  const { maintenance, protect, keepVersionsForMs, options } = input
+  const { maintenance, protect, holdFiles, keepVersionsForMs, options } = input
   const startedAt = Date.now()
   let total: LakeRetentionReport | undefined
 
@@ -297,6 +325,7 @@ async function runRetentionPasses(input: {
       deleteFilesAfterMs: options.deleteFilesAfterMs,
       dryRun: options.dryRun ?? false,
       protect: await protect(),
+      holdFiles: await holdFiles(),
       signal: options.signal,
     })
     total = total === undefined ? report : addReports(total, report)

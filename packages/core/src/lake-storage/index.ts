@@ -20,6 +20,15 @@ export {
   planDatasetDefinitionUpdate,
 } from "./definition-updates"
 export { LakeConcurrencyError, LakeStorageError, LakeValueRefusedError } from "./errors"
+export type {
+  LakeFile,
+  LakeFileRange,
+  LakeForks,
+  LakeSliceVersion,
+  LakeVersionsAtInput,
+  ReleaseLakeSliceFilesInput,
+  WriteLakeSliceInput,
+} from "./forks"
 export { InMemoryLakeStorage } from "./in-memory"
 export type { LineageAtCommitInput } from "./lineage"
 export { lineageAtCommit, resolveStepLineage } from "./lineage"
