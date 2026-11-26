@@ -217,6 +217,10 @@ jobs:
             package: "@sixb/pg"
           - name: queues-bullmq
             package: "@sixb/queues-bullmq"
+          # Runs a hosted branch for real: its clone, its `sixb dev` on production's PostgreSQL as
+          # its own role, its WebSockets and a push.
+          - name: branch-worker
+            package: "@sixb/branch-worker"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
