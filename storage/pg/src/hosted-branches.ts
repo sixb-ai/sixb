@@ -73,7 +73,7 @@ export interface HostedBranchEnforcement {
 
 /** Why production took a branch's login away. */
 export type HostedBranchClosure =
-  /** A session held more advisory locks, or locks of any kind, than the framework ever takes. */
+  /** It held more advisory locks, or more of the lock table, than the framework ever takes. */
   | { readonly reason: "locks"; readonly locks: number }
   /** A session held a lock that another role's session waited for. */
   | { readonly reason: "blocking" }
@@ -109,13 +109,16 @@ const EXTENSIONS = ["pg_trgm", "vector"] as const
 const ADVISORY_LOCKS_PER_SESSION = 64
 
 /**
- * Locks of any kind one session of the branch's may hold in the shared table (fast-path ones live
- * outside it): ten connections' worth of `max_locks_per_transaction`, and never under 2,000. The
- * framework's own load holds a few hundred, one per partition and index, about 170 for three
- * types; a session locking thousands of its own tables in one transaction fills the table as
- * surely as advisory keys do.
+ * Shares of the lock table branches may hold, locks of every kind but fast-path ones, which live
+ * outside it. The table holds `max_locks_per_transaction` × (`max_connections` +
+ * `max_prepared_transactions`): 6,400 by default. One branch, all its sessions together, holds at
+ * most a quarter of it. All branches together hold at most three eighths, which two branches at
+ * their full share already pass: past it, the branch holding the most closes. Production always
+ * keeps more than half. A copy's load holds about 120 locks plus 15 per type (one per partition
+ * and index; 175 measured for 3 types, 530 for 30), so a quarter of the default table fits a copy
+ * of about 100 types: a larger ontology needs a larger `max_locks_per_transaction`.
  */
-const LOCKS_PER_SESSION = { floor: 2_000, connections: 10 } as const
+const LOCK_TABLE_SHARES = { branch: 1 / 4, branches: 3 / 8 } as const
 
 /** How long dropping a branch's database waits for a lock before it fails, to be tried again. */
 const DROP_LOCK_TIMEOUT_MS = 5_000
@@ -198,9 +201,6 @@ interface RoleSession {
   readonly pid: number
   readonly database: string | null
   readonly advisory: number
-  /** Its locks in the shared table, of every kind, and how many it may hold there. */
-  readonly shared: number
-  readonly shared_limit: number
   readonly blocking: boolean
   readonly ended: boolean
   readonly long_statement: boolean
@@ -390,7 +390,8 @@ export class PgHostedBranches {
    * Holds the role to its limits whatever it SETs. Cancels its statements past the statement
    * limit, and ends its sessions past the transaction limit or idle in a transaction past that
    * limit. Closes the branch when one of its sessions holds too many advisory locks, holds a lock
-   * another role's session waits for, or is connected to another database, and, measured once a
+   * another role's session waits for, or is connected to another database, when it holds more
+   * than its share of the lock table, and, measured once a
    * minute, when its database grows past its size limit. That minute it also renews the login of
    * a branch still open. A member of the role may signal its backends, which production is.
    */
@@ -409,18 +410,11 @@ export class PgHostedBranches {
 
     const sessions = await this.sql<RoleSession[]>`
       WITH locks AS (
-        SELECT pid, count(*) FILTER (WHERE locktype = 'advisory')::int AS advisory,
-          count(*) FILTER (WHERE NOT fastpath)::int AS shared
-        FROM pg_locks
-        WHERE pid IS NOT NULL
+        SELECT pid, count(*)::int AS advisory FROM pg_locks
+        WHERE locktype = 'advisory' AND pid IS NOT NULL
         GROUP BY pid
       )
       SELECT a.pid, a.datname AS database, coalesce(l.advisory, 0) AS advisory,
-        coalesce(l.shared, 0) AS shared,
-        greatest(
-          ${LOCKS_PER_SESSION.floor}::int,
-          current_setting('max_locks_per_transaction')::int * ${LOCKS_PER_SESSION.connections}::int
-        ) AS shared_limit,
         EXISTS (
           SELECT 1 FROM pg_stat_activity w
           WHERE w.wait_event_type = 'Lock' AND w.backend_type = 'client backend'
@@ -437,7 +431,10 @@ export class PgHostedBranches {
       WHERE a.usename = ${role} AND a.pid <> pg_backend_pid()
     `
 
-    const closed = closureOf(role, sessions) ?? (await this.slowCheck(role, sizeLimitMb))
+    const closed =
+      closureOf(role, sessions) ??
+      (await this.lockTableClosure(role)) ??
+      (await this.slowCheck(role, sizeLimitMb))
     if (closed) {
       await this.close(namespace)
       return { stopped: sessions.length, closed }
@@ -466,6 +463,35 @@ export class PgHostedBranches {
       productionSchema: this.input.productionSchema,
       namespace,
     })
+  }
+
+  /** The branch's share of the lock table, and all branches' together: `LOCK_TABLE_SHARES`. */
+  private async lockTableClosure(role: string): Promise<HostedBranchClosure | null> {
+    const rows = await this.sql<{ role: string; locks: number; capacity: number }[]>`
+      SELECT a.usename AS role, count(*)::int AS locks,
+        current_setting('max_locks_per_transaction')::int * (
+          current_setting('max_connections')::int
+          + current_setting('max_prepared_transactions')::int
+        ) AS capacity
+      FROM pg_locks l
+      JOIN pg_stat_activity a ON a.pid = l.pid
+      WHERE NOT l.fastpath AND a.usename LIKE ${`${ROLE_PREFIX.replaceAll("_", "\\_")}%`}
+      GROUP BY a.usename
+      ORDER BY locks DESC, a.usename
+    `
+    const own = rows.find((row) => row.role === role)
+    if (!own) return null
+
+    const capacity = own.capacity
+    if (own.locks > capacity * LOCK_TABLE_SHARES.branch) {
+      return { reason: "locks", locks: own.locks }
+    }
+
+    const all = rows.reduce((sum, row) => sum + row.locks, 0)
+    if (all > capacity * LOCK_TABLE_SHARES.branches && rows[0]?.role === role) {
+      return { reason: "locks", locks: own.locks }
+    }
+    return null
   }
 
   /**
@@ -563,7 +589,6 @@ function closureOf(database: string, sessions: readonly RoleSession[]): HostedBr
     if (session.advisory > ADVISORY_LOCKS_PER_SESSION) {
       return { reason: "locks", locks: session.advisory }
     }
-    if (session.shared > session.shared_limit) return { reason: "locks", locks: session.shared }
     if (session.blocking) return { reason: "blocking" }
     if (session.database !== null && session.database !== database) {
       return { reason: "elsewhere", database: session.database }

@@ -57,7 +57,7 @@ export interface BranchEnforcement {
 
 /** Why production closed a branch. */
 export type BranchClosure =
-  /** A session held more advisory locks, or locks of any kind, than the framework ever takes. */
+  /** It held more advisory locks, or more of the lock table, than the framework ever takes. */
   | { readonly reason: "locks"; readonly locks: number }
   /** A session held a lock that another role's session waited for. */
   | { readonly reason: "blocking" }

@@ -366,41 +366,60 @@ describe("a hosted branch's database", () => {
     expect((await role(admin, name))?.login).toBe(false)
   })
 
-  // Relation locks fill the same table: a session locking thousands of its own tables in one
-  // transaction does what 15,000 advisory keys do. The bound is 2,000 at the default
-  // `max_locks_per_transaction` of 64, well above a load's own (three types in the load test below).
-  // Guard check: drop the `shared` clause from `closureOf`.
-  test("closes the branch when one of its sessions holds more locks of any kind than a load does", async () => {
-    const { storage } = await production()
+  // Relation locks fill the same table as advisory keys: sessions locking thousands of their
+  // own tables in a transaction each fill it just as surely. A load holds far less (three types
+  // in the load test below, which `enforce` leaves alone).
+  // Guard check: drop the `LOCK_TABLE_SHARES.branch` clause from `lockTableClosure`.
+  test("closes the branch whose sessions together hold more than its share of the lock table", async () => {
+    const { storage, admin } = await production()
     await hosted(storage, "feature-a")
-    const { sql } = await asRole(storage, "feature-a")
-    // The first 16 a session takes stay out of the shared table, on the fast path: 2,001 in it.
-    const tables = 2_017
+    const capacity = await lockTable(admin)
 
-    // In batches, each its own transaction: creating them takes locks too.
-    for (let from = 1; from <= tables; from += 500) {
-      await sql.unsafe(`
-        DO $$ BEGIN
-          FOR i IN ${from}..${Math.min(from + 499, tables)} LOOP
-            EXECUTE format('CREATE TABLE own_%s (id int)', i);
-          END LOOP;
-        END $$
-      `)
+    // Three sessions, each under the branch's share, all three past it.
+    const each = Math.ceil(capacity / 4 / 3) + 20
+    const { sql, login } = await asRole(storage, "feature-a")
+    await createTables(sql, 3 * each)
+    const sessions = await Promise.all(
+      [0, 1, 2].map((index) => lockTables(login.url, index * each, each))
+    )
+
+    const { closed } = await storage.enforceHostedBranchLimits("feature-a")
+    expect(closed).toMatchObject({ reason: "locks" })
+    expect((closed as { locks: number }).locks).toBeGreaterThan(capacity / 4)
+    expect(await rejection(sessions[0]!`SELECT 1`)).not.toBe("resolved")
+  }, 30_000)
+
+  // Two branches, each within its share, together past what branches may hold.
+  // Guard check: drop the `LOCK_TABLE_SHARES.branches` clause from `lockTableClosure`.
+  test("closes the branch holding the most once all branches together hold too much", async () => {
+    const { storage, admin } = await production()
+    await hosted(storage, "feature-a")
+    await hosted(storage, "feature-b")
+    const capacity = await lockTable(admin)
+
+    const holds = async (name: string, share: number) => {
+      const each = Math.ceil((capacity * share) / 2)
+      const { sql, login } = await asRole(storage, name)
+      await createTables(sql, 2 * each)
+      return Promise.all([0, 1].map((index) => lockTables(login.url, index * each, each)))
     }
-    const session = await sql.reserve()
-    await session`BEGIN`
-    await session.unsafe(`
-      DO $$ BEGIN
-        FOR i IN 1..${tables} LOOP EXECUTE format('LOCK TABLE own_%s IN ACCESS SHARE MODE', i); END LOOP;
-      END $$
-    `)
+    // Kept: a session nothing refers to any more is collected, and its transaction ends.
+    const sessions = [...(await holds("feature-a", 0.22)), ...(await holds("feature-b", 0.19))]
 
-    expect(await storage.enforceHostedBranchLimits("feature-a")).toEqual({
-      stopped: 1,
-      closed: { reason: "locks", locks: 2_001 },
+    expect(await storage.enforceHostedBranchLimits("feature-b")).toEqual({
+      stopped: 0,
+      closed: null,
     })
-    expect(await rejection(session`SELECT 1`)).not.toBe("resolved")
-  }, 15_000)
+    expect((await storage.enforceHostedBranchLimits("feature-a")).closed).toMatchObject({
+      reason: "locks",
+    })
+
+    expect(await rejection(sessions[0]!`SELECT 1`)).not.toBe("resolved")
+    expect([...(await sessions[2]!<{ ok: number }[]>`SELECT 1 AS ok`)]).toEqual([{ ok: 1 }])
+
+    // Its sessions end too, before the test's clients close on them.
+    await storage.closeHostedBranch("feature-b")
+  }, 30_000)
 
   // Guard check: drop the `blocking` clause from `closureOf`.
   test("closes the branch when one of its sessions holds up another role's session", async () => {
@@ -707,6 +726,48 @@ async function productionAs(
     await admin.unsafe(`DROP ROLE ${user}`)
   })
   return storage
+}
+
+/** How many locks the instance's shared lock table holds. */
+async function lockTable(admin: Bun.SQL): Promise<number> {
+  const [row] = (await admin`
+    SELECT current_setting('max_locks_per_transaction')::int * (
+      current_setting('max_connections')::int + current_setting('max_prepared_transactions')::int
+    ) AS capacity
+  `) as { capacity: number }[]
+  return row!.capacity
+}
+
+/** `count` tables of the branch's own, in batches: creating them takes locks too. */
+async function createTables(sql: Bun.SQL, count: number): Promise<void> {
+  for (let from = 0; from < count; from += 500) {
+    await sql.unsafe(`
+      DO $$ BEGIN
+        FOR i IN ${from}..${Math.min(from + 499, count - 1)} LOOP
+          EXECUTE format('CREATE TABLE own_%s (id int)', i);
+        END LOOP;
+      END $$
+    `)
+  }
+}
+
+/**
+ * A session of its own, on the branch's login, holding `count` of those tables locked in a
+ * transaction: all but the 16 fast-path ones in the shared lock table.
+ */
+async function lockTables(url: string, from: number, count: number) {
+  const sql = new Bun.SQL(url, { max: 1 })
+  cleanups.push(() => sql.close())
+  const session = await sql.reserve()
+  await session`BEGIN`
+  await session.unsafe(`
+    DO $$ BEGIN
+      FOR i IN ${from}..${from + count - 1} LOOP
+        EXECUTE format('LOCK TABLE own_%s IN ACCESS SHARE MODE', i);
+      END LOOP;
+    END $$
+  `)
+  return session
 }
 
 /** Production's migration lock, which a branch must never hold in production's database. */
