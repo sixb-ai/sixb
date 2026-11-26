@@ -30,7 +30,10 @@ export interface MaterializerContext {
   readonly maxSerializationRetries: number
   readonly onSerializationRetry?: (attempt: number, error: unknown) => void
   readonly observeCoreBuffer?: (boundary: string, rows: number) => void
-  /** What a branch's copy withheld from the objects it holds, read as writes reach them. */
+  /**
+   * What a branch's copy withheld from the objects it holds, read as writes reach them.
+   * Mutable, but a cache of immutable commits: one snapshot commit per namespace at most.
+   */
   readonly withheld: WithheldProperties
 }
 

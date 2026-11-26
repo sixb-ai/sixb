@@ -1,8 +1,6 @@
 import type { EffectiveObjectSnapshot } from "../../materialization/model"
 import type { OntologyCommitStorage, SnapshotWithheldProperties } from "../../storage/ontology"
-
-/** The id of every snapshot's base commit starts so: `importSnapshot` names it. */
-export const SNAPSHOT_COMMIT_ID_PREFIX = "snapshot_"
+import { SNAPSHOT_COMMIT_ID_PREFIX } from "../../storage/ontology/commits"
 
 /** The required properties a branch's copy left out of one object, and who took the copy. */
 export interface WithheldFromObject {

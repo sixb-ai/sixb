@@ -46,7 +46,8 @@ export type TypeFit =
  * Whether objects stored under production's definition of a type are valid under the branch's.
  * A type fits unless the branch removed it, changed its primary property, changed a property both
  * define, or requires a property production does not. A required property hidden from the person
- * does not skip the type: it is read and linked, and a write that leaves it unset fails.
+ * does not skip the type: its objects and links travel and read normally, any write to one of
+ * them, a new link included, fails while the property is unset, and a delete works.
  */
 export function checkTypeFits(
   manifest: SnapshotTypeManifest,

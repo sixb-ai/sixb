@@ -3,7 +3,6 @@ import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execu
 import { createKernelScope } from "../execution/scopes"
 import type { JsonValue } from "../json"
 import { sha256Canonical } from "../materialization/identity"
-import { SNAPSHOT_COMMIT_ID_PREFIX } from "../materializer/effective/withheld"
 import { vectorConfiguration } from "../objects/vectors/profile"
 import type { OntologyRegistry } from "../ontology"
 import { collectArtifactRefIds } from "../ontology/artifact-ref"
@@ -11,7 +10,11 @@ import type { ObjectType, Property } from "../ontology/types"
 import { UNIQUE_VALUE_KEY_VERSION, uniqueValueKey } from "../ontology/unique-values"
 import type { UserRef } from "../ontology/user-ref"
 import { computeOntologyRevision } from "../projections/revision"
-import type { OntologyCommitRecord, SnapshotWithheldProperties } from "../storage/ontology/commits"
+import {
+  type OntologyCommitRecord,
+  SNAPSHOT_COMMIT_ID_PREFIX,
+  type SnapshotWithheldProperties,
+} from "../storage/ontology/commits"
 import type {
   ExactArtifactHolderWrite,
   ExactUniqueValueClaim,
@@ -71,8 +74,8 @@ export interface ImportedSnapshotType {
   /** Properties the person cannot read: no object holds a value for them. */
   readonly hiddenPropertyIds: readonly string[]
   /**
-   * The hidden properties the branch requires. The type is read and linked as any other, but a
-   * write that leaves one of them unset fails on the branch and says why.
+   * The hidden properties the branch requires. The objects and their links read normally; any
+   * write to one, a new link included, fails while the property is unset, and says why.
    */
   readonly requiredHiddenPropertyIds: readonly string[]
   /** Properties the branch no longer defines, left out. */
