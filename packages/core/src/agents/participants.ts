@@ -1,12 +1,14 @@
-import { principalsEqual, type UserPrincipal } from "../auth"
+import { principalsEqual, SYSTEM_PRINCIPAL, type UserPrincipal } from "../auth"
 import { userReferenceProblem } from "../ontology/user-ref"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { SecurityDefinitionCatalog } from "../security"
 import {
+  type AgentRunRecord,
   type AgentStorage,
   AgentStorageError,
   type AgentThreadParticipantRecord,
 } from "../storage/agents"
+import type { ExecutionStorage } from "../storage/executions"
 import { announceAgentApprovals } from "./approvals"
 import { userCanRunAgent } from "./authority"
 import { AgentRequestError } from "./errors"
@@ -14,6 +16,7 @@ import {
   type AgentThreadAccessRule,
   type AgentThreadView,
   assertConversationThread,
+  conversationThreadId,
 } from "./thread-access"
 
 /** At most this many users take part in one conversation, besides its owner. */
@@ -114,6 +117,48 @@ export async function removeAgentThreadParticipant(
     return agents.approvals.stop({ projectId: runtime.projectId, threadId, requestedBy: principal })
   })
   await announceAgentApprovals(runtime.broker, cancelled)
+}
+
+/**
+ * Whether the conversation a run works for is shared: someone was added to it, even one who can no
+ * longer read it, or the run acts for someone else than its owner. Only the owner's run in a
+ * conversation nobody else was added to is private: a participant removed while their turn runs
+ * still writes into a conversation its owner reads. A sub-agent works for its parent's
+ * conversation, so it is shared exactly when that conversation is. What cannot be told counts as
+ * shared.
+ */
+export async function agentRunConversationShared(
+  storage: {
+    readonly agents: Pick<AgentStorage, "threads">
+    readonly executions: Pick<ExecutionStorage, "getById">
+  },
+  run: Pick<AgentRunRecord, "projectId" | "kind" | "threadId" | "executionId">
+): Promise<boolean> {
+  const { agents, executions } = storage
+  const { projectId } = run
+  let threadId = run.threadId
+
+  if (run.kind === "subagent") {
+    const thread = await agents.threads.getById({ projectId, id: run.threadId })
+    if (!thread) return true
+
+    // One level only: a child's parent is always a conversation, as storage admits no other.
+    threadId = conversationThreadId(thread)
+  }
+
+  const participants = await agents.threads.listParticipants({ projectId, threadIds: [threadId] })
+  if (participants.length > 0) return true
+
+  const [conversation, execution] = await Promise.all([
+    agents.threads.getById({ projectId, id: threadId }),
+    executions.getById({ projectId, id: run.executionId }),
+  ])
+  if (!conversation || !execution) return true
+
+  // An execution with no requester runs with authorization disabled, as the system, which owns
+  // every conversation started there.
+  const requester = execution.requestedBy ?? SYSTEM_PRINCIPAL
+  return !principalsEqual(requester, conversation.ownerPrincipal)
 }
 
 /**

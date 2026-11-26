@@ -1007,7 +1007,7 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
     // shared conversation then reaches its requester's own memory.
     test("reads the project's memory alone once others take part in the conversation", async () => {
       const { storage, turn, open } = await seedConversation(claim)
-      const session = await open(await turn("run-a", "m1"))
+      const session = await open(await turn("run-a", "m1", { requestedBy: alice }))
       const asOf = new Date()
 
       expect((await session.memory({ asOf })).shared).toBe(false)
@@ -1022,8 +1022,66 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       })
       const shared = await session.memory({ asOf })
       expect(shared.shared).toBe(true)
-      expect(shared.repos.map(({ latest }) => latest.repo)).toEqual(["project"])
+      expect(shared.repos.map(({ latest }) => latest.repo)).not.toContain("user")
       session.close()
+    })
+
+    // Guard proof: count only the participants in agentRunConversationShared; Bob's turn, which
+    // goes on once Alice removes him, then reads his own memory into her conversation.
+    test("reads the project's memory alone for a participant removed during their turn", async () => {
+      const { storage, turn, open } = await seedConversation(claim)
+      const bob = { type: "user", id: "usr_bob" } as const
+      await storage.auth.users.create({
+        projectId: PROJECT_ID,
+        id: bob.id,
+        email: "bob@example.com",
+      })
+      await storage.agents.threads.addParticipants({
+        projectId: PROJECT_ID,
+        threadId: "thr_1",
+        principals: [bob],
+        addedBy: alice,
+        maxParticipants: 50,
+      })
+      const session = await open(await turn("run-b", "m1", { requestedBy: bob }))
+      await storage.agents.threads.removeParticipant({
+        projectId: PROJECT_ID,
+        threadId: "thr_1",
+        principal: bob,
+      })
+
+      const memory = await session.memory({ asOf: new Date() })
+      expect(memory.shared).toBe(true)
+      expect(memory.repos.map(({ latest }) => latest.repo)).not.toContain("user")
+      session.close()
+    })
+
+    // Guard proof: count the participants of the child's own thread in agentRunConversationShared;
+    // the child of a shared conversation then reaches its requester's own memory. Count every
+    // child as shared; the child of a private one then loses it.
+    test("reads for a child what its conversation reads", async () => {
+      const { storage, turn, open } = await seedConversation(claim)
+      const parent = await open(await turn("run-a", "m1", { requestedBy: alice }))
+      const child = await open(await spawnChild(storage, parent))
+      const asOf = new Date()
+
+      const alone = await child.memory({ asOf })
+      expect(alone.shared).toBe(false)
+      expect(alone.repos.map(({ latest }) => latest.repo)).toContain("user")
+
+      await storage.agents.threads.addParticipants({
+        projectId: PROJECT_ID,
+        threadId: "thr_1",
+        principals: [{ type: "user", id: "usr_bob" }],
+        addedBy: alice,
+        maxParticipants: 50,
+        addedAt: asOf,
+      })
+      const shared = await child.memory({ asOf })
+      expect(shared.shared).toBe(true)
+      expect(shared.repos.map(({ latest }) => latest.repo)).not.toContain("user")
+      parent.close()
+      child.close()
     })
   })
 

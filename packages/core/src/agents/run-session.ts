@@ -50,6 +50,7 @@ import {
 import { measuringAgentContextTokenRates, readAgentContextTokenRates } from "./context-token-rate"
 import { AgentToolPublicError } from "./errors"
 import { createAgentRunExecutionToken } from "./ids"
+import { agentRunConversationShared } from "./participants"
 import { type AgentRunArtifacts, agentRunArtifacts, announceAgentTurnEnded } from "./run-artifacts"
 import type { StreamSink } from "./run-events"
 import {
@@ -656,15 +657,10 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       return Object.freeze({ ...plan, tokenRates })
     },
     async memory({ asOf }) {
-      // Others read a shared conversation, so its runs reach no one's own memory.
-      const participants =
-        run.kind === "conversation"
-          ? await agents.threads.listParticipants({
-              projectId: host.projectId,
-              threadIds: [run.threadId],
-            })
-          : []
-      return readAgentRunMemory(await runSdk(), { shared: participants.length > 0, asOf })
+      // Others read a shared conversation, so its runs and its children's reach no one's own memory;
+      // nor does a run the owner did not ask for.
+      const shared = await agentRunConversationShared(host.storage, run)
+      return readAgentRunMemory(await runSdk(), { shared, asOf })
     },
     context: async () => {
       const context = await readAgentRunContext(host, run)

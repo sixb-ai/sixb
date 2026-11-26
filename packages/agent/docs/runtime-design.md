@@ -294,7 +294,8 @@ Each child:
 - with `readOnly`, gets no `edit` and no `write`, in its tools and in the specs its estimates
   count, for this run and every continuation (`SubagentRunSpec.readOnly`); its `bash` still runs;
 - knows the project as its parent does: `SIXB.md`, the skills, the ontology index, the requester's
-  time zone and locale, and the memory, which it reads and the API refuses to let it save;
+  time zone and locale, and the memory its conversation reads (the project's alone once it is
+  shared, `agentRunConversationShared`), which the API refuses to let it save;
 - gets the conversation prompt's data rules, never its rules for talking to the user;
 - publishes artifacts into its conversation (`conversationThreadId`) as its own run, so a retry of
   the parent removes them with the parent's own;
