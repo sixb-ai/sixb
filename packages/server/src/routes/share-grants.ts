@@ -20,6 +20,7 @@ import {
   SharedAccessGrantIdParamsSchema,
   SharedAccessGrantSchema,
 } from "../schemas/share-grants"
+import { handleRouteError } from "../utils/http"
 
 const INTERNAL_ERROR = "[SixbServer] Shared-access operation failed."
 const STORAGE_UNAVAILABLE_ERROR =
@@ -193,11 +194,8 @@ function handleShareGrantRouteError(
     set.status = 404
     return { error: error.message }
   }
-  // A branch production runs issues no link: the refusal says why, and where to share instead.
-  if (isSixbError(error) && error.code === "branch.refused") {
-    set.status = 409
-    return { error: error.message }
-  }
+  // A branch production runs issues no link: its refusal says why, as on every route.
+  if (isSixbError(error) && error.code === "branch.refused") return handleRouteError(error, set)
 
   set.status = 500
   return { error: INTERNAL_ERROR }
