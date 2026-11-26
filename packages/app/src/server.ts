@@ -6,6 +6,7 @@
  */
 export {
   AppPackagesMissingError,
+  AppPackagesSplitError,
   type CreateCustomAppOptions,
   type CustomAppBuildOptions,
   type CustomAppDevOptions,

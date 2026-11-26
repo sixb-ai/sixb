@@ -20,6 +20,7 @@ import {
   generateRouteManifest,
 } from "./codegen"
 import { devReloadResponse } from "./dev-reload"
+import { editorPackageSplit } from "./editor-packages"
 import { readAppFrameOrigins } from "./frame-origins"
 import { collectPublicEnv, renderCustomAppRuntimeScript } from "./runtime"
 import { type PageRoute, routePatternKey, scanAppRoutes } from "./scanner"
@@ -280,6 +281,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     routes: PageRoute[]
   }> {
     assertAppPackagesInstalled(rootDir)
+    assertEditorPackagesSingle(rootDir)
     const discovery = await scanAppRoutes(appDir)
     const routes = [...discovery.pages]
     if (!servesApp(routes)) {
@@ -777,6 +779,27 @@ function assertAppPackagesInstalled(rootDir: string): void {
     }
   })
   if (missing.length > 0) throw new AppPackagesMissingError(missing)
+}
+
+function assertEditorPackagesSingle(rootDir: string): void {
+  const split = editorPackageSplit(rootDir, appPackageRoot())
+  if (split) throw new AppPackagesSplitError(split)
+}
+
+/** The folder of @sixb/app itself, from its source or its build. */
+function appPackageRoot(): string {
+  for (let dir = import.meta.dir; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, "package.json"))) return dir
+    if (dirname(dir) === dir) throw new Error("[SixbCustomApp] Cannot find @sixb/app's package.")
+  }
+}
+
+/**
+ * The project installs more than one copy of a package the app's editor shares, so the editor
+ * would fail. `sixb dev` keeps the API running.
+ */
+export class AppPackagesSplitError extends Error {
+  readonly name = "AppPackagesSplitError"
 }
 
 /** The project lacks packages the app is bundled from. `sixb dev` keeps the API running. */
