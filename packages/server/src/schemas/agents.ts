@@ -588,6 +588,60 @@ export const PostAgentMessageBodySchema = z
   })
   .strict()
 
+/** What to look for in the caller's earlier conversations. */
+export const SearchAgentThreadsBodySchema = z
+  .object({
+    /** In the person's words: at most 8,000 characters. */
+    text: z.string().trim().min(1).max(8000),
+    /** Only turns from this instant on. */
+    since: z.string().datetime({ offset: true }).optional(),
+    /** Only turns before this instant: a result's `searchedFrom` goes further back. */
+    until: z.string().datetime({ offset: true }).optional(),
+    /** At most this many conversations: 10 by default. */
+    limit: z.number().int().min(1).max(25).optional(),
+  })
+  .strict()
+
+export const AgentThreadSearchTurnSchema = z.object({
+  /** The person's message that opens the turn. */
+  messageId: z.string(),
+  firstSeq: z.number().int(),
+  lastSeq: z.number().int(),
+  /** When that message was written. */
+  at: z.string(),
+  /** Cosine similarity to the search, from -1 to 1. */
+  score: z.number(),
+  /** The start of what was asked and answered. */
+  excerpt: z.string(),
+  /** What the turn published, under its title now. */
+  artifacts: z.array(z.object({ id: z.string(), title: z.string() })),
+})
+
+export const SearchAgentThreadsResponseSchema = z.object({
+  /** The best first. */
+  conversations: z.array(
+    z.object({
+      thread: z.object({
+        id: z.string(),
+        title: z.string().optional(),
+        createdAt: z.string(),
+        lastMessageAt: z.string().optional(),
+        /** Someone was added to it. */
+        shared: z.boolean(),
+      }),
+      /** Its best turn's score. */
+      score: z.number(),
+      /** Its best turns, the best first. */
+      turns: z.array(AgentThreadSearchTurnSchema),
+    })
+  ),
+  /**
+   * Set when there were more turns than one search reads: only those from this instant on were
+   * searched. Search again with `until` set to it to go further back.
+   */
+  searchedFrom: z.string().optional(),
+})
+
 /** A refused message request, with the stable code of the reason, such as `invalid_locale`. */
 export const AgentRequestErrorResponseSchema = ErrorResponseSchema.extend({
   code: z.string().optional(),

@@ -954,6 +954,12 @@ export type {
   AgentChildRunView,
   AgentChildView,
 } from "./agents/children"
+export type {
+  AgentThreadSearchConversation,
+  AgentThreadSearchResult,
+  AgentThreadSearchTurn,
+  SearchAgentThreadsInput,
+} from "./agents/conversation-search"
 export type { AgentMemoryErrorCode } from "./agents/errors"
 export { AgentMemoryError } from "./agents/errors"
 export type {

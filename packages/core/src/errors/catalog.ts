@@ -56,6 +56,13 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Agent execution failed.",
     retryable: false,
   },
+  // The project has no embedding model, or its storage cannot search vectors: asking again changes
+  // nothing until one is configured.
+  "agent.search_unavailable": {
+    publicMessage:
+      "Searching earlier conversations needs an embedding model and storage that can search vectors.",
+    retryable: false,
+  },
   // Not retryable: the same task runs into the same limit. Whoever started the run decides.
   "agent.step_limit_reached": {
     publicMessage: "The agent reached its step limit before finishing.",

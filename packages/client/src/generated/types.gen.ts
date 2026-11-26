@@ -9615,6 +9615,7 @@ export type GetWorkflowAgentNodeExecutionResponses = {
                     | "agent.approval_authority_lost"
                     | "agent.context_limit_exceeded"
                     | "agent.execution_failed"
+                    | "agent.search_unavailable"
                     | "agent.step_limit_reached"
                     | "ai.usage_limit_exceeded"
                     | "ai.usage_limit_unavailable"
@@ -12375,6 +12376,7 @@ export type RequestActionErrors = {
       | "agent.approval_authority_lost"
       | "agent.context_limit_exceeded"
       | "agent.execution_failed"
+      | "agent.search_unavailable"
       | "agent.step_limit_reached"
       | "ai.usage_limit_exceeded"
       | "ai.usage_limit_unavailable"
@@ -13611,6 +13613,92 @@ export type CreateAgentThreadResponses = {
 
 export type CreateAgentThreadResponse = CreateAgentThreadResponses[keyof CreateAgentThreadResponses]
 
+export type SearchAgentThreadsData = {
+  body: {
+    text: string
+    since?: string
+    until?: string
+    limit?: number
+  }
+  path?: never
+  query?: never
+  url: "/api/agent-threads/search"
+}
+
+export type SearchAgentThreadsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 502
+   */
+  502: {
+    error: string
+    code?: string
+  }
+}
+
+export type SearchAgentThreadsError = SearchAgentThreadsErrors[keyof SearchAgentThreadsErrors]
+
+export type SearchAgentThreadsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    conversations: Array<{
+      thread: {
+        id: string
+        title?: string
+        createdAt: string
+        lastMessageAt?: string
+        shared: boolean
+      }
+      score: number
+      turns: Array<{
+        messageId: string
+        firstSeq: number
+        lastSeq: number
+        at: string
+        score: number
+        excerpt: string
+        artifacts: Array<{
+          id: string
+          title: string
+        }>
+      }>
+    }>
+    searchedFrom?: string
+  }
+}
+
+export type SearchAgentThreadsResponse =
+  SearchAgentThreadsResponses[keyof SearchAgentThreadsResponses]
+
 export type GetAgentThreadData = {
   body?: never
   path: {
@@ -14618,6 +14706,7 @@ export type ListAgentThreadMessagesResponses = {
                       | "agent.approval_authority_lost"
                       | "agent.context_limit_exceeded"
                       | "agent.execution_failed"
+                      | "agent.search_unavailable"
                       | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
@@ -15310,6 +15399,7 @@ export type PostAgentThreadMessageResponses = {
                       | "agent.approval_authority_lost"
                       | "agent.context_limit_exceeded"
                       | "agent.execution_failed"
+                      | "agent.search_unavailable"
                       | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
@@ -15848,6 +15938,7 @@ export type ListAgentThreadInboxResponses = {
                       | "agent.approval_authority_lost"
                       | "agent.context_limit_exceeded"
                       | "agent.execution_failed"
+                      | "agent.search_unavailable"
                       | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
@@ -16376,6 +16467,7 @@ export type UpdateAgentThreadInboxItemResponses = {
                       | "agent.approval_authority_lost"
                       | "agent.context_limit_exceeded"
                       | "agent.execution_failed"
+                      | "agent.search_unavailable"
                       | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
@@ -17055,6 +17147,7 @@ export type EditAgentThreadMessageResponses = {
                       | "agent.approval_authority_lost"
                       | "agent.context_limit_exceeded"
                       | "agent.execution_failed"
+                      | "agent.search_unavailable"
                       | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
@@ -19537,6 +19630,7 @@ export type ListAgentThreadApprovalsResponses = {
                 | "agent.approval_authority_lost"
                 | "agent.context_limit_exceeded"
                 | "agent.execution_failed"
+                | "agent.search_unavailable"
                 | "agent.step_limit_reached"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
@@ -19773,6 +19867,7 @@ export type DecideAgentApprovalResponses = {
                 | "agent.approval_authority_lost"
                 | "agent.context_limit_exceeded"
                 | "agent.execution_failed"
+                | "agent.search_unavailable"
                 | "agent.step_limit_reached"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
@@ -20122,6 +20217,7 @@ export type ListAgentApprovalsResponses = {
                 | "agent.approval_authority_lost"
                 | "agent.context_limit_exceeded"
                 | "agent.execution_failed"
+                | "agent.search_unavailable"
                 | "agent.step_limit_reached"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
@@ -20497,6 +20593,7 @@ export type ListObservedAgentThreadMessagesResponses = {
                       | "agent.approval_authority_lost"
                       | "agent.context_limit_exceeded"
                       | "agent.execution_failed"
+                      | "agent.search_unavailable"
                       | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"

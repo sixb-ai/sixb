@@ -478,8 +478,19 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: false,
   },
+  // The Agent finds its requester's earlier conversations by meaning; the run decides which, as it
+  // decides which of them it reads.
+  {
+    operationId: "searchAgentThreads",
+    method: "POST",
+    path: "/api/agent-threads/search",
+    accessToken: true,
+    agentApi: true,
+    agentEffect: "read",
+  },
   // The Agent reads its own conversation with `sixb history`, the turns compaction summarized
-  // included: a run token reaches only its run's thread.
+  // included, and the earlier conversations its search finds: never the one a sub-agent works for,
+  // and from a shared conversation none of its requester's private ones.
   {
     operationId: "listAgentThreadMessages",
     method: "GET",

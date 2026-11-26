@@ -28617,6 +28617,7 @@
                                               "agent.approval_authority_lost",
                                               "agent.context_limit_exceeded",
                                               "agent.execution_failed",
+                                              "agent.search_unavailable",
                                               "agent.step_limit_reached",
                                               "ai.usage_limit_exceeded",
                                               "ai.usage_limit_unavailable",
@@ -36895,6 +36896,7 @@
                         "agent.approval_authority_lost",
                         "agent.context_limit_exceeded",
                         "agent.execution_failed",
+                        "agent.search_unavailable",
                         "agent.step_limit_reached",
                         "ai.usage_limit_exceeded",
                         "ai.usage_limit_unavailable",
@@ -40148,6 +40150,317 @@
         }
       }
     },
+    "/api/agent-threads/search": {
+      "post": {
+        "summary": "Search the caller's earlier agent conversations by meaning",
+        "description": "The conversations the caller owns or was added to, never one they only observe. With a run's token, never the conversation the run works for, and from a shared conversation only conversations someone else reads too. Answers 501 with `agent.search_unavailable` without an embedding model or storage that can search vectors.",
+        "tags": ["Agent Threads"],
+        "operationId": "searchAgentThreads",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8000
+                  },
+                  "since": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "until": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 25
+                  }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8000
+                  },
+                  "since": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "until": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 25
+                  }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8000
+                  },
+                  "since": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "until": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 25
+                  }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "conversations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "thread": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "createdAt": {
+                                "type": "string"
+                              },
+                              "lastMessageAt": {
+                                "type": "string"
+                              },
+                              "shared": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["id", "createdAt", "shared"],
+                            "additionalProperties": false
+                          },
+                          "score": {
+                            "type": "number"
+                          },
+                          "turns": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "messageId": {
+                                  "type": "string"
+                                },
+                                "firstSeq": {
+                                  "type": "integer"
+                                },
+                                "lastSeq": {
+                                  "type": "integer"
+                                },
+                                "at": {
+                                  "type": "string"
+                                },
+                                "score": {
+                                  "type": "number"
+                                },
+                                "excerpt": {
+                                  "type": "string"
+                                },
+                                "artifacts": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["id", "title"],
+                                    "additionalProperties": false
+                                  }
+                                }
+                              },
+                              "required": [
+                                "messageId",
+                                "firstSeq",
+                                "lastSeq",
+                                "at",
+                                "score",
+                                "excerpt",
+                                "artifacts"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": ["thread", "score", "turns"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "searchedFrom": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["conversations"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Response for status 502",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agent-threads/{threadId}": {
       "get": {
         "summary": "Get agent thread",
@@ -43174,6 +43487,7 @@
                                                     "agent.approval_authority_lost",
                                                     "agent.context_limit_exceeded",
                                                     "agent.execution_failed",
+                                                    "agent.search_unavailable",
                                                     "agent.step_limit_reached",
                                                     "ai.usage_limit_exceeded",
                                                     "ai.usage_limit_unavailable",
@@ -45407,6 +45721,7 @@
                                                   "agent.approval_authority_lost",
                                                   "agent.context_limit_exceeded",
                                                   "agent.execution_failed",
+                                                  "agent.search_unavailable",
                                                   "agent.step_limit_reached",
                                                   "ai.usage_limit_exceeded",
                                                   "ai.usage_limit_unavailable",
@@ -46850,6 +47165,7 @@
                                                     "agent.approval_authority_lost",
                                                     "agent.context_limit_exceeded",
                                                     "agent.execution_failed",
+                                                    "agent.search_unavailable",
                                                     "agent.step_limit_reached",
                                                     "ai.usage_limit_exceeded",
                                                     "ai.usage_limit_unavailable",
@@ -48203,6 +48519,7 @@
                                                   "agent.approval_authority_lost",
                                                   "agent.context_limit_exceeded",
                                                   "agent.execution_failed",
+                                                  "agent.search_unavailable",
                                                   "agent.step_limit_reached",
                                                   "ai.usage_limit_exceeded",
                                                   "ai.usage_limit_unavailable",
@@ -50559,6 +50876,7 @@
                                                   "agent.approval_authority_lost",
                                                   "agent.context_limit_exceeded",
                                                   "agent.execution_failed",
+                                                  "agent.search_unavailable",
                                                   "agent.step_limit_reached",
                                                   "ai.usage_limit_exceeded",
                                                   "ai.usage_limit_unavailable",
@@ -57578,6 +57896,7 @@
                                           "agent.approval_authority_lost",
                                           "agent.context_limit_exceeded",
                                           "agent.execution_failed",
+                                          "agent.search_unavailable",
                                           "agent.step_limit_reached",
                                           "ai.usage_limit_exceeded",
                                           "ai.usage_limit_unavailable",
@@ -58204,6 +58523,7 @@
                                         "agent.approval_authority_lost",
                                         "agent.context_limit_exceeded",
                                         "agent.execution_failed",
+                                        "agent.search_unavailable",
                                         "agent.step_limit_reached",
                                         "ai.usage_limit_exceeded",
                                         "ai.usage_limit_unavailable",
@@ -59198,6 +59518,7 @@
                                           "agent.approval_authority_lost",
                                           "agent.context_limit_exceeded",
                                           "agent.execution_failed",
+                                          "agent.search_unavailable",
                                           "agent.step_limit_reached",
                                           "ai.usage_limit_exceeded",
                                           "ai.usage_limit_unavailable",
@@ -60180,6 +60501,7 @@
                                                     "agent.approval_authority_lost",
                                                     "agent.context_limit_exceeded",
                                                     "agent.execution_failed",
+                                                    "agent.search_unavailable",
                                                     "agent.step_limit_reached",
                                                     "ai.usage_limit_exceeded",
                                                     "ai.usage_limit_unavailable",

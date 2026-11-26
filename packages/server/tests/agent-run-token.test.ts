@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path"
 import {
   type AuthorizablePrincipal,
   type AuthorizationContext,
+  agent,
   can,
   change,
   col,
@@ -31,7 +32,11 @@ import {
   userRef,
 } from "@sixb/core"
 import { createInheritedAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
-import { createAgentRunExecutionToken, createAgentRunToken } from "@sixb/core/internal/agents"
+import {
+  agentTurnVectorConfiguration,
+  createAgentRunExecutionToken,
+  createAgentRunToken,
+} from "@sixb/core/internal/agents"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { ImageModel, LanguageModel, ModelCatalogInput } from "@sixb/core/models"
@@ -39,6 +44,7 @@ import {
   AGENT_APPROVAL_MODES,
   type AgentApprovalMode,
   type AgentApprovalRecord,
+  type UserPrincipal,
 } from "@sixb/core/storage"
 import {
   createTestAgentExecution,
@@ -207,6 +213,28 @@ const noteReaders = defineGroup("note-readers")
 const noteReaderRole = defineRole("note.reader", {
   grantedTo: [noteReaders],
   grants: [can.view(PrivateNote)],
+})
+
+/** The project Agent's model: these tests never run a turn. */
+const agentModel = {
+  providerId: "test",
+  modelId: "agent-model",
+  definition: { kind: "language", providerId: "test", modelId: "agent-model", capabilities: {} },
+  stream: async () => {
+    throw new Error("Run-token tests never run a turn.")
+  },
+} satisfies LanguageModel
+
+/** People who talk to the Agent, and those who also observe everyone's conversations. */
+const agentUsers = defineGroup("agent-users")
+const agentUserRole = defineRole("agent.user", {
+  grantedTo: [agentUsers],
+  grants: [can.run(agent)],
+})
+const threadObservers = defineGroup("thread-observers")
+const threadObserverRole = defineRole("agent.thread-observer", {
+  grantedTo: [threadObservers],
+  grants: [can.observe(agent.threads)],
 })
 
 describe("run tokens", () => {
@@ -956,9 +984,9 @@ describe("run tokens", () => {
     expect(await response.text()).toBe("agent attachment")
   })
 
-  test("reads its own conversation's messages, and no other thread", async () => {
-    // Reproduce by dropping the run's own-thread check from the messages route: the run then
-    // reads its requester's other conversation.
+  test("reads its own conversation's messages, and another only as its requester reads it", async () => {
+    // Reproduce by reading every thread from storage in the messages route: the run then reads
+    // its requester's other conversation, which they cannot read without can.run(agent).
     const { app, apiBaseUrl, storage } = await createRunTokenRuntime()
     await storage.agents.threads.create({
       id: "thread-2",
@@ -1003,6 +1031,340 @@ describe("run tokens", () => {
       new Request(`${apiBaseUrl}/api/agent-threads/thread-1/messages`)
     )
     expect(response.status).toBe(404)
+  })
+
+  describe("earlier conversations", () => {
+    const requester: UserPrincipal = { type: "user", id: "usr_requester" }
+    const bob: UserPrincipal = { type: "user", id: "usr_bob" }
+
+    /**
+     * A conversation with one turn, `msg-<thread>`, indexed: `thread-1`, the run's own, is made by
+     * the fixture.
+     */
+    async function conversation(
+      storage: InMemoryStorage,
+      threadId: string,
+      owner: UserPrincipal = requester,
+      participants: readonly UserPrincipal[] = []
+    ) {
+      if (threadId !== "thread-1") {
+        await storage.agents.threads.create({
+          id: threadId,
+          projectId: PROJECT_ID,
+          ownerPrincipal: owner,
+          title: `About ${threadId}`,
+          createdAt: NOW,
+          updatedAt: NOW,
+        })
+      }
+      if (participants.length > 0) {
+        await storage.agents.threads.addParticipants({
+          projectId: PROJECT_ID,
+          threadId,
+          principals: participants,
+          addedBy: owner,
+          maxParticipants: 50,
+        })
+      }
+
+      await storage.agents.messages.append({
+        id: `msg-${threadId}`,
+        projectId: PROJECT_ID,
+        threadId,
+        runId: null,
+        role: "user",
+        parts: [{ type: "text", text: `Fan maintenance in ${threadId}` }],
+        authorPrincipal: owner,
+        createdAt: NOW,
+      })
+
+      const configuration = agentTurnVectorConfiguration(deviceEmbeddings)
+      const progress = await storage.agents.turnVectors.progress({
+        projectId: PROJECT_ID,
+        threadId,
+        configuration,
+      })
+      const [message] = (
+        await storage.agents.messages.list({ projectId: PROJECT_ID, threadId, order: "desc" })
+      ).messages
+      await storage.agents.turnVectors.write({
+        projectId: PROJECT_ID,
+        threadId,
+        configuration,
+        revision: progress!.revision,
+        fromSeq: message!.seq,
+        turns: [
+          {
+            messageId: `msg-${threadId}`,
+            chunk: 0,
+            firstSeq: message!.seq,
+            lastSeq: message!.seq,
+            turnAt: NOW,
+            text: `Request: Fan maintenance in ${threadId}`,
+            embedding: [1, 0, 0],
+          },
+        ],
+        complete: true,
+      })
+    }
+
+    /** Bob added to the conversation the run works for. */
+    async function shareRunConversation(storage: InMemoryStorage) {
+      await storage.agents.threads.addParticipants({
+        projectId: PROJECT_ID,
+        threadId: "thread-1",
+        principals: [bob],
+        addedBy: requester,
+        maxParticipants: 50,
+      })
+    }
+
+    /** The requester's conversations as each scope sees them, and Bob's alone. */
+    async function conversations(storage: InMemoryStorage) {
+      await conversation(storage, "thread-1")
+      await conversation(storage, "thread-2")
+      await conversation(storage, "thread-3", requester, [bob])
+      await conversation(storage, "thread-4", bob, [requester])
+      await conversation(storage, "thread-5", bob)
+    }
+
+    function search(app: AgentApi, apiBaseUrl: string) {
+      return app.fetch(
+        new Request(`${apiBaseUrl}/api/agent-threads/search`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: "fan maintenance" }),
+        })
+      )
+    }
+
+    async function foundThreads(app: AgentApi, apiBaseUrl: string) {
+      const response = await search(app, apiBaseUrl)
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as {
+        conversations: { thread: { id: string } }[]
+      }
+      return body.conversations.map((found) => found.thread.id)
+    }
+
+    function readMessages(app: AgentApi, apiBaseUrl: string, threadId: string) {
+      return app.fetch(new Request(`${apiBaseUrl}/api/agent-threads/${threadId}/messages`))
+    }
+
+    // Removal proof: drop `excludeThreadId` from runReach; `thread-1` is found. Search the "all"
+    // scope from a shared conversation; `thread-2` is found once Bob reads `thread-1`.
+    test("searches its requester's conversations, never the one it works for", async () => {
+      const { app, apiBaseUrl, storage, agentExecutionId } = await createRunTokenRuntime({
+        agentUser: true,
+      })
+      await conversations(storage)
+
+      const response = await search(app, apiBaseUrl)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        conversations: [
+          {
+            thread: {
+              id: "thread-2",
+              title: "About thread-2",
+              createdAt: NOW.toISOString(),
+              lastMessageAt: NOW.toISOString(),
+              shared: false,
+            },
+            score: 1,
+            turns: [
+              {
+                messageId: "msg-thread-2",
+                firstSeq: 1,
+                lastSeq: 1,
+                at: NOW.toISOString(),
+                score: 1,
+                excerpt: "Request: Fan maintenance in thread-2",
+                artifacts: [],
+              },
+            ],
+          },
+          expect.objectContaining({ thread: expect.objectContaining({ id: "thread-3" }) }),
+          expect.objectContaining({
+            thread: expect.objectContaining({ id: "thread-4", shared: true }),
+          }),
+        ],
+      })
+
+      // The query's embedding is the run's, as its own calls are.
+      await expect(
+        storage.aiUsage.getLatestForExecution({
+          projectId: PROJECT_ID,
+          executionId: agentExecutionId,
+        })
+      ).resolves.toMatchObject({ usage: { inputTokens: 7 } })
+
+      // From a shared conversation, none of the requester's private ones.
+      await shareRunConversation(storage)
+      expect(await foundThreads(app, apiBaseUrl)).toEqual(["thread-3", "thread-4"])
+    })
+
+    // Removal proof: drop the kind check from agentRunReadsConversation; the child's thread is
+    // read through its conversation. Read the target from storage instead of through the
+    // requester's access; Bob's own conversation is read.
+    test("reads the conversations its search finds, and no other", async () => {
+      const { app, apiBaseUrl, storage, sixb } = await createRunTokenRuntime({ agentUser: true })
+      await conversations(storage)
+      await storage.auth.groupMemberships.upsert({
+        projectId: PROJECT_ID,
+        userId: "usr_requester",
+        groupId: threadObservers.id,
+        source: "manual",
+        createdAt: NOW,
+      })
+
+      // A child of `thread-2`, whose thread its conversation's readers read.
+      const parentExecution = await createTestAgentExecution(storage, {
+        projectId: PROJECT_ID,
+        runId: "run-2",
+      })
+      await storage.agents.runs.create({
+        id: "run-2",
+        projectId: PROJECT_ID,
+        executionId: parentExecution,
+        threadId: "thread-2",
+        triggerMessageId: "msg-thread-2",
+        spec: { model: { provider: "test", modelId: "test-model" } },
+        createdAt: NOW,
+      })
+      await storage.agents.runs.start({
+        id: "run-2",
+        projectId: PROJECT_ID,
+        execution: { token: "exec-run-2", queueLeaseExpiresAt: new Date(Date.now() + 60_000) },
+      })
+      await storage.agents.runs.createSubagent({
+        id: "child-of-run-2",
+        projectId: PROJECT_ID,
+        executionId: await createTestAgentExecution(storage, {
+          projectId: PROJECT_ID,
+          runId: "child-of-run-2",
+          sourceExecutionId: parentExecution,
+        }),
+        parentRunId: "run-2",
+        parentExecutionToken: "exec-run-2",
+        spawnKey: "research",
+        spec: {
+          model: { provider: "test", modelId: "child" },
+          task: "Research.",
+          toolNames: [],
+        },
+        thread: { id: "thread-2-child", create: true },
+        trigger: { id: "task-thread-2-child", parts: [{ type: "text", text: "Research." }] },
+        maxActiveChildren: 4,
+        createdAt: NOW,
+      })
+
+      // Its files too, as `sixb history` hints at them.
+      const fileRef = await sixb.blobStorage.put({
+        body: new TextEncoder().encode("earlier attachment"),
+        fileName: "earlier.txt",
+        mediaType: "text/plain",
+      })
+      await storage.agents.messages.append({
+        id: "msg-thread-2-file",
+        projectId: PROJECT_ID,
+        threadId: "thread-2",
+        runId: null,
+        role: "user",
+        parts: [{ type: "file", fileRef }],
+        authorPrincipal: requester,
+        createdAt: NOW,
+      })
+      const file = await app.fetch(
+        new Request(
+          `${apiBaseUrl}/api/agent-threads/thread-2/messages/msg-thread-2-file/files/content?path=${encodeURIComponent("/parts/0/fileRef")}`
+        )
+      )
+      expect(file.status).toBe(200)
+      expect(await file.text()).toBe("earlier attachment")
+
+      const status = async (threadId: string) =>
+        (await readMessages(app, apiBaseUrl, threadId)).status
+      expect(await status("thread-1")).toBe(200)
+      expect(await status("thread-2")).toBe(200)
+      expect(await status("thread-2-child")).toBe(404)
+      // Bob's alone: the requester observes it, which a run never reads by.
+      expect(await status("thread-5")).toBe(404)
+
+      await shareRunConversation(storage)
+      expect(await status("thread-1")).toBe(200)
+      expect(await status("thread-2")).toBe(404)
+      expect(await status("thread-3")).toBe(200)
+      expect(await status("thread-4")).toBe(200)
+    })
+
+    // Removal proof: count only the participants in agentRunConversation; once Bob removes the
+    // requester, their turn searches and reads their private `thread-2` into his conversation.
+    test("keeps a participant removed during their turn to the shared scope", async () => {
+      const { app, apiBaseUrl, storage } = await createRunTokenRuntime({
+        agentUser: true,
+        conversationOwner: "usr_bob",
+      })
+      await conversation(storage, "thread-1", bob, [requester])
+      await conversation(storage, "thread-2")
+      await conversation(storage, "thread-3", requester, [bob])
+      await storage.agents.threads.removeParticipant({
+        projectId: PROJECT_ID,
+        threadId: "thread-1",
+        principal: requester,
+      })
+
+      expect(await foundThreads(app, apiBaseUrl)).toEqual(["thread-3"])
+      expect((await readMessages(app, apiBaseUrl, "thread-2")).status).toBe(404)
+      expect((await readMessages(app, apiBaseUrl, "thread-3")).status).toBe(200)
+    })
+
+    // Removal proof: resolve a child's scope from its own thread in agentRunConversation; its
+    // conversation, `thread-1`, is never excluded, and never counts as shared.
+    test("gives a sub-agent its conversation's scope", async () => {
+      const { app, apiBaseUrl, storage } = await createRunTokenRuntime({
+        executionKind: "subagent",
+        agentUser: true,
+      })
+      await conversations(storage)
+
+      expect(await foundThreads(app, apiBaseUrl)).toEqual(["thread-2", "thread-3", "thread-4"])
+      expect((await readMessages(app, apiBaseUrl, "thread-2")).status).toBe(200)
+      expect((await readMessages(app, apiBaseUrl, "thread-1")).status).toBe(404)
+
+      await shareRunConversation(storage)
+      expect(await foundThreads(app, apiBaseUrl)).toEqual(["thread-3", "thread-4"])
+      expect((await readMessages(app, apiBaseUrl, "thread-2")).status).toBe(404)
+      expect((await readMessages(app, apiBaseUrl, "thread-3")).status).toBe(200)
+    })
+
+    // Removal proof: drop the check of a node's own account in searchAgentThreads; the node's
+    // search is answered, finding nothing, instead of refused. A node has no Agent run, so it
+    // reads no thread.
+    test("gives a workflow agent node no search and no conversation", async () => {
+      const { app, apiBaseUrl, storage } = await createRunTokenRuntime({
+        executionKind: "workflow",
+        agentUser: true,
+      })
+      await conversation(storage, "thread-2")
+
+      const response = await search(app, apiBaseUrl)
+      expect(response.status).toBe(403)
+      await expect(response.json()).resolves.toMatchObject({ code: "search_not_allowed" })
+      expect((await readMessages(app, apiBaseUrl, "thread-2")).status).toBe(404)
+    })
+
+    test("says the project cannot search on storage that cannot", async () => {
+      const { app, apiBaseUrl, storage } = await createRunTokenRuntime({ agentUser: true })
+      storage.agents.turnVectors.searchAvailable = async () => false
+
+      const response = await search(app, apiBaseUrl)
+      expect(response.status).toBe(501)
+      await expect(response.json()).resolves.toMatchObject({
+        code: "agent.search_unavailable",
+        error: expect.stringContaining("pgvector"),
+      })
+    })
   })
 
   // Removal proof: bind run-token requests with `bindRequestExecution` again in server.ts; the
@@ -2349,6 +2711,8 @@ async function createRunTokenRuntime(
     readonly approvalMode?: AgentApprovalMode
     /** Who owns the conversation the run works for: its requester by default. */
     readonly conversationOwner?: string
+    /** Its requester holds can.run(agent), and reads their conversations through the Agent. */
+    readonly agentUser?: boolean
   } = {}
 ): Promise<{
   /** The API as the run's commands call it: with the run token, unless a request names its own. */
@@ -2370,10 +2734,20 @@ async function createRunTokenRuntime(
     actions: [labelDevice, syncDevice, notifyDevice],
     workflows: [inspectDevices, pingDevices, relabelDevices],
     datasets: [deviceReadings, payroll],
-    groups: [agentRuntime, noteReaders],
-    roles: [agentRole, noteReaderRole],
+    groups: [
+      agentRuntime,
+      noteReaders,
+      ...(options.agentUser ? [agentUsers, threadObservers] : []),
+    ],
+    roles: [
+      agentRole,
+      noteReaderRole,
+      ...(options.agentUser ? [agentUserRole, threadObserverRole] : []),
+    ],
     models: {
       embedding: [options.embed ? { ...deviceEmbeddings, embed: options.embed } : deviceEmbeddings],
+      // can.run(agent) names a project Agent, which needs a language model.
+      ...(options.agentUser ? { language: [agentModel] } : {}),
       ...options.models,
     },
     broker: new InMemoryBroker(),
@@ -2636,6 +3010,16 @@ async function createRunTokenRuntime(
       projectId: PROJECT_ID,
       execution,
       startedAt: NOW,
+    })
+  }
+
+  if (options.agentUser) {
+    await storage.auth.groupMemberships.upsert({
+      projectId: PROJECT_ID,
+      userId: "usr_requester",
+      groupId: agentUsers.id,
+      source: "manual",
+      createdAt: NOW,
     })
   }
 

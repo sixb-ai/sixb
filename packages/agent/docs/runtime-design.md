@@ -186,7 +186,10 @@ it: a call that carries another model's, after a switch or a fallback, measures 
 - **A history too long to read at once** is summarized in steps, oldest first, each from the summary
   so far; a turn too large alone is read with its longest texts and results cut.
 - The whole conversation stays stored: `sixb history` reads it in the sandbox, through the run's
-  own thread only.
+  own thread. A run token also reads the earlier conversations its search finds
+  (`POST /api/agent-threads/search`): its requester's, never the one it works for, and from a shared
+  conversation none of their private ones. A sub-agent reads as its conversation does; a workflow's
+  agent node reads no other thread.
 
 ## How agents use a sandbox
 

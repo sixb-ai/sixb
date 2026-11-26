@@ -1,4 +1,6 @@
+import { ObjectQueryExecutionError } from "@sixb/core"
 import {
+  assertSearchAgentTurnVectorsInput,
   assertWriteAgentTurnVectorsInput,
   cachedTurnVectorSearchProbe,
 } from "@sixb/core/internal/agent-run-storage-provider"
@@ -13,6 +15,8 @@ import {
   type HaltAgentThreadIndexingInput,
   type ListAgentThreadsToIndexInput,
   type ListAgentTurnVectorsInput,
+  type SearchAgentTurnVectorsInput,
+  type SearchAgentTurnVectorsResult,
   type WriteAgentTurnVectorsInput,
 } from "@sixb/core/storage"
 import { type PgStoreClient, runPgTransaction } from "../transactions"
@@ -29,6 +33,18 @@ interface AgentTurnVectorRow {
   configuration: string
   embedding: readonly (number | string)[]
   indexed_at: Date | string
+}
+
+interface AgentTurnSearchRow {
+  searched_from: Date | string | null
+  thread_id: string | null
+  message_id: string
+  chunk: number
+  first_seq: number
+  last_seq: number
+  turn_at: Date | string
+  text: string
+  score: number | string
 }
 
 interface AgentThreadIndexProgressRow {
@@ -252,6 +268,141 @@ export class PgAgentTurnVectorStore implements AgentTurnVectorStore {
       ORDER BY first_seq, chunk
     `
     return rows.map(rowToTurnVector)
+  }
+
+  async search(input: SearchAgentTurnVectorsInput): Promise<SearchAgentTurnVectorsResult> {
+    assertSearchAgentTurnVectorsInput(input, "SixbPg")
+    if (!(await this.searchAvailable())) {
+      throw new ObjectQueryExecutionError(
+        "vector_extension_missing",
+        "PostgreSQL vector search requires pgvector installed in schema public (CREATE EXTENSION vector WITH SCHEMA public)."
+      )
+    }
+
+    const { projectId, principal } = input
+    const sql = this.sql
+
+    // The principal's conversations, read from two indexes: those they own
+    // (idx_agent_threads_project_owner_activity) and those they were added to
+    // (idx_agent_thread_participants_principal). Only a conversation takes participants.
+    const theirs = principal
+      ? sql`
+          SELECT id FROM agent_threads
+          WHERE project_id = ${projectId} AND kind = 'conversation'
+            AND owner_principal_type = ${principal.type} AND owner_principal_id = ${principal.id}
+          UNION
+          SELECT thread_id FROM agent_thread_participants
+          WHERE project_id = ${projectId}
+            AND principal_type = ${principal.type} AND principal_id = ${principal.id}
+        `
+      : sql`SELECT id FROM agent_threads WHERE project_id = ${projectId} AND kind = 'conversation'`
+
+    const shared =
+      input.scope === "shared"
+        ? sql`
+            AND EXISTS (
+              SELECT 1 FROM agent_thread_participants AS participant
+              WHERE participant.project_id = ${projectId} AND participant.thread_id = theirs.id
+            )
+          `
+        : sql``
+    const excluded =
+      input.excludeThreadId === undefined ? sql`` : sql`AND theirs.id <> ${input.excludeThreadId}`
+    const since = input.since ? sql`AND vector.turn_at >= ${input.since}` : sql``
+    const until = input.until ? sql`AND vector.turn_at < ${input.until}` : sql``
+
+    // `recent` reads keys alone, the most recent first, one past the candidates: whether that one
+    // exists says whether the window is cut, and where. Only the candidates' embeddings are read,
+    // and scored exactly: `scored` is materialized, so no filter on the score reaches the scan of
+    // `agent_turn_vectors`, where it would score every row. Ids order by code unit, as every
+    // provider does.
+    const rows = await sql<AgentTurnSearchRow[]>`
+      WITH theirs AS (${theirs}),
+      eligible AS (
+        SELECT theirs.id FROM theirs WHERE true ${excluded} ${shared}
+      ),
+      recent AS MATERIALIZED (
+        SELECT vector.thread_id, vector.message_id, vector.chunk, vector.turn_at
+        FROM eligible
+        JOIN agent_turn_vectors AS vector
+          ON vector.project_id = ${projectId} AND vector.thread_id = eligible.id
+        WHERE vector.configuration = ${input.configuration} ${since} ${until}
+        ORDER BY vector.turn_at DESC, vector.thread_id COLLATE "C", vector.message_id COLLATE "C",
+          vector.chunk
+        LIMIT ${input.candidates + 1}
+      ),
+      bound AS (
+        SELECT CASE WHEN COUNT(*) > ${input.candidates} THEN COALESCE(
+          MIN(turn_at) FILTER (WHERE turn_at > (SELECT MIN(turn_at) FROM recent)),
+          MIN(turn_at)
+        ) END AS searched_from
+        FROM recent
+      ),
+      candidates AS (
+        SELECT recent.* FROM recent, bound
+        WHERE bound.searched_from IS NULL OR recent.turn_at >= bound.searched_from
+        ORDER BY recent.turn_at DESC, recent.thread_id COLLATE "C", recent.message_id COLLATE "C",
+          recent.chunk
+        LIMIT ${input.candidates}
+      ),
+      scored AS MATERIALIZED (
+        SELECT candidates.thread_id, candidates.message_id, candidates.chunk, candidates.turn_at,
+          CASE WHEN cardinality(vector.embedding) = ${input.vector.length} THEN 1 - (
+            vector.embedding::public.vector
+              OPERATOR(public.<=>) ${JSON.stringify(input.vector)}::public.vector
+          ) END AS score
+        FROM candidates
+        JOIN agent_turn_vectors AS vector
+          ON vector.project_id = ${projectId}
+            AND vector.message_id = candidates.message_id AND vector.chunk = candidates.chunk
+      ),
+      turns AS (
+        SELECT DISTINCT ON (message_id) * FROM scored
+        WHERE score IS NOT NULL
+        ORDER BY message_id, score DESC, chunk
+      ),
+      ranked AS (
+        SELECT turns.*, row_number() OVER (
+          PARTITION BY thread_id ORDER BY score DESC, turn_at DESC, message_id COLLATE "C"
+        ) AS place
+        FROM turns
+      ),
+      best AS (
+        SELECT * FROM ranked WHERE place <= ${input.perThread}
+        ORDER BY score DESC, turn_at DESC, thread_id COLLATE "C", message_id COLLATE "C"
+        LIMIT ${input.k}
+      )
+      SELECT bound.searched_from, best.thread_id, best.message_id, best.chunk, best.turn_at,
+        best.score, vector.first_seq, vector.last_seq, vector.text
+      FROM bound
+      LEFT JOIN best ON true
+      LEFT JOIN agent_turn_vectors AS vector
+        ON vector.project_id = ${projectId}
+          AND vector.message_id = best.message_id AND vector.chunk = best.chunk
+      ORDER BY best.score DESC, best.turn_at DESC, best.thread_id COLLATE "C",
+        best.message_id COLLATE "C"
+    `
+
+    const searchedFrom = rows[0]?.searched_from
+    return {
+      hits: rows.flatMap((row) =>
+        row.thread_id === null
+          ? []
+          : [
+              {
+                threadId: row.thread_id,
+                messageId: row.message_id,
+                chunk: Number(row.chunk),
+                firstSeq: Number(row.first_seq),
+                lastSeq: Number(row.last_seq),
+                turnAt: new Date(row.turn_at),
+                text: row.text,
+                score: Math.max(-1, Math.min(1, Number(row.score))),
+              },
+            ]
+      ),
+      ...(searchedFrom ? { searchedFrom: new Date(searchedFrom) } : {}),
+    }
   }
 
   async listThreadsToIndex(

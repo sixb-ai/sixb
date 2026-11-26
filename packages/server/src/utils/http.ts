@@ -16,6 +16,7 @@ import { RequestBodyTooLargeError } from "./request-body"
 /** Explicit transport policy for coded failures that are safe to surface as non-500 responses. */
 const HTTP_STATUS_BY_ERROR_CODE: Partial<Record<SixbErrorCode, number>> = {
   "action.run_in_progress": 409,
+  "agent.search_unavailable": 501,
   "connector.adapter_invalid": 502,
   "connector.authorization_invalid": 400,
   "connector.authorization_required": 409,
@@ -33,6 +34,7 @@ const HTTP_STATUS_BY_ERROR_CODE: Partial<Record<SixbErrorCode, number>> = {
   "object.not_found": 404,
   "object.unique_violation": 409,
   "runtime.stopping": 503,
+  "vector.response_invalid": 502,
   "ai.usage_limit_exceeded": 429,
   "ai.usage_limit_unavailable": 429,
 }

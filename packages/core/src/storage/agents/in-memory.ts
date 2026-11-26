@@ -41,6 +41,7 @@ import {
   assertMovableToCloud,
   assertRequestAgentApprovalInput,
   assertSaveAgentMemoryInput,
+  assertSearchAgentTurnVectorsInput,
   assertStartsOnComputer,
   assertSubagentThreadTakesRun,
   assertTakeAgentInboxSteersInput,
@@ -104,6 +105,7 @@ import type {
   AgentThreadToIndex,
   AgentTokenRateRecord,
   AgentTokenRateStore,
+  AgentTurnSearchHit,
   AgentTurnVectorRecord,
   AgentTurnVectorStore,
   AppendAgentMessageInput,
@@ -162,6 +164,8 @@ import type {
   RewindAgentApprovalsResult,
   SaveAgentMemoryInput,
   SaveAgentMemoryResult,
+  SearchAgentTurnVectorsInput,
+  SearchAgentTurnVectorsResult,
   SettleAgentApprovalsInput,
   StartAgentRunInput,
   StopAgentApprovalsInput,
@@ -1539,6 +1543,42 @@ function copyTurnVectors(
   })
 }
 
+/**
+ * Where a search starts when more chunks are eligible than it scores, from the eligible chunks'
+ * times, the most recent first: the oldest time whose chunks all fit, so a search with `until` set
+ * to it leaves none of a turn out. When even the newest time holds more chunks than fit, that time,
+ * of which the first `candidates` are scored. `undefined` when every chunk fits.
+ */
+function turnSearchWindow(times: readonly Date[], candidates: number): Date | undefined {
+  if (times.length <= candidates) return undefined
+
+  const firstLeftOut = times[candidates]!
+  const newer = times.slice(0, candidates).filter((time) => time > firstLeftOut)
+  return newer.at(-1) ?? firstLeftOut
+}
+
+/** Ids order by code unit, as SQL's binary collation does. */
+function compareIds(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+/** Null for vectors of other lengths, which a search leaves out. */
+function cosineSimilarity(stored: readonly number[], query: readonly number[]): number | null {
+  if (stored.length !== query.length) return null
+
+  let dot = 0
+  let storedNorm = 0
+  let queryNorm = 0
+  for (let index = 0; index < query.length; index++) {
+    dot += stored[index]! * query[index]!
+    storedNorm += stored[index]! * stored[index]!
+    queryNorm += query[index]! * query[index]!
+  }
+  if (storedNorm === 0 || queryNorm === 0) return null
+
+  return Math.max(-1, Math.min(1, dot / Math.sqrt(storedNorm * queryNorm)))
+}
+
 function turnVectorKey(projectId: string, messageId: string, chunk: number): string {
   return JSON.stringify([projectId, messageId, chunk])
 }
@@ -1721,6 +1761,92 @@ class InMemoryAgentTurnVectorStore implements AgentTurnVectorStore {
         threadId: thread.id,
         revision: this.state.messageRevisions.get(key(thread.projectId, thread.id)) ?? 0,
       }))
+  }
+
+  async search(input: SearchAgentTurnVectorsInput): Promise<SearchAgentTurnVectorsResult> {
+    assertSearchAgentTurnVectorsInput(input)
+
+    const eligible = new Set(
+      [...this.state.threads.values()]
+        .filter((thread) => thread.projectId === input.projectId && thread.kind === "conversation")
+        .filter((thread) => thread.id !== input.excludeThreadId)
+        .filter((thread) => {
+          const participants = this.state.participants.get(key(thread.projectId, thread.id)) ?? []
+          if (input.scope === "shared" && participants.length === 0) return false
+
+          const { principal } = input
+          if (!principal) return true
+          return (
+            principalsEqual(thread.ownerPrincipal, principal) ||
+            participants.some((participant) => principalsEqual(participant.principal, principal))
+          )
+        })
+        .map((thread) => thread.id)
+    )
+
+    // The most recent eligible chunks first, the order SQL reads them in.
+    const recent = [...this.state.turnVectors.values()]
+      .filter((vector) => vector.projectId === input.projectId && eligible.has(vector.threadId))
+      .filter((vector) => vector.configuration === input.configuration)
+      .filter((vector) => !input.since || vector.turnAt >= input.since)
+      .filter((vector) => !input.until || vector.turnAt < input.until)
+      .sort(
+        (left, right) =>
+          right.turnAt.getTime() - left.turnAt.getTime() ||
+          compareIds(left.threadId, right.threadId) ||
+          compareIds(left.messageId, right.messageId) ||
+          left.chunk - right.chunk
+      )
+
+    const searchedFrom = turnSearchWindow(
+      recent.map((vector) => vector.turnAt),
+      input.candidates
+    )
+    const candidates = recent
+      .filter((vector) => !searchedFrom || vector.turnAt >= searchedFrom)
+      .slice(0, input.candidates)
+
+    // Each turn by its best chunk.
+    const turns = new Map<string, AgentTurnSearchHit>()
+    for (const vector of candidates) {
+      const score = cosineSimilarity(vector.embedding, input.vector)
+      if (score === null) continue
+
+      const best = turns.get(vector.messageId)
+      if (best && (best.score > score || (best.score === score && best.chunk < vector.chunk))) {
+        continue
+      }
+      turns.set(vector.messageId, {
+        threadId: vector.threadId,
+        messageId: vector.messageId,
+        chunk: vector.chunk,
+        firstSeq: vector.firstSeq,
+        lastSeq: vector.lastSeq,
+        turnAt: new Date(vector.turnAt),
+        text: vector.text,
+        score,
+      })
+    }
+
+    // Best first, then at most `perThread` turns of each conversation.
+    const ranked = [...turns.values()].sort(
+      (left, right) =>
+        right.score - left.score ||
+        right.turnAt.getTime() - left.turnAt.getTime() ||
+        compareIds(left.threadId, right.threadId) ||
+        compareIds(left.messageId, right.messageId)
+    )
+    const kept = new Map<string, number>()
+    const hits = ranked.filter((hit) => {
+      const count = kept.get(hit.threadId) ?? 0
+      kept.set(hit.threadId, count + 1)
+      return count < input.perThread
+    })
+
+    return {
+      hits: hits.slice(0, input.k),
+      ...(searchedFrom ? { searchedFrom: new Date(searchedFrom) } : {}),
+    }
   }
 
   private vectorsOf(projectId: string, threadId: string): AgentTurnVectorRecord[] {

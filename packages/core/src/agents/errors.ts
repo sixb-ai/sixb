@@ -59,6 +59,10 @@ export type AgentRequestErrorCode =
   | "approval_not_found"
   | "approval_not_pending"
   | "approval_expired"
+  /** A search of earlier conversations asked for something it cannot read. */
+  | "invalid_search"
+  /** A workflow's agent node searches nothing: it works for no conversation. */
+  | "search_not_allowed"
 
 /**
  * Raised by {@link requestAgentRun} (the trigger). Callers branch on `code` rather than message text
