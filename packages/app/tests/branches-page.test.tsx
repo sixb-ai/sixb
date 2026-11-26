@@ -89,6 +89,7 @@ function branch(overrides: Partial<Branch> = {}): Branch {
     generation: 3,
     commit: "a".repeat(40),
     error: null,
+    remoteError: null,
     notices: [],
     data: {
       takenAt: ago(2 * 60 * 60_000),
@@ -424,7 +425,14 @@ describe("Console › Branches", () => {
         branch({
           wanted: "stopped",
           state: "stopped",
-          notices: [{ code: "database-limit", message: "Closed past its database's limits." }],
+          // A crowded closure, as production words it: the Console says it in its own words.
+          notices: [
+            {
+              code: "database-limit",
+              message:
+                "This branch stopped: branches together held more database locks than production's database can spare, and this one held the most (900). Start it again to keep going.",
+            },
+          ],
         }),
       ],
       unavailable: null,

@@ -75,20 +75,7 @@ import {
 import { SkeletonBlock } from "../skeletons"
 import { type BranchesMessages, useBranchesMessages } from "./messages"
 
-type ListedBranch = ListBranchesResponse["branches"][number]
-
-export type Branch = Omit<ListedBranch, "notices"> & {
-  /**
-   * Why production can't get the branch from its repository, as its last read of the remote
-   * said. Optional: a server may not send it.
-   */
-  readonly remoteError?: string | null
-  /** What its creator should know, `database-limit` included: production closed the branch. */
-  readonly notices: readonly {
-    readonly code: ListedBranch["notices"][number]["code"] | "database-limit"
-    readonly message: string
-  }[]
-}
+export type Branch = ListBranchesResponse["branches"][number]
 type Unavailable = NonNullable<ListBranchesResponse["unavailable"]>
 
 /** What a branch is doing, in the words a person reads on its pill. */
