@@ -14,8 +14,11 @@ import type { Storage } from "../storage/types"
  * owns, which production reaches only as that role. See `@sixb/pg`'s `hosted-branches.ts`.
  */
 export interface BranchHostingStorage {
-  /** What production's database user lacks to host branches, such as `CREATEDB`, or null. */
-  unmetHostedBranchRequirement(): Promise<string | null>
+  /**
+   * What production lacks to host branches, such as `CREATEDB`, or a lock table large enough for
+   * a copy of `objectTypes` types, or null.
+   */
+  unmetHostedBranchRequirement(objectTypes?: number): Promise<string | null>
   /**
    * Creates the role, which cannot log in yet, and the empty database it owns. Production never
    * acts in it but to create its own extensions there: the branch's runtime migrates it and loads
@@ -59,6 +62,8 @@ export interface BranchEnforcement {
 export type BranchClosure =
   /** It held more advisory locks, or more of the lock table, than the framework ever takes. */
   | { readonly reason: "locks"; readonly locks: number }
+  /** Branches together held more of the lock table than they may, and it held the most. */
+  | { readonly reason: "crowded"; readonly locks: number }
   /** A session held a lock that another role's session waited for. */
   | { readonly reason: "blocking" }
   /** A session was connected to another database than the branch's own. */
@@ -83,9 +88,12 @@ export interface BranchRoleLimits {
   readonly tempFileLimitKb?: number
   /**
    * What the branch's database may hold on production's disk, in MB, its copy included. Defaults
-   * to 20 GiB. Checked once a minute; past it, production closes the branch.
+   * to twice production's own database, at least 20 GiB. Checked once a minute, every round past
+   * 80% of it; past it, production closes the branch.
    */
   readonly databaseSizeLimitMb?: number
+  /** The object types the copy loads, which sizes its locks. Defaults to the host's ontology's. */
+  readonly objectTypes?: number
 }
 
 const MAX_NAMESPACE_LENGTH = 40
@@ -118,7 +126,7 @@ export async function prepareBranchData(
 ): Promise<{ readonly tempFileLimit: boolean }> {
   const hosting = requireHosting(host.storage)
   await hosting.dropHostedBranch(branch.namespace)
-  return hosting.createHostedBranch(branch.namespace, limits)
+  return hosting.createHostedBranch(branch.namespace, withObjectTypes(host, limits))
 }
 
 /** Drops the branch's database, with its copy and what it wrote, and its role. */
@@ -157,7 +165,7 @@ export function branchDatabaseAddress(host: SixbHostView): {
 export async function branchHostingRequirement(host: SixbHostView): Promise<string | null> {
   if (!isBranchHostingStorage(host.storage)) return HOSTING_STORAGE
 
-  return host.storage.unmetHostedBranchRequirement()
+  return host.storage.unmetHostedBranchRequirement(objectTypesOf(host))
 }
 
 /** Holds the branch's role to its limits, which it cannot SET away: see `BranchHostingStorage`. */
@@ -166,7 +174,18 @@ export async function enforceBranchLimits(
   branch: BranchRecord,
   limits: BranchRoleLimits = {}
 ): Promise<BranchEnforcement> {
-  return requireHosting(host.storage).enforceHostedBranchLimits(branch.namespace, limits)
+  return requireHosting(host.storage).enforceHostedBranchLimits(
+    branch.namespace,
+    withObjectTypes(host, limits)
+  )
+}
+
+function withObjectTypes(host: SixbHostView, limits: BranchRoleLimits): BranchRoleLimits {
+  return { objectTypes: objectTypesOf(host), ...limits }
+}
+
+function objectTypesOf(host: SixbHostView): number {
+  return host.definitions.ontology.listObjectTypes().length
 }
 
 /** What a branch's row says once production closed it. */
@@ -176,16 +195,19 @@ export function branchClosureNotice(closure: BranchClosure): BranchNotice {
 
 function closureMessage(closure: BranchClosure): string {
   const stopped = "This branch stopped:"
+  const again = "Start it again to keep going."
 
   switch (closure.reason) {
     case "disk":
       return `${stopped} its data grew past ${gigabytes(closure.limitBytes)} on production's database, its limit. Refresh it from production to start again from a new copy.`
     case "locks":
-      return `${stopped} its code held ${closure.locks} database locks at once, more than production's database can spare. Start it again once its code takes fewer.`
+      return `${stopped} it held ${closure.locks} database locks at once, more than production's database can spare for one branch. ${again}`
+    case "crowded":
+      return `${stopped} branches together held more database locks than production's database can spare, and this one held the most (${closure.locks}). ${again}`
     case "blocking":
-      return `${stopped} its code held up production's own work on the database. Start it again to keep going.`
+      return `${stopped} another session on production's database waited on a lock it held. ${again}`
     case "elsewhere":
-      return `${stopped} its code connected to another database of production's instance ('${closure.database}'), which a branch may not do.`
+      return `${stopped} it connected to another database of production's instance ('${closure.database}'), which a branch may not do.`
   }
 }
 

@@ -1,7 +1,8 @@
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto"
 import { assertBranchNamespaceName } from "@sixb/core/internal/storage"
 import { quoteIdent } from "./migrations"
-import type { SQL } from "./pg-client"
+import type { SQL, SQLClient } from "./pg-client"
+import { pgErrorCode } from "./storage-errors"
 import { runPgTransaction, withReservedPgConnection } from "./transactions"
 
 /**
@@ -13,7 +14,9 @@ import { runPgTransaction, withReservedPgConnection } from "./transactions"
  * uses. The branch's runtime migrates the database and loads its copy, as the role. Production
  * never runs its own migrations or DDL there, so nothing the branch plants in it ever runs with
  * production's privileges. Afterwards production only watches the role's sessions, takes its
- * login away, and drops the database, `DROP DATABASE … WITH (FORCE)`, then the role.
+ * login away, and drops the database, `DROP DATABASE … WITH (FORCE)`, then the role. Every one
+ * of its statements that waits on a lock waits a bounded time: a branch holding the role's own
+ * row, or its database's, never stalls production.
  */
 
 /** What a hosted branch's role may take from production's instance. */
@@ -39,9 +42,15 @@ export interface HostedBranchLimits {
   readonly tempFileLimitKb?: number
   /**
    * What the branch's database may hold on production's disk, in MB, its copy included. Defaults
-   * to 20 GiB. Past it, production takes the role's login away.
+   * to twice production's own database, at least 20 GiB: a copy is at most what production holds.
+   * Past it, production takes the role's login away.
    */
   readonly databaseSizeLimitMb?: number
+  /**
+   * The object types its copy loads, which sizes the locks its load takes: a copy too large for
+   * a branch's share of the lock table is refused before it starts.
+   */
+  readonly objectTypes?: number
 }
 
 /** How production connects: a branch's login copies it, but for its user, password and database. */
@@ -75,6 +84,8 @@ export interface HostedBranchEnforcement {
 export type HostedBranchClosure =
   /** It held more advisory locks, or more of the lock table, than the framework ever takes. */
   | { readonly reason: "locks"; readonly locks: number }
+  /** Branches together held more of the lock table than they may, and it held the most. */
+  | { readonly reason: "crowded"; readonly locks: number }
   /** A session held a lock that another role's session waited for. */
   | { readonly reason: "blocking" }
   /** A session was connected to another database than the branch's own. */
@@ -94,6 +105,7 @@ const DEFAULT_LIMITS = {
   transactionTimeoutMillis: 30 * 60_000,
   idleInTransactionMillis: 60_000,
   tempFileLimitKb: 1024 * 1024,
+  /** The floor of the default size limit, which is twice production's database. */
   databaseSizeLimitMb: 20 * 1024,
 } as const
 
@@ -114,11 +126,25 @@ const ADVISORY_LOCKS_PER_SESSION = 64
  * `max_prepared_transactions`): 6,400 by default. One branch, all its sessions together, holds at
  * most a quarter of it. All branches together hold at most three eighths, which two branches at
  * their full share already pass: past it, the branch holding the most closes. Production always
- * keeps more than half. A copy's load holds about 120 locks plus 15 per type (one per partition
- * and index; 175 measured for 3 types, 530 for 30), so a quarter of the default table fits a copy
- * of about 100 types: a larger ontology needs a larger `max_locks_per_transaction`.
+ * keeps more than half. A branch's share stays a quarter however large its ontology: one whose
+ * load would need more is refused up front (`LOAD_LOCKS`), never closed halfway through its load.
  */
 const LOCK_TABLE_SHARES = { branch: 1 / 4, branches: 3 / 8 } as const
+
+/**
+ * The most locks a copy's load holds, all its sessions together, for its object types: one per
+ * partition and index, on two lanes. Measured at 175 for 3 types, 530 for 30, and about 9.5 per
+ * type on each lane at 40 to 250 types; this rounds both up.
+ */
+const LOAD_LOCKS = { base: 120, perType: 20 } as const
+
+/** How long a statement of production's on the role or its database waits for a lock. */
+const ROLE_LOCK_TIMEOUT_MS = 2_000
+
+/** How many times production ends the role's sessions and tries again after such a wait. */
+const ROLE_LOCK_ATTEMPTS = 5
+
+const LOCK_TIMEOUT = "55P03"
 
 /** How long dropping a branch's database waits for a lock before it fails, to be tried again. */
 const DROP_LOCK_TIMEOUT_MS = 5_000
@@ -131,6 +157,68 @@ const LOGIN_LEASE_MS = 15 * 60_000
 
 /** How often `enforce` measures the database and renews the login: both cost more than a look. */
 const SLOW_CHECK_MS = 60_000
+
+/** Past this share of its size limit, `enforce` measures the database every round. */
+const SIZE_WATCH_SHARE = 0.8
+
+/** What production's instance and user are, as `hostedBranchRequirement` judges them. */
+export interface HostedBranchHostFacts {
+  readonly user: string
+  readonly superuser: boolean
+  readonly createrole: boolean
+  readonly createdb: boolean
+  readonly version: number
+  readonly database: string
+  /** Whether every role may connect to production's database (`CONNECT` for `PUBLIC`). */
+  readonly publicConnect: boolean
+  readonly maxPreparedTransactions: number
+  readonly maxConnections: number
+  readonly maxLocksPerTransaction: number
+  /** The object types a branch's copy loads, when known. */
+  readonly objectTypes?: number
+}
+
+/**
+ * What production lacks to host branches, as a phrase that follows "needs", or null. Every check
+ * here stops a branch before it changes anything.
+ */
+export function hostedBranchRequirement(facts: HostedBranchHostFacts): string | null {
+  if (facts.version < 160_000) return "PostgreSQL 16 or later"
+
+  const missing = [
+    ...(facts.superuser || facts.createrole ? [] : ["CREATEROLE"]),
+    ...(facts.superuser || facts.createdb ? [] : ["CREATEDB"]),
+  ]
+  if (missing.length > 0) {
+    return `production's database user '${facts.user}' to have ${missing.join(" and ")}, to give each branch a role and a database of its own on production's instance. As a superuser: ALTER ROLE "${facts.user}" ${missing.join(" ")}`
+  }
+
+  // A prepared transaction outlives its session, with its locks and the vacuum horizon it holds
+  // back, and only its owner may finish it: a branch could leave one production cannot end.
+  if (facts.maxPreparedTransactions > 0) {
+    return `max_prepared_transactions = 0 on production's instance (it is ${facts.maxPreparedTransactions}): a transaction a branch prepared would outlive its session, with its locks, beyond production's reach. The framework never prepares one: set it to 0 and restart PostgreSQL`
+  }
+
+  if (facts.publicConnect) {
+    return `production's database '${facts.database}' closed to PUBLIC: every role may connect to it today, a branch's role too, and hold production's advisory keys or read its statistics there. As a superuser: REVOKE CONNECT ON DATABASE "${facts.database}" FROM PUBLIC; GRANT CONNECT ON DATABASE "${facts.database}" TO each role that connects to it`
+  }
+
+  if (facts.objectTypes !== undefined) {
+    const peak = loadLocks(facts.objectTypes)
+    const connections = facts.maxConnections + facts.maxPreparedTransactions
+    const share = facts.maxLocksPerTransaction * connections * LOCK_TABLE_SHARES.branch
+    if (peak > share) {
+      const needed = Math.ceil(peak / LOCK_TABLE_SHARES.branch / connections / 64) * 64
+      return `a larger lock table for a copy of ${facts.objectTypes} object types: its load holds about ${peak} locks, more than a branch's quarter of the table (${Math.floor(share)}). Set max_locks_per_transaction = ${needed} and restart PostgreSQL`
+    }
+  }
+  return null
+}
+
+/** The most locks a copy of `objectTypes` types holds while it loads: `LOAD_LOCKS`. */
+function loadLocks(objectTypes: number): number {
+  return LOAD_LOCKS.base + LOAD_LOCKS.perType * objectTypes
+}
 
 /**
  * The role, and the database it owns, of a branch namespace: one name, at most 63 bytes, unique in
@@ -207,8 +295,8 @@ interface RoleSession {
 }
 
 export class PgHostedBranches {
-  /** When `enforce` last measured each branch's database, by role. */
-  readonly #measuredAt = new Map<string, number>()
+  /** When `enforce` last measured each branch's database, and how full it was, by role. */
+  readonly #measured = new Map<string, { readonly at: number; readonly share: number }>()
 
   constructor(
     private readonly sql: SQL,
@@ -221,33 +309,26 @@ export class PgHostedBranches {
   ) {}
 
   /**
-   * What production's database user lacks to host branches, or null when it lacks nothing: each
-   * branch gets a role and a database of its own.
+   * What production lacks to host branches, or null when it lacks nothing: see
+   * `hostedBranchRequirement`.
    */
-  async unmetRequirement(): Promise<string | null> {
-    const [row] = await this.sql<
-      {
-        name: string
-        superuser: boolean
-        createrole: boolean
-        createdb: boolean
-        version: number
-      }[]
-    >`
-      SELECT rolname AS name, rolsuper AS superuser, rolcreaterole AS createrole,
-        rolcreatedb AS createdb, current_setting('server_version_num')::int AS version
+  async unmetRequirement(objectTypes?: number): Promise<string | null> {
+    const [row] = await this.sql<Omit<HostedBranchHostFacts, "objectTypes">[]>`
+      SELECT rolname AS "user", rolsuper AS superuser, rolcreaterole AS createrole,
+        rolcreatedb AS createdb, current_database() AS database,
+        current_setting('server_version_num')::int AS version,
+        has_database_privilege('public', current_database(), 'CONNECT') AS "publicConnect",
+        current_setting('max_prepared_transactions')::int AS "maxPreparedTransactions",
+        current_setting('max_connections')::int AS "maxConnections",
+        current_setting('max_locks_per_transaction')::int AS "maxLocksPerTransaction"
       FROM pg_roles WHERE rolname = current_user
     `
     if (!row) return "a database user PostgreSQL knows"
-    if (row.version < 160_000) return "PostgreSQL 16 or later"
 
-    const missing = [
-      ...(row.superuser || row.createrole ? [] : ["CREATEROLE"]),
-      ...(row.superuser || row.createdb ? [] : ["CREATEDB"]),
-    ]
-    if (missing.length === 0) return null
-
-    return `production's database user '${row.name}' to have ${missing.join(" and ")}, to give each branch a role and a database of its own on production's instance. As a superuser: ALTER ROLE "${row.name}" ${missing.join(" ")}`
+    return hostedBranchRequirement({
+      ...row,
+      ...(objectTypes === undefined ? {} : { objectTypes }),
+    })
   }
 
   /**
@@ -278,11 +359,11 @@ export class PgHostedBranches {
       "tempFileLimitKb"
     )
 
-    const unmet = await this.unmetRequirement()
+    const unmet = await this.unmetRequirement(limits.objectTypes)
     if (unmet) throw new Error(`[SixbPg] Hosted branches need ${unmet}.`)
     const extensions = await this.productionExtensions()
 
-    const tempFileLimit = await runPgTransaction(this.sql, async (tx) => {
+    const tempFileLimit = await this.bounded(async (tx) => {
       // No login until a runtime starts: `open` gives it one.
       await tx.unsafe(
         `CREATE ROLE ${ident} NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE ` +
@@ -329,9 +410,9 @@ export class PgHostedBranches {
     const role = await this.roleName(namespace)
     const password = newPassword()
 
-    await this.sql.unsafe(
-      `ALTER ROLE ${quoteIdent(role)} LOGIN PASSWORD ${literal(scramVerifier(password))} ` +
-        `VALID UNTIL ${literal(await this.leaseEnd())}`
+    await this.alterRole(
+      role,
+      `LOGIN PASSWORD ${literal(scramVerifier(password))} VALID UNTIL ${literal(await this.leaseEnd())}`
     )
     await this.endSessions(role)
 
@@ -341,13 +422,18 @@ export class PgHostedBranches {
     }
   }
 
-  /** Takes the role's login away and ends its sessions: the branch's runtime is stopped. */
+  /**
+   * Takes the role's login away and ends its sessions: the branch's runtime is stopped. Its
+   * sessions end first, since one may hold the role's own row (an `ALTER ROLE` of its own left
+   * open), then again, for any that logged in meanwhile.
+   */
   async close(namespace: string): Promise<void> {
     const role = await this.roleName(namespace)
+    this.#measured.delete(role)
     if (!(await this.roleExists(role))) return
 
-    // First, so a runtime still running cannot open a new session once the others end.
-    await this.sql.unsafe(`ALTER ROLE ${quoteIdent(role)} NOLOGIN`)
+    await this.endSessions(role)
+    await this.alterRole(role, "NOLOGIN")
     await this.endSessions(role)
   }
 
@@ -366,7 +452,9 @@ export class PgHostedBranches {
     `
     if (database) {
       // Its owner may make it a template, which PostgreSQL refuses to drop.
-      if (database.template) await this.sql.unsafe(`ALTER DATABASE ${ident} IS_TEMPLATE false`)
+      if (database.template) {
+        await this.bounded((tx) => tx.unsafe(`ALTER DATABASE ${ident} IS_TEMPLATE false`))
+      }
 
       await withReservedPgConnection(this.sql, async (connection) => {
         await connection.unsafe(`SET lock_timeout = ${DROP_LOCK_TIMEOUT_MS}`)
@@ -379,8 +467,9 @@ export class PgHostedBranches {
     }
 
     if (!(await this.roleExists(role))) return
+    await this.dropOwnedElsewhere(role)
     // Its grants go with DROP OWNED.
-    await runPgTransaction(this.sql, async (tx) => {
+    await this.bounded(async (tx) => {
       await tx.unsafe(`DROP OWNED BY ${ident}`)
       await tx.unsafe(`DROP ROLE ${ident}`)
     })
@@ -403,10 +492,10 @@ export class PgHostedBranches {
     const statement = limits.statementTimeoutMillis ?? DEFAULT_LIMITS.statementTimeoutMillis
     const transaction = limits.transactionTimeoutMillis ?? DEFAULT_LIMITS.transactionTimeoutMillis
     const idle = limits.idleInTransactionMillis ?? DEFAULT_LIMITS.idleInTransactionMillis
-    const sizeLimitMb = positive(
-      limits.databaseSizeLimitMb ?? DEFAULT_LIMITS.databaseSizeLimitMb,
-      "databaseSizeLimitMb"
-    )
+    const sizeLimitMb =
+      limits.databaseSizeLimitMb === undefined
+        ? undefined
+        : positive(limits.databaseSizeLimitMb, "databaseSizeLimitMb")
 
     const sessions = await this.sql<RoleSession[]>`
       WITH locks AS (
@@ -415,10 +504,14 @@ export class PgHostedBranches {
         GROUP BY pid
       )
       SELECT a.pid, a.datname AS database, coalesce(l.advisory, 0) AS advisory,
+        -- From pg_locks, which every user sees whole: pg_stat_activity hides another user's
+        -- wait and backend type from a production that is no superuser. A user's session, not
+        -- a background worker's, which has none.
         EXISTS (
-          SELECT 1 FROM pg_stat_activity w
-          WHERE w.wait_event_type = 'Lock' AND w.backend_type = 'client backend'
-            AND w.usename IS DISTINCT FROM ${role} AND a.pid = ANY (pg_blocking_pids(w.pid))
+          SELECT 1 FROM pg_locks w
+          JOIN pg_stat_activity wa ON wa.pid = w.pid
+          WHERE NOT w.granted AND wa.usename IS NOT NULL AND wa.usename <> ${role}
+            AND a.pid = ANY (pg_blocking_pids(w.pid))
         ) AS blocking,
         (a.xact_start IS NOT NULL
           AND now() - a.xact_start > ${transaction} * interval '1 millisecond')
@@ -489,22 +582,27 @@ export class PgHostedBranches {
 
     const all = rows.reduce((sum, row) => sum + row.locks, 0)
     if (all > capacity * LOCK_TABLE_SHARES.branches && rows[0]?.role === role) {
-      return { reason: "locks", locks: own.locks }
+      return { reason: "crowded", locks: own.locks }
     }
     return null
   }
 
   /**
-   * Once a minute per branch, at once for one this process has not looked at yet: measures its
-   * database, and renews the login of a branch still open.
+   * Once a minute per branch, at once for one this process has not looked at yet, and every
+   * round once it is past `SIZE_WATCH_SHARE` of its limit: measures its database, and renews the
+   * login of a branch still open.
    */
-  private async slowCheck(role: string, sizeLimitMb: number): Promise<HostedBranchClosure | null> {
+  private async slowCheck(
+    role: string,
+    sizeLimitMb: number | undefined
+  ): Promise<HostedBranchClosure | null> {
     const now = Date.now()
-    if (now - (this.#measuredAt.get(role) ?? Number.NEGATIVE_INFINITY) < SLOW_CHECK_MS) return null
-    this.#measuredAt.set(role, now)
+    const last = this.#measured.get(role)
+    if (last && now - last.at < SLOW_CHECK_MS && last.share < SIZE_WATCH_SHARE) return null
 
-    const [row] = await this.sql<{ bytes: string; login: boolean }[]>`
-      SELECT pg_database_size(d.oid)::text AS bytes, r.rolcanlogin AS login
+    const [row] = await this.sql<{ bytes: string; production: string; login: boolean }[]>`
+      SELECT pg_database_size(d.oid)::text AS bytes,
+        pg_database_size(current_database())::text AS production, r.rolcanlogin AS login
       FROM pg_database d
       JOIN pg_roles r ON r.rolname = d.datname
       WHERE d.datname = ${role}
@@ -512,15 +610,77 @@ export class PgHostedBranches {
     if (!row) return null
 
     const bytes = Number(row.bytes)
-    const limitBytes = sizeLimitMb * 1024 * 1024
+    const limitBytes =
+      sizeLimitMb === undefined
+        ? Math.max(DEFAULT_LIMITS.databaseSizeLimitMb * 1024 * 1024, 2 * Number(row.production))
+        : sizeLimitMb * 1024 * 1024
+    this.#measured.set(role, { at: now, share: bytes / limitBytes })
     if (bytes > limitBytes) return { reason: "disk", bytes, limitBytes }
 
-    if (row.login) {
-      await this.sql.unsafe(
-        `ALTER ROLE ${quoteIdent(role)} VALID UNTIL ${literal(await this.leaseEnd())}`
-      )
-    }
+    if (row.login) await this.alterRole(role, `VALID UNTIL ${literal(await this.leaseEnd())}`)
     return null
+  }
+
+  /**
+   * `ALTER ROLE` on the branch's role, bounded: a branch session holding the role's row ends, and
+   * it runs again. Fails, to be tried again, when the role keeps it held.
+   */
+  private async alterRole(role: string, change: string): Promise<void> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await this.bounded((tx) => tx.unsafe(`ALTER ROLE ${quoteIdent(role)} ${change}`))
+        return
+      } catch (error) {
+        if (pgErrorCode(error) !== LOCK_TIMEOUT) throw error
+        if (attempt === ROLE_LOCK_ATTEMPTS) {
+          throw new Error(
+            `[SixbPg] Branch role '${role}' kept its own row locked through ${ROLE_LOCK_ATTEMPTS} attempts: production could not change it. Try again.`,
+            { cause: error }
+          )
+        }
+        await this.endSessions(role)
+      }
+    }
+  }
+
+  /** `run` in a transaction of its own, whose statements wait for a lock a bounded time. */
+  private bounded<T>(run: (tx: SQLClient) => Promise<T>): Promise<T> {
+    return runPgTransaction(this.sql, async (tx) => {
+      await tx.unsafe(`SET LOCAL lock_timeout = ${ROLE_LOCK_TIMEOUT_MS}`)
+      return run(tx)
+    })
+  }
+
+  /**
+   * What the role owns in the instance's other databases, such as a large object made where
+   * `PUBLIC` may connect, which keeps `DROP ROLE` failing: dropped there, as production.
+   */
+  private async dropOwnedElsewhere(role: string): Promise<void> {
+    const databases = await this.sql<{ name: string }[]>`
+      SELECT DISTINCT d.datname AS name
+      FROM pg_shdepend s
+      JOIN pg_database d ON d.oid = s.dbid
+      WHERE s.refclassid = 'pg_authid'::regclass
+        AND s.refobjid = (SELECT oid FROM pg_roles WHERE rolname = ${role})
+        AND d.datname <> current_database()
+      ORDER BY 1
+    `
+    for (const { name } of databases) {
+      const sql = this.input.connect(name)
+      try {
+        await runPgTransaction(sql, async (tx) => {
+          await tx.unsafe(`SET LOCAL lock_timeout = ${ROLE_LOCK_TIMEOUT_MS}`)
+          await tx.unsafe(`DROP OWNED BY ${quoteIdent(role)}`)
+        })
+      } catch (error) {
+        throw new Error(
+          `[SixbPg] Branch role '${role}' owns objects in database '${name}', which production could not drop: ${error instanceof Error ? error.message : String(error)}. As a superuser, in that database: DROP OWNED BY "${role}"`,
+          { cause: error }
+        )
+      } finally {
+        await sql.end({ timeout: 5 })
+      }
+    }
   }
 
   /** The extensions production's storage uses that production's own database has. */

@@ -614,8 +614,8 @@ export class PostgresStorage
    * What this database user lacks to host branches, such as `CREATEDB`, or null. See
    * `hosted-branches.ts`.
    */
-  unmetHostedBranchRequirement(): Promise<string | null> {
-    return this.branchHosting.unmetRequirement()
+  unmetHostedBranchRequirement(objectTypes?: number): Promise<string | null> {
+    return this.branchHosting.unmetRequirement(objectTypes)
   }
 
   /**

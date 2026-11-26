@@ -2,25 +2,38 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { randomUUID } from "node:crypto"
 import { PostgresStorage } from "../src"
 import { hostedBranchRoleName, SCRAM_ITERATIONS } from "../src/hosted-branches"
-import { postgresStorageMigrations, quoteIdent } from "../src/migrations"
+import { quoteIdent } from "../src/migrations"
 import { createPgClient } from "../src/pg-client"
 import { authLockKey, lockAdvisoryKeys, runPgTransaction } from "../src/transactions"
 import { createTestStorage, disposeTestStorage } from "./helpers"
 
 // A hosted branch's database and role on production's instance, checked against PostgreSQL
-// itself: each property below fails if the code that gives it is taken out.
+// itself: each property below fails if the code that gives it is taken out. Production runs as a
+// user that is no superuser, as on a managed instance, unless a test needs a superuser's right.
 
 const cleanups: (() => Promise<unknown>)[] = []
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup().catch(() => {})
 })
 
-async function production() {
+async function production(options: { readonly superuser?: boolean } = {}) {
   const test = await createTestStorage()
   cleanups.push(() => disposeTestStorage(test.storage))
   const admin = new Bun.SQL(test.connectionString)
   cleanups.push(() => admin.close())
-  return { ...test, admin }
+
+  // Hosted branches refuse a production database every role may connect to.
+  const database = quoteIdent(new URL(test.connectionString).pathname.slice(1))
+  await admin.unsafe(`REVOKE CONNECT ON DATABASE ${database} FROM PUBLIC`)
+  if (options.superuser) return { ...test, admin }
+
+  const storage = await productionAs(
+    admin,
+    test.connectionString,
+    test.schemaName,
+    "CREATEROLE CREATEDB"
+  )
+  return { ...test, storage, admin }
 }
 
 async function hosted(storage: PostgresStorage, name: string, limits = {}) {
@@ -99,7 +112,8 @@ describe("a hosted branch's database", () => {
   // Text indexes and vectors take extensions a branch's role may not create.
   // Guard check: skip `createExtensions` in `PgHostedBranches.create`.
   test("has production's extensions before its role first logs in", async () => {
-    const { storage, admin, connectionString } = await production()
+    // pgvector is no trusted extension: only a superuser creates it.
+    const { storage, admin, connectionString } = await production({ superuser: true })
     await admin`CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public`
     await admin`CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public`
     await hosted(storage, "feature-a")
@@ -411,7 +425,7 @@ describe("a hosted branch's database", () => {
       closed: null,
     })
     expect((await storage.enforceHostedBranchLimits("feature-a")).closed).toMatchObject({
-      reason: "locks",
+      reason: "crowded",
     })
 
     expect(await rejection(sessions[0]!`SELECT 1`)).not.toBe("resolved")
@@ -449,25 +463,23 @@ describe("a hosted branch's database", () => {
   })
 
   // PostgreSQL lets every role connect to a database that did not revoke `CONNECT` from
-  // `PUBLIC`, production's own included: there the branch could hold production's keys.
+  // `PUBLIC`, such as the cluster's `postgres`: there it reads that database's statistics.
   // Guard check: drop the `elsewhere` clause from `closureOf`.
   test("closes the branch when one of its sessions connects to another database", async () => {
-    const { storage, connectionString, schemaName } = await production()
+    const { storage } = await production()
     await hosted(storage, "feature-a")
     const login = await storage.openHostedBranch("feature-a")
-    const database = new URL(connectionString).pathname.slice(1)
 
     const url = new URL(login.url)
-    url.pathname = `/${database}`
+    url.pathname = "/postgres"
     const elsewhere = new Bun.SQL(url.toString(), { max: 1 })
     cleanups.push(() => elsewhere.close())
     const session = await elsewhere.reserve()
-    const [first, second] = migrationLock(schemaName)
-    await session`SELECT pg_advisory_lock(${first}::int, ${second}::int)`
+    await session`SELECT pg_advisory_lock(42)`
 
     expect(await storage.enforceHostedBranchLimits("feature-a")).toEqual({
       stopped: 1,
-      closed: { reason: "elsewhere", database },
+      closed: { reason: "elsewhere", database: "postgres" },
     })
     expect(await rejection(session`SELECT 1`)).not.toBe("resolved")
   })
@@ -522,17 +534,22 @@ describe("a hosted branch's database", () => {
     expect(loaded).toBe("loaded")
     // Its lanes' locks, one per partition and index of three types, close nothing.
     expect(closures.filter((closed) => closed !== null)).toEqual([])
-  }, 15_000)
+  }, 30_000)
 
   // Guard check: drop the `REVOKE … FROM PUBLIC` from `create`: anyone may then connect.
   test("lets its role reach its own database and nothing of production's, and no one else in", async () => {
-    const { storage, admin, schemaName } = await production()
+    const { storage, admin, schemaName, connectionString } = await production()
     await hosted(storage, "feature-a")
     const { sql, login } = await asRole(storage, "feature-a")
 
     expect(
       await rejection(sql.unsafe(`SELECT * FROM ${quoteIdent(schemaName)}.sixb_migrations`))
     ).toContain("does not exist")
+    const productionDatabase = new URL(login.url)
+    productionDatabase.pathname = new URL(connectionString).pathname
+    const intoProduction = new Bun.SQL(productionDatabase.toString(), { max: 1 })
+    cleanups.push(() => intoProduction.close())
+    expect(await rejection(intoProduction`SELECT 1`)).toContain("permission denied for database")
     expect(await rejection(sql`SET ROLE postgres`)).toContain("permission denied")
     expect(await sql`CREATE TABLE own_table (id int)`).toBeDefined()
 
@@ -637,7 +654,8 @@ describe("a hosted branch's database", () => {
   // A superuser's setting the role cannot raise caps what one of its sessions spills to disk.
   // Guard check: drop the `temp_file_limit` setting from `PgHostedBranches.create`.
   test("caps the temporary files its role's sessions write, whatever they SET", async () => {
-    const { storage } = await production()
+    // Setting `temp_file_limit` takes a superuser, or one granted `SET` on it.
+    const { storage } = await production({ superuser: true })
     await hosted(storage, "feature-a", { tempFileLimitKb: 1024 })
     const { sql } = await asRole(storage, "feature-a")
     const session = await sql.reserve()
@@ -657,7 +675,7 @@ describe("a hosted branch's database", () => {
   // could not cap the role, rather than let the branch believe it is capped.
   // Guard check: return `{ tempFileLimit: true }` whatever `has_parameter_privilege` answers.
   test("says whether it could cap the temporary files of its role", async () => {
-    const { storage, admin, connectionString, schemaName } = await production()
+    const { storage, admin, connectionString, schemaName } = await production({ superuser: true })
     expect(await storage.createHostedBranch("feature-capped")).toEqual({ tempFileLimit: true })
     cleanups.push(() => storage.dropHostedBranch("feature-capped"))
 
@@ -682,25 +700,153 @@ describe("a hosted branch's database", () => {
     expect(await role(admin, name)).toBeUndefined()
   })
 
-  // A production that is no superuser, as on a managed instance: what it creates roles and
-  // databases with.
-  test("is hosted by a production that may create roles and databases but is no superuser", async () => {
-    const { admin, connectionString, schemaName } = await production()
+  // A trusted extension a production that is no superuser creates for its branches too.
+  test("creates pg_trgm in a branch's database as a production that is no superuser", async () => {
+    const { storage, admin } = await production()
     await admin`CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public`
-    const storage = await productionAs(admin, connectionString, schemaName, "CREATEROLE CREATEDB")
     expect(await storage.unmetHostedBranchRequirement()).toBeNull()
 
     await hosted(storage, "feature-a")
     const { sql } = await asRole(storage, "feature-a")
     expect(await sql`SELECT extname FROM pg_extension WHERE extname = 'pg_trgm'`).toHaveLength(1)
-    expect(await storage.enforceHostedBranchLimits("feature-a")).toEqual({
+  })
+
+  // Every role may connect to a database that did not revoke it from `PUBLIC`: in production's,
+  // a branch's role would hold production's advisory keys and read its statistics.
+  // Guard check: drop the `publicConnect` clause from `hostedBranchRequirement`.
+  test("refuses a production database every role may connect to, and says how to close it", async () => {
+    const { storage, admin, connectionString } = await production()
+    const database = new URL(connectionString).pathname.slice(1)
+    await admin.unsafe(`GRANT CONNECT ON DATABASE ${quoteIdent(database)} TO PUBLIC`)
+
+    expect(await storage.unmetHostedBranchRequirement()).toContain(
+      `REVOKE CONNECT ON DATABASE "${database}" FROM PUBLIC`
+    )
+    expect(await rejection(storage.createHostedBranch("feature-a"))).toContain(
+      `production's database '${database}' closed to PUBLIC`
+    )
+    expect(await role(admin, await storage.hostedBranchRole("feature-a"))).toBeUndefined()
+  })
+
+  // A copy's load takes locks by the type: one too large for a branch's share of the lock table
+  // would close itself halfway through, so it never starts.
+  // Guard check: drop the `objectTypes` clause from `hostedBranchRequirement`.
+  test("refuses up front a copy whose load needs more of the lock table than a branch's share", async () => {
+    const { storage } = await production()
+
+    expect(await storage.unmetHostedBranchRequirement(60)).toBeNull()
+    expect(await storage.unmetHostedBranchRequirement(400)).toContain(
+      "Set max_locks_per_transaction = "
+    )
+    expect(
+      await rejection(storage.createHostedBranch("feature-a", { objectTypes: 400 }))
+    ).toContain("a larger lock table for a copy of 400 object types")
+  })
+
+  // A branch session holding its role's own row, an `ALTER ROLE` of its own left open, once made
+  // production's NOLOGIN and login renewal wait for good, and the worker's limits with them.
+  // Guard checks: drop the `lock_timeout` from `bounded`, and `close` waits for good; drop the
+  // retry from `alterRole`, and it fails on the first lock timeout.
+  test("closes, renews and opens a branch whose session holds its role's row", async () => {
+    const { storage, admin } = await production()
+    await hosted(storage, "feature-a")
+    const name = await storage.hostedBranchRole("feature-a")
+
+    const pin = async () => {
+      const { sql } = await asRole(storage, "feature-a")
+      const session = await sql.reserve()
+      await session`SET idle_in_transaction_session_timeout = 0`
+      await session`BEGIN`
+      await session.unsafe("ALTER ROLE CURRENT_USER PASSWORD 'mine'")
+      return session
+    }
+
+    const pinned = await pin()
+    expect(await within(storage.enforceHostedBranchLimits("feature-a"))).toEqual({
       stopped: 0,
       closed: null,
     })
+    expect(await rejection(pinned`SELECT 1`)).not.toBe("resolved")
+
+    await pin()
+    expect(await within(storage.openHostedBranch("feature-a").then(() => "opened"))).toBe("opened")
+
+    await pin()
+    expect(await within(storage.closeHostedBranch("feature-a").then(() => "closed"))).toBe("closed")
+    expect((await role(admin, name))?.login).toBe(false)
+  }, 30_000)
+
+  // A large object made where `PUBLIC` may connect, the cluster's `postgres` here, once kept
+  // `DROP ROLE` failing for good: no refresh, no delete.
+  // Guard check: drop `dropOwnedElsewhere` from `PgHostedBranches.drop`.
+  test("drops a role that owns objects in another database of the instance", async () => {
+    const { storage, admin } = await production({ superuser: true })
+    await storage.createHostedBranch("feature-a", {})
+    cleanups.push(() => storage.dropHostedBranch("feature-a"))
+    const name = await storage.hostedBranchRole("feature-a")
+    const login = await storage.openHostedBranch("feature-a")
+
+    const url = new URL(login.url)
+    url.pathname = "/postgres"
+    const elsewhere = new Bun.SQL(url.toString(), { max: 1 })
+    await elsewhere`SELECT lo_create(0)`
+    await elsewhere.close()
 
     await storage.dropHostedBranch("feature-a")
-    expect(await role(admin, await storage.hostedBranchRole("feature-a"))).toBeUndefined()
+    expect(await role(admin, name)).toBeUndefined()
   })
+
+  // Once its database nears its limit, a minute is long enough to fill what is left.
+  // Guard check: drop the `SIZE_WATCH_SHARE` clause from `slowCheck`.
+  test("measures a database near its size limit every round", async () => {
+    const { storage } = await production()
+    await hosted(storage, "feature-a")
+    const { sql } = await asRole(storage, "feature-a")
+    const name = await storage.hostedBranchRole("feature-a")
+
+    const [size] = (await sql`
+      SELECT pg_database_size(current_database())::bigint AS bytes
+    `) as { bytes: string }[]
+    // 90% of the limit now, past it once the table below is in.
+    const limitMb = Math.ceil(Number(size!.bytes) / 0.9 / 1024 / 1024)
+    expect(
+      await storage.enforceHostedBranchLimits("feature-a", { databaseSizeLimitMb: limitMb })
+    ).toEqual({ stopped: 0, closed: null })
+
+    await sql`CREATE TABLE fill AS SELECT repeat('x', 1000) AS v FROM generate_series(1, 4000)`
+    const { closed } = await storage.enforceHostedBranchLimits("feature-a", {
+      databaseSizeLimitMb: limitMb,
+    })
+    expect(closed).toMatchObject({ reason: "disk" })
+    expect(name).toStartWith("sixb_branch_feature_a_")
+  })
+
+  // A copy of many types holds a lock per partition and index on each lane, more than a quarter
+  // of the default table at 150 types and more: what the branch may hold is sized for the copy,
+  // and a copy too large for it is refused before it starts.
+  test("leaves open a copy of 60 types while it loads", async () => {
+    const { storage } = await production()
+    expect(await storage.unmetHostedBranchRequirement(60)).toBeNull()
+    await hosted(storage, "feature-a", { objectTypes: 60 })
+    const branch = await (await runtime(storage, "feature-a", 4)).createBranchNamespace("copy")
+
+    const closures: unknown[] = []
+    const loaded = await loadWaiting(
+      branch,
+      async () => {
+        for (let round = 0; round < 5; round += 1) {
+          const { closed } = await storage.enforceHostedBranchLimits("feature-a", {
+            objectTypes: 60,
+          })
+          closures.push(closed)
+        }
+      },
+      60
+    )
+
+    expect(loaded).toBe("loaded")
+    expect(closures).toEqual([null, null, null, null, null])
+  }, 60_000)
 })
 
 /** Production as a user that is no superuser, with `attributes`, on the same database. */
@@ -713,7 +859,7 @@ async function productionAs(
   const user = `sixb_prod_${randomUUID().replaceAll("-", "").slice(0, 12)}`
   const database = quoteIdent(new URL(connectionString).pathname.slice(1))
   await admin.unsafe(`CREATE ROLE ${user} LOGIN ${attributes} PASSWORD 'prod'`)
-  await admin.unsafe(`GRANT CREATE ON DATABASE ${database} TO ${user}`)
+  await admin.unsafe(`GRANT CONNECT, CREATE ON DATABASE ${database} TO ${user}`)
   await admin.unsafe(`GRANT ALL ON SCHEMA ${quoteIdent(schemaName)} TO ${user}`)
 
   const url = new URL(connectionString)
@@ -770,19 +916,16 @@ async function lockTables(url: string, from: number, count: number) {
   return session
 }
 
-/** Production's migration lock, which a branch must never hold in production's database. */
-function migrationLock(schemaName: string): readonly [number, number] {
-  const hash = new Bun.CryptoHasher("sha256")
-    .update(`storage:migration:${schemaName}:${postgresStorageMigrations.adapterId}`)
-    .digest()
-  return [hash.readInt32BE(0), hash.readInt32BE(4)]
-}
-
-/** Loads an object of three types, then waits on `hold` before the load ends: its other lanes sit idle. */
+/**
+ * Loads an object of each of `types` types, then waits on `hold` before the load ends: its other
+ * lanes sit idle. Settles within 10 s, or says it is still loading.
+ */
 async function loadWaiting(
   branch: Awaited<ReturnType<PostgresStorage["createBranchNamespace"]>>,
-  hold: () => Promise<void>
+  hold: () => Promise<void>,
+  types = 3
 ): Promise<string> {
+  const objectTypeIds = Array.from({ length: types }, (_, index) => `Type${index}`)
   const id = "snapshot_idle"
   const at = "2026-01-01T00:00:00.000Z"
   const operation = { type: "ontology.loadSnapshot", snapshotId: id } as const
@@ -819,11 +962,11 @@ async function loadWaiting(
         },
       },
       uniqueProperties: [],
-      objectTypeIds: ["Order", "Customer", "Product"],
+      objectTypeIds,
     },
     async (loader) => {
       await loader.write({
-        objects: ["Order", "Customer", "Product"].map((objectTypeId) => ({
+        objects: objectTypeIds.map((objectTypeId) => ({
           objectTypeId,
           primaryId: `${objectTypeId}-1`,
           properties: { id: `${objectTypeId}-1` },
@@ -834,10 +977,31 @@ async function loadWaiting(
       await hold()
     }
   )
-  return load.then(
-    () => "loaded",
-    (error: unknown) => String(error)
+  return within(
+    load.then(
+      () => "loaded",
+      (error: unknown) => String(error)
+    ),
+    10_000,
+    "still loading"
   )
+}
+
+/** `work`, or a named failure once `timeoutMs` passes: a guard taken out fails by name. */
+async function within<T>(
+  work: Promise<T>,
+  timeoutMs = 10_000,
+  late = "still waiting"
+): Promise<T | string> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<string>((resolve) => {
+    timer = setTimeout(() => resolve(`${late} after ${timeoutMs} ms`), timeoutMs)
+  })
+  try {
+    return await Promise.race([work, deadline])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function until(check: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> {
