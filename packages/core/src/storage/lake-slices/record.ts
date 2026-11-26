@@ -1,5 +1,5 @@
 import type { DatasetVersionRef } from "../../lake-storage/types"
-import type { LakeSliceGrantRecord, LakeSliceRecord } from "./types"
+import type { LakeSliceCredentialMinter, LakeSliceGrantRecord, LakeSliceRecord } from "./types"
 
 /**
  * Rebuilds a slice from a provider row with camelCase keys. Lists may arrive parsed (jsonb) or as
@@ -33,6 +33,9 @@ export function parseLakeSliceRow(row: { readonly [column: string]: unknown }): 
     ...(row.credentialGroupIds == null
       ? {}
       : { credentialGroupIds: groupIds(json(row.credentialGroupIds), id) }),
+    ...(row.credentialMintedByType == null && row.credentialMintedById == null
+      ? {}
+      : { credentialMintedBy: minter(row.credentialMintedByType, row.credentialMintedById, id) }),
     ...(row.receivedAt == null ? {} : { receivedAt: date(row.receivedAt, "receivedAt", id) }),
   }
 }
@@ -49,6 +52,13 @@ export function parseLakeSliceGrantRow(row: {
     createdAt: date(row.createdAt, "createdAt", id),
     expiresAt: date(row.expiresAt, "expiresAt", id),
   }
+}
+
+function minter(type: unknown, minterId: unknown, id: string): LakeSliceCredentialMinter {
+  if (type !== "session" && type !== "accessToken") {
+    throw corrupt(id, "the credential was minted by neither a session nor an access token")
+  }
+  return { type, id: text(minterId, "credentialMintedById", id) }
 }
 
 function groupIds(value: unknown, id: string): string[] {

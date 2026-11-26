@@ -600,6 +600,7 @@ export { InMemoryStorage } from "./in-memory"
 export type { LakeRetentionRunRecord, LakeRetentionRunStorage } from "./lake-retention-runs"
 export type {
   DeleteExpiredLakeSlicesInput,
+  LakeSliceCredentialMinter,
   LakeSliceGrantRecord,
   LakeSliceRecord,
   LakeSliceRef,

@@ -6,7 +6,12 @@ import type { LakeFile, LakeForks, LakeSliceVersion } from "../lake-storage/fork
 import type { DatasetVersionRef, LakeStorage } from "../lake-storage/types"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
 import type { SecurityDefinitionCatalog } from "../security/registry"
-import type { LakeSliceRecord, LakeSliceStorage, Storage } from "../storage"
+import type {
+  LakeSliceCredentialMinter,
+  LakeSliceRecord,
+  LakeSliceStorage,
+  Storage,
+} from "../storage"
 import type { DatasetDefinition } from "./types"
 
 /**
@@ -89,6 +94,8 @@ export interface WriteLakeSliceOptions {
   readonly credentialHash?: string
   /** The groups the credential reads with at most: those the copy read with. */
   readonly credentialGroupIds?: readonly string[]
+  /** What the person signed in with: the credential dies when it is revoked or signed out. */
+  readonly credentialMintedBy?: LakeSliceCredentialMinter
 }
 
 export interface IssueLakeSliceTokenInput {
@@ -204,6 +211,7 @@ export async function writeLakeSlice(
           branch: input.branch,
           ...(input.credentialHash ? { credentialHash: input.credentialHash } : {}),
           ...(input.credentialGroupIds ? { credentialGroupIds: input.credentialGroupIds } : {}),
+          ...(input.credentialMintedBy ? { credentialMintedBy: input.credentialMintedBy } : {}),
           point: input.point,
           versions: refs,
           files: [...files],

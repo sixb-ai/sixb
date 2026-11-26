@@ -33,10 +33,22 @@ export interface LakeSliceRecord {
    */
   readonly credentialGroupIds?: readonly string[]
   /**
+   * What its person signed in with to take the copy: the credential reads nothing once that is
+   * revoked or signed out. Absent for a copy production took for its person itself, such as a
+   * hosted branch's.
+   */
+  readonly credentialMintedBy?: LakeSliceCredentialMinter
+  /**
    * When the branch confirmed it holds its copy whole. A slice with a credential that no branch
    * confirmed is the copy of a branch that never got it: it lives only a short grace.
    */
   readonly receivedAt?: Date
+}
+
+/** The session or personal access token a branch credential was taken with. */
+export interface LakeSliceCredentialMinter {
+  readonly type: "session" | "accessToken"
+  readonly id: string
 }
 
 /** One token a branch reads a slice's files with. SHA-256 only: the token is never stored. */

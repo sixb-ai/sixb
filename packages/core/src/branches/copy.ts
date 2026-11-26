@@ -79,6 +79,8 @@ export async function* copyForBranch(
               credentialHash: branchCredential.hash,
               // An access token may narrow the person's groups: the credential keeps to them.
               credentialGroupIds: input.person.groupIds,
+              // Revoking the token or signing the session out ends the branch's credential too.
+              ...(input.credential ? { credentialMintedBy: input.credential } : {}),
               onSlice: (cut: SnapshotLakeSlice) => {
                 slice = cut
               },

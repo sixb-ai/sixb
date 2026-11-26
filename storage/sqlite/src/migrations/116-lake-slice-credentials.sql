@@ -9,5 +9,12 @@ CREATE UNIQUE INDEX idx_lake_slices_credential
 -- The groups the copy read with, which an access token may narrow: the credential reads with no more.
 ALTER TABLE lake_slices ADD COLUMN credential_group_ids TEXT;
 
+-- What the person signed in with to take the copy: the credential reads nothing once that session
+-- is signed out or that access token revoked. Both or neither.
+ALTER TABLE lake_slices ADD COLUMN credential_minted_by_type TEXT
+  CHECK (credential_minted_by_type IN ('session', 'accessToken'));
+ALTER TABLE lake_slices ADD COLUMN credential_minted_by_id TEXT
+  CHECK ((credential_minted_by_type IS NULL) = (credential_minted_by_id IS NULL));
+
 -- When the branch confirmed it holds its copy whole: a copy no branch confirmed lives a short grace.
 ALTER TABLE lake_slices ADD COLUMN received_at TEXT;

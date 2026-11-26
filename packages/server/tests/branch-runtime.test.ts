@@ -441,6 +441,54 @@ describe("a branch's credential in production", () => {
     expect(slice?.receivedAt).toBeInstanceOf(Date)
   })
 
+  // A leaked token is revoked to stop it: what it minted stops too. Red check: in
+  // branches/credential.ts, drop the `isWithdrawn` check: both credentials still read t-1's file.
+  test("reads nothing once the session or token its copy was taken with is withdrawn", async () => {
+    const now = new Date()
+    const { session } = production.host.auth.prepareBearerSession({
+      userId: "usr_dave",
+      clientName: "sixb CLI",
+      now,
+    })
+    await production.storage.auth.sessions.create(session)
+    const token = createAccessTokenCredential("personal")
+    await production.storage.auth.accessTokens.create({
+      id: token.tokenId,
+      projectId: PROJECT,
+      name: "laptop",
+      kind: "personal",
+      subject: { type: "user", id: "usr_dave" },
+      tokenHash: token.tokenHash,
+      createdAt: now,
+      // Already past its natural end, which a branch outlives.
+      expiresAt: new Date(now.getTime() - 60_000),
+    })
+
+    const bySession = await branchSlice("usr_dave", "slice_by_session", now, {
+      credentialMintedBy: { type: "session", id: session.id },
+      receivedAt: now,
+    })
+    const byToken = await branchSlice("usr_dave", "slice_by_token", now, {
+      credentialMintedBy: { type: "accessToken", id: token.tokenId },
+      receivedAt: now,
+    })
+    expect((await fileAs(bySession)).status).toBe(200)
+    expect((await fileAs(byToken)).status).toBe(200)
+
+    await production.storage.auth.sessions.revoke({
+      projectId: PROJECT,
+      id: session.id,
+      revokedAt: now,
+    })
+    await production.storage.auth.accessTokens.revoke({
+      projectId: PROJECT,
+      id: token.tokenId,
+      revokedAt: now,
+    })
+    expect((await fileAs(bySession)).status).toBe(401)
+    expect((await fileAs(byToken)).status).toBe(401)
+  })
+
   // Red check: in server.ts, drop the loopback check of the branch person's binding.
   test("answers only requests that name this machine", async () => {
     const response = await branch.app.fetch(

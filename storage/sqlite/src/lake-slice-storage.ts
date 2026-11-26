@@ -14,6 +14,8 @@ const SLICE_COLUMNS = `
   project_id AS projectId, id, user_id AS userId, branch, point, versions, files,
   created_at AS createdAt, last_token_expires_at AS lastTokenExpiresAt,
   credential_hash AS credentialHash, credential_group_ids AS credentialGroupIds,
+  credential_minted_by_type AS credentialMintedByType,
+  credential_minted_by_id AS credentialMintedById,
   received_at AS receivedAt
 `
 const LIVE_UNTIL = "coalesce(last_token_expires_at, created_at)"
@@ -30,8 +32,9 @@ export class SqliteLakeSliceStorage implements LakeSliceStorage {
       .query(
         `INSERT INTO lake_slices (
           project_id, id, user_id, branch, point, versions, files, created_at, last_token_expires_at,
-          credential_hash, credential_group_ids, received_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          credential_hash, credential_group_ids, credential_minted_by_type, credential_minted_by_id,
+          received_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         record.projectId,
@@ -45,6 +48,8 @@ export class SqliteLakeSliceStorage implements LakeSliceStorage {
         record.lastTokenExpiresAt?.toISOString() ?? null,
         record.credentialHash ?? null,
         record.credentialGroupIds ? JSON.stringify(record.credentialGroupIds) : null,
+        record.credentialMintedBy?.type ?? null,
+        record.credentialMintedBy?.id ?? null,
         record.receivedAt?.toISOString() ?? null
       )
   }

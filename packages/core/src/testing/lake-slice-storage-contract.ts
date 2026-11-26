@@ -54,7 +54,11 @@ export function runLakeSliceStorageContractSuite<TStorage extends LakeSliceStora
 
     test("finds a slice by its branch credential, in its project only", async () => {
       await withStorage(async (storage) => {
-        const credential = { credentialHash: "c".repeat(64), credentialGroupIds: ["developers"] }
+        const credential = {
+          credentialHash: "c".repeat(64),
+          credentialGroupIds: ["developers"],
+          credentialMintedBy: { type: "accessToken" as const, id: "tok_1" },
+        }
         await storage.create({ ...slice(), ...credential })
         await storage.create({ ...slice(), id: "slice_2" })
 

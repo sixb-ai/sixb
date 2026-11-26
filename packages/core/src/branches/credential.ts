@@ -4,12 +4,13 @@ import { resolveAuthorizationContext } from "../authorization/resolve"
 import type { AuthorizationContext } from "../authorization/types"
 import { isUnreceivedCopy, LAKE_SLICE_KEEP_MS } from "../datasets/lake-slices"
 import type { SecurityDefinitionCatalog } from "../security/registry"
-import type { LakeSliceRecord, Storage } from "../storage"
+import type { LakeSliceCredentialMinter, LakeSliceRecord, Storage } from "../storage"
 
 /**
  * A branch's credential in production. A laptop's branch holds this, never its developer's own
  * session: it reads production as that person only where the branch needs it, the files of its
- * objects and its lake slice, and lives as long as the slice. Any other route refuses it.
+ * objects and its lake slice, and lives as long as the slice, or until the session or access token
+ * the copy was taken with is signed out or revoked. Any other route refuses it.
  */
 export const BRANCH_CREDENTIAL_PREFIX = "sixb_branch_"
 
@@ -65,8 +66,9 @@ export interface BranchCredentialHost {
 
 /**
  * The person a branch credential reads production as, and its slice, or null: a credential of no
- * live slice, of a person no longer active, or of one who may no longer copy to a branch, reads
- * nothing. It reads with the person's groups now, and no more than the copy read with.
+ * live slice, of a session signed out or a token revoked since the copy, of a person no longer
+ * active, or of one who may no longer copy to a branch, reads nothing. It reads with the person's
+ * groups now, and no more than the copy read with.
  */
 export async function authorizeBranchCredential(
   host: BranchCredentialHost,
@@ -85,6 +87,10 @@ export async function authorizeBranchCredential(
   const liveUntil = (slice.lastTokenExpiresAt ?? slice.createdAt).getTime() + LAKE_SLICE_KEEP_MS
   if (liveUntil <= now.getTime() || isUnreceivedCopy(slice, now)) return null
 
+  if (slice.credentialMintedBy && (await isWithdrawn(auth, host.id, slice.credentialMintedBy))) {
+    return null
+  }
+
   const user = await auth.users.getById({ projectId: host.id, id: slice.userId })
   if (!user || user.status !== "active") return null
 
@@ -101,4 +107,22 @@ export async function authorizeBranchCredential(
     roles: host.definitions.security.listResolvedRoles(),
   })
   return isAllowed(person, { kind: "source.manage" }) ? { slice, person } : null
+}
+
+/**
+ * Whether the session or token a copy was taken with was signed out or revoked. Revoking a leaked
+ * token must stop what it minted. Expiring or renewing does not: a branch outlives the CLI's
+ * session, which renews, and a token's natural end.
+ */
+async function isWithdrawn(
+  auth: NonNullable<Storage["auth"]>,
+  projectId: string,
+  minter: LakeSliceCredentialMinter
+): Promise<boolean> {
+  const record =
+    minter.type === "session"
+      ? await auth.sessions.getById({ projectId, id: minter.id })
+      : await auth.accessTokens.getById({ projectId, id: minter.id })
+
+  return !record || record.revokedAt !== undefined
 }

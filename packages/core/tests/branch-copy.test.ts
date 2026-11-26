@@ -117,11 +117,14 @@ describe("a copy for a branch", () => {
     expect(await live()).toEqual([])
   })
 
-  // Red check: in `copyForBranch`, record no credential hash with the slice.
+  // Red checks: in `copyForBranch`, record no credential hash with the slice; record no
+  // `credentialMintedBy`: revoking the token the copy was taken with no longer ends the credential.
   test("hands the branch a credential its slice records, and only by its hash", async () => {
     const { copy, live } = await production()
     const chunks: Uint8Array[] = []
-    for await (const part of copy()) chunks.push(part)
+    for await (const part of copy(developers.id, { type: "accessToken", id: "tok_alice" })) {
+      chunks.push(part)
+    }
 
     const received = readBranchCopy(
       (async function* () {
@@ -138,6 +141,8 @@ describe("a copy for a branch", () => {
     )
     // With the groups the copy read with, which the credential never reads beyond.
     expect(slice?.credentialGroupIds).toEqual([developers.id])
+    // With what the person signed in with, which the credential dies with.
+    expect(slice?.credentialMintedBy).toEqual({ type: "accessToken", id: "tok_alice" })
   })
 
   // Red check: capture the copy in the person's activity again: it opens a visit on a page no one

@@ -52,7 +52,9 @@ Not refused: your project's own `fetch` calls and the agent's web tools still re
 `sixb dev` takes the copy with your `sixb login` session (or `SIXB_API_TOKEN`), before the
 branch's code runs, and keeps it under `.sixb/branches/`, readable by you only. The branch's code
 gets none of that sign-in: it holds only its own credential, which reads production as you for its
-objects' files and its datasets, and nothing else, and ends with the copy. Production runs two
+objects' files and its datasets, and nothing else. It ends with the copy, or as soon as the
+session or token the copy was taken with is signed out or revoked: revoking a leaked token stops
+the branches it copied for too. Production runs two
 copies at a time per server process, one per person, and records each copy in its log, with your
 name, the branch and how you signed in.
 

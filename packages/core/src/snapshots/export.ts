@@ -32,6 +32,7 @@ import type { AppliedMarkings } from "../security/applied-markings"
 import { appliedSourcesKey } from "../security/applied-markings"
 import { getAppliedMarkings } from "../security/applied-markings-host"
 import type { UserRecord } from "../storage/auth"
+import type { LakeSliceCredentialMinter } from "../storage/lake-slices"
 import type { ObjectRow } from "../storage/objects/types"
 import type { ActiveOntologySource } from "../storage/ontology"
 import {
@@ -92,6 +93,8 @@ export interface SnapshotLakeOptions {
   readonly credentialHash?: string
   /** The groups the credential reads with at most. */
   readonly credentialGroupIds?: readonly string[]
+  /** What the person signed in with, which the credential dies with. */
+  readonly credentialMintedBy?: LakeSliceCredentialMinter
   /** Receives the slice and its first token, before the snapshot's end record. */
   readonly onSlice: (slice: SnapshotLakeSlice) => void | Promise<void>
 }
@@ -416,6 +419,7 @@ async function cutLakeSlice(
     branch: options.branch,
     ...(options.credentialHash ? { credentialHash: options.credentialHash } : {}),
     ...(options.credentialGroupIds ? { credentialGroupIds: options.credentialGroupIds } : {}),
+    ...(options.credentialMintedBy ? { credentialMintedBy: options.credentialMintedBy } : {}),
     ...(pinned.length === 0 ? {} : { pinned }),
   })
 
