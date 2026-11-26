@@ -225,7 +225,7 @@ test("a prepared sorted page expands links of indexed and overflow rows alike", 
 // The extension's key spans the database, and a hosted branch's production ended any session of
 // the branch's that held it: a branch whose database has pg_trgm from the start never takes it.
 // Guard check: drop the `pg_extension` check from `ensureTrigrams`: preparation then waits on the
-// key the other session holds, and this test times out.
+// key the other session holds, and is still waiting after 3 s.
 test("text preparation takes no database-wide key once pg_trgm is there", async () => {
   const created = await createTestStorage()
   const holder = createPgClient({
@@ -237,14 +237,20 @@ test("text preparation takes no database-wide key once pg_trgm is there", async 
     await holder.unsafe("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public")
     await holder`SELECT pg_advisory_lock(hashtextextended('sixb.extension.pg_trgm', 0))`
 
-    const result = await prepareObjectQueries({
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const waited = new Promise<string>((resolve) => {
+      timer = setTimeout(() => resolve("still waiting on the extension's key after 3 s"), 3_000)
+    })
+    const prepared = prepareObjectQueries({
       projectId: "publication",
       ontology,
       storage: created.storage,
-    })
-    expect(result.indexes).toBeGreaterThan(0)
+    }).then((result) => `prepared ${result.indexes > 0 ? "indexes" : "nothing"}`)
+
+    expect(await Promise.race([prepared, waited])).toBe("prepared indexes")
+    clearTimeout(timer)
   } finally {
     await holder.end()
     await disposeTestStorage(created.storage)
   }
-})
+}, 15_000)
