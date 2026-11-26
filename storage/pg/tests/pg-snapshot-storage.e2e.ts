@@ -274,3 +274,79 @@ test("a long branch name keeps a schema of its own", async () => {
     await disposeTestStorage(created)
   }
 }, 60_000)
+
+// Reproduce: drop the roots' flush before a flush of `ontology_source_rows` in PgSnapshotLoad:
+// the rows' 8 MB fill first, and their COPY reaches roots not copied yet.
+test("a source whose rows pass a COPY batch before its roots do loads whole", async () => {
+  const storage = await testStorage()
+  try {
+    const branch = await storage.createBranchNamespace("large-source")
+    // Each root asserts one object with a long note: its row is about 8 times its root.
+    const note = "n".repeat(800)
+    const roots = Array.from({ length: 12_000 }, (_, index) => {
+      const ref = { objectTypeId: "Thing", primaryId: `t-${String(index).padStart(6, "0")}` }
+      return {
+        projectionId: "things",
+        materializationId: "snapshot_things",
+        rootKey: JSON.stringify(["object", ref.objectTypeId, ref.primaryId]),
+        root: { kind: "object" as const, ref },
+        stagingOrdinal: index,
+        assertions: [{ kind: "object" as const, ref, properties: { note } }],
+      }
+    })
+    await load(branch, {
+      sources: [
+        {
+          projectionId: "things",
+          materializationId: "snapshot_things",
+          datasetVersion: { datasetId: "things", versionId: "v1", createdAt: at },
+          projectionRevision: "revision",
+          ownershipHash: "ownership",
+          ontologyRevision: "ontology",
+        },
+      ],
+      sourceRoots: roots,
+    })
+
+    const active = await branch.ontology.sources.getActive({
+      projectId: PROJECT,
+      source: { projectionId: "things" },
+    })
+    expect(active).toMatchObject({ status: "active", rootCount: 12_000, assertionCount: 12_000 })
+  } finally {
+    await disposeTestStorage(storage)
+  }
+}, 60_000)
+
+// Red check: in readPgLinkEditsOf, leave legacy slots in the query and drop them after it: a page
+// of them comes back empty, and the export stops reading link edits there.
+test("a page of slots an old migration left in conflict does not end the link edits", async () => {
+  const storage = await testStorage()
+  try {
+    await withClient(storage, undefined, async (sql) => {
+      for (const [id, kind] of [
+        ["a", "legacy-conflict"],
+        ["b", "legacy-conflict"],
+        ["c", "legacy-conflict"],
+        ["d", "clear"],
+      ] as const) {
+        const value =
+          kind === "clear" ? { kind, target: { objectTypeId: "Thing", primaryId: "x" } } : { kind }
+        await sql`
+          INSERT INTO ontology_link_overrides (project_id, identity_kind, identity_key,
+            source_type_id, source_primary_id, link_id, target_type_id, target_primary_id, value,
+            last_commit_id, updated_at)
+          VALUES (${PROJECT}, 'slot', ${sql.json(["Thing", id, "owner"])}, 'Thing', ${id},
+            'owner', 'Thing', 'x', ${sql.json(value)}, 'c', ${at})
+        `
+      }
+    })
+
+    const page = await storage.readSnapshot({ views: 1, maxDurationMs: 60_000 }, ([view]) =>
+      view!.readLinkEdits({ projectId: PROJECT, sourceTypeId: "Thing", limit: 3 })
+    )
+    expect(page.map((edit) => (edit.kind === "slot" ? edit.source.primaryId : ""))).toEqual(["d"])
+  } finally {
+    await disposeTestStorage(storage)
+  }
+}, 60_000)

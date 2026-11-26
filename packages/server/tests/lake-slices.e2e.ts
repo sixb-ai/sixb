@@ -362,6 +362,70 @@ describe("a snapshot for a branch", () => {
   }, 60_000)
 })
 
+describe("a branch's change read across a pinned slice", () => {
+  // On a PostgreSQL catalog with history, as in production. Red check: cut the slice without
+  // `pinned`: it holds the latest version, and production's applied one is unknown to the branch.
+  test("reads only the branch's change, from production's version", async () => {
+    const host = productionHost()
+    await seed(host)
+    const app = createSixbApi(
+      new SixbServer({ host, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const route = Bun.serve({ port: 0, fetch: (request) => app.fetch(request) })
+    const alice = createTestSixb(host, {
+      authorization: resolveAuthorizationContext({
+        principal: { type: "user", id: "usr_alice" },
+        groupIds: [staff.id],
+        roles: host.definitions.security.listResolvedRoles(),
+      }),
+    })
+
+    // A projection applied this version; production wrote another since.
+    const applied = await production.getLatestVersion(orders.id)
+    await commitAfterPoint(host)
+    const slicePath = join(rootDir, "pinned.ducklake")
+    const slice = await writeLakeSlice(host, alice, {
+      point: await production.forks.currentPoint(),
+      path: slicePath,
+      branch: "pinned",
+      pinned: [{ datasetId: orders.id, versionId: `${applied?.versionId}` }],
+    })
+    const { token } = await issueLakeSliceToken(host, alice, { sliceId: slice.id })
+    const branch = new DuckLakeStorage({
+      catalog: { type: "duckdb", path: slicePath },
+      dataPath: join(rootDir, "pinned", "data"),
+      productionFiles: {
+        url: new URL("api/lake/slice-files/", route.url).toString(),
+        token: () => token,
+        cacheDirectory: join(rootDir, "pinned", "cache"),
+      },
+    })
+    try {
+      const merge = await branch.beginMerge({ dataset: orders })
+      await merge.writeChanges([change.upsert({ id: "ord-branch", customer: "branch", total: 1 })])
+      const committed = await merge.commit()
+      expect(committed.version?.versionId).toBe("ducklake:branch:1")
+
+      const changes = await branch.readChanges({
+        datasetId: orders.id,
+        fromVersionId: `${applied?.versionId}`,
+        toVersionId: "ducklake:branch:1",
+        keyColumns: ["id"],
+        columns: ["id", "customer", "total"],
+      })
+      const read: unknown[] = []
+      for await (const row of changes?.changes ?? []) read.push(row.after ?? row.before)
+      await changes?.close()
+
+      expect(read).toEqual([{ id: "ord-branch", customer: "branch", total: 1 }])
+      expect(changes?.changeCount).toBe(1)
+    } finally {
+      await branch.close()
+      route.stop(true)
+    }
+  }, 60_000)
+})
+
 function productionHost(): SixbHost {
   return new SixbHost({
     ...createTestRuntimeDeps(),

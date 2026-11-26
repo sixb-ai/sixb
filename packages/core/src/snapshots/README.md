@@ -59,8 +59,8 @@ extended stream never imports.
 
 The manifest carries each type's definition fingerprints, the properties hidden from the person,
 the vector configurations, and the projection feeding the type with the version production
-applied, and `lake.catalogVersion`, the lake point the branch's slice was cut at. A new record kind, such as a
-projection's source rows, comes with the next format version, which this one refuses.
+applied, and `lake.catalogVersion`, the lake point the branch's slice was cut at. Version 2 adds
+a projection's source roots and the edits over its type; a reader refuses any other version.
 
 ## Lake slice
 
@@ -108,11 +108,32 @@ then deletes the slice through its caller (`dropLakeSlice`).
 
 ## Projections
 
-A type fed by a projection is exported and imported as created objects. The manifest records its
-projection, dataset, whether the person holds `dataset.view` (not whether they read the dataset in
-full: column markings decide that), and the version and revisions production applied. A branch
-that reads the dataset in place needs them to take the type's source rows over. Until then its
-projection cannot run on the branch, and the import report names it.
+A type a projection feeds travels as its projection's source when a branch can continue it:
+
+| Condition | Checked |
+|---|---|
+| The export cuts a lake slice, so the branch reads the dataset in place | `travellingSources` |
+| The projection applied a version, and no other projection of the dataset applied another | " |
+| The person reads every object and property of the type: the edits over it hide nothing | " |
+| No link projection feeds links from the type: their source does not travel, so the branch could not tell them from the type's own | " |
+| The person reads the dataset in full at that version (`readsVersionInFull`, the slice's rule) | " |
+| The slice holds the dataset at that version (`pinned`), or the export fails | `cutLakeSlice` |
+| The branch's projection of the same id still feeds the type from that dataset, and the branch drops none of its properties or links | `import.ts` `sourceTravel` |
+
+Then the manifest carries the active source's identity (version, revisions), and the stream its
+live roots (`sourceRoots`, in root key order) and the edits over the type and the links from it
+(`edits`), each paged by key inside the consistent read. Every edit over an object travels, a
+masked one (superseded under `mostRecent`) included. A link edit travels as the link would: the
+person reads links of its definition (`readsLink`) and the object it reaches, which was exported
+or belongs to a type that travels as its source, whose roots hold even objects an edit deleted.
+A cleared slot's anchor is such an object too, or the clear stays in production. The import writes the source as active as of the base commit, its roots and
+assertions, the objects without a creating edit, their links without one, and production's edits
+as they are. The branch's projection then reads the changes from that version to the branch's
+(`prepareIncrementalReplacement`) and updates only what changed; when its revisions differ from
+production's, it reads the dataset in full, as anywhere.
+
+Otherwise the type travels as created objects, and the manifest and the import report say why
+(`notReprojectable`): its projection cannot update them on the branch.
 
 ## Branch namespaces
 

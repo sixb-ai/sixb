@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite"
 import { expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -86,5 +87,45 @@ test("a load puts back the settings it relaxes, even when it fails", async () =>
     expect(settings()).toEqual(before)
   } finally {
     storage.close()
+  }
+})
+
+// Red check: in readSqliteLinkEdits, leave legacy slots in the query and drop them after it: a
+// page of them comes back empty, and the export stops reading link edits there.
+test("a page of slots an old migration left in conflict does not end the link edits", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sixb-sqlite-legacy-slots-"))
+  try {
+    await migrateSqliteStorage(directory)
+    const storage = new SqliteStorage({ path: directory })
+    const db = new Database(join(directory, "storage.sqlite"))
+    const slot = db.prepare(
+      `INSERT INTO ontology_link_overrides (project_id, identity_kind, identity_key, source_type_id,
+         source_primary_id, link_id, target_type_id, target_primary_id, value, last_commit_id,
+         updated_at)
+       VALUES ('p', 'slot', ?, 'Thing', ?, 'owner', 'Thing', 'x', ?, 'c', '2026-01-01T00:00:00.000Z')`
+    )
+    for (const [id, kind] of [
+      ["a", "legacy-conflict"],
+      ["b", "legacy-conflict"],
+      ["c", "legacy-conflict"],
+      ["d", "clear"],
+    ] as const) {
+      slot.run(
+        JSON.stringify(["Thing", id, "owner"]),
+        id,
+        JSON.stringify(
+          kind === "clear" ? { kind, target: { objectTypeId: "Thing", primaryId: "x" } } : { kind }
+        )
+      )
+    }
+    db.close()
+
+    const page = await storage.readSnapshot({ views: 1, maxDurationMs: 60_000 }, ([view]) =>
+      view!.readLinkEdits({ projectId: "p", sourceTypeId: "Thing", limit: 3 })
+    )
+    expect(page.map((edit) => (edit.kind === "slot" ? edit.source.primaryId : ""))).toEqual(["d"])
+    storage.close()
+  } finally {
+    await rm(directory, { recursive: true, force: true })
   }
 })

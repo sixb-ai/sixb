@@ -1,11 +1,24 @@
 import type {
+  LinkOverride,
+  LinkSlotOverride,
+  ObjectOverride,
+} from "@sixb/core/internal/materialization"
+import {
+  sourceAssertionFromColumns,
+  sourceEntityFromKey,
+} from "@sixb/core/internal/ontology-storage-provider"
+import type {
   GroupMembershipRecord,
+  SnapshotLinkEditRow,
+  SnapshotObjectEdit,
   SnapshotRange,
+  SnapshotSourceRoot,
   StoredObjectVector,
   TimeseriesPoint,
 } from "@sixb/core/storage"
 import { objectPartitionName } from "./objects/partitions"
 import { identityPageToken } from "./objects/query-compiler"
+import { PUBLISHED } from "./ontology-storage/source-roots"
 import type { SQLClient } from "./pg-client"
 
 // What a snapshot's views read beside the object reader, on their snapshot's connection.
@@ -174,4 +187,207 @@ export async function readPgRanges(
 
 function tokenAfter(objectTypeId: string, primaryId: string): string {
   return identityPageToken(objectTypeId, primaryId)
+}
+
+/**
+ * Live roots of a projection's source after `afterRootKey`, in root key order, each with what it
+ * asserts: the roots of every published version of the source not retired since.
+ */
+export async function readPgSourceRoots(
+  sql: SQLClient,
+  input: {
+    readonly projectId: string
+    readonly projectionId: string
+    readonly afterRootKey?: string
+    readonly limit: number
+  }
+): Promise<SnapshotSourceRoot[]> {
+  const rows = await sql<
+    {
+      root_key: string
+      entity_kind: "object" | "link"
+      object_type_id: string | null
+      primary_id: string | null
+      source_type_id: string | null
+      source_primary_id: string | null
+      link_id: string | null
+      target_type_id: string | null
+      target_primary_id: string | null
+      payload: unknown
+    }[]
+  >`
+    WITH page AS (
+      SELECT roots.id, roots.root_key
+      FROM ontology_source_roots AS roots
+      JOIN ontology_sources AS versions ON versions.version_id = roots.version_id
+      WHERE roots.project_id = ${input.projectId}
+        AND versions.project_id = ${input.projectId}
+        AND versions.source_id = ${input.projectionId}
+        AND versions.status IN ${sql.unsafe(PUBLISHED)}
+        AND roots.retired_at IS NULL AND NOT roots.deleted
+        AND roots.root_key > ${input.afterRootKey ?? ""}
+      ORDER BY roots.root_key
+      LIMIT ${input.limit}
+    )
+    SELECT page.root_key, rows.entity_kind, rows.object_type_id, rows.primary_id,
+      rows.source_type_id, rows.source_primary_id, rows.link_id, rows.target_type_id,
+      rows.target_primary_id, rows.payload
+    FROM page
+    JOIN ontology_source_rows AS rows ON rows.root_id = page.id
+    ORDER BY page.root_key
+  `
+
+  const roots = new Map<string, SnapshotSourceRoot>()
+  for (const row of rows) {
+    const root = roots.get(row.root_key) ?? {
+      rootKey: row.root_key,
+      root: sourceEntityFromKey(row.root_key),
+      assertions: [],
+    }
+    roots.set(row.root_key, {
+      ...root,
+      assertions: [...root.assertions, sourceAssertionFromColumns(row, row.payload)],
+    })
+  }
+  return [...roots.values()]
+}
+
+/** A page of the edits over a type's objects, in primary id order: its primary key's. */
+export async function readPgObjectEdits(
+  sql: SQLClient,
+  input: {
+    readonly projectId: string
+    readonly objectTypeId: string
+    readonly afterPrimaryId?: string
+    readonly limit: number
+  }
+): Promise<SnapshotObjectEdit[]> {
+  const rows = await sql<
+    {
+      primary_id: string
+      value: ObjectOverride
+      edited_at: Record<string, string> | null
+      updated_at: Date
+    }[]
+  >`
+    SELECT primary_id, value, edited_at, updated_at FROM ontology_object_overrides
+    WHERE project_id = ${input.projectId} AND object_type_id = ${input.objectTypeId}
+      AND primary_id > ${input.afterPrimaryId ?? ""}
+    ORDER BY primary_id
+    LIMIT ${input.limit}
+  `
+
+  return rows.map((row) => ({
+    ref: { objectTypeId: input.objectTypeId, primaryId: row.primary_id },
+    value: row.value,
+    ...(row.edited_at === null ? {} : { editedAt: row.edited_at }),
+    updatedAt: row.updated_at.toISOString(),
+  }))
+}
+
+/**
+ * A page of the edits over links from a type's objects: edges, then slots, each in the order of
+ * `idx_ontology_link_overrides_source`, so every page is a range of that index. A slot an old
+ * migration left in conflict is no edit a branch takes over: the query leaves it out, so a page of
+ * them never ends the read early.
+ */
+export async function readPgLinkEdits(
+  sql: SQLClient,
+  input: {
+    readonly projectId: string
+    readonly sourceTypeId: string
+    readonly afterKey?: string
+    readonly limit: number
+  }
+): Promise<SnapshotLinkEditRow[]> {
+  const after = input.afterKey === undefined ? undefined : linkEditCursor(input.afterKey)
+  const edges =
+    after?.kind === "slot" ? [] : await readPgLinkEditsOf(sql, input, "edge", after, input.limit)
+  if (edges.length === input.limit) return edges
+
+  const slots = await readPgLinkEditsOf(
+    sql,
+    input,
+    "slot",
+    after?.kind === "slot" ? after : undefined,
+    input.limit - edges.length
+  )
+  return [...edges, ...slots]
+}
+
+async function readPgLinkEditsOf(
+  sql: SQLClient,
+  input: { readonly projectId: string; readonly sourceTypeId: string },
+  kind: "edge" | "slot",
+  after: LinkEditCursor | undefined,
+  limit: number
+): Promise<SnapshotLinkEditRow[]> {
+  const rows = await sql<
+    {
+      source_primary_id: string
+      link_id: string
+      target_type_id: string
+      target_primary_id: string
+      value: LinkOverride | LinkSlotOverride
+      updated_at: Date
+    }[]
+  >`
+    SELECT source_primary_id, link_id, target_type_id, target_primary_id, value, updated_at
+    FROM ontology_link_overrides
+    WHERE project_id = ${input.projectId} AND identity_kind = ${kind}
+      AND source_type_id = ${input.sourceTypeId}
+      AND NOT (identity_kind = 'slot' AND value ->> 'kind' = 'legacy-conflict')
+      ${
+        after
+          ? sql`AND (source_primary_id, link_id, target_type_id, target_primary_id)
+              > (${after.sourcePrimaryId}, ${after.linkId}, ${after.targetTypeId}, ${after.targetPrimaryId})`
+          : sql``
+      }
+    ORDER BY source_primary_id, link_id, target_type_id, target_primary_id
+    LIMIT ${limit}
+  `
+
+  return rows.map((row): SnapshotLinkEditRow => {
+    const key = JSON.stringify([
+      kind,
+      row.source_primary_id,
+      row.link_id,
+      row.target_type_id,
+      row.target_primary_id,
+    ])
+    const source = { objectTypeId: input.sourceTypeId, primaryId: row.source_primary_id }
+    const updatedAt = row.updated_at.toISOString()
+    return kind === "edge"
+      ? {
+          kind,
+          key,
+          ref: {
+            source,
+            linkId: row.link_id,
+            target: { objectTypeId: row.target_type_id, primaryId: row.target_primary_id },
+          },
+          value: row.value as LinkOverride,
+          updatedAt,
+        }
+      : { kind, key, source, linkId: row.link_id, value: row.value as LinkSlotOverride, updatedAt }
+  })
+}
+
+interface LinkEditCursor {
+  readonly kind: string
+  readonly sourcePrimaryId: string
+  readonly linkId: string
+  readonly targetTypeId: string
+  readonly targetPrimaryId: string
+}
+
+function linkEditCursor(key: string): LinkEditCursor {
+  const [kind, sourcePrimaryId, linkId, targetTypeId, targetPrimaryId] = JSON.parse(key) as string[]
+  return {
+    kind: `${kind}`,
+    sourcePrimaryId: `${sourcePrimaryId}`,
+    linkId: `${linkId}`,
+    targetTypeId: `${targetTypeId}`,
+    targetPrimaryId: `${targetPrimaryId}`,
+  }
 }

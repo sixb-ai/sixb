@@ -85,7 +85,15 @@ import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
 import { PgShareGrantStorage } from "./share-grant-storage"
 import { PgShareSessionStorage } from "./share-session-storage"
 import { type BranchSchemaState, PgSnapshotLoad, SNAPSHOT_LANES } from "./snapshot-load"
-import { readPgLatestPoints, readPgMemberships, readPgRanges, readPgVectors } from "./snapshot-read"
+import {
+  readPgLatestPoints,
+  readPgLinkEdits,
+  readPgMemberships,
+  readPgObjectEdits,
+  readPgRanges,
+  readPgSourceRoots,
+  readPgVectors,
+} from "./snapshot-read"
 import { isRetryableTransactionConflict } from "./storage-errors"
 import { registerPostgresStorageTestingAdapter } from "./testing"
 import {
@@ -474,6 +482,9 @@ export class PostgresStorage
       readLatestPoints: (input) => readPgLatestPoints(connection, input),
       readMemberships: ({ projectId }) => readPgMemberships(connection, projectId),
       readRanges: (input) => readPgRanges(connection, input),
+      readSourceRoots: (input) => readPgSourceRoots(connection, input),
+      readObjectEdits: (input) => readPgObjectEdits(connection, input),
+      readLinkEdits: (input) => readPgLinkEdits(connection, input),
     }
   }
 

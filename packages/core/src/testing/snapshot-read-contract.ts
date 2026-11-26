@@ -113,7 +113,15 @@ export function runSnapshotReadContractSuite<TStorage extends Storage>(
           const end = records.at(-1)
           expect(end).toEqual({
             kind: "end",
-            counts: { objects: 4, links: 3, points: 2, vectors: 2, users: 1 },
+            counts: {
+              objects: 4,
+              links: 3,
+              points: 2,
+              vectors: 2,
+              users: 1,
+              sourceRoots: 0,
+              edits: 0,
+            },
           })
         } finally {
           await production.closeBroker()

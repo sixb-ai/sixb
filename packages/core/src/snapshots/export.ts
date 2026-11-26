@@ -6,9 +6,11 @@ import {
   type LakeSliceHost,
   type LakeSliceReader,
   type LakeSliceToken,
+  readsVersionInFull,
   writeLakeSlice,
 } from "../datasets/lake-slices"
 import {
+  type AuthorizedObjectReader,
   createAuthorizedObjectReader,
   objectReadersIn,
   type ReaderSnapshotScope,
@@ -17,6 +19,8 @@ import {
   type SnapshotPage,
 } from "../execution/authorized-object-reader"
 import type { ExecutionScope } from "../execution/types"
+import type { DatasetVersionRef } from "../lake-storage/types"
+import type { OntologyObjectRef } from "../materialization/model"
 import { vectorConfiguration, vectorSources } from "../objects/vectors/profile"
 import { OntologyRegistry } from "../ontology"
 import type { ObjectType } from "../ontology/types"
@@ -32,6 +36,7 @@ import type { ObjectRow } from "../storage/objects/types"
 import type { ActiveOntologySource } from "../storage/ontology"
 import {
   isSnapshotReadStorage,
+  type SnapshotLinkEditRow,
   type SnapshotRange,
   type SnapshotReadStorage,
   type SnapshotReadView,
@@ -51,6 +56,7 @@ import {
   type SnapshotPoints,
   type SnapshotProjection,
   type SnapshotRecord,
+  type SnapshotSourceVersion,
   type SnapshotTypeManifest,
   type SnapshotVectors,
   toColumns,
@@ -264,7 +270,15 @@ async function takeSnapshot(
   const lake = settings.lake ? { source: lakeSourceOf(source), options: settings.lake } : undefined
   let slicing: Promise<SnapshotLakeSlice> | undefined
 
-  const counts = { objects: 0, links: 0, points: 0, vectors: 0, users: 0 }
+  const counts = {
+    objects: 0,
+    links: 0,
+    points: 0,
+    vectors: 0,
+    users: 0,
+    sourceRoots: 0,
+    edits: 0,
+  }
   const encode = (record: SnapshotRecord) =>
     encodeSnapshotFrame(record, { compress: settings.compress })
   const pushFrame = (frame: Uint8Array) => frames.push(frame)
@@ -294,12 +308,24 @@ async function takeSnapshot(
           // Every version an object was derived from was committed before the read began, so the
           // lake's point taken now is at or after it: the slice and the objects agree.
           const point = lake ? await currentLakePoint(lake.source.host) : undefined
+          const sources = await travellingSources({
+            source,
+            view: first,
+            scope,
+            active,
+            ...(lake && point !== undefined
+              ? { reader: lake.source.readerFor(executionScope) }
+              : {}),
+          })
           if (lake && point !== undefined) {
-            slicing = cutLakeSlice(lake.source, lake.options, executionScope, point)
+            const pinned = [...sources.values()].flatMap((travel) =>
+              travel.kind === "source" ? [travel.pin] : []
+            )
+            slicing = cutLakeSlice(lake.source, lake.options, executionScope, point, pinned)
             slicing.catch((error: unknown) => stop.abort(error))
           }
 
-          const manifest = snapshotManifest(source, { ...scope, user }, active, settings)
+          const manifest = snapshotManifest(source, { ...scope, user }, active, settings, sources)
           await push({
             ...manifest,
             takenAt,
@@ -310,7 +336,13 @@ async function takeSnapshot(
           counts.users = members.users.length
           await push(members)
 
-          const tasks = await exportTasks(source, manifest.types, first, views.length, settings)
+          const tasks: ExportTask[] = [
+            ...(await exportTasks(source, manifest.types, first, views.length, settings)),
+            ...sourceTasks(manifest.types),
+          ]
+          const travelling = new Set(
+            manifest.types.flatMap((type) => (type.projection?.source ? [type.objectTypeId] : []))
+          )
           // Every view settles before the provider ends the read, the failed ones included.
           const settled = await Promise.allSettled(
             views.map(async (view) => {
@@ -318,9 +350,16 @@ async function takeSnapshot(
               const work = { source, view, settings, encode, pushFrame, counts, stop: stop.signal }
               try {
                 for (let task = tasks.shift(); task; task = tasks.shift()) {
-                  await exportType({ ...work, ...task }, (input) =>
-                    readSnapshotPage(typeReader, input)
-                  )
+                  if (task.part === "sourceRoots") await exportSourceRoots({ ...work, ...task })
+                  else if (task.part === "objectEdits") {
+                    await exportObjectEdits({ ...work, ...task })
+                  } else if (task.part === "linkEdits") {
+                    await exportLinkEdits({ ...work, ...task }, scope, typeReader, travelling)
+                  } else {
+                    await exportType({ ...work, ...task }, (input) =>
+                      readSnapshotPage(typeReader, input)
+                    )
+                  }
                 }
               } catch (error) {
                 // A failed reader stops the others before their next page.
@@ -363,23 +402,285 @@ async function cutLakeSlice(
   lake: SnapshotLakeSource,
   options: SnapshotLakeOptions,
   scope: ExecutionScope,
-  point: string
+  point: string,
+  pinned: readonly DatasetVersionRef[]
 ): Promise<SnapshotLakeSlice> {
   const reader = lake.readerFor(scope)
   const slice = await writeLakeSlice(lake.host, reader, {
     point,
     path: options.path,
     branch: options.branch,
+    ...(pinned.length === 0 ? {} : { pinned }),
   })
 
   // A cut that fails after its slice is written deletes it: no one could read it, and it would
   // hold production's files for two weeks.
   try {
+    // A projection's source travels only with the version it applied, which the branch reads.
+    for (const pin of pinned) {
+      const held = slice.versions.some(
+        (version) => version.datasetId === pin.datasetId && version.versionId === pin.versionId
+      )
+      if (!held) {
+        throw new Error(
+          `[Sixb] The person no longer reads '${pin.datasetId}' in full at the version its projection applied. Take the snapshot again.`
+        )
+      }
+    }
+
     const token = await issueLakeSliceToken(lake.host, reader, { sliceId: slice.id })
     return { slice, token }
   } catch (error) {
     await dropLakeSlice(lake.host, slice.id)
     throw error
+  }
+}
+
+/** How a type a projection feeds travels: as its source, or as created objects, and why. */
+type SourceTravel =
+  | {
+      readonly kind: "source"
+      readonly projectionId: string
+      readonly version: SnapshotSourceVersion
+      readonly pin: DatasetVersionRef
+    }
+  | { readonly kind: "objects"; readonly reason: string }
+
+/**
+ * Which types a projection feeds travel as its source: those a branch's projection can continue.
+ * The branch reads the dataset in place at the version production applied, which the person
+ * reads in full; the person reads every object and property of the type, so the edits over it
+ * hide nothing; and the storage reads sources. Anything else travels as created objects.
+ */
+async function travellingSources(input: {
+  readonly source: SnapshotSource
+  readonly view: SnapshotReadView
+  readonly scope: ReaderSnapshotScope
+  readonly active: readonly ActiveOntologySource[]
+  readonly reader?: LakeSliceReader
+}): Promise<ReadonlyMap<string, SourceTravel>> {
+  const { source, view, scope, reader } = input
+  const travels = new Map<string, SourceTravel>()
+  const definitions = source.projections?.listObjects() ?? []
+  const applied = new Map(input.active.map((entry) => [entry.source.projectionId, entry]))
+  // Links a link projection feeds have no edit that makes them: their source does not travel, so
+  // the branch could not tell them from the type's own. Such a type travels as created objects.
+  const linkSources = new Set(
+    (source.projections?.listLinks() ?? []).map((definition) => definition.sourceObjectTypeId)
+  )
+
+  // A slice holds one version of a dataset: projections that applied two of one go as objects.
+  const versionsByDataset = new Map<string, Set<string>>()
+  for (const definition of definitions) {
+    const version = applied.get(definition.id)?.datasetVersion.versionId
+    if (version === undefined) continue
+    const versions = versionsByDataset.get(definition.datasetId) ?? new Set<string>()
+    versionsByDataset.set(definition.datasetId, versions.add(version))
+  }
+
+  for (const definition of definitions) {
+    const access = scope.types.get(definition.objectTypeId)
+    if (!access) continue
+
+    const objects = (reason: string) =>
+      travels.set(definition.objectTypeId, { kind: "objects", reason })
+    const version = applied.get(definition.id)
+
+    if (!reader) objects("the branch does not read production's datasets in place")
+    else if (!version) objects(NOT_APPLIED)
+    else if (linkSources.has(definition.objectTypeId)) {
+      objects("a link projection feeds links from it, and its source does not travel")
+    } else if (access.throughCondition || access.hiddenPropertyIds.length > 0) {
+      objects("the person does not read every object and property of the type")
+    } else if ((versionsByDataset.get(definition.datasetId)?.size ?? 0) > 1) {
+      objects("its dataset feeds projections that applied different versions of it")
+    } else if (
+      !(await readsVersionInFull(reader, definition.datasetId, version.datasetVersion.versionId))
+    ) {
+      objects("the person does not read its dataset in full")
+    } else {
+      const record = await view.storage.ontology.sources.getActive({
+        projectId: source.projectId,
+        source: { projectionId: definition.id },
+      })
+      if (!record) objects(NOT_APPLIED)
+      else {
+        travels.set(definition.objectTypeId, {
+          kind: "source",
+          projectionId: definition.id,
+          version: {
+            datasetVersion: record.datasetVersion,
+            projectionRevision: record.projectionRevision,
+            ownershipHash: record.ownershipHash,
+            ontologyRevision: record.ontologyRevision,
+          },
+          pin: { datasetId: definition.datasetId, versionId: record.datasetVersion.versionId },
+        })
+      }
+    }
+  }
+
+  return travels
+}
+
+const NOT_APPLIED = "its projection has not applied a version yet"
+
+/** A type that travels as its source sends its roots and its edits after its objects. */
+function sourceTasks(types: readonly SnapshotTypeManifest[]): ExportTask[] {
+  return types.flatMap((type) =>
+    type.projection?.source
+      ? [
+          { type, range: {}, part: "sourceRoots" as const },
+          { type, range: {}, part: "objectEdits" as const },
+          { type, range: {}, part: "linkEdits" as const },
+        ]
+      : []
+  )
+}
+
+/** Every live root of the type's source, a page a frame. */
+async function exportSourceRoots(work: TypeExport): Promise<void> {
+  const projectionId = work.type.projection?.projectionId
+  if (projectionId === undefined) return
+
+  for (let after: string | undefined; ; ) {
+    work.stop.throwIfAborted()
+    const roots = await work.view.readSourceRoots({
+      projectId: work.source.projectId,
+      projectionId,
+      limit: work.settings.pageSize,
+      ...(after === undefined ? {} : { afterRootKey: after }),
+    })
+    if (roots.length === 0) return
+
+    await pushInHalves(work, roots, (part) => ({
+      kind: "sourceRoots",
+      projectionId,
+      roots: part.map((root) => [root.root, root.assertions]),
+    }))
+    work.counts.sourceRoots += roots.length
+    after = roots.at(-1)?.rootKey
+  }
+}
+
+/** The edits over the type's objects, a page a frame, in primary id order. */
+async function exportObjectEdits(work: TypeExport): Promise<void> {
+  const objectTypeId = work.type.objectTypeId
+
+  for (let after: string | undefined; ; ) {
+    work.stop.throwIfAborted()
+    const edits = await work.view.readObjectEdits({
+      projectId: work.source.projectId,
+      objectTypeId,
+      limit: work.settings.pageSize,
+      ...(after === undefined ? {} : { afterPrimaryId: after }),
+    })
+    if (edits.length === 0) return
+
+    await pushInHalves(work, edits, (part) => ({
+      kind: "edits",
+      objectTypeId,
+      objects: part.map((edit) => [
+        edit.ref.primaryId,
+        edit.value,
+        edit.editedAt ?? null,
+        Date.parse(edit.updatedAt),
+      ]),
+      links: [],
+      slots: [],
+    }))
+    work.counts.edits += edits.length
+    after = edits.at(-1)?.ref.primaryId
+  }
+}
+
+/**
+ * The edits over links from the type's objects, a page a frame. An edit leaves only as the link it
+ * edits would: the person reads links of its definition, and the object it reaches. That object
+ * was exported, or its type travels as its source, whose roots hold even the objects an edit
+ * deleted. A cleared slot's anchor is such an object too, or the clear stays in production.
+ */
+async function exportLinkEdits(
+  work: TypeExport,
+  scope: ReaderSnapshotScope,
+  reader: AuthorizedObjectReader,
+  travelling: ReadonlySet<string>
+): Promise<void> {
+  const sourceTypeId = work.type.objectTypeId
+
+  for (let after: string | undefined; ; ) {
+    work.stop.throwIfAborted()
+    const page = await work.view.readLinkEdits({
+      projectId: work.source.projectId,
+      sourceTypeId,
+      limit: work.settings.pageSize,
+      ...(after === undefined ? {} : { afterKey: after }),
+    })
+    if (page.length === 0) return
+    after = page.at(-1)?.key
+
+    const targetOf = (edit: SnapshotLinkEditRow) =>
+      edit.kind === "edge" ? edit.ref.target : edit.value.target
+    const linkOf = (edit: SnapshotLinkEditRow) =>
+      edit.kind === "edge" ? edit.ref.linkId : edit.linkId
+    const readable = page.filter((edit) =>
+      scope.readsLink(sourceTypeId, linkOf(edit), targetOf(edit).objectTypeId)
+    )
+    const reached = await reachedTargets(
+      reader,
+      readable.map(targetOf).filter((target) => !travelling.has(target.objectTypeId))
+    )
+    const kept = readable.filter((edit) => {
+      const target = targetOf(edit)
+      return travelling.has(target.objectTypeId) || reached.has(objectKey(target))
+    })
+    if (kept.length === 0) continue
+
+    await pushInHalves(work, kept, (part) => ({
+      kind: "edits",
+      objectTypeId: sourceTypeId,
+      objects: [],
+      links: part.flatMap((edit) =>
+        edit.kind === "edge" ? [[edit.ref, edit.value, Date.parse(edit.updatedAt)] as const] : []
+      ),
+      slots: part.flatMap((edit) =>
+        edit.kind === "slot"
+          ? [[edit.source.primaryId, edit.linkId, edit.value, Date.parse(edit.updatedAt)] as const]
+          : []
+      ),
+    }))
+    work.counts.edits += kept.length
+  }
+}
+
+/** The objects among these the reader reads at the snapshot's moment. */
+async function reachedTargets(
+  reader: AuthorizedObjectReader,
+  targets: readonly OntologyObjectRef[]
+): Promise<ReadonlySet<string>> {
+  if (targets.length === 0) return new Set()
+
+  const rows = await reader.getByPrimaryIdBatch({ items: targets })
+  return new Set([...rows.values()].map((row) => objectKey(row)))
+}
+
+function objectKey(ref: { readonly objectTypeId: string; readonly primaryId: string }): string {
+  return JSON.stringify([ref.objectTypeId, ref.primaryId])
+}
+
+/** Encode rows as one record, or in halves when they pass a frame's limit. */
+async function pushInHalves<T>(
+  work: TypeExport,
+  rows: readonly T[],
+  record: (rows: readonly T[]) => SnapshotRecord
+): Promise<void> {
+  try {
+    await work.pushFrame(await work.encode(record(rows)))
+  } catch (error) {
+    if (!(error instanceof SnapshotFrameTooLarge) || rows.length < 2) throw error
+    const middle = Math.ceil(rows.length / 2)
+    await pushInHalves(work, rows.slice(0, middle), record)
+    await pushInHalves(work, rows.slice(middle), record)
   }
 }
 
@@ -458,9 +759,10 @@ function snapshotManifest(
   source: SnapshotSource,
   scope: ReaderSnapshotScope & { readonly user: UserRef },
   active: readonly ActiveOntologySource[],
-  settings: ExportSettings
+  settings: ExportSettings,
+  sources: ReadonlyMap<string, SourceTravel>
 ): Omit<SnapshotManifest, "takenAt"> {
-  const projections = projectionsByType(source, active, scope.canViewDataset)
+  const projections = projectionsByType(source, active, scope.canViewDataset, sources)
 
   const types: SnapshotTypeManifest[] = []
   const unreadableTypeIds: string[] = []
@@ -502,7 +804,8 @@ function snapshotManifest(
 function projectionsByType(
   source: SnapshotSource,
   active: readonly ActiveOntologySource[],
-  canViewDataset: (datasetId: string) => boolean
+  canViewDataset: (datasetId: string) => boolean,
+  sources: ReadonlyMap<string, SourceTravel>
 ): ReadonlyMap<string, SnapshotProjection> {
   const definitions = source.projections?.listObjects() ?? []
   if (definitions.length === 0) return new Map()
@@ -512,6 +815,7 @@ function projectionsByType(
   return new Map(
     definitions.map((definition) => {
       const version = applied.get(definition.id)
+      const travel = sources.get(definition.objectTypeId)
       return [
         definition.objectTypeId,
         {
@@ -526,6 +830,8 @@ function projectionsByType(
                 },
               }
             : {}),
+          ...(travel?.kind === "source" ? { source: travel.version } : {}),
+          ...(travel?.kind === "objects" ? { notReprojectable: travel.reason } : {}),
         },
       ]
     })
@@ -618,6 +924,8 @@ interface TypeExport {
 interface ExportTask {
   readonly type: SnapshotTypeManifest
   readonly range: SnapshotRange
+  /** What of the type the task sends: its objects by default. */
+  readonly part?: "sourceRoots" | "objectEdits" | "linkEdits"
 }
 
 /** What one page reads from storage: its objects and links, their latest points, their vectors. */

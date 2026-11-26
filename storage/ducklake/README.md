@@ -786,7 +786,8 @@ lock: production's reads and writes go on while a slice is cut.
 - **Inlined rows** are read back through DuckLake by row id: a PostgreSQL catalog stores them
   encoded (strings as `bytea`, timestamps as text), the slice as a DuckDB catalog does. DuckLake
   prunes every file by its row-id range, so this reads no data file. Inlined deletes are applied
-  by the copies, not copied.
+  by the copies, not copied. An inlined table with no row live at the version is left out: it
+  may hold a later schema's rows, such as after a column added since a pinned version.
 - **Copies** are written by production's DuckDB, once, beside the data path
   (`<dataPath>-branch-copies/`, never under it, where DuckLake's orphan search would delete them).
   Each one is the file read at its version, with each row's id (`_ducklake_internal_row_id`) and

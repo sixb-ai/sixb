@@ -1,5 +1,14 @@
 import type { JsonValue } from "../json"
-import type { ObjectOverride, OntologyObjectRef } from "../materialization/model"
+import type {
+  LinkOverride,
+  LinkSlotOverride,
+  ObjectOverride,
+  OntologyLinkRef,
+  OntologyObjectRef,
+  PinnedDatasetVersion,
+  ProjectionEntityRef,
+  ProjectionSourceAssertion,
+} from "../materialization/model"
 import type { GroupMembershipRecord } from "./auth"
 import type { OntologyCommitRecord } from "./ontology/commits"
 import type { ExactArtifactHolderWrite, ExactUniqueValueClaim } from "./ontology/materializations"
@@ -65,6 +74,33 @@ export interface SnapshotReadView {
    * read side by side; none when the type is too small to split. Optional: without it, each
    * type is read whole.
    */
+  /**
+   * Live roots of a projection's active source, in root key order after `afterRootKey`, each with
+   * what it asserts.
+   */
+  readSourceRoots(input: {
+    readonly projectId: string
+    readonly projectionId: string
+    readonly afterRootKey?: string
+    readonly limit: number
+  }): Promise<readonly SnapshotSourceRoot[]>
+  /** A page of the edits over a type's objects, in primary id order after `afterPrimaryId`. */
+  readObjectEdits(input: {
+    readonly projectId: string
+    readonly objectTypeId: string
+    readonly afterPrimaryId?: string
+    readonly limit: number
+  }): Promise<readonly SnapshotObjectEdit[]>
+  /**
+   * A page of the edits over links from a type's objects, edges and cardinality-one slots, in
+   * `key` order after `afterKey`.
+   */
+  readLinkEdits(input: {
+    readonly projectId: string
+    readonly sourceTypeId: string
+    readonly afterKey?: string
+    readonly limit: number
+  }): Promise<readonly SnapshotLinkEditRow[]>
   readRanges?(input: {
     readonly projectId: string
     readonly objectTypeId: string
@@ -81,6 +117,45 @@ export interface SnapshotReadView {
 export interface SnapshotRange {
   readonly startToken?: string
   readonly lastPrimaryId?: string
+}
+
+export interface SnapshotSourceRoot {
+  /** `projectionEntityKey(root)`, the order roots are read in. */
+  readonly rootKey: string
+  readonly root: ProjectionEntityRef
+  readonly assertions: readonly ProjectionSourceAssertion[]
+}
+
+export interface SnapshotTypeEdits {
+  readonly objects: readonly SnapshotObjectEdit[]
+  readonly links: readonly SnapshotLinkEdit[]
+  readonly slots: readonly SnapshotLinkSlotEdit[]
+}
+
+/** A link edit as a page reads it: `key` orders the pages, and means nothing else. */
+export type SnapshotLinkEditRow =
+  | ({ readonly kind: "edge"; readonly key: string } & SnapshotLinkEdit)
+  | ({ readonly kind: "slot"; readonly key: string } & SnapshotLinkSlotEdit)
+
+export interface SnapshotObjectEdit {
+  readonly ref: OntologyObjectRef
+  readonly value: ObjectOverride
+  /** When each property the edit sets was last edited. */
+  readonly editedAt?: Readonly<Record<string, string>>
+  readonly updatedAt: string
+}
+
+export interface SnapshotLinkEdit {
+  readonly ref: OntologyLinkRef
+  readonly value: LinkOverride
+  readonly updatedAt: string
+}
+
+export interface SnapshotLinkSlotEdit {
+  readonly source: OntologyObjectRef
+  readonly linkId: string
+  readonly value: LinkSlotOverride
+  readonly updatedAt: string
 }
 
 export interface SnapshotLoadInput {
@@ -105,14 +180,47 @@ export interface SnapshotLoadBatch {
   readonly uniqueValues?: readonly ExactUniqueValueClaim[]
   readonly artifactHolders?: readonly ExactArtifactHolderWrite[]
   readonly vectors?: readonly StoredObjectVector[]
+  /**
+   * A projection's active source, taken over from production, before any of its roots. The
+   * provider counts its roots and assertions once the load wrote them.
+   */
+  readonly sources?: readonly SnapshotSourceWrite[]
+  readonly sourceRoots?: readonly SnapshotSourceRootWrite[]
+  readonly edits?: SnapshotTypeEdits
 }
 
-/** An object created by the base commit: its effective row and the edit that creates it. */
+/**
+ * A projection's source, active as of the base commit, with production's identity: the branch's
+ * projection continues from it when its own identity is the same.
+ */
+export interface SnapshotSourceWrite {
+  readonly projectionId: string
+  readonly materializationId: string
+  readonly datasetVersion: PinnedDatasetVersion
+  readonly projectionRevision: string
+  readonly ownershipHash: string
+  readonly ontologyRevision: string
+}
+
+export interface SnapshotSourceRootWrite {
+  readonly projectionId: string
+  readonly materializationId: string
+  readonly rootKey: string
+  readonly root: ProjectionEntityRef
+  /** The root's place among the source's roots, from 0. */
+  readonly stagingOrdinal: number
+  readonly assertions: readonly ProjectionSourceAssertion[]
+}
+
+/**
+ * An object of the base commit: its effective row, and the edit that creates it. An object a
+ * source asserts has none: its source and the edits over it (`edits`) make it what it is.
+ */
 export interface SnapshotObjectWrite {
   readonly objectTypeId: string
   readonly primaryId: string
   readonly properties: Readonly<Record<string, JsonValue>>
-  readonly override: Extract<ObjectOverride, { readonly kind: "create" }>
+  readonly override?: Extract<ObjectOverride, { readonly kind: "create" }>
   readonly createdAt: string
   readonly updatedAt: string
 }
@@ -128,7 +236,8 @@ export interface SnapshotLinkWrite {
   readonly targetTypeId: string
   readonly targetId: string
   readonly properties?: Readonly<Record<string, JsonValue>>
-  readonly identity: "edge" | "slot"
+  /** The edit that creates it, or none for a link a source asserts. */
+  readonly identity: "edge" | "slot" | "source"
   readonly createdAt: string
   readonly updatedAt: string
 }

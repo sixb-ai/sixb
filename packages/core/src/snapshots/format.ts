@@ -1,6 +1,15 @@
 import { promisify } from "node:util"
 import { zstdCompress, zstdDecompress } from "node:zlib"
 import type { JsonValue } from "../json"
+import type {
+  LinkOverride,
+  LinkSlotOverride,
+  ObjectOverride,
+  OntologyLinkRef,
+  PinnedDatasetVersion,
+  ProjectionEntityRef,
+  ProjectionSourceAssertion,
+} from "../materialization/model"
 import type { UserRef } from "../ontology/user-ref"
 import type { GroupMembershipSource, UserStatus } from "../storage/auth"
 
@@ -13,13 +22,13 @@ import type { GroupMembershipSource, UserStatus } from "../storage/auth"
  * Objects are columnar: one array per property across a page, which compresses to about half of
  * one JSON object per row and decodes faster.
  */
-export const SNAPSHOT_SIGNATURE = new Uint8Array([0x53, 0x49, 0x58, 0x42, 0x53, 0x4e, 0x50, 0x01])
+export const SNAPSHOT_SIGNATURE = new Uint8Array([0x53, 0x49, 0x58, 0x42, 0x53, 0x4e, 0x50, 0x02])
 
 /**
  * The format's version, in the signature's last byte and in the manifest. A reader refuses any
- * other: a new record kind, such as a projection's source rows, comes with the next version.
+ * other. Version 2 adds a projection's source roots and the edits made over them.
  */
-export const SNAPSHOT_FORMAT = 1
+export const SNAPSHOT_FORMAT = 2
 
 const FRAME_HEADER_BYTES = 5
 const MAX_FRAME_BYTES = 512 * 1024 * 1024
@@ -36,6 +45,8 @@ export type SnapshotRecord =
   | SnapshotLinks
   | SnapshotPoints
   | SnapshotVectors
+  | SnapshotSourceRoots
+  | SnapshotEdits
   | SnapshotEnd
 
 /** What the snapshot holds, written first. */
@@ -89,6 +100,22 @@ export interface SnapshotProjection {
     readonly datasetVersionId: string
     readonly projectionRevision: string
   }
+  /**
+   * Set when the type travels as its projection's source roots and the edits over them, so the
+   * projection continues on the branch from the version production applied. The person reads the
+   * dataset in full at that version, and the lake slice holds it.
+   */
+  readonly source?: SnapshotSourceVersion
+  /** Why the type travels as created objects instead, which its projection cannot update. */
+  readonly notReprojectable?: string
+}
+
+/** The source production's projection last activated, as the branch takes it over. */
+export interface SnapshotSourceVersion {
+  readonly datasetVersion: PinnedDatasetVersion
+  readonly projectionRevision: string
+  readonly ownershipHash: string
+  readonly ontologyRevision: string
 }
 
 export interface SnapshotMembers {
@@ -162,6 +189,31 @@ export interface SnapshotVectors {
   readonly values: string
 }
 
+/** Live roots of a projection's source, each with what it asserts. */
+export interface SnapshotSourceRoots {
+  readonly kind: "sourceRoots"
+  readonly projectionId: string
+  readonly roots: readonly (readonly [ProjectionEntityRef, readonly ProjectionSourceAssertion[]])[]
+}
+
+/**
+ * The edits over a type a projection feeds: of its objects, `[primaryId, override, editedAt,
+ * updatedAt]`, and of the links from them, `[ref, override, updatedAt]`, a cardinality-one link's
+ * slot by its source and link.
+ */
+export interface SnapshotEdits {
+  readonly kind: "edits"
+  readonly objectTypeId: string
+  readonly objects: readonly (readonly [
+    string,
+    ObjectOverride,
+    Readonly<Record<string, string>> | null,
+    number,
+  ])[]
+  readonly links: readonly (readonly [OntologyLinkRef, LinkOverride, number])[]
+  readonly slots: readonly (readonly [string, string, LinkSlotOverride, number])[]
+}
+
 export interface SnapshotEnd {
   readonly kind: "end"
   readonly counts: SnapshotCounts
@@ -173,6 +225,8 @@ export interface SnapshotCounts {
   readonly points: number
   readonly vectors: number
   readonly users: number
+  readonly sourceRoots: number
+  readonly edits: number
 }
 
 /** A record past the frame limit: the writer splits its rows and encodes each half. */

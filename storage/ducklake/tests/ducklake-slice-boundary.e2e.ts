@@ -27,6 +27,10 @@ const stores = defineDataset("boundary.stores", {
   schema: [col("id", "string"), col("city", "string")],
   partitionBy: ["city"],
 })
+const peopleWithTeam = defineDataset("boundary.people", {
+  schema: [...people.schema.columns, col("team", "string", { nullable: true })],
+  primaryKey: "id",
+})
 const customers = defineDataset("boundary.customers", {
   schema: [col("email", "string"), col("revision", "int64"), col("name", "string")],
   primaryKey: "email",
@@ -382,6 +386,37 @@ describe("a slice's boundary", () => {
     },
     SLOW_TEST_MS
   )
+
+  // Red check: in catalog-slice.ts `copyInlinedRows`, copy an inlined table that holds no live
+  // row too: the cut binds the added column at a version before it, and refuses.
+  lakeTest("a slice pinned before a column was added holds its version's rows", async (lake) => {
+    await lake.write(people, [person(1, 1_000), person(2, 2_000)])
+    const pinned = await lake.production.getLatestVersion(people.id)
+    if (!pinned) throw new Error("Missing version")
+
+    // A deploy adds a column, and nothing is written since: the version a projection applied
+    // stays the one before it.
+    await lake.production.createDataset(peopleWithTeam)
+    const point = await lake.production.forks.currentPoint()
+    const version = { datasetId: people.id, versionId: pinned.versionId }
+
+    const slicePath = join(lake.rootDir, "pinned.ducklake")
+    const files = await lake.production.forks.writeSlice({
+      point,
+      versions: [version],
+      path: slicePath,
+      record: async () => undefined,
+    })
+
+    const branch = lake.openBranch(slicePath, await lake.serve(files))
+    try {
+      expect(await sorted(branch.readRows(version))).toEqual(
+        await sorted(lake.production.readRows(version))
+      )
+    } finally {
+      await branch.close()
+    }
+  })
 
   lakeTest("partition values of any text reach their file", async (lake) => {
     await lake.write(stores, [
