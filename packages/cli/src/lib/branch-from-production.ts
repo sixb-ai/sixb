@@ -49,7 +49,15 @@ interface BranchRecord {
   }
   /** What the copy held once loaded, and the types it left out: what a hosted branch reports. */
   readonly objects?: number
-  readonly skipped?: readonly { readonly objectTypeId: string; readonly reason: string }[]
+  readonly skipped?: BranchLoadedCopy["skipped"]
+  /** The types the person reads only in part: the branch's migrations ran on the rest. */
+  readonly partial?: BranchLoadedCopy["partial"]
+  /** What a deploy of the branch's code would refuse in what the copy held. */
+  readonly refusedByDeploy?: BranchLoadedCopy["refusedByDeploy"]
+  /** What a deploy would check that the copy can't. */
+  readonly unchecked?: BranchLoadedCopy["unchecked"]
+  /** The branch's migrations the copy ran, by type. */
+  readonly migrated?: BranchLoadedCopy["migrated"]
 }
 
 type BranchIndex = Record<string, BranchRecord>
@@ -173,6 +181,11 @@ export interface BranchFromProduction {
   readonly dropped: readonly string[]
   /** What production's datasets give the branch, or why they give it nothing. */
   readonly lake: "in place" | string
+  /** What the copy left out, holds in part, and the migrations it ran. */
+  readonly copy: Pick<
+    BranchLoadedCopy,
+    "skipped" | "partial" | "refusedByDeploy" | "unchecked" | "migrated"
+  >
 }
 
 /**
@@ -251,7 +264,15 @@ export async function branchFromProduction(
     runtime,
   }) as LoadedSixbHost
 
-  return { host, namespace: name, copied: fetched, takenAt: record.takenAt, dropped, lake }
+  return {
+    host,
+    namespace: name,
+    copied: fetched,
+    takenAt: record.takenAt,
+    dropped,
+    lake,
+    copy: copyReport(record),
+  }
 }
 
 export interface HostedBranchFromProductionInput {
@@ -341,7 +362,35 @@ export async function hostedBranchFromProduction(
     runtime,
   }) as LoadedSixbHost
 
-  return { host, namespace: name, copied: fetched, takenAt: record.takenAt, dropped: [], lake }
+  return {
+    host,
+    namespace: name,
+    copied: fetched,
+    takenAt: record.takenAt,
+    dropped: [],
+    lake,
+    copy: copyReport(record),
+  }
+}
+
+/** What the copy says of its types; a record an earlier CLI wrote reads with its defaults. */
+function copyReport(record: BranchRecord): BranchFromProduction["copy"] {
+  const { skipped, partial, refusedByDeploy, unchecked, migrated } = parseLoadedCopy({
+    takenAt: record.takenAt,
+    objects: record.objects ?? 0,
+    ...copyTypes(record),
+  })!
+  return { skipped, partial, refusedByDeploy, unchecked, migrated }
+}
+
+function copyTypes(record: BranchRecord) {
+  return {
+    skipped: record.skipped ?? [],
+    partial: record.partial ?? [],
+    refusedByDeploy: record.refusedByDeploy ?? [],
+    unchecked: record.unchecked ?? [],
+    migrated: record.migrated ?? [],
+  }
 }
 
 /** The copy a branch's runtime loaded, as its index records it, or null before it has. */
@@ -357,7 +406,7 @@ export async function loadedCopyOf(
   return parseLoadedCopy({
     takenAt: record.takenAt,
     objects: record.objects ?? 0,
-    skipped: record.skipped ?? [],
+    ...copyTypes(record),
     skippedDatasets: record.lake?.skipped ?? [],
     lakeSliceId: record.lake?.sliceId ?? null,
   })
@@ -486,7 +535,33 @@ async function loadCopy(input: {
       apiUrl: pending.apiUrl,
       profile: pending.profile,
       objects: report.types.reduce((total, type) => total + type.objects, 0),
-      skipped: report.skipped.map(({ objectTypeId, reason }) => ({ objectTypeId, reason })),
+      skipped: report.skipped.map((skip) => ({ ...skip, findings: [...skip.findings] })),
+      partial: report.types.flatMap((type) =>
+        type.hiddenPropertyIds.length > 0 || type.throughCondition
+          ? [
+              {
+                objectTypeId: type.objectTypeId,
+                hiddenPropertyIds: [...type.hiddenPropertyIds],
+                throughCondition: type.throughCondition,
+              },
+            ]
+          : []
+      ),
+      refusedByDeploy: report.types.flatMap((type) =>
+        type.refusedByDeploy.length > 0
+          ? [{ objectTypeId: type.objectTypeId, findings: [...type.refusedByDeploy] }]
+          : []
+      ),
+      unchecked: report.types.flatMap((type) =>
+        type.unchecked.length > 0
+          ? [{ objectTypeId: type.objectTypeId, lines: [...type.unchecked] }]
+          : []
+      ),
+      migrated: report.types.flatMap((type) =>
+        type.migrationIds.length > 0
+          ? [{ objectTypeId: type.objectTypeId, migrationIds: [...type.migrationIds] }]
+          : []
+      ),
       ...(rest
         ? {
             credential: rest.lake.credential,

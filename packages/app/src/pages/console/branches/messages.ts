@@ -1,5 +1,16 @@
 import { defineMessages, type MessageTree, plural, type Translation } from "@sixb/ui/lib/i18n"
 
+/** What the copy's summary counts. */
+interface CopySummary {
+  /** Types left out. */
+  readonly types: number
+  readonly datasets: number
+  /** Types whose values the copy holds only some of. */
+  readonly inPart: number
+  /** Types the branch's migrations ran on. */
+  readonly migrated: number
+}
+
 /** Source catalog of Console › Branches. */
 export const en = {
   title: "Branches",
@@ -103,7 +114,7 @@ export const en = {
       "Production stopped this branch: it held up production's database, or its code reached a database it may not use. What it wrote is kept: start it to keep going.",
   },
   notCopied: {
-    summary: (types: number, datasets: number) => {
+    summary: ({ types, datasets, inPart, migrated }: CopySummary) => {
       const parts = [
         ...(types > 0 ? [plural("en", types, { one: "1 type", other: `${types} types` })] : []),
         ...(datasets > 0
@@ -111,10 +122,45 @@ export const en = {
           : []),
       ]
       const verb = types + datasets === 1 ? "wasn't" : "weren't"
-      return `${parts.join(" and ")} ${verb} copied`
+      return [
+        ...(parts.length > 0 ? [`${parts.join(" and ")} ${verb} copied`] : []),
+        ...(inPart > 0
+          ? [
+              plural("en", inPart, {
+                one: "1 type copied in part",
+                other: `${inPart} types copied in part`,
+              }),
+            ]
+          : []),
+        ...(migrated > 0
+          ? [
+              plural("en", migrated, {
+                one: "1 type migrated",
+                other: `${migrated} types migrated`,
+              }),
+            ]
+          : []),
+      ].join(", ")
     },
     unreadable: (name: string) => `${name} can't read it in production.`,
-    changed: "Its definition changed on this branch, so production's rows no longer fit.",
+    removed: "This branch no longer has it.",
+    primary: "Its primary key changed on this branch, which isn't supported yet.",
+    migrating: "Production was updating it when the copy was taken. Refresh to copy it again.",
+    conflict: "Two of this branch's migrations change the same thing in it.",
+    unfit:
+      "Its definition changed on this branch, and no migration makes production's rows fit it yet.",
+    removedValues:
+      "This branch removed some of its values, so they weren't copied. Production needs a migration to remove them too.",
+    migrated: "This branch's migrations updated its rows on this copy.",
+    unchecked:
+      "Some of this branch's changes to it couldn't be checked here: the copy doesn't hold the values they touch.",
+    inPart: (name: string, properties: string, someObjects: boolean) =>
+      [
+        ...(properties
+          ? [`${name} can't read ${properties}, so those values weren't copied.`]
+          : []),
+        ...(someObjects ? [`${name} reads only some of its rows: the others weren't copied.`] : []),
+      ].join(" "),
     hiddenColumns: (name: string, columns: string) =>
       `${name} can't read every column (${columns}), so none of it was copied.`,
     someone: "The person who started it",
@@ -256,7 +302,7 @@ export const fr: Translation<BranchesMessages> = {
       "La production a arrêté cette branche : elle bloquait la base de production, ou son code a atteint une base qu’il ne peut pas utiliser. Ce qu’elle a écrit est conservé : démarrez-la pour continuer.",
   },
   notCopied: {
-    summary: (types: number, datasets: number) => {
+    summary: ({ types, datasets, inPart, migrated }: CopySummary) => {
       const parts = [
         ...(types > 0 ? [plural("fr", types, { one: "1 type", other: `${types} types` })] : []),
         ...(datasets > 0
@@ -269,11 +315,43 @@ export const fr: Translation<BranchesMessages> = {
           : []),
       ]
       const verb = types + datasets === 1 ? "n’a pas été copié" : "n’ont pas été copiés"
-      return `${parts.join(" et ")} ${verb}`
+      return [
+        ...(parts.length > 0 ? [`${parts.join(" et ")} ${verb}`] : []),
+        ...(inPart > 0
+          ? [
+              plural("fr", inPart, {
+                one: "1 type copié en partie",
+                other: `${inPart} types copiés en partie`,
+              }),
+            ]
+          : []),
+        ...(migrated > 0
+          ? [plural("fr", migrated, { one: "1 type migré", other: `${migrated} types migrés` })]
+          : []),
+      ].join(", ")
     },
     unreadable: (name: string) => `${name} ne peut pas le lire en production.`,
-    changed:
-      "Sa définition a changé sur cette branche : les lignes de production n’y correspondent plus.",
+    removed: "Cette branche ne l’a plus.",
+    primary: "Sa clé primaire a changé sur cette branche, ce qui n’est pas encore possible.",
+    migrating:
+      "La production le mettait à jour pendant la copie. Actualisez la branche pour le copier à nouveau.",
+    conflict: "Deux migrations de cette branche y changent la même chose.",
+    unfit:
+      "Sa définition a changé sur cette branche, et aucune migration n’y fait encore correspondre les lignes de production.",
+    removedValues:
+      "Cette branche a retiré certaines de ses valeurs : elles n’ont pas été copiées. La production a besoin d’une migration pour les retirer aussi.",
+    migrated: "Les migrations de cette branche ont mis à jour ses lignes sur cette copie.",
+    unchecked:
+      "Certains changements de cette branche n’ont pas pu y être vérifiés : la copie ne contient pas les valeurs qu’ils touchent.",
+    inPart: (name: string, properties: string, someObjects: boolean) =>
+      [
+        ...(properties
+          ? [`${name} ne peut pas lire ${properties} : ces valeurs n’ont pas été copiées.`]
+          : []),
+        ...(someObjects
+          ? [`${name} ne lit qu’une partie de ses lignes : les autres n’ont pas été copiées.`]
+          : []),
+      ].join(" "),
     hiddenColumns: (name: string, columns: string) =>
       `${name} ne peut pas lire toutes ses colonnes (${columns}) : rien n’en a été copié.`,
     someone: "La personne qui l’a démarrée",

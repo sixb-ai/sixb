@@ -25391,11 +25391,111 @@
                                     "objectTypeId": {
                                       "type": "string"
                                     },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "unreadable",
+                                        "removed",
+                                        "primary",
+                                        "migrating",
+                                        "conflict",
+                                        "unfit"
+                                      ]
+                                    },
                                     "reason": {
                                       "type": "string"
+                                    },
+                                    "findings": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
                                     }
                                   },
-                                  "required": ["objectTypeId", "reason"],
+                                  "required": ["objectTypeId", "kind", "reason", "findings"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "partial": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "objectTypeId": {
+                                      "type": "string"
+                                    },
+                                    "hiddenPropertyIds": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "throughCondition": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "objectTypeId",
+                                    "hiddenPropertyIds",
+                                    "throughCondition"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "refusedByDeploy": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "objectTypeId": {
+                                      "type": "string"
+                                    },
+                                    "findings": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "required": ["objectTypeId", "findings"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "unchecked": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "objectTypeId": {
+                                      "type": "string"
+                                    },
+                                    "lines": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "required": ["objectTypeId", "lines"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "migrated": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "objectTypeId": {
+                                      "type": "string"
+                                    },
+                                    "migrationIds": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "required": ["objectTypeId", "migrationIds"],
                                   "additionalProperties": false
                                 }
                               },
@@ -25431,6 +25531,10 @@
                               "takenAt",
                               "objects",
                               "skipped",
+                              "partial",
+                              "refusedByDeploy",
+                              "unchecked",
+                              "migrated",
                               "skippedDatasets",
                               "lakeSliceId"
                             ],
@@ -25699,11 +25803,107 @@
                               "objectTypeId": {
                                 "type": "string"
                               },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "unreadable",
+                                  "removed",
+                                  "primary",
+                                  "migrating",
+                                  "conflict",
+                                  "unfit"
+                                ]
+                              },
                               "reason": {
                                 "type": "string"
+                              },
+                              "findings": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
                               }
                             },
-                            "required": ["objectTypeId", "reason"],
+                            "required": ["objectTypeId", "kind", "reason", "findings"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "partial": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "hiddenPropertyIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "throughCondition": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["objectTypeId", "hiddenPropertyIds", "throughCondition"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "refusedByDeploy": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "findings": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["objectTypeId", "findings"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "unchecked": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "lines": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["objectTypeId", "lines"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "migrated": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "migrationIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["objectTypeId", "migrationIds"],
                             "additionalProperties": false
                           }
                         },
@@ -25739,6 +25939,10 @@
                         "takenAt",
                         "objects",
                         "skipped",
+                        "partial",
+                        "refusedByDeploy",
+                        "unchecked",
+                        "migrated",
                         "skippedDatasets",
                         "lakeSliceId"
                       ],
@@ -25942,11 +26146,107 @@
                               "objectTypeId": {
                                 "type": "string"
                               },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "unreadable",
+                                  "removed",
+                                  "primary",
+                                  "migrating",
+                                  "conflict",
+                                  "unfit"
+                                ]
+                              },
                               "reason": {
                                 "type": "string"
+                              },
+                              "findings": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
                               }
                             },
-                            "required": ["objectTypeId", "reason"],
+                            "required": ["objectTypeId", "kind", "reason", "findings"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "partial": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "hiddenPropertyIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "throughCondition": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["objectTypeId", "hiddenPropertyIds", "throughCondition"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "refusedByDeploy": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "findings": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["objectTypeId", "findings"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "unchecked": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "lines": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["objectTypeId", "lines"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "migrated": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "migrationIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["objectTypeId", "migrationIds"],
                             "additionalProperties": false
                           }
                         },
@@ -25982,6 +26282,10 @@
                         "takenAt",
                         "objects",
                         "skipped",
+                        "partial",
+                        "refusedByDeploy",
+                        "unchecked",
+                        "migrated",
                         "skippedDatasets",
                         "lakeSliceId"
                       ],
@@ -26222,11 +26526,107 @@
                               "objectTypeId": {
                                 "type": "string"
                               },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "unreadable",
+                                  "removed",
+                                  "primary",
+                                  "migrating",
+                                  "conflict",
+                                  "unfit"
+                                ]
+                              },
                               "reason": {
                                 "type": "string"
+                              },
+                              "findings": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
                               }
                             },
-                            "required": ["objectTypeId", "reason"],
+                            "required": ["objectTypeId", "kind", "reason", "findings"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "partial": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "hiddenPropertyIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "throughCondition": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["objectTypeId", "hiddenPropertyIds", "throughCondition"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "refusedByDeploy": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "findings": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["objectTypeId", "findings"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "unchecked": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "lines": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["objectTypeId", "lines"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "migrated": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "migrationIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["objectTypeId", "migrationIds"],
                             "additionalProperties": false
                           }
                         },
@@ -26262,6 +26662,10 @@
                         "takenAt",
                         "objects",
                         "skipped",
+                        "partial",
+                        "refusedByDeploy",
+                        "unchecked",
+                        "migrated",
                         "skippedDatasets",
                         "lakeSliceId"
                       ],
@@ -26502,11 +26906,107 @@
                               "objectTypeId": {
                                 "type": "string"
                               },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "unreadable",
+                                  "removed",
+                                  "primary",
+                                  "migrating",
+                                  "conflict",
+                                  "unfit"
+                                ]
+                              },
                               "reason": {
                                 "type": "string"
+                              },
+                              "findings": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
                               }
                             },
-                            "required": ["objectTypeId", "reason"],
+                            "required": ["objectTypeId", "kind", "reason", "findings"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "partial": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "hiddenPropertyIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "throughCondition": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["objectTypeId", "hiddenPropertyIds", "throughCondition"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "refusedByDeploy": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "findings": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["objectTypeId", "findings"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "unchecked": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "lines": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["objectTypeId", "lines"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "migrated": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "migrationIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["objectTypeId", "migrationIds"],
                             "additionalProperties": false
                           }
                         },
@@ -26542,6 +27042,10 @@
                         "takenAt",
                         "objects",
                         "skipped",
+                        "partial",
+                        "refusedByDeploy",
+                        "unchecked",
+                        "migrated",
                         "skippedDatasets",
                         "lakeSliceId"
                       ],

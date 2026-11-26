@@ -11,6 +11,7 @@ export {
 } from "./export"
 export { readSnapshotFile, spoolSnapshot, writeSnapshotFile } from "./files"
 export type { SnapshotCounts, SnapshotManifest, SnapshotTypeManifest } from "./format"
+export { SNAPSHOT_SKIP_KINDS } from "./format"
 export {
   type ImportedSnapshotType,
   type ImportSnapshotInput,

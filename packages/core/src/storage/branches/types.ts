@@ -1,3 +1,4 @@
+import type { SnapshotSkipKind } from "../../snapshots/format"
 /**
  * A git branch of the project that runs next to production: production copies what its creator
  * reads into a namespace of its own (a schema on production's instance, with a role limited to
@@ -94,6 +95,9 @@ export interface BranchNotice {
   readonly message: string
 }
 
+/** Why an object type was left out of a branch's copy: the snapshot import's own kinds. */
+export type BranchCopySkipKind = SnapshotSkipKind
+
 /** The copy a branch runs on, taken at S. */
 export interface BranchData {
   /** S: when production took the copy. */
@@ -101,7 +105,44 @@ export interface BranchData {
   /** The objects it holds. */
   readonly objects: number
   /** Object types left out of it, and why. */
-  readonly skipped: readonly { readonly objectTypeId: string; readonly reason: string }[]
+  readonly skipped: readonly {
+    readonly objectTypeId: string
+    readonly kind: BranchCopySkipKind
+    /** Why, in a sentence. */
+    readonly reason: string
+    /** The lines a deploy of the branch's code prints for it, with the copy's counts. */
+    readonly findings: readonly string[]
+  }[]
+  /**
+   * Object types its creator reads only in part: properties their clearance hides, or objects a
+   * view condition hides. The copy holds the rest, which the branch's migrations ran on.
+   */
+  readonly partial: readonly {
+    readonly objectTypeId: string
+    readonly hiddenPropertyIds: readonly string[]
+    readonly throughCondition: boolean
+  }[]
+  /**
+   * What a deploy of the branch's code would refuse in what the copy held: properties and links
+   * it removed with no migration. The copy leaves them out; the lines a deploy prints, counted.
+   */
+  readonly refusedByDeploy: readonly {
+    readonly objectTypeId: string
+    readonly findings: readonly string[]
+  }[]
+  /**
+   * What a deploy would check that the copy can't, by type: changes of properties hidden from
+   * its creator, or of keys whose values don't travel. One line each.
+   */
+  readonly unchecked: readonly {
+    readonly objectTypeId: string
+    readonly lines: readonly string[]
+  }[]
+  /** The branch's migrations the copy ran, by type. */
+  readonly migrated: readonly {
+    readonly objectTypeId: string
+    readonly migrationIds: readonly string[]
+  }[]
   /**
    * Datasets its lake slice leaves out: their creator may not read every column, so the branch
    * gets none of them. Empty without a slice.

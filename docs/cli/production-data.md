@@ -47,9 +47,11 @@ defineRole("developers", { grantedTo: [developers], grants: [can.manage(project.
   | Retypes `hours`, and some jobs hold values it refuses, with no migration | Leaves the type out, with the lines a deploy prints |
   | Removes a property or link with no migration | Leaves it out of the objects, and says a deploy would refuse it |
 
-  The copy decides as a deploy would on the data you read. Properties hidden from you and objects
-  a view condition hides are copied without those values, so the migrations ran on what you read
-  only. Values your production code no longer declares never travel. A migration added after the
+  The copy decides as a deploy would on the data you read. `sixb dev` and the Console say what
+  it left out, and what it holds only in part: properties hidden from you and objects a view
+  condition hides are copied without those values, so the migrations ran on what you read only,
+  and a change to them is listed as not checked. Values your production code no longer declares
+  never travel; the copy says when a deploy would still refuse them. A migration added after the
   copy needs a new copy (`--refresh`, or **Refresh from production** in the Console) to run on
   the keys the copy left out. A copy of a production still on Sixb 0.2.x carries no shapes: a
   property removed with no migration leaves its whole type out, with the lines a deploy prints.

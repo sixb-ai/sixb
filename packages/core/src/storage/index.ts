@@ -474,6 +474,7 @@ export type {
 export { AuthStorageError, InMemoryAuthStorage, MAX_PENDING_DEVICE_AUTHORIZATIONS } from "./auth"
 export type {
   BranchChanges,
+  BranchCopySkipKind,
   BranchData,
   BranchError,
   BranchNotice,

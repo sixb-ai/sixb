@@ -117,7 +117,8 @@ your machine only.
 | Its git branch is deleted | Is deleted. A merge alone deletes nothing |
 
 A branch is the dry run of its [migrations](../ontology/migrations.md) on production's data: see
-[what its copy holds](../cli/production-data.md#what-the-branch-holds).
+[what its copy holds](../cli/production-data.md#what-the-branch-holds). The Console lists what the
+copy left out, what a deploy would print, and the types the migrations ran on.
 
 A branch reaches production's database, production's API, the git host, the npm and yarn
 registries, DuckDB's extensions (`https://extensions.duckdb.org`) when the project's lake is

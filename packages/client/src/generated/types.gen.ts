@@ -8486,7 +8486,26 @@ export type DeleteBranchResponses = {
       objects: number
       skipped: Array<{
         objectTypeId: string
+        kind: "unreadable" | "removed" | "primary" | "migrating" | "conflict" | "unfit"
         reason: string
+        findings: Array<string>
+      }>
+      partial: Array<{
+        objectTypeId: string
+        hiddenPropertyIds: Array<string>
+        throughCondition: boolean
+      }>
+      refusedByDeploy: Array<{
+        objectTypeId: string
+        findings: Array<string>
+      }>
+      unchecked: Array<{
+        objectTypeId: string
+        lines: Array<string>
+      }>
+      migrated: Array<{
+        objectTypeId: string
+        migrationIds: Array<string>
       }>
       skippedDatasets: Array<{
         datasetId: string
@@ -8565,7 +8584,26 @@ export type ListBranchesResponses = {
         objects: number
         skipped: Array<{
           objectTypeId: string
+          kind: "unreadable" | "removed" | "primary" | "migrating" | "conflict" | "unfit"
           reason: string
+          findings: Array<string>
+        }>
+        partial: Array<{
+          objectTypeId: string
+          hiddenPropertyIds: Array<string>
+          throughCondition: boolean
+        }>
+        refusedByDeploy: Array<{
+          objectTypeId: string
+          findings: Array<string>
+        }>
+        unchecked: Array<{
+          objectTypeId: string
+          lines: Array<string>
+        }>
+        migrated: Array<{
+          objectTypeId: string
+          migrationIds: Array<string>
         }>
         skippedDatasets: Array<{
           datasetId: string
@@ -8657,7 +8695,26 @@ export type OpenBranchResponses = {
       objects: number
       skipped: Array<{
         objectTypeId: string
+        kind: "unreadable" | "removed" | "primary" | "migrating" | "conflict" | "unfit"
         reason: string
+        findings: Array<string>
+      }>
+      partial: Array<{
+        objectTypeId: string
+        hiddenPropertyIds: Array<string>
+        throughCondition: boolean
+      }>
+      refusedByDeploy: Array<{
+        objectTypeId: string
+        findings: Array<string>
+      }>
+      unchecked: Array<{
+        objectTypeId: string
+        lines: Array<string>
+      }>
+      migrated: Array<{
+        objectTypeId: string
+        migrationIds: Array<string>
       }>
       skippedDatasets: Array<{
         datasetId: string
@@ -8737,7 +8794,26 @@ export type RefreshBranchResponses = {
       objects: number
       skipped: Array<{
         objectTypeId: string
+        kind: "unreadable" | "removed" | "primary" | "migrating" | "conflict" | "unfit"
         reason: string
+        findings: Array<string>
+      }>
+      partial: Array<{
+        objectTypeId: string
+        hiddenPropertyIds: Array<string>
+        throughCondition: boolean
+      }>
+      refusedByDeploy: Array<{
+        objectTypeId: string
+        findings: Array<string>
+      }>
+      unchecked: Array<{
+        objectTypeId: string
+        lines: Array<string>
+      }>
+      migrated: Array<{
+        objectTypeId: string
+        migrationIds: Array<string>
       }>
       skippedDatasets: Array<{
         datasetId: string
@@ -8817,7 +8893,26 @@ export type StopBranchResponses = {
       objects: number
       skipped: Array<{
         objectTypeId: string
+        kind: "unreadable" | "removed" | "primary" | "migrating" | "conflict" | "unfit"
         reason: string
+        findings: Array<string>
+      }>
+      partial: Array<{
+        objectTypeId: string
+        hiddenPropertyIds: Array<string>
+        throughCondition: boolean
+      }>
+      refusedByDeploy: Array<{
+        objectTypeId: string
+        findings: Array<string>
+      }>
+      unchecked: Array<{
+        objectTypeId: string
+        lines: Array<string>
+      }>
+      migrated: Array<{
+        objectTypeId: string
+        migrationIds: Array<string>
       }>
       skippedDatasets: Array<{
         datasetId: string
