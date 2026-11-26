@@ -33,10 +33,12 @@ export async function signedInProfile(apiUrl: string, accessToken: string) {
     env: {
       XDG_CONFIG_HOME: root,
       SIXB_API_URL: undefined,
+      SIXB_API_BASE_URL: undefined,
       SIXB_API_PUBLIC_ORIGIN: undefined,
       SIXB_API_TOKEN: undefined,
       SIXB_TOKEN: undefined,
       SIXB_PROFILE: undefined,
+      SIXB_RUN_ID: undefined,
     },
     cleanup: () => rm(root, { recursive: true, force: true }),
   }

@@ -9,7 +9,7 @@ import {
 import { fail, writeJson, writeText } from "../output"
 import { CLI_LIMITS } from "../policies"
 import { GROUP_HELP } from "./metadata"
-import { idSegment, type QueryOptions } from "./shared"
+import { idSegment, type QueryOptions, readJson } from "./shared"
 
 export async function datasets(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
@@ -78,6 +78,18 @@ export async function runnables(
   if (sub === "get") {
     const { positionals } = parseCommandArgs(rest, {}, `${group} get`, 1)
     return writeJson(await api.get(`/api/${group}/${idSegment(positionals[0])}`))
+  }
+
+  if (sub === "run") {
+    const { positionals, options } = parseCommandArgs(
+      rest,
+      group === "syncs" ? { "--file": "string" } : {},
+      `${group} run`,
+      1
+    )
+    const file = typeof options["--file"] === "string" ? options["--file"] : undefined
+    const body = group === "syncs" && file ? await readJson(file) : {}
+    return writeJson(await api.post(`/api/${group}/${idSegment(positionals[0])}/runs`, body))
   }
 
   fail(`Unknown ${group} command '${sub}'.`)

@@ -133,6 +133,7 @@ async function startRole(
       "bun",
       ...(options.preload ? ["--preload", options.preload] : []),
       cliEntry,
+      "serve",
       ...args,
       "--entry",
       options.entry ?? fixtureEntry,
@@ -357,7 +358,7 @@ describe("role startup connection budget", () => {
       // Outside a terminal the role prints the failure as plain lines. To see this fail, render it
       // with a live renderer there: no terminal answers it, and the role exits 1 with no reason.
       const result = await runCliToCompletion({
-        cmd: ["bun", cliEntry, "app", "--entry", fixtureEntry, "--port", String(port)],
+        cmd: ["bun", cliEntry, "serve", "app", "--entry", fixtureEntry, "--port", String(port)],
         cwd: repoRoot,
         env: { SIXB_API_PUBLIC_ORIGIN: undefined },
         timeoutMs: ROLE_TIMEOUT_MS,

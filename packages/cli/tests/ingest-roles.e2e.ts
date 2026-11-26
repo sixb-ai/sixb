@@ -85,7 +85,7 @@ async function whileRunning(
   const logPath = join(env.SIXB_E2E_DIR ?? "", `${role[0]}-${randomUUID()}.log`)
 
   const { ready } = await startRoleUntilReadyThenStop({
-    cmd: ["bun", cliEntry, ...role, "--entry", fixtureEntry],
+    cmd: ["bun", cliEntry, "serve", ...role, "--entry", fixtureEntry],
     cwd: repoRoot,
     env,
     logPath,

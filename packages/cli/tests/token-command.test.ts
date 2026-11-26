@@ -16,7 +16,7 @@ afterAll(async () => {
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()))
 })
 
-describe("sixb token command", () => {
+describe("sixb tokens command", () => {
   test.concurrent("creates a token from the profile's sign-in", async () => {
     let authorizationHeader = null as string | null
     let requestBody: unknown
@@ -51,7 +51,7 @@ describe("sixb token command", () => {
     cleanups.push(profile.cleanup)
 
     const result = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "token", "create", "CI", "--expires-at", "2099-01-01T00:00:00.000Z"],
+      cmd: ["bun", cliEntry, "tokens", "create", "CI", "--expires-at", "2099-01-01T00:00:00.000Z"],
       cwd: repoRoot,
       env: profile.env,
     })
@@ -59,11 +59,11 @@ describe("sixb token command", () => {
 
     expect(authorizationHeader).toBe("Bearer sixb_at_ses_cli.secret")
     expect(requestBody).toEqual({ name: "CI", expiresAt: "2099-01-01T00:00:00.000Z" })
-    expect(result.stdout).toContain("sixb_pat_tok_ci.secret")
+    expect(JSON.parse(result.stdout).tokenValue).toBe("sixb_pat_tok_ci.secret")
   }, 15_000)
 
-  // Reproduce: drop `assertSignedIn` from createToken; the CLI then sends the request with the
-  // access token, and this permissive server mints it.
+  // Reproduce: drop `assertNotAccessToken` from tokens create; the CLI then sends the request with
+  // the access token, and this permissive server mints it.
   test.concurrent("refuses to create a token with an access token", async () => {
     let requests = 0
     const server = Bun.serve({
@@ -77,7 +77,7 @@ describe("sixb token command", () => {
     servers.push(server)
 
     const result = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "token", "create", "CI", "--json"],
+      cmd: ["bun", cliEntry, "tokens", "create", "CI", "--json"],
       cwd: repoRoot,
       env: {
         SIXB_API_URL: `http://127.0.0.1:${server.port}`,
@@ -85,9 +85,9 @@ describe("sixb token command", () => {
       },
     })
 
-    expect(result.exitCode).toBe(1)
+    expect(result.exitCode).toBe(2)
     expect(JSON.parse(result.stderr).error.message).toBe(
-      `[SixbCLI] Creating a token requires signing in; an access token cannot create another token. Run \`sixb login http://127.0.0.1:${server.port}\`, then create the token from that profile.`
+      `Creating a token requires signing in; an access token cannot create another token. Run \`sixb login http://127.0.0.1:${server.port}\`, then create the token from that profile.`
     )
     expect(requests).toBe(0)
   }, 15_000)

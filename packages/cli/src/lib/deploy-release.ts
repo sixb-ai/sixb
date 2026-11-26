@@ -154,7 +154,7 @@ function sixbService(
   return {
     name: service,
     kind: address ? "http" : isDeploySingletonService(service) ? "singleton" : "workers",
-    command: { program: "sixb", args: [...args, ...noMigrate] },
+    command: { program: "sixb", args: ["serve", ...args, ...noMigrate] },
     env: { ...env, ...options.env },
     instances: processOptions.instances ?? 1,
     ...(address ? { http: address } : {}),

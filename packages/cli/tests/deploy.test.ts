@@ -127,11 +127,13 @@ describe("deploy release", () => {
       ["workers", "workers"],
     ])
     expect(built.bunVersion).toBe("1.4.2")
-    expect(commandLine(built, "api")).toBe("sixb api --host 127.0.0.1 --port 3002 --no-migrate")
+    expect(commandLine(built, "api")).toBe(
+      "sixb serve api --host 127.0.0.1 --port 3002 --no-migrate"
+    )
     expect(service(built, "api").http?.readinessPath).toBe("/ready")
-    expect(commandLine(built, "app")).toBe("sixb app --host 127.0.0.1 --port 3001")
-    expect(commandLine(built, "rules")).toBe("sixb rules --no-migrate")
-    expect(commandLine(built, "workers")).toBe("sixb worker-group --no-migrate")
+    expect(commandLine(built, "app")).toBe("sixb serve app --host 127.0.0.1 --port 3001")
+    expect(commandLine(built, "rules")).toBe("sixb serve rules --no-migrate")
+    expect(commandLine(built, "workers")).toBe("sixb serve worker-group --no-migrate")
     // No `env` step: a project without a source keeps its own `.env`.
     expect(built.steps).toEqual({
       build: [{ program: "sixb", args: ["build"] }],
@@ -162,7 +164,7 @@ describe("deploy release", () => {
       const role = roles[entry.name]
       if (!role) throw new Error(`No role for ${entry.name}.`)
       const parsed = parseCliArgs(entry.command.args)
-      expect(parsed).toMatchObject({ kind: "command", id: role })
+      expect(parsed).toMatchObject({ kind: "command", id: `serve:${role}` })
       if (parsed.kind !== "command") continue
       expect(parsed.options["no-migrate"] === true).toBe(
         productionRoleFacts(role).usesStorageSchema
@@ -181,7 +183,7 @@ describe("deploy release", () => {
       id: "env:pull",
     })
     expect(commandLine(built, "workers")).toBe(
-      "sixb worker-group sync agent --concurrency sync=2 --concurrency agent=8 --no-migrate"
+      "sixb serve worker-group sync agent --concurrency sync=2 --concurrency agent=8 --no-migrate"
     )
   })
 
@@ -677,7 +679,7 @@ export default {
     expect(result.error).toBeUndefined()
     expect(result.output).toContain("sixb deploy --dry-run  northline")
     expect(result.output).toContain("ssh sixb@203.0.113.10 · sixb.deploy.ts")
-    expect(result.output).toContain("sixb api --host 127.0.0.1 --port 3002 --no-migrate")
+    expect(result.output).toContain("sixb serve api --host 127.0.0.1 --port 3002 --no-migrate")
     expect(result.output).toContain("Nothing was deployed")
   })
 

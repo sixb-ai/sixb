@@ -25,6 +25,47 @@ interface Comment {
 export async function artifacts(api: ApiClient, args: readonly string[]): Promise<void> {
   const [group, sub, ...rest] = args
   if (!group || isHelp(group)) return writeText(GROUP_HELP.artifacts)
+  if (group === "list") {
+    if (requestsHelp(args.slice(1))) return writeText(GROUP_HELP.artifacts)
+    const { options } = parseCommandArgs(
+      args.slice(1),
+      { "--limit": "string", "--offset": "string" },
+      "artifacts list"
+    )
+    return writeJson(
+      await api.get("/api/artifacts", {
+        ...(options["--limit"] ? { limit: options["--limit"] } : {}),
+        ...(options["--offset"] ? { offset: options["--offset"] } : {}),
+      })
+    )
+  }
+  if (group === "get") {
+    if (requestsHelp(args.slice(1))) return writeText(GROUP_HELP.artifacts)
+    const { positionals } = parseCommandArgs(args.slice(1), {}, "artifacts get", 1)
+    return writeJson(await api.get(`/api/artifacts/${idSegment(positionals[0]?.trim())}`))
+  }
+  if (group === "version") {
+    if (requestsHelp(args.slice(1))) return writeText(GROUP_HELP.artifacts)
+    const { positionals } = parseCommandArgs(args.slice(1), {}, "artifacts version", 2)
+    const [artifactId, version] = positionals
+    return writeJson(
+      await api.get(
+        `/api/artifacts/${idSegment(artifactId?.trim())}/versions/${idSegment(version?.trim())}`
+      )
+    )
+  }
+  if (group === "freeze") {
+    if (requestsHelp(args.slice(1))) return writeText(GROUP_HELP.artifacts)
+    const { positionals } = parseCommandArgs(args.slice(1), {}, "artifacts freeze", 1)
+    return writeJson(
+      await api.post(`/api/artifacts/${idSegment(positionals[0]?.trim())}/freeze`, {})
+    )
+  }
+  if (group === "delete") {
+    if (requestsHelp(args.slice(1))) return writeText(GROUP_HELP.artifacts)
+    const { positionals } = parseCommandArgs(args.slice(1), {}, "artifacts delete", 1)
+    return writeJson(await api.delete(`/api/artifacts/${idSegment(positionals[0]?.trim())}`))
+  }
   if (group === "export") return exportVideo(api, args.slice(1))
   if (group === "media") return media(api, args.slice(1))
   if (group !== "comments") fail(`Unknown artifacts command '${group}'.`)

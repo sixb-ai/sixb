@@ -36,6 +36,7 @@ async function startThenStop(
       cmd: [
         "bun",
         cliEntry,
+        "serve",
         ...args,
         "--entry",
         fixtureEntry(fixture),

@@ -1129,17 +1129,22 @@ export function runSandboxCliContractSuite(implementation: SandboxCliContractImp
       }
     })
 
-    test("exposes no raw request, origin, or header override", async () => {
+    test("allows relative /api/ calls via `api`, while refusing origin and header overrides", async () => {
       const api = startGraphApi()
       try {
-        const raw = await runCli(implementation, ["api", "get", "/api/project"], apiEnv(api))
-        expect(raw.exitCode).toBe(2)
-        expect(JSON.parse(raw.stderr)).toEqual({
-          error: {
-            code: "invalid_arguments",
-            message: "Unknown command 'api'. Run 'sixb --help'.",
-          },
+        const raw = await runCli(implementation, ["api", "GET", "/api/project"], apiEnv(api))
+        expect(raw.exitCode).toBe(0)
+        expect(JSON.parse(raw.stdout)).toEqual({
+          id: "contract-project",
+          name: "Contract project",
         })
+
+        const externalOrigin = await runCli(
+          implementation,
+          ["api", "GET", "https://attacker.invalid/api/project"],
+          apiEnv(api)
+        )
+        expect(externalOrigin.exitCode).toBe(2)
 
         const originFlag = await runCli(
           implementation,
@@ -1154,7 +1159,7 @@ export function runSandboxCliContractSuite(implementation: SandboxCliContractImp
           apiEnv(api)
         )
         expect(headerFlag.exitCode).toBe(2)
-        expect(api.requests).toHaveLength(0)
+        expect(api.requests).toHaveLength(1)
       } finally {
         api.close()
       }

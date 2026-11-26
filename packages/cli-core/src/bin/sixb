@@ -11,8 +11,9 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 case "${1:-}" in
   "" | -h | --help | help | --version | version) ;;
   status | project | ontology | objects | telemetry | actions | action-runs | files) ;;
-  workflows | workflow-runs | users | artifacts | models | datasets) ;;
-  syncs | sync-runs | pipelines | pipeline-runs | threads | memory) ;;
+  workflows | workflow-runs | users | tokens | service-accounts | shares) ;;
+  artifacts | models | datasets | syncs | sync-runs | pipelines | pipeline-runs) ;;
+  threads | memory | logs | activity | connectors | api) ;;
   *)
     dir=$(pwd)
     while :; do

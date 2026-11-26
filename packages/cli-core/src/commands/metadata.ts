@@ -58,15 +58,19 @@ Data:
 Files:
   sixb files upload|download ...
 
-Members:
+Members and access:
   sixb users search <text>            Find members by name or email
   sixb users list|get ...
+  sixb tokens list|create|revoke ...
+  sixb service-accounts list|create|disable|tokens ...
+  sixb shares list|create|revoke ...
 
 Threads and memory:
   sixb threads list|get|messages|runs|approvals ...
   sixb memory get|pull|save ...
 
 Artifacts:
+  sixb artifacts list|get|version|freeze|delete ...
   sixb artifacts comments list <artifact-id>
                                       Open comments, as threads with where each is
   sixb artifacts comments resolve|reply ...
@@ -74,6 +78,12 @@ Artifacts:
                                       A video's or sound's proxy, poster, cuts, transcript
   sixb artifacts export <artifact-id> --output <path.mp4>
                                       A video's MP4, rendered, then downloaded
+
+Observability and raw API:
+  sixb logs list ...
+  sixb activity summary|visits|users ...
+  sixb connectors accounts <connector-id>
+  sixb api <METHOD> <path> ...        Direct request to any relative /api/ route
 
 A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id with
 \`sixb users search <name>\`.
@@ -308,6 +318,11 @@ exact email, ignoring case, and finds suspended members too. Each member is
 {"id","email","displayName","avatarUrl","status"}; a user parameter takes
 {"type":"user","id":"<id>"}. Reading members requires can.view(project.users).`,
   artifacts: `Usage:
+  sixb artifacts list [--limit <n>] [--offset <n>]
+  sixb artifacts get <artifact-id>
+  sixb artifacts version <artifact-id> <version>
+  sixb artifacts freeze <artifact-id>
+  sixb artifacts delete <artifact-id>
   sixb artifacts comments list <artifact-id> [--status open|resolved|all]
   sixb artifacts comments resolve <artifact-id> <comment-id> [--reopen]
   sixb artifacts comments reply <artifact-id> <comment-id> <text>|--file <path|->
@@ -371,6 +386,7 @@ and ends on; --reference shows a character, object or style, and repeats.`,
   "workflow-runs": `Usage:
   sixb workflow-runs list [options]
   sixb workflow-runs get <run-id>
+  sixb workflow-runs cancel <run-id>
 
 List options:
   --workflow <workflow-id>
@@ -397,8 +413,9 @@ columns your clearances do not cover and names them under redactions.`,
   syncs: `Usage:
   sixb syncs list
   sixb syncs get <sync-id>
+  sixb syncs run <sync-id> [--file <path|->]
 
-Lists the syncs you may run, each with its latest run. \`sixb sync-runs list\` shows the history.`,
+Lists, inspects, or triggers syncs you may run. \`sixb sync-runs list\` shows the history.`,
   "sync-runs": `Usage:
   sixb sync-runs list [options]
 
@@ -413,9 +430,10 @@ List options:
   pipelines: `Usage:
   sixb pipelines list
   sixb pipelines get <pipeline-id>
+  sixb pipelines run <pipeline-id>
 
-Lists the pipelines you may run, each with its latest run. \`sixb pipeline-runs\` shows the
-history and each run's steps.`,
+Lists, inspects, or triggers pipelines you may run. \`sixb pipeline-runs\` shows the history and
+each run's steps.`,
   "pipeline-runs": `Usage:
   sixb pipeline-runs list [options]
   sixb pipeline-runs get <run-id>
@@ -429,6 +447,40 @@ List options:
   --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}
 
 \`get\` includes the run's steps.`,
+  tokens: `Usage:
+  sixb tokens list [--json]
+  sixb tokens create <name> [--expires-in <duration>|--expires-at <iso>] [--group <id>]... [--json]
+  sixb tokens revoke <token-id> [--json]
+
+Manage personal access tokens. Creating a token requires a signed-in session (\`sixb login\`).`,
+  "service-accounts": `Usage:
+  sixb service-accounts list [--json]
+  sixb service-accounts create <name> [--id <id>] [--description <text>] [--group <id>]... [--json]
+  sixb service-accounts disable <service-account-id> [--json]
+  sixb service-accounts tokens list <service-account-id> [--json]
+  sixb service-accounts tokens create <service-account-id> <name> [--expires-in <duration>|--expires-at <iso>] [--group <id>]... [--json]
+  sixb service-accounts tokens revoke <service-account-id> <token-id> [--json]
+
+Manage service accounts and their access tokens.`,
+  shares: `Usage:
+  sixb shares list [--definition <id>] [--primary-id <id>] [--json]
+  sixb shares create --file <path|-> [--json]
+  sixb shares revoke <grant-id> [--json]
+
+List, create, and revoke shared-access grants.`,
+  logs: `Usage:
+  sixb logs list [--limit <n>] [--level <level>] [--service <name>] [--search <text>] [--from <RFC3339>] [--to <RFC3339>]`,
+  activity: `Usage:
+  sixb activity summary [--from <RFC3339>] [--to <RFC3339>]
+  sixb activity visits [--from <RFC3339>] [--to <RFC3339>] [--limit <n>]
+  sixb activity users [--from <RFC3339>] [--to <RFC3339>] [--limit <n>]`,
+  connectors: `Usage:
+  sixb connectors accounts <connector-id>`,
+  api: `Usage:
+  sixb api <METHOD> <path> [--file <path|->|--input <json>] [--query <key=value>]... [--json]
+
+Send a request directly to any relative /api/... route using the active connection, auth, and
+grant boundary. METHOD is GET, POST, PUT, PATCH, DELETE, or HEAD.`,
 } as const
 
 export const QUERY_EXAMPLES: Readonly<Record<string, string>> = {

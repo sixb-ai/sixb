@@ -55,7 +55,7 @@ export function writeText(value: string): void {
   process.stdout.write(value.endsWith("\n") ? value : `${value}\n`)
 }
 
-export function reportError(error: unknown): number {
+export function reportError(error: unknown, options: { readonly json?: boolean } = {}): number {
   if (error instanceof CliExit) return error.exitCode
   const cliError =
     error instanceof CliError
@@ -67,6 +67,19 @@ export function reportError(error: unknown): number {
           },
           EXIT_API
         )
-  process.stderr.write(`${JSON.stringify({ error: cliError.body })}\n`)
+
+  const asJson =
+    options.json === true || process.env.SIXB_OUTPUT === "json" || process.stderr.isTTY !== true
+  if (asJson) {
+    process.stderr.write(`${JSON.stringify({ error: cliError.body })}\n`)
+  } else {
+    const color = !process.env.NO_COLOR
+    const prefix = color ? "\x1b[31merror:\x1b[0m" : "error:"
+    process.stderr.write(`${prefix} ${cliError.body.message}\n`)
+    if (cliError.body.hint) {
+      const hintPrefix = color ? "\x1b[2mhint:\x1b[0m" : "hint:"
+      process.stderr.write(`${hintPrefix} ${cliError.body.hint}\n`)
+    }
+  }
   return cliError.exitCode
 }

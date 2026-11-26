@@ -21,6 +21,8 @@ const UNIX_BASE_URL_PREFIX = "unix:"
  */
 const RUN_HEADER = "x-sixb-run"
 
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD"
+
 export class ApiClient {
   readonly baseUrl: string
   private readonly socketPath: string | undefined
@@ -45,9 +47,48 @@ export class ApiClient {
     this.unavailableHint = options.unavailableHint ?? "Run 'sixb status' to check the connection."
   }
 
+  /** The raw Bearer token configured on this client, if any. */
+  get bearerToken(): string | undefined {
+    return this.authorization?.match(/^Bearer\s+(\S+)$/i)?.[1]
+  }
+
+  async request(
+    method: HttpMethod,
+    path: string,
+    options: {
+      readonly query?: Readonly<Record<string, string | undefined>>
+      readonly body?: unknown
+      readonly signal?: AbortSignal
+    } = {}
+  ): Promise<unknown> {
+    const url = this.url(path, options.query)
+    if (method === "HEAD") {
+      const response = await this.fetch(url, {
+        method,
+        ...(options.signal ? { signal: options.signal } : {}),
+      })
+      return { status: response.status, ok: response.ok }
+    }
+    const init: RequestInit = {
+      method,
+      ...(options.signal ? { signal: options.signal } : {}),
+    }
+    if (options.body !== undefined) {
+      init.headers = { "content-type": "application/json" }
+      init.body = JSON.stringify(options.body)
+    }
+    return this.json(url, init)
+  }
+
   async get(path: string, query?: Readonly<Record<string, string | undefined>>): Promise<unknown> {
-    const url = this.url(path, query)
-    return this.json(url, { method: "GET" })
+    return this.request("GET", path, { query })
+  }
+
+  async delete(
+    path: string,
+    query?: Readonly<Record<string, string | undefined>>
+  ): Promise<unknown> {
+    return this.request("DELETE", path, { query })
   }
 
   /** `signal` stops waiting for the response; the abort is rethrown as it was raised. */
@@ -56,12 +97,15 @@ export class ApiClient {
     body: unknown,
     options: { readonly signal?: AbortSignal } = {}
   ): Promise<unknown> {
-    return this.json(this.url(path), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      ...(options.signal ? { signal: options.signal } : {}),
-    })
+    return this.request("POST", path, { body, signal: options.signal })
+  }
+
+  async patch(
+    path: string,
+    body: unknown,
+    options: { readonly signal?: AbortSignal } = {}
+  ): Promise<unknown> {
+    return this.request("PATCH", path, { body, signal: options.signal })
   }
 
   /**

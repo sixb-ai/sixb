@@ -46,6 +46,12 @@ export async function runs(
   const [sub, ...rest] = args
   const group = `${kind}-runs` as const
   if (!sub || isHelp(sub) || requestsHelp(rest)) return writeText(GROUP_HELP[group])
+  if (sub === "cancel" && kind === "workflow") {
+    const { positionals } = parseCommandArgs(rest, {}, "workflow-runs cancel", 1)
+    return writeJson(
+      await api.post(`/api/workflow-runs/${encodeURIComponent(positionals[0] ?? "")}/cancel`, {})
+    )
+  }
   // The API lists sync runs but has no route for one.
   if (sub === "get" && kind !== "sync") {
     const { positionals } = parseCommandArgs(rest, {}, `${group} get`, 1)

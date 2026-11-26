@@ -1,4 +1,4 @@
-import { INSTANCE_COMMANDS, type InstanceCommand } from "@sixb/cli-core"
+import { COMMAND_REGISTRY, INSTANCE_COMMANDS } from "@sixb/cli-core"
 
 type OptionKind = "boolean" | "string"
 
@@ -214,28 +214,18 @@ export type LocalCommandId =
   | "agent"
   | "connect"
   | "dev"
-  | "api"
-  | "app"
+  | "serve:api"
+  | "serve:app"
+  | "serve:orchestrator"
+  | "serve:rules"
+  | "serve:worker"
+  | "serve:worker-group"
   | "login"
   | "logout"
   | "status"
   | "profile:list"
   | "profile:show"
   | "profile:use"
-  | "token:list"
-  | "token:create"
-  | "token:revoke"
-  | "service-account:list"
-  | "service-account:create"
-  | "service-account:disable"
-  | "service-account:token:list"
-  | "service-account:token:create"
-  | "service-account:token:revoke"
-  | "scheduler"
-  | "orchestrator"
-  | "rules"
-  | "worker"
-  | "worker-group"
   | "check"
   | "run"
   | "typegen"
@@ -280,57 +270,20 @@ interface CommandNode {
 }
 
 const CONNECTION_OPTIONS = ["api-url", "token", "profile"] as const
-const TOKEN_CREATE_OPTIONS = [
-  ...CONNECTION_OPTIONS,
-  "name",
-  "expires-at",
-  "expires-in",
-  "group",
-  "json",
-] as const
-const SERVICE_ACCOUNT_CREATE_OPTIONS = [
-  ...CONNECTION_OPTIONS,
-  "id",
-  "name",
-  "description",
-  "expires-at",
-  "expires-in",
-  "group",
-  "json",
-] as const
 
-const INSTANCE_SUMMARIES = {
-  status: "Check API connection, project, and runtime",
-  project: "Show project metadata",
-  ontology: "Inspect the visible ontology",
-  objects: "Inspect, list, search, and query objects",
-  telemetry: "Read current and historical telemetry",
-  actions: "Discover and request actions",
-  "action-runs": "Inspect action execution history",
-  files: "Upload and download files",
-  workflows: "Discover and start workflows",
-  "workflow-runs": "Inspect workflow execution history",
-  users: "List and search project members",
-  artifacts: "Read, resolve and reply to an artifact's comments",
-  models: "List the project's models and their prices",
-  datasets: "Read datasets, their versions and rows",
-  syncs: "List the syncs you may run",
-  "sync-runs": "Inspect sync run history",
-  pipelines: "List the pipelines you may run",
-  "pipeline-runs": "Inspect pipeline runs and their steps",
-  threads: "List threads, messages, runs, and approvals",
-  memory: "Read, pull, and save memory repos",
-} as const satisfies Record<InstanceCommand, string>
-
-const instanceNodes: readonly CommandNode[] = INSTANCE_COMMANDS.filter(
-  (name) => name !== "status"
-).map((name) => ({
-  name,
-  summary: INSTANCE_SUMMARIES[name],
-  usage: `sixb ${name} --help`,
+const instanceNodes: readonly CommandNode[] = COMMAND_REGISTRY.filter(
+  (entry) => entry.name !== "status"
+).map((entry) => ({
+  name: entry.name,
+  summary: entry.summary,
+  usage: `sixb ${entry.name} --help`,
   instance: true,
   rootHelpLabel:
-    name === "project" ? "project show" : name === "ontology" ? "ontology list|get" : `${name} ...`,
+    entry.name === "project"
+      ? "project show"
+      : entry.name === "ontology"
+        ? "ontology list|get"
+        : `${entry.name} ...`,
 }))
 
 const commandTree: readonly CommandNode[] = [
@@ -351,22 +304,78 @@ const commandTree: readonly CommandNode[] = [
     ],
     repeatable: ["concurrency"],
   }),
-  command("api", "Start the production API, docs, and event stream", {
-    options: [
-      "entry",
-      "no-migrate",
-      "port",
-      "host",
-      "api-port",
-      "api-host",
-      "api-public-origin",
-      "app-public-origin",
-      "trusted-proxies",
+  {
+    name: "serve",
+    summary: "Run production roles: api, app, orchestrator, rules, worker, worker-group",
+    usage: "sixb serve <api|app|orchestrator|rules|worker|worker-group> [options]",
+    rootHelpLabel: "serve <role>",
+    children: [
+      command("serve:api", "Start the production API, docs, and event stream", {
+        path: ["serve", "api"],
+        options: [
+          "entry",
+          "no-migrate",
+          "port",
+          "host",
+          "api-port",
+          "api-host",
+          "api-public-origin",
+          "app-public-origin",
+          "trusted-proxies",
+        ],
+      }),
+      command("serve:app", "Start the production app server", {
+        path: ["serve", "app"],
+        options: ["entry", "port", "host", "api-public-origin", "app-public-origin"],
+      }),
+      command(
+        "serve:orchestrator",
+        "Start the production orchestrator: cron, event dispatch and upkeep",
+        {
+          path: ["serve", "orchestrator"],
+          options: ["entry", "no-migrate"],
+        }
+      ),
+      command("serve:rules", "Start the production rules runtime", {
+        path: ["serve", "rules"],
+        options: ["entry", "no-migrate"],
+      }),
+      command(
+        "serve:worker",
+        "Start one queue worker: sync, agent, pipeline, projection, workflow",
+        {
+          path: ["serve", "worker"],
+          usage: "sixb serve worker <sync|agent|pipeline|projection|workflow> [options]",
+          options: [
+            "entry",
+            "no-migrate",
+            "api-public-origin",
+            "concurrency",
+            "vector-concurrency",
+            "subagent-concurrency",
+            "subagent-concurrency-per-run",
+          ],
+          minimumPositionals: 1,
+          maximumPositionals: 1,
+        }
+      ),
+      command("serve:worker-group", "Run several queue workers in one process", {
+        path: ["serve", "worker-group"],
+        usage: "sixb serve worker-group [types...] [options]",
+        options: [
+          "entry",
+          "no-migrate",
+          "api-public-origin",
+          "concurrency",
+          "vector-concurrency",
+          "subagent-concurrency",
+          "subagent-concurrency-per-run",
+        ],
+        repeatable: ["concurrency"],
+        maximumPositionals: Number.POSITIVE_INFINITY,
+      }),
     ],
-  }),
-  command("app", "Start the production app server", {
-    options: ["entry", "port", "host", "api-public-origin", "app-public-origin"],
-  }),
+  },
   command("login", "Sign in to an instance and save it as a profile", {
     usage: "sixb login <api-url> [--profile <name>] [--token-stdin]",
     options: ["profile", "token-stdin", "json"],
@@ -420,128 +429,6 @@ const commandTree: readonly CommandNode[] = [
     ],
   },
   ...instanceNodes,
-  {
-    name: "token",
-    summary: "Manage personal access tokens",
-    rootHelpLabel: "token list|create|revoke",
-    usage: "sixb token <list|create|revoke>",
-    children: [
-      command("token:list", "List personal access tokens", {
-        path: ["token", "list"],
-        options: [...CONNECTION_OPTIONS, "json"],
-      }),
-      command("token:create", "Create a personal access token", {
-        path: ["token", "create"],
-        usage: "sixb token create [name] [options]",
-        options: TOKEN_CREATE_OPTIONS,
-        repeatable: ["group"],
-        maximumPositionals: 1,
-        requiredInputs: [{ option: "name", positional: 0 }],
-      }),
-      command("token:revoke", "Revoke a personal access token", {
-        path: ["token", "revoke"],
-        usage: "sixb token revoke <token-id>",
-        options: [...CONNECTION_OPTIONS, "id", "json"],
-        maximumPositionals: 1,
-        requiredInputs: [{ option: "id", positional: 0 }],
-      }),
-    ],
-  },
-  {
-    name: "service-account",
-    summary: "Manage service accounts and their tokens",
-    rootHelpLabel: "service-account ...",
-    usage: "sixb service-account <list|create|disable|token>",
-    children: [
-      command("service-account:list", "List service accounts", {
-        path: ["service-account", "list"],
-        options: [...CONNECTION_OPTIONS, "json"],
-      }),
-      command("service-account:create", "Create a service account", {
-        path: ["service-account", "create"],
-        usage: "sixb service-account create [name] [options]",
-        options: SERVICE_ACCOUNT_CREATE_OPTIONS,
-        repeatable: ["group"],
-        maximumPositionals: 1,
-        requiredInputs: [{ option: "name", positional: 0 }],
-      }),
-      command("service-account:disable", "Disable a service account", {
-        path: ["service-account", "disable"],
-        usage: "sixb service-account disable <service-account-id>",
-        options: [...CONNECTION_OPTIONS, "id", "json"],
-        maximumPositionals: 1,
-        requiredInputs: [{ option: "id", positional: 0 }],
-      }),
-      {
-        name: "token",
-        summary: "Manage service-account tokens",
-        usage: "sixb service-account token <list|create|revoke> <service-account-id>",
-        children: [
-          command("service-account:token:list", "List service-account tokens", {
-            path: ["service-account", "token", "list"],
-            usage: "sixb service-account token list <service-account-id>",
-            options: [...CONNECTION_OPTIONS, "json"],
-            minimumPositionals: 1,
-            maximumPositionals: 1,
-          }),
-          command("service-account:token:create", "Create a service-account token", {
-            path: ["service-account", "token", "create"],
-            usage: "sixb service-account token create <service-account-id> [name] [options]",
-            options: [...CONNECTION_OPTIONS, "name", "expires-at", "expires-in", "group", "json"],
-            repeatable: ["group"],
-            minimumPositionals: 1,
-            maximumPositionals: 2,
-            requiredInputs: [{ option: "name", positional: 1 }],
-          }),
-          command("service-account:token:revoke", "Revoke a service-account token", {
-            path: ["service-account", "token", "revoke"],
-            usage: "sixb service-account token revoke <service-account-id> <token-id>",
-            options: [...CONNECTION_OPTIONS, "id", "json"],
-            minimumPositionals: 1,
-            maximumPositionals: 2,
-            requiredInputs: [{ option: "id", positional: 1 }],
-          }),
-        ],
-      },
-    ],
-  },
-  command("scheduler", "Removed: the orchestrator runs cron schedules", {
-    options: ["entry", "no-migrate"],
-  }),
-  command("orchestrator", "Start the production orchestrator: cron, event dispatch and upkeep", {
-    options: ["entry", "no-migrate"],
-  }),
-  command("rules", "Start the production rules runtime", { options: ["entry", "no-migrate"] }),
-  command("worker", "Start one queue worker: sync, agent, pipeline, projection, workflow", {
-    usage: "sixb worker <sync|agent|pipeline|projection|workflow> [options]",
-    options: [
-      "entry",
-      "no-migrate",
-      "api-public-origin",
-      "concurrency",
-      "vector-concurrency",
-      "subagent-concurrency",
-      "subagent-concurrency-per-run",
-    ],
-    minimumPositionals: 1,
-    maximumPositionals: 1,
-    rootHelpLabel: "worker <type>",
-  }),
-  command("worker-group", "Run several queue workers in one process", {
-    usage: "sixb worker-group [types...] [options]",
-    options: [
-      "entry",
-      "no-migrate",
-      "api-public-origin",
-      "concurrency",
-      "vector-concurrency",
-      "subagent-concurrency",
-      "subagent-concurrency-per-run",
-    ],
-    repeatable: ["concurrency"],
-    maximumPositionals: Number.POSITIVE_INFINITY,
-    rootHelpLabel: "worker-group [types...]",
-  }),
   command("check", "Validate project configuration and health", {
     options: ["entry", "migrate", "lake"],
   }),
@@ -739,16 +626,11 @@ const ROOT_HELP_GROUP_COMMANDS: readonly {
 }[] = [
   { title: "Agent", names: ["agent", "connect"] },
   { title: "Develop", names: ["init", "dev", "env", "check", "run", "typegen", "build"] },
-  { title: "Deploy", names: ["deploy", "desktop"] },
-  {
-    title: "Run in production",
-    names: ["api", "app", "orchestrator", "rules", "worker", "worker-group"],
-  },
-  { title: "Removed", names: ["scheduler"] },
+  { title: "Deploy", names: ["deploy", "desktop", "serve"] },
   { title: "Storage", names: ["db", "lake"] },
   {
     title: "Connect to an instance",
-    names: ["login", "logout", "status", "profile", "token", "service-account"],
+    names: ["login", "logout", "status", "profile"],
   },
   {
     title: "Work with an instance",

@@ -43,15 +43,28 @@ function writeText(value) {
 `) ? value : `${value}
 `);
 }
-function reportError(error) {
+function reportError(error, options = {}) {
   if (error instanceof CliExit)
     return error.exitCode;
   const cliError = error instanceof CliError ? error : new CliError({
     code: "internal_error",
     message: error instanceof Error ? error.message : "The Sixb CLI failed unexpectedly."
   }, EXIT_API);
-  process.stderr.write(`${JSON.stringify({ error: cliError.body })}
+  const asJson = options.json === true || process.env.SIXB_OUTPUT === "json" || process.stderr.isTTY !== true;
+  if (asJson) {
+    process.stderr.write(`${JSON.stringify({ error: cliError.body })}
 `);
+  } else {
+    const color = !process.env.NO_COLOR;
+    const prefix = color ? "\x1B[31merror:\x1B[0m" : "error:";
+    process.stderr.write(`${prefix} ${cliError.body.message}
+`);
+    if (cliError.body.hint) {
+      const hintPrefix = color ? "\x1B[2mhint:\x1B[0m" : "hint:";
+      process.stderr.write(`${hintPrefix} ${cliError.body.hint}
+`);
+    }
+  }
   return cliError.exitCode;
 }
 
@@ -235,15 +248,19 @@ Data:
 Files:
   sixb files upload|download ...
 
-Members:
+Members and access:
   sixb users search <text>            Find members by name or email
   sixb users list|get ...
+  sixb tokens list|create|revoke ...
+  sixb service-accounts list|create|disable|tokens ...
+  sixb shares list|create|revoke ...
 
 Threads and memory:
   sixb threads list|get|messages|runs|approvals ...
   sixb memory get|pull|save ...
 
 Artifacts:
+  sixb artifacts list|get|version|freeze|delete ...
   sixb artifacts comments list <artifact-id>
                                       Open comments, as threads with where each is
   sixb artifacts comments resolve|reply ...
@@ -251,6 +268,12 @@ Artifacts:
                                       A video's or sound's proxy, poster, cuts, transcript
   sixb artifacts export <artifact-id> --output <path.mp4>
                                       A video's MP4, rendered, then downloaded
+
+Observability and raw API:
+  sixb logs list ...
+  sixb activity summary|visits|users ...
+  sixb connectors accounts <connector-id>
+  sixb api <METHOD> <path> ...        Direct request to any relative /api/ route
 
 A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id with
 \`sixb users search <name>\`.
@@ -477,6 +500,11 @@ exact email, ignoring case, and finds suspended members too. Each member is
 {"id","email","displayName","avatarUrl","status"}; a user parameter takes
 {"type":"user","id":"<id>"}. Reading members requires can.view(project.users).`,
   artifacts: `Usage:
+  sixb artifacts list [--limit <n>] [--offset <n>]
+  sixb artifacts get <artifact-id>
+  sixb artifacts version <artifact-id> <version>
+  sixb artifacts freeze <artifact-id>
+  sixb artifacts delete <artifact-id>
   sixb artifacts comments list <artifact-id> [--status open|resolved|all]
   sixb artifacts comments resolve <artifact-id> <comment-id> [--reopen]
   sixb artifacts comments reply <artifact-id> <comment-id> <text>|--file <path|->
@@ -540,6 +568,7 @@ and ends on; --reference shows a character, object or style, and repeats.`,
   "workflow-runs": `Usage:
   sixb workflow-runs list [options]
   sixb workflow-runs get <run-id>
+  sixb workflow-runs cancel <run-id>
 
 List options:
   --workflow <workflow-id>
@@ -566,8 +595,9 @@ columns your clearances do not cover and names them under redactions.`,
   syncs: `Usage:
   sixb syncs list
   sixb syncs get <sync-id>
+  sixb syncs run <sync-id> [--file <path|->]
 
-Lists the syncs you may run, each with its latest run. \`sixb sync-runs list\` shows the history.`,
+Lists, inspects, or triggers syncs you may run. \`sixb sync-runs list\` shows the history.`,
   "sync-runs": `Usage:
   sixb sync-runs list [options]
 
@@ -582,9 +612,10 @@ List options:
   pipelines: `Usage:
   sixb pipelines list
   sixb pipelines get <pipeline-id>
+  sixb pipelines run <pipeline-id>
 
-Lists the pipelines you may run, each with its latest run. \`sixb pipeline-runs\` shows the
-history and each run's steps.`,
+Lists, inspects, or triggers pipelines you may run. \`sixb pipeline-runs\` shows the history and
+each run's steps.`,
   "pipeline-runs": `Usage:
   sixb pipeline-runs list [options]
   sixb pipeline-runs get <run-id>
@@ -597,7 +628,41 @@ List options:
   --offset <n>                  Non-negative; defaults to 0
   --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}
 
-\`get\` includes the run's steps.`
+\`get\` includes the run's steps.`,
+  tokens: `Usage:
+  sixb tokens list [--json]
+  sixb tokens create <name> [--expires-in <duration>|--expires-at <iso>] [--group <id>]... [--json]
+  sixb tokens revoke <token-id> [--json]
+
+Manage personal access tokens. Creating a token requires a signed-in session (\`sixb login\`).`,
+  "service-accounts": `Usage:
+  sixb service-accounts list [--json]
+  sixb service-accounts create <name> [--id <id>] [--description <text>] [--group <id>]... [--json]
+  sixb service-accounts disable <service-account-id> [--json]
+  sixb service-accounts tokens list <service-account-id> [--json]
+  sixb service-accounts tokens create <service-account-id> <name> [--expires-in <duration>|--expires-at <iso>] [--group <id>]... [--json]
+  sixb service-accounts tokens revoke <service-account-id> <token-id> [--json]
+
+Manage service accounts and their access tokens.`,
+  shares: `Usage:
+  sixb shares list [--definition <id>] [--primary-id <id>] [--json]
+  sixb shares create --file <path|-> [--json]
+  sixb shares revoke <grant-id> [--json]
+
+List, create, and revoke shared-access grants.`,
+  logs: `Usage:
+  sixb logs list [--limit <n>] [--level <level>] [--service <name>] [--search <text>] [--from <RFC3339>] [--to <RFC3339>]`,
+  activity: `Usage:
+  sixb activity summary [--from <RFC3339>] [--to <RFC3339>]
+  sixb activity visits [--from <RFC3339>] [--to <RFC3339>] [--limit <n>]
+  sixb activity users [--from <RFC3339>] [--to <RFC3339>] [--limit <n>]`,
+  connectors: `Usage:
+  sixb connectors accounts <connector-id>`,
+  api: `Usage:
+  sixb api <METHOD> <path> [--file <path|->|--input <json>] [--query <key=value>]... [--json]
+
+Send a request directly to any relative /api/... route using the active connection, auth, and
+grant boundary. METHOD is GET, POST, PUT, PATCH, DELETE, or HEAD.`
 };
 var QUERY_EXAMPLES = {
   exact: '{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]}',
@@ -748,6 +813,63 @@ async function actions(api, args, requestWaitMs = ACTION_REQUEST_WAIT_MS) {
   fail(`Unknown actions command '${sub}'.`);
 }
 
+// src/commands/api.ts
+var METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]);
+async function apiCommand(client, args) {
+  if (args.length === 0 || isHelp(args[0]) || requestsHelp(args)) {
+    return writeText(GROUP_HELP.api);
+  }
+  const { positionals, options } = parseCommandArgs(args, {
+    "--file": "string",
+    "--input": "string",
+    "--query": "strings",
+    "--json": "boolean"
+  }, "api", 2);
+  const rawMethod = (positionals[0] ?? "").toUpperCase();
+  if (!METHODS.has(rawMethod)) {
+    fail(`Unsupported HTTP method '${positionals[0] ?? ""}'. Use GET, POST, PUT, PATCH, DELETE, or HEAD.`);
+  }
+  const path = positionals[1] ?? "";
+  if (options["--file"] && options["--input"]) {
+    fail("--file and --input cannot be used together.");
+  }
+  let body;
+  if (options["--file"]) {
+    body = await readJson(options["--file"]);
+  } else if (options["--input"] !== undefined) {
+    try {
+      body = JSON.parse(options["--input"]);
+    } catch {
+      fail("--input must be valid JSON.", "invalid_json");
+    }
+  }
+  if (body !== undefined && (rawMethod === "GET" || rawMethod === "HEAD")) {
+    fail(`${rawMethod} requests cannot include a body.`);
+  }
+  const query = parseQueryPairs(options["--query"]);
+  const result = await client.request(rawMethod, path, {
+    ...query ? { query } : {},
+    ...body === undefined ? {} : { body }
+  });
+  if (rawMethod === "POST" || rawMethod === "PUT" || rawMethod === "PATCH") {
+    return writeRequestResult(result);
+  }
+  writeJson(result);
+}
+function parseQueryPairs(entries) {
+  if (!entries || entries.length === 0)
+    return;
+  const query = {};
+  for (const entry of entries) {
+    const separator = entry.indexOf("=");
+    if (separator <= 0) {
+      fail(`Invalid --query '${entry}'. Use key=value.`);
+    }
+    query[entry.slice(0, separator)] = entry.slice(separator + 1);
+  }
+  return query;
+}
+
 // src/commands/artifacts.ts
 var STATUSES = ["open", "resolved", "all"];
 var MAX_BODY_LENGTH = 4000;
@@ -755,6 +877,40 @@ async function artifacts(api, args) {
   const [group, sub, ...rest] = args;
   if (!group || isHelp(group))
     return writeText(GROUP_HELP.artifacts);
+  if (group === "list") {
+    if (requestsHelp(args.slice(1)))
+      return writeText(GROUP_HELP.artifacts);
+    const { options } = parseCommandArgs(args.slice(1), { "--limit": "string", "--offset": "string" }, "artifacts list");
+    return writeJson(await api.get("/api/artifacts", {
+      ...options["--limit"] ? { limit: options["--limit"] } : {},
+      ...options["--offset"] ? { offset: options["--offset"] } : {}
+    }));
+  }
+  if (group === "get") {
+    if (requestsHelp(args.slice(1)))
+      return writeText(GROUP_HELP.artifacts);
+    const { positionals } = parseCommandArgs(args.slice(1), {}, "artifacts get", 1);
+    return writeJson(await api.get(`/api/artifacts/${idSegment(positionals[0]?.trim())}`));
+  }
+  if (group === "version") {
+    if (requestsHelp(args.slice(1)))
+      return writeText(GROUP_HELP.artifacts);
+    const { positionals } = parseCommandArgs(args.slice(1), {}, "artifacts version", 2);
+    const [artifactId, version] = positionals;
+    return writeJson(await api.get(`/api/artifacts/${idSegment(artifactId?.trim())}/versions/${idSegment(version?.trim())}`));
+  }
+  if (group === "freeze") {
+    if (requestsHelp(args.slice(1)))
+      return writeText(GROUP_HELP.artifacts);
+    const { positionals } = parseCommandArgs(args.slice(1), {}, "artifacts freeze", 1);
+    return writeJson(await api.post(`/api/artifacts/${idSegment(positionals[0]?.trim())}/freeze`, {}));
+  }
+  if (group === "delete") {
+    if (requestsHelp(args.slice(1)))
+      return writeText(GROUP_HELP.artifacts);
+    const { positionals } = parseCommandArgs(args.slice(1), {}, "artifacts delete", 1);
+    return writeJson(await api.delete(`/api/artifacts/${idSegment(positionals[0]?.trim())}`));
+  }
   if (group === "export")
     return exportVideo(api, args.slice(1));
   if (group === "media")
@@ -939,6 +1095,12 @@ async function runnables(api, group, args) {
   if (sub === "get") {
     const { positionals } = parseCommandArgs(rest, {}, `${group} get`, 1);
     return writeJson(await api.get(`/api/${group}/${idSegment(positionals[0])}`));
+  }
+  if (sub === "run") {
+    const { positionals, options } = parseCommandArgs(rest, group === "syncs" ? { "--file": "string" } : {}, `${group} run`, 1);
+    const file = typeof options["--file"] === "string" ? options["--file"] : undefined;
+    const body = group === "syncs" && file ? await readJson(file) : {};
+    return writeJson(await api.post(`/api/${group}/${idSegment(positionals[0])}/runs`, body));
   }
   fail(`Unknown ${group} command '${sub}'.`);
 }
@@ -2471,6 +2633,58 @@ async function objectsLinks(api, args) {
   }));
 }
 
+// src/commands/observability.ts
+async function logs(api, args) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP.logs);
+  if (sub === "list") {
+    const { options } = parseCommandArgs(rest, {
+      "--limit": "string",
+      "--level": "string",
+      "--service": "string",
+      "--search": "string",
+      "--from": "string",
+      "--to": "string"
+    }, "logs list");
+    const limit = options["--limit"] === undefined ? undefined : String(integerInRange("--limit", options["--limit"], 1, CLI_LIMITS.list.maximum));
+    return writeJson(await api.get("/api/logs", {
+      ...limit ? { limit } : {},
+      ...options["--level"] ? { level: options["--level"] } : {},
+      ...options["--service"] ? { service: options["--service"] } : {},
+      ...options["--search"] ? { search: options["--search"] } : {},
+      ...options["--from"] ? { from: rfc3339Value("--from", options["--from"]) } : {},
+      ...options["--to"] ? { to: rfc3339Value("--to", options["--to"]) } : {}
+    }));
+  }
+  fail(`Unknown logs command '${sub}'. Run 'sixb logs --help'.`);
+}
+async function activity(api, args) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP.activity);
+  if (sub === "summary" || sub === "visits" || sub === "users") {
+    const { options } = parseCommandArgs(rest, { "--from": "string", "--to": "string", "--limit": "string" }, `activity ${sub}`);
+    const limit = options["--limit"] === undefined ? undefined : String(integerInRange("--limit", options["--limit"], 1, CLI_LIMITS.list.maximum));
+    return writeJson(await api.get(`/api/activity/${sub}`, {
+      ...options["--from"] ? { from: rfc3339Value("--from", options["--from"]) } : {},
+      ...options["--to"] ? { to: rfc3339Value("--to", options["--to"]) } : {},
+      ...limit ? { limit } : {}
+    }));
+  }
+  fail(`Unknown activity command '${sub}'. Run 'sixb activity --help'.`);
+}
+async function connectors(api, args) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP.connectors);
+  if (sub === "accounts") {
+    const { positionals } = parseCommandArgs(rest, {}, "connectors accounts", 1);
+    return writeJson(await api.get(`/api/connectors/${idSegment(positionals[0]?.trim())}/accounts`));
+  }
+  fail(`Unknown connectors command '${sub}'. Run 'sixb connectors --help'.`);
+}
+
 // src/commands/ontology.ts
 async function ontology(api, args) {
   const [sub, ...rest] = args;
@@ -2559,6 +2773,10 @@ async function runs(api, kind, args) {
   const group = `${kind}-runs`;
   if (!sub || isHelp(sub) || requestsHelp(rest))
     return writeText(GROUP_HELP[group]);
+  if (sub === "cancel" && kind === "workflow") {
+    const { positionals } = parseCommandArgs(rest, {}, "workflow-runs cancel", 1);
+    return writeJson(await api.post(`/api/workflow-runs/${encodeURIComponent(positionals[0] ?? "")}/cancel`, {}));
+  }
   if (sub === "get" && kind !== "sync") {
     const { positionals } = parseCommandArgs(rest, {}, `${group} get`, 1);
     return writeJson(await api.get(`/api/${group}/${encodeURIComponent(positionals[0] ?? "")}`));
@@ -2594,6 +2812,450 @@ async function runs(api, kind, args) {
   fail(`Unknown ${group} command '${sub}'.`);
 }
 
+// src/format.ts
+function wantsJson(explicitJson) {
+  if (explicitJson === true)
+    return true;
+  if (process.env.SIXB_OUTPUT === "json")
+    return true;
+  return process.stdout.isTTY !== true;
+}
+function renderOutput(data, options) {
+  if (wantsJson(options.json)) {
+    writeJson(data);
+    return;
+  }
+  writeText(options.renderText());
+}
+var useColor = () => process.stdout.isTTY === true && !process.env.NO_COLOR;
+var style = {
+  bold: (text) => useColor() ? `\x1B[1m${text}\x1B[0m` : text,
+  dim: (text) => useColor() ? `\x1B[2m${text}\x1B[0m` : text,
+  blue: (text) => useColor() ? `\x1B[34m${text}\x1B[0m` : text,
+  green: (text) => useColor() ? `\x1B[32m${text}\x1B[0m` : text,
+  red: (text) => useColor() ? `\x1B[31m${text}\x1B[0m` : text
+};
+function renderTable(options) {
+  const lines = [];
+  if (options.title || options.subtitle) {
+    const heading = [
+      options.title ? style.bold(options.title) : "",
+      options.subtitle ? style.dim(options.subtitle) : ""
+    ].filter(Boolean).join("  ");
+    lines.push(heading);
+  }
+  if (options.rows.length === 0) {
+    lines.push(style.dim(options.emptyMessage ?? "No results."));
+    return lines.join(`
+`);
+  }
+  const widths = options.headers.map((header, column) => Math.max(header.length, ...options.rows.map((row) => (row[column] ?? "").length)));
+  const formatRow = (cells) => cells.map((cell, index) => cell.padEnd(widths[index] ?? 0)).join("  ");
+  lines.push(style.dim(formatRow(options.headers)));
+  for (const row of options.rows) {
+    lines.push(formatRow(options.headers.map((_, index) => row[index] ?? "")));
+  }
+  return lines.join(`
+`);
+}
+function renderKeyValues(options) {
+  const lines = [];
+  if (options.title) {
+    const painted = options.titleTone === "green" ? style.green(style.bold(options.title)) : options.titleTone === "red" ? style.red(style.bold(options.title)) : style.bold(options.title);
+    lines.push(options.subtitle ? `${painted}  ${style.dim(options.subtitle)}` : painted);
+  }
+  const width = Math.max(0, ...options.items.map((item) => item.label.length));
+  for (const item of options.items) {
+    lines.push(`${style.dim(`${item.label.padEnd(width)}:`)} ${item.value}`);
+  }
+  if (options.note)
+    lines.push("", options.note);
+  return lines.join(`
+`);
+}
+function formatShortDate(value) {
+  if (typeof value !== "string" || !value)
+    return "—";
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed))
+    return value;
+  return new Date(parsed).toISOString().slice(0, 10);
+}
+function formatGroups(value) {
+  if (!Array.isArray(value) || value.length === 0)
+    return "all";
+  return value.map(String).join(", ");
+}
+
+// src/commands/tokens.ts
+var DURATION_PATTERN = /^(\d+)([smhdwy])$/i;
+var DURATION_MS = {
+  s: 1000,
+  m: 60000,
+  h: 3600000,
+  d: 86400000,
+  w: 7 * 86400000,
+  y: 365 * 86400000
+};
+async function tokens(api, args) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP.tokens);
+  if (sub === "list") {
+    const { options } = parseCommandArgs(rest, { "--json": "boolean" }, "tokens list");
+    const result = asRecord(await api.get("/api/auth/access-tokens"));
+    const items = Array.isArray(result.accessTokens) ? result.accessTokens.map(asRecord) : [];
+    return renderOutput(result, {
+      json: options["--json"],
+      renderText: () => renderTable({
+        subtitle: `${items.length} visible`,
+        headers: ["Name", "ID", "Status", "Groups", "Last used", "Expires"],
+        rows: items.map((token) => [
+          String(token.name ?? ""),
+          String(token.id ?? ""),
+          String(token.status ?? ""),
+          formatGroups(token.groupIds),
+          formatShortDate(token.lastUsedAt),
+          formatShortDate(token.expiresAt)
+        ]),
+        emptyMessage: "No personal access tokens."
+      })
+    });
+  }
+  if (sub === "create") {
+    const { positionals, options } = parseCommandArgs(rest, {
+      "--name": "string",
+      "--expires-at": "string",
+      "--expires-in": "string",
+      "--group": "strings",
+      "--json": "boolean"
+    }, "tokens create", [0, 1]);
+    const name = options["--name"]?.trim() || positionals[0]?.trim();
+    if (!name)
+      fail("Usage: sixb tokens create <name> [--expires-in 90d] [--group <id>]");
+    assertNotAccessToken(api);
+    const expiresAt = resolveExpiration(options["--expires-at"], options["--expires-in"]);
+    const groupIds = normalizeGroupIds(options["--group"]);
+    const result = asRecord(await api.post("/api/auth/access-tokens", {
+      name,
+      ...expiresAt ? { expiresAt } : {},
+      ...groupIds.length > 0 ? { groupIds } : {}
+    }));
+    const token = asRecord(result.accessToken);
+    const secret = typeof result.tokenValue === "string" ? result.tokenValue : "";
+    return renderOutput(result, {
+      json: options["--json"],
+      renderText: () => renderKeyValues({
+        title: "Created personal access token",
+        titleTone: "green",
+        items: [
+          { label: "Name", value: String(token.name ?? "") },
+          { label: "ID", value: String(token.id ?? "") },
+          { label: "Expires", value: formatShortDate(token.expiresAt) },
+          { label: "Groups", value: formatGroups(token.groupIds) },
+          { label: "Token", value: secret }
+        ],
+        note: "Copy this token now; it will not be shown again."
+      })
+    });
+  }
+  if (sub === "revoke") {
+    const { positionals, options } = parseCommandArgs(rest, { "--id": "string", "--json": "boolean" }, "tokens revoke", [0, 1]);
+    const tokenId = options["--id"]?.trim() || positionals[0]?.trim();
+    if (!tokenId)
+      fail("Usage: sixb tokens revoke <token-id>");
+    const result = asRecord(await api.post(`/api/auth/access-tokens/${idSegment(tokenId)}/revoke`, {}));
+    const token = asRecord(result.accessToken);
+    return renderOutput(result, {
+      json: options["--json"],
+      renderText: () => renderKeyValues({
+        title: "Revoked personal access token",
+        items: [
+          { label: "Name", value: String(token.name ?? "") },
+          { label: "ID", value: String(token.id ?? "") },
+          { label: "Status", value: String(token.status ?? "") }
+        ]
+      })
+    });
+  }
+  fail(`Unknown tokens command '${sub}'. Run 'sixb tokens --help'.`);
+}
+function assertNotAccessToken(api) {
+  const token = api.bearerToken;
+  if (token && (token.startsWith("sixb_pat_") || token.startsWith("sixb_sat_"))) {
+    throw new CliError({
+      code: "session_required",
+      message: `Creating a token requires signing in; an access token cannot create another token. Run \`sixb login ${api.baseUrl}\`, then create the token from that profile.`
+    }, EXIT_USAGE);
+  }
+}
+function resolveExpiration(expiresAt, expiresIn) {
+  if (expiresAt && expiresIn) {
+    fail("Use either --expires-at or --expires-in, not both.");
+  }
+  if (expiresAt) {
+    const parsed = Date.parse(expiresAt);
+    if (Number.isNaN(parsed))
+      fail(`Invalid --expires-at timestamp '${expiresAt}'.`);
+    return new Date(parsed).toISOString();
+  }
+  if (!expiresIn)
+    return;
+  const match = DURATION_PATTERN.exec(expiresIn.trim());
+  if (!match)
+    fail(`Invalid --expires-in duration '${expiresIn}'. Use values like 30d, 12h, or 1y.`);
+  const amount = Number.parseInt(match[1] ?? "0", 10);
+  const unit = (match[2] ?? "").toLowerCase();
+  const multiplier = DURATION_MS[unit];
+  if (!multiplier || amount <= 0)
+    fail(`Invalid --expires-in duration '${expiresIn}'.`);
+  return new Date(Date.now() + amount * multiplier).toISOString();
+}
+function normalizeGroupIds(values) {
+  if (!values || values.length === 0)
+    return [];
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+// src/commands/service-accounts.ts
+async function serviceAccounts(api, args) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP["service-accounts"]);
+  if (sub === "list") {
+    const { options } = parseCommandArgs(rest, { "--json": "boolean" }, "service-accounts list");
+    const result = asRecord(await api.get("/api/auth/service-accounts"));
+    const items = Array.isArray(result.serviceAccounts) ? result.serviceAccounts.map(asRecord) : [];
+    return renderOutput(result, {
+      json: options["--json"],
+      renderText: () => renderTable({
+        subtitle: `${items.length} visible`,
+        headers: ["Name", "ID", "Status", "Groups", "Updated"],
+        rows: items.map((sa) => [
+          String(sa.name ?? ""),
+          String(sa.id ?? ""),
+          String(sa.status ?? ""),
+          formatGroups(sa.groupIds),
+          formatShortDate(sa.updatedAt)
+        ]),
+        emptyMessage: "No service accounts."
+      })
+    });
+  }
+  if (sub === "create") {
+    const { positionals, options } = parseCommandArgs(rest, {
+      "--id": "string",
+      "--name": "string",
+      "--description": "string",
+      "--group": "strings",
+      "--json": "boolean"
+    }, "service-accounts create", [0, 1]);
+    const name = options["--name"]?.trim() || positionals[0]?.trim();
+    if (!name)
+      fail("Usage: sixb service-accounts create <name> [--id <id>] [--group <id>]");
+    const groupIds = normalizeGroupIds(options["--group"]);
+    const result = asRecord(await api.post("/api/auth/service-accounts", {
+      ...options["--id"]?.trim() ? { id: options["--id"].trim() } : {},
+      name,
+      ...options["--description"]?.trim() ? { description: options["--description"].trim() } : {},
+      ...groupIds.length > 0 ? { groupIds } : {}
+    }));
+    const sa = asRecord(result.serviceAccount);
+    return renderOutput(result, {
+      json: options["--json"],
+      renderText: () => renderKeyValues({
+        title: "Created service account",
+        titleTone: "green",
+        items: [
+          { label: "Name", value: String(sa.name ?? "") },
+          { label: "ID", value: String(sa.id ?? "") },
+          { label: "Status", value: String(sa.status ?? "") },
+          { label: "Groups", value: formatGroups(sa.groupIds) }
+        ]
+      })
+    });
+  }
+  if (sub === "disable") {
+    const { positionals, options } = parseCommandArgs(rest, { "--id": "string", "--json": "boolean" }, "service-accounts disable", [0, 1]);
+    const id = options["--id"]?.trim() || positionals[0]?.trim();
+    if (!id)
+      fail("Usage: sixb service-accounts disable <service-account-id>");
+    const result = asRecord(await api.post(`/api/auth/service-accounts/${idSegment(id)}/disable`, {}));
+    const sa = asRecord(result.serviceAccount);
+    return renderOutput(result, {
+      json: options["--json"],
+      renderText: () => renderKeyValues({
+        title: "Disabled service account",
+        items: [
+          { label: "Name", value: String(sa.name ?? "") },
+          { label: "ID", value: String(sa.id ?? "") },
+          { label: "Status", value: String(sa.status ?? "") }
+        ]
+      })
+    });
+  }
+  if (sub === "tokens" || sub === "token") {
+    return serviceAccountTokens(api, rest);
+  }
+  fail(`Unknown service-accounts command '${sub}'. Run 'sixb service-accounts --help'.`);
+}
+async function serviceAccountTokens(api, args) {
+  const [action, ...rest] = args;
+  if (!action || isHelp(action) || requestsHelp(rest)) {
+    return writeText(GROUP_HELP["service-accounts"]);
+  }
+  if (action === "list") {
+    const { positionals, options } = parseCommandArgs(rest, { "--json": "boolean" }, "service-accounts tokens list", 1);
+    const saId = positionals[0]?.trim() ?? "";
+    const result = asRecord(await api.get(`/api/auth/service-accounts/${idSegment(saId)}/access-tokens`));
+    const items = Array.isArray(result.accessTokens) ? result.accessTokens.map(asRecord) : [];
+    return renderOutput(result, {
+      json: options["--json"],
+      renderText: () => renderTable({
+        subtitle: saId,
+        headers: ["Name", "ID", "Status", "Groups", "Last used", "Expires"],
+        rows: items.map((token) => [
+          String(token.name ?? ""),
+          String(token.id ?? ""),
+          String(token.status ?? ""),
+          formatGroups(token.groupIds),
+          formatShortDate(token.lastUsedAt),
+          formatShortDate(token.expiresAt)
+        ]),
+        emptyMessage: "No service-account tokens."
+      })
+    });
+  }
+  if (action === "create") {
+    const { positionals, options } = parseCommandArgs(rest, {
+      "--name": "string",
+      "--expires-at": "string",
+      "--expires-in": "string",
+      "--group": "strings",
+      "--json": "boolean"
+    }, "service-accounts tokens create", [1, 2]);
+    const saId = positionals[0]?.trim() ?? "";
+    const name = options["--name"]?.trim() || positionals[1]?.trim();
+    if (!name) {
+      fail("Usage: sixb service-accounts tokens create <service-account-id> <name> [options]");
+    }
+    assertNotAccessToken(api);
+    const expiresAt = resolveExpiration(options["--expires-at"], options["--expires-in"]);
+    const groupIds = normalizeGroupIds(options["--group"]);
+    const result = asRecord(await api.post(`/api/auth/service-accounts/${idSegment(saId)}/access-tokens`, {
+      name,
+      ...expiresAt ? { expiresAt } : {},
+      ...groupIds.length > 0 ? { groupIds } : {}
+    }));
+    const token = asRecord(result.accessToken);
+    const secret = typeof result.tokenValue === "string" ? result.tokenValue : "";
+    return renderOutput(result, {
+      json: options["--json"],
+      renderText: () => renderKeyValues({
+        title: "Created service-account token",
+        titleTone: "green",
+        subtitle: saId,
+        items: [
+          { label: "Name", value: String(token.name ?? "") },
+          { label: "ID", value: String(token.id ?? "") },
+          { label: "Expires", value: formatShortDate(token.expiresAt) },
+          { label: "Groups", value: formatGroups(token.groupIds) },
+          { label: "Token", value: secret }
+        ],
+        note: "Copy this token now; it will not be shown again."
+      })
+    });
+  }
+  if (action === "revoke") {
+    const { positionals, options } = parseCommandArgs(rest, { "--id": "string", "--json": "boolean" }, "service-accounts tokens revoke", [1, 2]);
+    const saId = positionals[0]?.trim() ?? "";
+    const tokenId = options["--id"]?.trim() || positionals[1]?.trim();
+    if (!tokenId) {
+      fail("Usage: sixb service-accounts tokens revoke <service-account-id> <token-id>");
+    }
+    const result = asRecord(await api.post(`/api/auth/service-accounts/${idSegment(saId)}/access-tokens/${idSegment(tokenId)}/revoke`, {}));
+    const token = asRecord(result.accessToken);
+    return renderOutput(result, {
+      json: options["--json"],
+      renderText: () => renderKeyValues({
+        title: "Revoked service-account token",
+        subtitle: saId,
+        items: [
+          { label: "Name", value: String(token.name ?? "") },
+          { label: "ID", value: String(token.id ?? "") },
+          { label: "Status", value: String(token.status ?? "") }
+        ]
+      })
+    });
+  }
+  fail(`Unknown service-accounts tokens command '${action}'. Run 'sixb service-accounts --help'.`);
+}
+
+// src/commands/shares.ts
+async function shares(api, args) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP.shares);
+  if (sub === "list") {
+    const { options } = parseCommandArgs(rest, { "--definition": "string", "--primary-id": "string", "--json": "boolean" }, "shares list");
+    const result = asRecord(await api.get("/api/share-grants", {
+      ...options["--definition"] ? { definitionId: options["--definition"] } : {},
+      ...options["--primary-id"] ? { primaryId: options["--primary-id"] } : {}
+    }));
+    const grants = Array.isArray(result.grants) ? result.grants.map(asRecord) : [];
+    return renderOutput(result, {
+      json: options["--json"],
+      renderText: () => renderTable({
+        subtitle: `${grants.length} visible`,
+        headers: ["ID", "Definition", "Destination", "Status", "Expires"],
+        rows: grants.map((grant) => [
+          String(grant.id ?? ""),
+          String(grant.definitionId ?? ""),
+          String(grant.destinationPath ?? ""),
+          String(grant.status ?? ""),
+          formatShortDate(grant.expiresAt)
+        ]),
+        emptyMessage: "No shared-access grants."
+      })
+    });
+  }
+  if (sub === "create") {
+    const { options } = parseCommandArgs(rest, { "--file": "string", "--json": "boolean" }, "shares create");
+    if (!options["--file"]) {
+      fail("shares create requires --file <path|-> with the share grant payload.");
+    }
+    const payload = await readJson(options["--file"]);
+    const result = asRecord(await api.post("/api/share-grants", payload));
+    const grant = asRecord(result.grant);
+    return renderOutput(result, {
+      json: options["--json"],
+      renderText: () => renderKeyValues({
+        title: "Created shared-access grant",
+        titleTone: "green",
+        items: [
+          { label: "ID", value: String(grant.id ?? "") },
+          { label: "Definition", value: String(grant.definitionId ?? "") },
+          { label: "Expires", value: formatShortDate(grant.expiresAt) },
+          { label: "URL", value: String(result.url ?? "") }
+        ]
+      })
+    });
+  }
+  if (sub === "revoke") {
+    const { positionals, options } = parseCommandArgs(rest, { "--json": "boolean" }, "shares revoke", 1);
+    const grantId = positionals[0]?.trim() ?? "";
+    const result = asRecord(await api.delete(`/api/share-grants/${idSegment(grantId)}`));
+    return renderOutput(result, {
+      json: options["--json"],
+      renderText: () => renderKeyValues({
+        title: "Revoked shared-access grant",
+        items: [{ label: "ID", value: grantId }]
+      })
+    });
+  }
+  fail(`Unknown shares command '${sub}'. Run 'sixb shares --help'.`);
+}
+
 // src/commands/status.ts
 async function fetchStatus(api, context = {}) {
   const project = asRecord(await api.get("/api/project"));
@@ -2621,7 +3283,26 @@ async function status(api, args, context = {}) {
     return writeText(GROUP_HELP.status);
   if (args.some((arg) => arg !== "--json"))
     fail("status accepts no arguments but --json.");
-  writeJson(await fetchStatus(api, context));
+  const report = await fetchStatus(api, context);
+  renderOutput(report, {
+    json: args.includes("--json"),
+    renderText: () => renderKeyValues({
+      title: "Connected",
+      titleTone: "green",
+      items: [
+        ...report.profile ? [{ label: "Profile", value: report.profile }] : [],
+        { label: "Project", value: report.project.id },
+        { label: "API", value: report.apiUrl },
+        ...report.authenticated === undefined ? [] : [
+          {
+            label: "Authentication",
+            value: report.authenticated ? "token" : "not required"
+          }
+        ],
+        { label: "Runtime", value: `${report.runtime.name} ${report.runtime.version}` }
+      ]
+    })
+  });
 }
 function javascriptRuntime() {
   if (typeof globalThis.Bun === "object") {
@@ -2928,76 +3609,159 @@ async function workflows(api, args) {
 }
 
 // src/commands/index.ts
-var INSTANCE_COMMANDS = [
-  "status",
-  "project",
-  "ontology",
-  "objects",
-  "telemetry",
-  "actions",
-  "action-runs",
-  "files",
-  "workflows",
-  "workflow-runs",
-  "users",
-  "artifacts",
-  "models",
-  "datasets",
-  "syncs",
-  "sync-runs",
-  "pipelines",
-  "pipeline-runs",
-  "threads",
-  "memory"
+var COMMAND_REGISTRY = [
+  {
+    name: "status",
+    category: "Discovery",
+    summary: "Check API connection, project, and runtime",
+    run: status
+  },
+  { name: "project", category: "Discovery", summary: "Show project metadata", run: project },
+  {
+    name: "ontology",
+    category: "Discovery",
+    summary: "Inspect the visible ontology",
+    run: ontology
+  },
+  {
+    name: "objects",
+    category: "Objects",
+    summary: "Inspect, list, search, and query objects",
+    run: objects
+  },
+  {
+    name: "telemetry",
+    category: "Telemetry",
+    summary: "Read current and historical telemetry",
+    run: telemetry
+  },
+  {
+    name: "actions",
+    category: "Actions and workflows",
+    summary: "Discover and request actions",
+    run: actions
+  },
+  {
+    name: "action-runs",
+    category: "Actions and workflows",
+    summary: "Inspect action execution history",
+    run: (api, args) => runs(api, "action", args)
+  },
+  {
+    name: "workflows",
+    category: "Actions and workflows",
+    summary: "Discover and start workflows",
+    run: workflows
+  },
+  {
+    name: "workflow-runs",
+    category: "Actions and workflows",
+    summary: "Inspect and cancel workflow runs",
+    run: (api, args) => runs(api, "workflow", args)
+  },
+  {
+    name: "datasets",
+    category: "Data",
+    summary: "Read datasets, versions, and rows",
+    run: datasets
+  },
+  {
+    name: "syncs",
+    category: "Data",
+    summary: "List, inspect, and run syncs",
+    run: (api, args) => runnables(api, "syncs", args)
+  },
+  {
+    name: "sync-runs",
+    category: "Data",
+    summary: "Inspect sync run history",
+    run: (api, args) => runs(api, "sync", args)
+  },
+  {
+    name: "pipelines",
+    category: "Data",
+    summary: "List, inspect, and run pipelines",
+    run: (api, args) => runnables(api, "pipelines", args)
+  },
+  {
+    name: "pipeline-runs",
+    category: "Data",
+    summary: "Inspect pipeline runs and their steps",
+    run: (api, args) => runs(api, "pipeline", args)
+  },
+  { name: "files", category: "Files", summary: "Upload and download files", run: files },
+  {
+    name: "users",
+    category: "Members and access",
+    summary: "List and search project members",
+    run: users
+  },
+  {
+    name: "tokens",
+    category: "Members and access",
+    summary: "Manage personal access tokens",
+    run: tokens
+  },
+  {
+    name: "service-accounts",
+    category: "Members and access",
+    summary: "Manage service accounts and their tokens",
+    run: serviceAccounts
+  },
+  {
+    name: "shares",
+    category: "Members and access",
+    summary: "List, create, and revoke shared-access grants",
+    run: shares
+  },
+  {
+    name: "threads",
+    category: "Threads and memory",
+    summary: "List threads, messages, runs, and approvals",
+    run: threads
+  },
+  {
+    name: "memory",
+    category: "Threads and memory",
+    summary: "Read, pull, and save memory repos",
+    run: memory
+  },
+  {
+    name: "artifacts",
+    category: "Artifacts and models",
+    summary: "Manage artifacts, comments, media, and video exports",
+    run: artifacts
+  },
+  {
+    name: "models",
+    category: "Artifacts and models",
+    summary: "List and call the project's AI models",
+    run: models
+  },
+  { name: "logs", category: "Observability", summary: "Read project logs", run: logs },
+  { name: "activity", category: "Observability", summary: "Read activity metrics", run: activity },
+  {
+    name: "connectors",
+    category: "Observability",
+    summary: "Inspect connector accounts",
+    run: connectors
+  },
+  {
+    name: "api",
+    category: "Raw API",
+    summary: "Send an authenticated request to any relative /api/ path",
+    run: apiCommand
+  }
 ];
+var COMMAND_BY_NAME = new Map(COMMAND_REGISTRY.map((entry) => [entry.name, entry]));
 function isInstanceCommand(command) {
-  return INSTANCE_COMMANDS.includes(command);
+  return COMMAND_BY_NAME.has(command);
 }
 async function dispatch(api, command, args) {
-  switch (command) {
-    case "status":
-      return status(api, args);
-    case "project":
-      return project(api, args);
-    case "ontology":
-      return ontology(api, args);
-    case "objects":
-      return objects(api, args);
-    case "telemetry":
-      return telemetry(api, args);
-    case "actions":
-      return actions(api, args);
-    case "action-runs":
-      return runs(api, "action", args);
-    case "files":
-      return files(api, args);
-    case "workflows":
-      return workflows(api, args);
-    case "workflow-runs":
-      return runs(api, "workflow", args);
-    case "artifacts":
-      return artifacts(api, args);
-    case "users":
-      return users(api, args);
-    case "models":
-      return models(api, args);
-    case "datasets":
-      return datasets(api, args);
-    case "syncs":
-      return runnables(api, "syncs", args);
-    case "sync-runs":
-      return runs(api, "sync", args);
-    case "pipelines":
-      return runnables(api, "pipelines", args);
-    case "pipeline-runs":
-      return runs(api, "pipeline", args);
-    case "threads":
-      return threads(api, args);
-    case "memory":
-      return memory(api, args);
-    default:
-      fail(`Unknown command '${command}'. Run 'sixb --help'.`);
-  }
+  const entry = COMMAND_BY_NAME.get(command);
+  if (!entry)
+    fail(`Unknown command '${command}'. Run 'sixb --help'.`);
+  return entry.run(api, args);
 }
 
 // src/api-client.ts
@@ -3029,17 +3793,39 @@ class ApiClient {
     this.unavailableMessage = options.unavailableMessage ?? "The Sixb API could not be reached.";
     this.unavailableHint = options.unavailableHint ?? "Run 'sixb status' to check the connection.";
   }
+  get bearerToken() {
+    return this.authorization?.match(/^Bearer\s+(\S+)$/i)?.[1];
+  }
+  async request(method, path, options = {}) {
+    const url = this.url(path, options.query);
+    if (method === "HEAD") {
+      const response = await this.fetch(url, {
+        method,
+        ...options.signal ? { signal: options.signal } : {}
+      });
+      return { status: response.status, ok: response.ok };
+    }
+    const init = {
+      method,
+      ...options.signal ? { signal: options.signal } : {}
+    };
+    if (options.body !== undefined) {
+      init.headers = { "content-type": "application/json" };
+      init.body = JSON.stringify(options.body);
+    }
+    return this.json(url, init);
+  }
   async get(path, query) {
-    const url = this.url(path, query);
-    return this.json(url, { method: "GET" });
+    return this.request("GET", path, { query });
+  }
+  async delete(path, query) {
+    return this.request("DELETE", path, { query });
   }
   async post(path, body, options = {}) {
-    return this.json(this.url(path), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      ...options.signal ? { signal: options.signal } : {}
-    });
+    return this.request("POST", path, { body, signal: options.signal });
+  }
+  async patch(path, body, options = {}) {
+    return this.request("PATCH", path, { body, signal: options.signal });
   }
   async put(path, body, sizeBytes) {
     return this.json(this.url(path), {

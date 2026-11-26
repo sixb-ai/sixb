@@ -143,7 +143,7 @@ async function main(): Promise<void> {
       break
     }
 
-    case "worker": {
+    case "serve:worker": {
       const { runWorker } = await import("./commands/worker")
       await runWorker({
         entry: getFlag("entry"),
@@ -158,7 +158,7 @@ async function main(): Promise<void> {
       break
     }
 
-    case "worker-group": {
+    case "serve:worker-group": {
       const { runWorkerGroup } = await import("./commands/worker-group")
       await runWorkerGroup({
         entry: getFlag("entry"),
@@ -173,7 +173,7 @@ async function main(): Promise<void> {
       break
     }
 
-    case "api": {
+    case "serve:api": {
       const { runApi } = await import("./commands/api")
       await runApi({
         entry: getFlag("entry"),
@@ -189,7 +189,7 @@ async function main(): Promise<void> {
       break
     }
 
-    case "app": {
+    case "serve:app": {
       const { runApp } = await import("./commands/app")
       await runApp({
         entry: getFlag("entry"),
@@ -268,64 +268,13 @@ async function main(): Promise<void> {
       break
     }
 
-    case "token:list":
-    case "token:create":
-    case "token:revoke": {
-      const { runToken } = await import("./commands/token")
-      const action = parsed.id.slice("token:".length)
-      await runToken({
-        action,
-        positionals: [action, ...positionals],
-        apiUrl: getFlag("api-url"),
-        token: getFlag("token"),
-        profile: getFlag("profile"),
-        id: getFlag("id"),
-        name: getFlag("name"),
-        expiresAt: getFlag("expires-at"),
-        expiresIn: getFlag("expires-in"),
-        groupIds: getFlags("group"),
-        json: hasFlag("json"),
-      })
-      break
-    }
-
-    case "service-account:list":
-    case "service-account:create":
-    case "service-account:disable":
-    case "service-account:token:list":
-    case "service-account:token:create":
-    case "service-account:token:revoke": {
-      const { runServiceAccount } = await import("./commands/service-account")
-      const commandPath = parsed.id.split(":").slice(1)
-      await runServiceAccount({
-        positionals: [...commandPath, ...positionals],
-        apiUrl: getFlag("api-url"),
-        token: getFlag("token"),
-        profile: getFlag("profile"),
-        id: getFlag("id"),
-        name: getFlag("name"),
-        description: getFlag("description"),
-        expiresAt: getFlag("expires-at"),
-        expiresIn: getFlag("expires-in"),
-        groupIds: getFlags("group"),
-        json: hasFlag("json"),
-      })
-      break
-    }
-
-    case "scheduler": {
-      const { runScheduler } = await import("./commands/scheduler")
-      await runScheduler()
-      break
-    }
-
-    case "orchestrator": {
+    case "serve:orchestrator": {
       const { runOrchestrator } = await import("./commands/orchestrator")
       await runOrchestrator({ entry: getFlag("entry"), noMigrate: hasFlag("no-migrate") })
       break
     }
 
-    case "rules": {
+    case "serve:rules": {
       const { runRules } = await import("./commands/rules")
       await runRules({ entry: getFlag("entry"), noMigrate: hasFlag("no-migrate") })
       break

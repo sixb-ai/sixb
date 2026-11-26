@@ -2,7 +2,6 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { runScheduler } from "../src/commands/scheduler"
 import {
   type CliHelp,
   CliUsageError,
@@ -53,12 +52,11 @@ describe("sixb command line", () => {
     // One line: the help pads each label to a column and wraps long summaries.
     const output = help.output.replace(/\s+/g, " ")
 
-    for (const command of ["api", "app", "scheduler", "orchestrator", "rules", "worker <type>"]) {
+    for (const command of ["serve <role>", "tokens", "service-accounts", "shares", "api"]) {
       expect(output).toContain(command)
     }
     expect(output).toContain("action-runs")
     expect(output).toContain("workflow-runs")
-    expect(output).toContain("sync, agent, pipeline, projection, workflow")
     expect(output).not.toContain("--concurrency <value>")
     // A command added without a group would land in "More".
     expect(ROOT_HELP_GROUPS.map((group) => group.title)).not.toContain("More")
@@ -67,7 +65,7 @@ describe("sixb command line", () => {
     expect(items).toHaveLength(ROOT_HELP.commands.length + 1)
     expect(items[0]).toMatchObject({ label: "(no command)" })
 
-    const worker = await runInProcess(() => renderHelp(helpFor(["worker"])))
+    const worker = await runInProcess(() => renderHelp(helpFor(["serve", "worker"])))
     const workerOutput = worker.output.replace(/\s+/g, " ")
     expect(workerOutput).toContain("--concurrency <value>")
     expect(workerOutput).toContain("--subagent-concurrency-per-run <count>")
@@ -76,34 +74,33 @@ describe("sixb command line", () => {
   })
 
   test("serves a command's own help without running it", () => {
-    for (const group of ["profile", "token", "service-account", "db", "lake"]) {
+    for (const group of ["profile", "serve", "db", "lake"]) {
       expect(parseCliArgs([group])).toMatchObject({ kind: "help", help: { path: [group] } })
     }
-    expect(parseCliArgs(["service-account", "token"])).toMatchObject({
-      kind: "help",
-      help: { usage: "sixb service-account token <list|create|revoke> <service-account-id>" },
-    })
     for (const args of [
-      ["token", "create", "--help"],
-      ["help", "token", "create"],
+      ["serve", "api", "--help"],
+      ["help", "serve", "api"],
     ]) {
       expect(parseCliArgs(args)).toMatchObject({
         kind: "help",
-        help: { path: ["token", "create"] },
+        help: { path: ["serve", "api"] },
       })
     }
-    expect(parseCliArgs(["api", "--help"])).toMatchObject({ kind: "help", help: { path: ["api"] } })
+    expect(parseCliArgs(["api", "--help"])).toMatchObject({
+      kind: "instance",
+      args: ["api", "--help"],
+    })
   })
 
   // Reproduce: render the root help whatever the path in `renderHelp` (src/ui/index.tsx).
   test("renders a command's own help, not the root help", async () => {
-    const parsed = parseCliArgs(["service-account", "token"])
-    if (parsed.kind !== "help") throw new Error("Expected help.")
+    const serveHelp = parseCliArgs(["serve"])
+    if (serveHelp.kind !== "help") throw new Error("Expected help.")
 
-    const help = await runInProcess(() => renderHelp(parsed.help))
+    const help = await runInProcess(() => renderHelp(serveHelp.help))
 
     expect(help.output).toContain(
-      "sixb service-account token <list|create|revoke> <service-account-id>"
+      "sixb serve <api|app|orchestrator|rules|worker|worker-group> [options]"
     )
     expect(help.output).not.toContain("Real-time digital twin framework")
   })
@@ -121,12 +118,11 @@ describe("sixb command line", () => {
       ["status", "--api-url", "http://localhost:3002", "--profile", "local"],
       "--api-url and --profile cannot be used together",
     ],
-    [["token", "create"], "Missing required --name <name>"],
     [["init", "--unknown-option"], "Unknown option '--unknown-option'"],
-    [["worker"], "Invalid arguments for 'worker'"],
-    [["worker", "--type", "pipeline"], "Unknown option '--type'"],
-    [["worker", "sync", "--concurrency"], "--concurrency requires a value"],
-    [["worker-group", "sync", "--concurrency"], "--concurrency requires a value"],
+    [["serve", "worker"], "Invalid arguments for 'serve worker'"],
+    [["serve", "worker", "--type", "pipeline"], "Unknown option '--type'"],
+    [["serve", "worker", "sync", "--concurrency"], "--concurrency requires a value"],
+    [["serve", "worker-group", "sync", "--concurrency"], "--concurrency requires a value"],
   ])("rejects %j before running a command", (args, message) => {
     const error = usageError(args)
 
@@ -135,12 +131,14 @@ describe("sixb command line", () => {
   })
 
   test("shows the worker types when the type is missing", () => {
-    expect(usageError(["worker"]).help.usage).toContain("<sync|agent|pipeline|projection|workflow>")
+    expect(usageError(["serve", "worker"]).help.usage).toContain(
+      "<sync|agent|pipeline|projection|workflow>"
+    )
   })
 
   test("keeps the whole value of an equals-form option", () => {
     // Splitting on every `=` truncates this to 3, which passes validation and starts the worker.
-    expect(parseCliArgs(["worker", "sync", "--concurrency=3=4"])).toMatchObject({
+    expect(parseCliArgs(["serve", "worker", "sync", "--concurrency=3=4"])).toMatchObject({
       options: { concurrency: "3=4" },
     })
   })
@@ -174,7 +172,7 @@ describe("sixb command line", () => {
   // `renderCliError` in its catch.
   test.concurrent("hands a command its flags, and prints the failure it throws", async () => {
     const entry = resolve(import.meta.dir, "fixtures", "valid-project", "sixb.config.ts")
-    const result = await runCli(["worker", "sync", "--entry", entry, "--concurrency=3=4"])
+    const result = await runCli(["serve", "worker", "sync", "--entry", entry, "--concurrency=3=4"])
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("Invalid worker concurrency '3=4'")
@@ -258,15 +256,5 @@ describe("production asset paths", () => {
     expect(paths.projectRoot).toBe(outdir)
     expect(paths.buildOutdir).toBe(outdir)
     expect(builtAppOutdir(paths.buildOutdir)).toBe(join(outdir, "app"))
-  })
-})
-
-describe("sixb scheduler", () => {
-  // Reproduce: have `runScheduler` return without exiting; a process manager reads it as running.
-  test("refuses to start, and names what runs cron now", async () => {
-    const result = await runInProcess(() => runScheduler())
-
-    expect(result.exitCode).toBe(1)
-    expect(result.output.replace(/\s+/g, " ")).toContain("`sixb orchestrator` runs cron")
   })
 })

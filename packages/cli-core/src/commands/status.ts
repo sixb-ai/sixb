@@ -1,6 +1,7 @@
 import type { ApiClient } from "../api-client"
 import { isHelp } from "../arguments"
-import { CliError, EXIT_API, fail, INSTANCE_CLI_VERSION, writeJson, writeText } from "../output"
+import { renderKeyValues, renderOutput } from "../format"
+import { CliError, EXIT_API, fail, INSTANCE_CLI_VERSION, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
 import { asRecord } from "./shared"
 
@@ -66,7 +67,29 @@ export async function status(
 ): Promise<void> {
   if (isHelp(args[0])) return writeText(GROUP_HELP.status)
   if (args.some((arg) => arg !== "--json")) fail("status accepts no arguments but --json.")
-  writeJson(await fetchStatus(api, context))
+  const report = await fetchStatus(api, context)
+  renderOutput(report, {
+    json: args.includes("--json"),
+    renderText: () =>
+      renderKeyValues({
+        title: "Connected",
+        titleTone: "green",
+        items: [
+          ...(report.profile ? [{ label: "Profile", value: report.profile }] : []),
+          { label: "Project", value: report.project.id },
+          { label: "API", value: report.apiUrl },
+          ...(report.authenticated === undefined
+            ? []
+            : [
+                {
+                  label: "Authentication",
+                  value: report.authenticated ? "token" : "not required",
+                },
+              ]),
+          { label: "Runtime", value: `${report.runtime.name} ${report.runtime.version}` },
+        ],
+      }),
+  })
 }
 
 function javascriptRuntime(): StatusReport["runtime"] {
