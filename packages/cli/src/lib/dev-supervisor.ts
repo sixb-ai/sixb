@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path"
 import type { DevOptions } from "../commands/dev-runner"
 import { canRunLive } from "../ui/live/can-run-live"
 import { DESKTOP_RUNNER_ENTRY, loadDesktop } from "./desktop"
-import { DEV_UI_ENV, type DevChildMessage } from "./dev-messages"
+import { DEV_UI_ENV, type DevChildMessage, loadingLine } from "./dev-messages"
 import { watchDevSource } from "./dev-watch"
 import { errorMessage } from "./errors"
 
@@ -33,6 +33,40 @@ export interface DevControls {
   quit(): void
 }
 
+/** How long a dev process has to be ready, besides loading a branch's copy. */
+export const DEV_STARTUP_TIMEOUT_MS = 60_000
+
+/**
+ * A dev process's startup deadline. Loading a branch's copy pauses it: a copy of millions of
+ * objects loads for minutes, and a process killed mid-load would load it again, and be killed
+ * again, on every start. Once the copy is loaded, the rest of the startup has its own minute.
+ */
+export function startupDeadline(onExpired: () => void): {
+  observe(message: DevChildMessage): void
+  clear(): void
+} {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const arm = () => {
+    clearTimeout(timer)
+    timer = setTimeout(onExpired, DEV_STARTUP_TIMEOUT_MS)
+  }
+
+  arm()
+
+  return {
+    observe(message) {
+      if (message.type === "ready" || (message.type === "loading" && !message.done)) {
+        clearTimeout(timer)
+      } else if (message.type === "loading") {
+        arm()
+      }
+    },
+    clear() {
+      clearTimeout(timer)
+    },
+  }
+}
+
 /** The lines `sixb dev` prints where no live footer can be drawn. */
 export function plainDevReporter(root: string): DevReporter {
   return {
@@ -42,6 +76,7 @@ export function plainDevReporter(root: string): DevReporter {
     },
     message(message, pid) {
       if (message.type === "ready") console.log(`[SixbDev] Ready (pid ${pid}). Watching ${root}`)
+      if (message.type === "loading") console.log(`[SixbDev] ${loadingLine(message.done)}`)
     },
     restarting(filename) {
       console.log(`[SixbDev] Source changed${filename ? `: ${filename}` : ""}. Restarting…`)
@@ -75,7 +110,7 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
   let appWatched = false
   let started = false
   let timer: ReturnType<typeof setTimeout> | undefined
-  let startupTimer: ReturnType<typeof setTimeout> | undefined
+  let startup: ReturnType<typeof startupDeadline> | undefined
   let complete!: () => void
   const finished = new Promise<void>((resolve) => {
     complete = resolve
@@ -110,7 +145,7 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
   }
 
   async function stopChild() {
-    clearTimeout(startupTimer)
+    startup?.clear()
     const current = child
     if (!current) return
     // Give the runtime ownership of graceful shutdown. Kill the isolated process group
@@ -169,8 +204,8 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
           if (child !== current || !message || typeof message !== "object") return
           if (!("type" in message)) return
           reporter.message(message as DevChildMessage, proc.pid)
+          startup?.observe(message as DevChildMessage)
           if (message.type === "ready") {
-            clearTimeout(startupTimer)
             appWatched = "watchesApp" in message && message.watchesApp === true
             const app = servedApp(message)
             if (desktop && app && !desktopWindow) {
@@ -193,17 +228,17 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
           }
         })
         child = current
-        startupTimer = setTimeout(() => {
+        startup = startupDeadline(() => {
           if (child === current) {
             reporter.timedOut()
             terminate(current, "SIGKILL")
           }
-        }, 60_000)
+        })
         void current.exited
           .then((code) => {
             terminate(current, "SIGKILL")
             if (child !== current) return
-            clearTimeout(startupTimer)
+            startup?.clear()
             child = null
             appWatched = false
             if (!stopping && !restarting) reporter.exited(code)

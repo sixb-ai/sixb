@@ -1,9 +1,50 @@
-import { expect, test } from "bun:test"
+import { afterEach, expect, jest, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
+import { DEV_STARTUP_TIMEOUT_MS, startupDeadline } from "../src/lib/dev-supervisor"
+
 const supervisor = resolve(import.meta.dir, "../src/lib/dev-supervisor.ts")
+
+afterEach(() => {
+  jest.useRealTimers()
+})
+
+// A copy of millions of objects loads for minutes: killed at the minute, the next start loads it
+// again and is killed again, forever. Guard check: drop the `loading` cases from
+// `startupDeadline.observe` (`lib/dev-supervisor.ts`): the deadline fires mid-load.
+test("waits while a branch's copy loads, and gives the rest of the startup its own minute", () => {
+  jest.useFakeTimers()
+  let expired = 0
+  const deadline = startupDeadline(() => {
+    expired += 1
+  })
+
+  jest.advanceTimersByTime(DEV_STARTUP_TIMEOUT_MS - 1_000)
+  deadline.observe({ type: "loading", done: false })
+  jest.advanceTimersByTime(10 * DEV_STARTUP_TIMEOUT_MS)
+  expect(expired).toBe(0)
+
+  deadline.observe({ type: "loading", done: true })
+  jest.advanceTimersByTime(DEV_STARTUP_TIMEOUT_MS - 1)
+  expect(expired).toBe(0)
+  jest.advanceTimersByTime(1)
+  expect(expired).toBe(1)
+})
+
+test("stops counting once the dev process is ready", () => {
+  jest.useFakeTimers()
+  let expired = 0
+  const deadline = startupDeadline(() => {
+    expired += 1
+  })
+
+  deadline.observe({ type: "ready", watchesApp: false, app: null })
+  jest.advanceTimersByTime(2 * DEV_STARTUP_TIMEOUT_MS)
+
+  expect(expired).toBe(0)
+})
 
 // Guard check: remove process.execArgv from the spawn arguments in dev-supervisor.ts.
 // The child then reports null instead of the global initialized by the preload.

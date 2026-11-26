@@ -556,6 +556,8 @@ await Bun.write(import.meta.dir + "/.sixb/runtime-seen.txt", process.env.SIXB_BR
     const token = (await alice()).slice("Bearer ".length)
     try {
       const first = await dev(root, token)
+      // The supervisor's startup deadline waits for the load, and says so (`dev-supervisor.test.ts`).
+      expect(first.output()).toContain("[SixbDev] Loading this branch's copy of production's data")
       expect(first.output()).toContain("Branch: production's data as you read it, copied now")
       expect(first.output()).toContain("Off on this branch")
       expect(await Bun.file(join(root, ".sixb/sign-in-seen.json")).json()).toEqual([])
@@ -570,6 +572,7 @@ await Bun.write(import.meta.dir + "/.sixb/runtime-seen.txt", process.env.SIXB_BR
       await editOnBranch(root)
       const second = await dev(root, token)
       expect(second.output()).not.toContain("copied now")
+      expect(second.output()).not.toContain("Loading this branch's copy")
       expect(await tickets(second.api)).toEqual(["t-1:Edited on the branch", "t-3:Ticket t-3"])
       await second.stop()
 

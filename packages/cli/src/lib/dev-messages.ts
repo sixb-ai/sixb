@@ -35,6 +35,11 @@ export interface DevStartupFailure {
 
 export type DevChildMessage =
   | { readonly type: "status"; readonly step: DevStartupStep }
+  /**
+   * A branch's copy of production starts loading (`done: false`) or is loaded: it takes as long
+   * as the copy is big, so the startup deadline waits for it.
+   */
+  | { readonly type: "loading"; readonly done: boolean }
   | {
       readonly type: "ready"
       readonly watchesApp: boolean
@@ -42,3 +47,10 @@ export type DevChildMessage =
       readonly view?: DevReadyView
     }
   | { readonly type: "startup-error"; readonly error?: DevStartupFailure }
+
+/** What `sixb dev` says while a branch's copy of production loads, and once it has. */
+export function loadingLine(done: boolean): string {
+  return done
+    ? "Loaded this branch's copy of production's data."
+    : "Loading this branch's copy of production's data. A large copy takes minutes: startup waits for it."
+}

@@ -8,6 +8,7 @@ import {
   type DevChildMessage,
   type DevReadyView,
   type DevStartupFailure,
+  loadingLine,
 } from "../../lib/dev-messages"
 import type { DevControls, DevReporter } from "../../lib/dev-supervisor"
 import { openUrl } from "../../lib/open-url"
@@ -117,6 +118,11 @@ export async function startDevFooter(options: {
           event(tone.blue(glyph.live), `${tone.strong("ready")} ${tone.muted(`in ${seconds}s`)}`)
         }
         set({ phase: { kind: "ready" }, view, readySince: Date.now() })
+      } else if (message.type === "loading") {
+        event(
+          tone.blue(message.done ? glyph.ok : glyph.idle),
+          tone.muted(loadingLine(message.done))
+        )
       } else if (message.type === "startup-error") {
         const error = message.error ?? { message: "The dev process failed to start." }
         set({ phase: { kind: "failed", error } })

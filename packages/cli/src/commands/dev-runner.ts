@@ -112,7 +112,9 @@ export async function runDevRuntime(options: DevOptions = {}) {
       appPublicOrigin: options.appPublicOrigin,
     })
     const branch =
-      options.from === "production" ? await openBranch(loaded, projectRoot, topology) : null
+      options.from === "production"
+        ? await openBranch(loaded, projectRoot, topology, (done) => send({ type: "loading", done }))
+        : null
     const host = branch?.host ?? loaded
     if (branch) {
       // The project's own providers serve nothing on the branch, but the runtime stops only its host's.
@@ -250,7 +252,8 @@ export async function startDevApp(
 async function openBranch(
   host: LoadedSixbHost,
   projectRoot: string,
-  topology: BrowserTopology
+  topology: BrowserTopology,
+  onLoading: (done: boolean) => void
 ): Promise<BranchFromProduction> {
   // Every request runs as that person, unauthenticated: only this machine may send them.
   const exposed = exposedBeyondThisMachine(topology)
@@ -266,6 +269,8 @@ async function openBranch(
     // The branch the supervisor started: a checkout since does not change it.
     gitBranch: process.env.SIXB_BRANCH ?? (await currentGitBranch(projectRoot)),
     gitBranches: await localGitBranches(projectRoot),
+    // The supervisor's startup deadline waits while the copy loads, and says so.
+    onLoading,
   })
 }
 

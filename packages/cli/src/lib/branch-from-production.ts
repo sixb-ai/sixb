@@ -127,6 +127,8 @@ export interface BranchFromProductionInput {
   /** The branch this process runs as, and every local git branch. */
   readonly gitBranch: string
   readonly gitBranches: readonly string[]
+  /** Told when a new copy starts loading, and once it is loaded: a large one takes minutes. */
+  readonly onLoading?: (done: boolean) => void
 }
 
 export interface BranchFromProduction {
@@ -173,7 +175,10 @@ export async function branchFromProduction(
     if (index[name] || (await storage.openBranchNamespace(name))) {
       await dropBranch(storage, directory, index, name)
     }
+
+    input.onLoading?.(false)
     await loadCopy({ host: input.host, storage, directory, index, name, spool })
+    input.onLoading?.(true)
   }
 
   const namespace = await storage.openBranchNamespace(name)

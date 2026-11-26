@@ -17,7 +17,8 @@ defineRole("developers", { grantedTo: [developers], grants: [can.manage(project.
 ## What the branch holds
 
 - **Your copy.** Every object, link, latest telemetry value and member you can read in production,
-  at one moment, and nothing you cannot. Its age shows when `sixb dev` starts.
+  at one moment, and nothing you cannot. Its age shows when `sixb dev` starts. A copy of millions
+  of objects loads for minutes on its first run: `sixb dev` says so and waits for it.
 - **Its own database.** The copy goes into a namespace of the database `sixb.config.ts` uses
   outside production, one per git branch and checkout: a file with SQLite, a schema with
   PostgreSQL. Use a database of your own: anyone who can read it reads your copy. Your changes stay
