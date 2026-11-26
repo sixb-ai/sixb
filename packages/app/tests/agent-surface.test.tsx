@@ -96,3 +96,15 @@ test("the conversation pages start below a bar above the app", () => {
   expect(page(createElement(AgentThreadsPage), "/threads")).toMatch(offset)
   expect(page(createElement(AgentChatPage), "/threads/thr_1")).toMatch(offset)
 })
+
+// On a phone the dock fills the screen: it starts below a bar above the app, such as a branch's,
+// which it once covered whole. Red check: put `max-sm:inset-y-0` back on the dock
+// (`agent/agent-surface.tsx`).
+test("the dock fills a phone below a bar above the app", () => {
+  const dock = renderSurface("dock")
+
+  expect(dock).toMatch(
+    /data-agent-surface="dock"[^>]*class="[^"]*max-sm:top-\[var\(--app-top-inset,0px\)\] max-sm:bottom-0/
+  )
+  expect(dock).not.toContain("max-sm:inset-y-0")
+})

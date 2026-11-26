@@ -281,9 +281,10 @@ export function AgentSurface({
           fullPage ? "absolute inset-0 z-40 h-full min-w-0 w-full" : "relative h-full",
           resizing && "select-none",
           !visible && "w-0 border-l border-transparent",
+          // On a phone it fills the screen below a bar above the app, such as a branch's.
           visible &&
             !fullPage &&
-            "w-[var(--agent-surface-width)] border-l border-border max-sm:fixed max-sm:inset-y-0 max-sm:right-0 max-sm:z-50 max-sm:w-screen",
+            "w-[var(--agent-surface-width)] border-l border-border max-sm:fixed max-sm:top-[var(--app-top-inset,0px)] max-sm:bottom-0 max-sm:right-0 max-sm:z-50 max-sm:h-auto max-sm:w-screen",
           className
         )}
       >
