@@ -453,6 +453,11 @@ async function copyInlinedRows(
         AND (end_snapshot IS NULL OR end_snapshot > ${table.snapshotId})
     `
     const rowIds = (await runtime.query(liveRows)).map((live) => getBigIntLike(live, "row_id"))
+
+    // An inlined table holds the rows of one schema version, which begin at or after it. With no
+    // row live at the snapshot, it may be of a later schema, whose columns the version lacks.
+    if (rowIds.length === 0) continue
+
     const relation = `${qualifiedTableName(options, table.tableName)} AT (VERSION => ${table.snapshotId})`
     const quoted = columns.map((column) => quoteIdentifier(column))
     const kept = keptRows(table)
@@ -467,7 +472,7 @@ async function copyInlinedRows(
       FROM (${liveRows}) live
       JOIN (
         SELECT rowid AS sixb_row_id, ${quoted.join(", ")} FROM ${relation}
-        WHERE rowid IN (${rowIds.length === 0 ? "NULL" : rowIds.join(", ")})
+        WHERE rowid IN (${rowIds.join(", ")})
           ${kept === undefined ? "" : `AND ${kept}`}
       ) decoded ON decoded.sixb_row_id = live.row_id
     `)
