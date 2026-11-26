@@ -141,8 +141,9 @@ describe("what an import reports of what the person read", () => {
 })
 
 describe("importing a snapshot into a branch", () => {
-  // Reproduce: pass no `withheld` to validateEffectiveObject in edits/operations.ts and
-  // telemetry/plan.ts, and both writes fail with a bare "Missing required property 'ssn'".
+  // Reproduce: pass no `withheld` to validateEffectiveObject in edits/operations.ts (an edit),
+  // edits/plan.ts (a new link) or telemetry/plan.ts (a point), and that write fails with a bare
+  // "Missing required property 'ssn'".
   test("a required property hidden from the person keeps its type, and a write says why", async () => {
     const pii = defineMarking("pii")
     const Person = defineObjectType({
@@ -154,6 +155,7 @@ describe("importing a snapshot into a branch", () => {
         prop("ssn", "string", { required: true, markings: [pii] }),
         prop("heartRate", "double", { mode: "telemetry" }),
       ],
+      links: [link.ref("mentors", "person")],
     })
     const staff = defineRole("staff", {
       grantedTo: [defineGroup("staff")],
@@ -172,9 +174,14 @@ describe("importing a snapshot into a branch", () => {
       id: "usr_ada",
       email: "ada@example.com",
     })
-    await createTestSixb(production)
-      .objects(Person)
-      .upsert({ properties: { id: "p1", name: "Ada", ssn: "078-05-1120" } })
+    for (const [id, name] of [
+      ["p1", "Ada"],
+      ["p2", "Grace"],
+    ]) {
+      await createTestSixb(production)
+        .objects(Person)
+        .upsert({ properties: { id, name, ssn: `078-05-112${id.at(-1)}` } })
+    }
 
     // Ada reads people, without the clearance `ssn` asks for.
     const scope = createTestingScope({
@@ -193,7 +200,7 @@ describe("importing a snapshot into a branch", () => {
     expect(report.types).toEqual([
       expect.objectContaining({
         objectTypeId: "person",
-        objects: 1,
+        objects: 2,
         hiddenPropertyIds: ["ssn"],
         requiredHiddenPropertyIds: ["ssn"],
       }),
@@ -230,6 +237,18 @@ describe("importing a snapshot into a branch", () => {
       .append({ value: 61, at: new Date(Date.UTC(2026, 0, 1)) })
       .catch((error: unknown) => error)
     expect(String(point)).toContain(reason)
+
+    // A new link writes both its objects again, as their final state is validated.
+    const mentor = await branch
+      .objects(Person)
+      .byId("p1")
+      .link(Person.l.mentors, { objectTypeId: Person.id, primaryId: "p2" })
+      .catch((error: unknown) => error)
+    expect(String(mentor)).toContain(reason)
+
+    // A delete leaves no object to validate.
+    await branch.objects(Person).byId("p2").delete()
+    expect(await branch.objects(Person).byId("p2").get()).toBeNull()
 
     // A write that gives the property a value is valid, as anywhere else.
     await branch
