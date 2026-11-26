@@ -366,6 +366,42 @@ describe("a hosted branch's database", () => {
     expect((await role(admin, name))?.login).toBe(false)
   })
 
+  // Relation locks fill the same table: a session locking thousands of its own tables in one
+  // transaction does what 15,000 advisory keys do. The bound is 2,000 at the default
+  // `max_locks_per_transaction` of 64, well above a load's own (three types in the load test below).
+  // Guard check: drop the `shared` clause from `closureOf`.
+  test("closes the branch when one of its sessions holds more locks of any kind than a load does", async () => {
+    const { storage } = await production()
+    await hosted(storage, "feature-a")
+    const { sql } = await asRole(storage, "feature-a")
+    // The first 16 a session takes stay out of the shared table, on the fast path: 2,001 in it.
+    const tables = 2_017
+
+    // In batches, each its own transaction: creating them takes locks too.
+    for (let from = 1; from <= tables; from += 500) {
+      await sql.unsafe(`
+        DO $$ BEGIN
+          FOR i IN ${from}..${Math.min(from + 499, tables)} LOOP
+            EXECUTE format('CREATE TABLE own_%s (id int)', i);
+          END LOOP;
+        END $$
+      `)
+    }
+    const session = await sql.reserve()
+    await session`BEGIN`
+    await session.unsafe(`
+      DO $$ BEGIN
+        FOR i IN 1..${tables} LOOP EXECUTE format('LOCK TABLE own_%s IN ACCESS SHARE MODE', i); END LOOP;
+      END $$
+    `)
+
+    expect(await storage.enforceHostedBranchLimits("feature-a")).toEqual({
+      stopped: 1,
+      closed: { reason: "locks", locks: 2_001 },
+    })
+    expect(await rejection(session`SELECT 1`)).not.toBe("resolved")
+  }, 15_000)
+
   // Guard check: drop the `blocking` clause from `closureOf`.
   test("closes the branch when one of its sessions holds up another role's session", async () => {
     const { storage, admin, connectionString } = await production()
@@ -448,10 +484,14 @@ describe("a hosted branch's database", () => {
     const branch = await (await runtime(storage, "feature-a", 4)).createBranchNamespace("copy")
     const name = await storage.hostedBranchRole("feature-a")
 
+    const closures: unknown[] = []
     const loaded = await loadWaiting(branch, async () => {
       // Twice the limit, by the server's clock, with production holding the role to it.
       await until(async () => {
-        await storage.enforceHostedBranchLimits("feature-a", { idleInTransactionMillis: 1_000 })
+        const { closed } = await storage.enforceHostedBranchLimits("feature-a", {
+          idleInTransactionMillis: 1_000,
+        })
+        closures.push(closed)
         const rows = await admin`
           SELECT 1 FROM pg_stat_activity
           WHERE usename = ${name} AND now() - xact_start > interval '2 s'
@@ -461,6 +501,8 @@ describe("a hosted branch's database", () => {
     })
 
     expect(loaded).toBe("loaded")
+    // Its lanes' locks, one per partition and index of three types, close nothing.
+    expect(closures.filter((closed) => closed !== null)).toEqual([])
   }, 15_000)
 
   // Guard check: drop the `REVOKE … FROM PUBLIC` from `create`: anyone may then connect.
@@ -675,7 +717,7 @@ function migrationLock(schemaName: string): readonly [number, number] {
   return [hash.readInt32BE(0), hash.readInt32BE(4)]
 }
 
-/** Loads two objects, then waits on `hold` before the load ends: its other lanes sit idle. */
+/** Loads an object of three types, then waits on `hold` before the load ends: its other lanes sit idle. */
 async function loadWaiting(
   branch: Awaited<ReturnType<PostgresStorage["createBranchNamespace"]>>,
   hold: () => Promise<void>
@@ -716,14 +758,14 @@ async function loadWaiting(
         },
       },
       uniqueProperties: [],
-      objectTypeIds: ["Order"],
+      objectTypeIds: ["Order", "Customer", "Product"],
     },
     async (loader) => {
       await loader.write({
-        objects: ["ord-1", "ord-2"].map((primaryId) => ({
-          objectTypeId: "Order",
-          primaryId,
-          properties: { id: primaryId },
+        objects: ["Order", "Customer", "Product"].map((objectTypeId) => ({
+          objectTypeId,
+          primaryId: `${objectTypeId}-1`,
+          properties: { id: `${objectTypeId}-1` },
           createdAt: at,
           updatedAt: at,
         })),

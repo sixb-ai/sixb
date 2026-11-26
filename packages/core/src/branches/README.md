@@ -30,7 +30,7 @@ the lock table and disk. The limits are set for those.
 | No password in a statement | A SCRAM-SHA-256 verifier computed by production, a new one each start, none stored | (same) |
 | Connections | `CONNECTION LIMIT` 5 on the role | (same) |
 | Vacuum of what databases share | Every 3 s, from outside: transactions past 30 min end, and sessions idle in a transaction past 60 s; statements past 15 min are cancelled. A copy's load keeps its waiting lanes busy with a `SELECT 1` | (same) |
-| The lock table every database shares | A session holding more than 64 advisory locks (the framework takes a few) closes the branch: 15,000 of them filled the table at the default `max_locks_per_transaction`, and production's new connections failed with "out of shared memory" | (same) |
+| The lock table every database shares | A session holding more than 64 advisory locks (the framework takes a few), or more than 2,000 locks of any kind (ten times `max_locks_per_transaction` when that is more), closes the branch: 15,000 of them filled the table at the default `max_locks_per_transaction`, and production's new connections failed with "out of shared memory" | (same) |
 | Production's sessions never wait on the branch | A branch session in `pg_blocking_pids()` of another role's session closes the branch | (same) |
 | Production's other databases | A branch session connected to any other database than its own closes the branch | (same) |
 | Disk | Its database's size, measured once a minute, past 20 GiB (`databaseSizeLimitMb`) closes the branch. `temp_file_limit` 1 GiB on the role, a superuser's setting it cannot raise, when production may set it | (same) |
@@ -47,9 +47,10 @@ What does not hold, and why:
   until `enforce` closes the branch, 3 s at most. A large object it creates there survives
   `DROP OWNED` and keeps `DROP ROLE` failing. Revoke `CONNECT` from `PUBLIC` on the cluster's other
   databases, or restrict `sixb_branch_*` in `pg_hba.conf`.
-- Relation locks share the same lock table, and a copy's load holds a few hundred at once (one
-  per partition and index). They are not counted: size `max_locks_per_transaction` for production
-  and its branches together.
+- Locks of other kinds share that table, and a copy's load holds a few hundred at once (one per
+  partition and index), so their bound is far looser: a session past 2,000, or ten times
+  `max_locks_per_transaction`, closes the branch. Five sessions near it can still fill the table at
+  the default size: size `max_locks_per_transaction` for production and its branches together.
 - Memory settings (`work_mem`, `maintenance_work_mem`, parallel workers) are any session's to SET,
   with no ceiling PostgreSQL enforces for a role, and no view shows another session's settings.
   The time limits bound how long a heavy query lasts.
