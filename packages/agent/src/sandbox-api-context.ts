@@ -5,8 +5,8 @@ import {
   AGENT_MEMORY_STARTER,
   type AgentMemoryManifest,
   agentMemoryFileHash,
-  loadSandboxCliAssets,
-} from "@sixb/cli-core"
+  loadCliAssets,
+} from "@sixb/cli"
 import type {
   AgentMemoryRepoView,
   AgentProjectFile,
@@ -71,7 +71,7 @@ export async function prepareAgentSandboxApiContext(
   const artifactsManifestPath = join(contextDir, AGENT_ARTIFACTS_MANIFEST)
   const memoryDir = join(contextDir, "memory")
   const toolOutputsDir = join(contextDir, TOOL_OUTPUTS_DIRECTORY)
-  const cli = await loadSandboxCliAssets()
+  const cli = await loadCliAssets()
   // The run's commands reach the API through the sandbox's credentialed address, which adds the
   // run token on the way out: no command holds it.
   if (!input.sandbox.credentialedUrl) {

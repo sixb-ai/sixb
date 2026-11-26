@@ -1,444 +1,172 @@
-# @sixb/cli
+# `@sixb/cli-core`
 
-Command-line interface for building and running [Sixb](https://github.com/sixb-ai/sixb) digital twin projects. All commands expect a `sixb.config.ts` in the current directory unless `--entry` is specified.
+The commands for working with a running Sixb instance: the API half of `sixb`, for people and
+agents alike.
 
-## Installation
+```text
+@sixb/cli          your sixb: these commands, signed in with your profile, plus the framework's
+the sandbox's sixb these commands plus status, context and memory, built from src/main.ts
+                   into one file the agent worker installs in every sandbox
+```
 
-Install the `sixb` cli globally:
+In a sandbox that holds a Sixb project, the sandbox's launcher (`src/bin/sixb`) hands any other
+command (`dev`, `env`, `check`...) to the nearest `node_modules/.bin/sixb`, so project commands run
+at the version the project pins. Its own commands keep talking to the instance the run belongs to.
+The launcher's list of its own commands has to match `src/main.ts`; `tests/sandbox-cli.test.ts`
+checks it.
+
+If you want the `sixb` command, install [`@sixb/cli`](https://www.npmjs.com/package/@sixb/cli):
 
 ```bash
 bun add --global @sixb/cli
-sixb --version
-```
-
-Add the CLI to a Sixb project when its development and deployment scripts use it:
-
-```bash
-bun add @sixb/cli
 ```
 
 ## Commands
 
-| Command | Description |
-|---|---|
-| `sixb dev` | Start the local API, app, and workers |
-| `sixb api` | Start the production API/docs/WebSocket server |
-| `sixb app` | Start the production app server |
-| `sixb login <api-url>` | Validate an instance and save it as the current profile. In a terminal, asks for the URL when it is left out. |
-| `sixb logout` | Remove the current or named profile |
-| `sixb status` | Check the selected profile and API |
-| `sixb profile list` | List saved profiles |
-| `sixb profile show [name]` | Show a profile without exposing its token |
-| `sixb profile use <name>` | Select the current profile. In a terminal, offers the saved profiles when the name is left out. |
-| `sixb project show` | Show project metadata |
-| `sixb ontology list|get` | Inspect the visible ontology |
-| `sixb objects ...` | Inspect, list, search, and query objects |
-| `sixb telemetry ...` | Read current and historical telemetry |
-| `sixb actions ...` | Discover and request actions |
-| `sixb action-runs ...` | Inspect action execution history |
-| `sixb workflows ...` | Discover and start workflows |
-| `sixb workflow-runs ...` | Inspect workflow execution history |
-| `sixb files ...` | Upload and download files |
-| `sixb datasets ...` | Read datasets, their versions and rows |
-| `sixb syncs ...`, `sixb sync-runs ...` | List the syncs you may run and their history |
-| `sixb pipelines ...`, `sixb pipeline-runs ...` | List the pipelines you may run and their runs |
-| `sixb token list` | List personal access tokens |
-| `sixb token create` | Create a personal access token |
-| `sixb token revoke <id>` | Revoke a personal access token |
-| `sixb service-account list` | List service accounts |
-| `sixb service-account create` | Create a service account |
-| `sixb service-account disable <id>` | Disable a service account |
-| `sixb service-account token list <service-account-id>` | List service-account tokens |
-| `sixb service-account token create <service-account-id>` | Create a service-account token |
-| `sixb service-account token revoke <service-account-id> <token-id>` | Revoke a service-account token |
-| `sixb orchestrator` | Start the production orchestrator: cron schedules, event dispatch and upkeep |
-| `sixb rules` | Start rules evaluation |
-| `sixb worker <type>` | Start a production queue worker (one queue type per process) |
-| `sixb worker-group [types...]` | Co-host several queue workers in one process (constrained resources) |
-| `sixb check` | Validate project configuration and provider health |
-| `sixb build` | Bundle the project runtime and the app |
-| `sixb db migrate` | Run adapter-owned database migrations ahead of, or instead of, role startup |
-| `sixb lake check` | Check lake dataset definitions for drift against the lake catalog |
-| `sixb lake cleanup` | Expire replaced lake versions and delete the files only they read |
-| `sixb lake rejected` | Print the ingested deliveries refused after `ingest` answered, as JSON |
-| `sixb init [dir]` | Initialize a new sixb project in a directory. In a terminal, asks for the directory when it is left out. |
-| `sixb help` | Show help |
-| `sixb --version` | Show version |
-
-Scaffold a new project without installing the CLI first with `bun create sixb <name>`.
-
-### Development reload
-
-`sixb dev` watches source and configuration files under the config module's directory.
-Changes to ontology, actions, pipelines, other discovered definitions, shared helpers, or
-configuration restart the local dev stack in a fresh process and regenerate project types.
-File additions and deletions are picked up too. Custom `app/` edits use frontend HMR once
-the app server is running; adding the first route starts it automatically.
-
-Native file events trigger targeted checks. An asynchronous source scan every five seconds
-recovers missed events without scanning the running frontend's files. A missed native event
-can therefore take a few seconds to reload. Hidden browser tabs pause reload polling and
-check again when visible; disconnected tabs back off retries until the server returns.
-
-Backend restarts stop the old workers before starting replacements and reload connected
-browser pages when the new stack is ready. In-memory state resets; persisted state remains.
-Startup errors are displayed and the watcher stays alive so the next save can recover.
-
-In a terminal, `sixb dev` keeps a footer at the bottom of the screen while the dev process's
-output scrolls above it. The footer stays put across restarts and shows what is being served,
-startup progress, and why a start failed. It takes a few keys:
-
-| Key | Action |
-|---|---|
-| `o` | Open the app in the browser |
-| `d` | Open the API docs |
-| `r` | Restart now, as a source change would |
-| `q`, `ctrl+c` | Stop `sixb dev` |
-
-Piped output, CI, and non-interactive shells get plain `[SixbDev]` lines instead.
-Generated `.sixb/` files, dependencies, build output, and non-source storage files are ignored.
-Source outside the project root is not watched. Environment-file changes require restarting
-`sixb dev`, because Bun loads them into the supervisor's environment at launch.
-Stop the supervisor and its child with Ctrl+C.
-On macOS/Linux, the dev child also enforces its own ten-second cleanup deadline if the
-supervisor disappears, so a stuck startup cannot leave its process group running indefinitely.
-
-## Options
-
-| Flag | Applies to | Default | Description |
-|---|---|---|---|
-| `--entry <path>` | project and runtime commands | `sixb.config.ts` | Path to the sixb config module |
-| `--no-migrate` | production roles | false | Start without migrating storage. Also `SIXB_SKIP_MIGRATION=1`. |
-| `--port <port>` | serving commands | role default | Role bind port. For `dev`, this is the app port. |
-| `--host <host>` | serving commands | dev: `127.0.0.1`, roles: `0.0.0.0` | Bind host. `sixb dev` stays on loopback unless you opt in. |
-| `--api-port <port>` | `dev`, `api` | `port + 1` | API/auth/docs/WebSocket port |
-| `--api-host <host>` | `dev`, `api` | `--host` | API bind host |
-| `--api-public-origin <origin>` | browser/API commands | dev: `http://localhost:<api-port>` | Public API origin |
-| `--vector-concurrency <count>` | `dev`, projection worker/group | `SIXB_VECTOR_CONCURRENCY` or `4` | Concurrent embedding calls for vector indexing |
-| `--subagent-concurrency <count>` | `dev`, agent worker/group | `SIXB_SUBAGENT_CONCURRENCY` or `4` | Child agents an agent worker runs at once |
-| `--subagent-concurrency-per-run <count>` | `dev`, agent worker/group | `SIXB_SUBAGENT_CONCURRENCY_PER_RUN` or `4` | Child agents one Agent turn keeps at work at once |
-| `--app-public-origin <origin>` | `dev`, `api`, `app` | dev: `http://localhost:<port>` | Public app origin |
-| `--profile <name>` | remote commands | current profile | Use a saved profile without changing the current one |
-| `--api-url <url>` | remote commands | resolved profile or `http://localhost:3001` | Use an API without a saved profile |
-| `--token <token>` | remote commands | selected source | Bearer token; direct `--api-url` never inherits another source's token |
-| `--token-stdin` | `login` | false | Read an existing token from standard input |
-| `--id <id>` | token/service-account commands | generated when supported | Token or service-account id |
-| `--name <name>` | token/service-account commands | required for create | Token or service-account name |
-| `--description <text>` | `service-account create` | none | Service-account description |
-| `--expires-in <duration>` | token create commands | `90d` | Token lifetime, e.g. `30d`, `4w`, or `1y` |
-| `--expires-at <iso>` | token create commands | none | Token expiration timestamp |
-| `--group <id>` | token/service-account create commands | inherited/none | Assignable auth group; may repeat or use commas |
-| `--json` | profile and credential commands | false | Print machine-readable JSON |
-| `--outdir <path>` | `build` | `.sixb/dist` | Build output directory |
-| `--dry-run` | `lake cleanup` | false | Preview cleanup without changing storage |
-| `--keep-versions-for <duration>` | `lake cleanup` | `7d` | How long a replaced version stays readable, at least `1h` |
-| `--delete-files-after <duration>` | `lake cleanup` | `7d` | How long files no kept version reads wait before deletion |
-
-Options are command-scoped. Unknown options, missing values, duplicate scalar options, and extra
-positionals fail before the command runs. Repeatable options such as `--group` and the typed
-`--concurrency` forms are declared explicitly. `--api-url` and `--profile` are mutually exclusive;
-either may be paired with an explicit `--token`.
-
-Instance commands share this validation with the sandbox CLI. Help does not require a saved profile
-or API connection. Use `--` to pass identifiers that look like options:
+The same JSON-first commands are available in local and sandbox modes:
 
 ```bash
-sixb objects get Customer alice --help
-sixb objects get Customer -- --help
+sixb project show
+sixb ontology list
+sixb ontology get Customer
+sixb objects inspect Customer customer-123
+sixb objects list --type Customer
+sixb objects search "Northline"
+sixb objects search "waterproof trail shoes" --type Product
+sixb telemetry latest Device device-1 temperature
+sixb actions list
+sixb actions request send-reminder --file input.json
+sixb action-runs get run-123
+sixb workflows list
+sixb workflows start onboarding --file input.json
+sixb workflow-runs get run-456
+sixb datasets rows orders --columns id,total --limit 10
+sixb sync-runs list --sync crm --status failed
+sixb pipeline-runs get run-789
+sixb files upload ./report.pdf
 ```
 
-The first command prints help; the second looks up the literal primary id `--help`.
+`objects search` matches identifiers and full-text fields across visible types. With `--type`, it
+runs a semantic search through that type's vector profile and ranks results by `score`; pass
+`--vector-profile <name>` when the type declares several. `sixb ontology list` shows each type's
+`vectorProfiles`.
 
-Use either help form for contextual command documentation:
+Run `sixb <group> --help` for exact arguments and limits.
 
-```bash
-sixb token --help
-sixb help token create
-```
-
-A bare command group prints its scoped help without choosing a default action:
-
-```bash
-sixb profile
-sixb service-account token
-```
-
-## Output and exit codes
-
-Instance commands emit compact JSON by default. Profile and credential-management commands render
-for humans by default and emit compact JSON when passed `--json`. In JSON mode, failures are
-written as one compact `{"error": ...}` value on stderr.
-
-```text
-0  success or help
-1  command or runtime failure
-2  invalid arguments
-3  API failure
-```
+Profile management, authentication, and server lifecycle commands belong to `@sixb/cli`. Both
+have `sixb status`: yours checks your profile, a sandbox's checks the sandbox and reports what the
+worker's preflight expects. `sixb context` and `sixb memory` work inside an agent run only.
 
 ## Usage
 
-```bash
-# Start development servers (loads ./sixb.config.ts)
-sixb dev
+Most callers need only `runInstanceCli()` and `reportError()`.
 
-# Build the production runtime and the app
-sixb build
+### Local mode
 
-# Recommended production process layout
-sixb api
-sixb app
-sixb orchestrator
-sixb rules
-sixb worker sync
-sixb worker pipeline
-sixb worker projection
-sixb worker workflow
-sixb worker lake
-sixb worker render
+The caller resolves the profile and passes its API URL and token explicitly:
 
-# Development with custom entry and app port
-sixb dev --entry examples/mac-os/sixb.config.ts --port 8080
+```ts
+import { reportError, runInstanceCli } from "@sixb/cli-core"
 
-# Validate project health
-sixb check
-
-# Run storage migrations
-sixb db migrate
-
-# Check lake dataset definitions for drift during deploy
-sixb lake check
-
-# Preview or run lake retention
-sixb lake cleanup --dry-run
-sixb lake cleanup --keep-versions-for 1h --delete-files-after 1h
-sixb lake cleanup --keep-versions-for 14d
-
-# Scaffold a new project without installing the CLI
-bun create sixb my-project
-cd my-project && bun install && sixb dev
-
-# Initialize sixb in an existing directory
-sixb init .
+try {
+  await runInstanceCli({
+    args: ["objects", "inspect", "Customer", "customer-123"],
+    mode: {
+      kind: "local",
+      baseUrl: "https://api.example.com",
+      token: "sixb_pat_...",
+      profile: "production",
+    },
+  })
+} catch (error) {
+  process.exitCode = reportError(error)
+}
 ```
 
-## Production builds
+Local mode sends the token as an `Authorization: Bearer ...` header. Omit `token` for an
+auth-disabled instance.
 
-`sixb build` bundles the config and all convention-discovered backend modules together. Configured
-tools and discovered definitions share the same module instances. Production discovery uses this
-built inventory, so the original `ontology/`, `connectors/`, and other discovery directories are
-not required at startup. Rebuild to include added or changed definitions.
+### Sandbox mode
 
-The runtime entry remains `.sixb/dist/sixb.config.js` (or the configured `--outdir`). Installed
-package dependencies and any files your application reads at runtime must still be deployed.
-Both top-level host exports and config factories are supported. Run production commands from the
-deployed project root; an explicit `createSixb({ projectRoot })` must resolve to that same root.
+`src/main.ts` runs it with the run's API address:
 
-## Profiles and remote commands
+```ts
+import { reportError, runInstanceCli } from "@sixb/cli-core"
 
-Login validates `/api/project`, saves the profile in `~/.config/sixb/config.json`, and selects it.
-The directory is mode `0700`; the config file is atomically replaced at mode `0600`.
-
-```bash
-sixb login http://localhost:3001 --profile local
-
-# Authenticated APIs open a browser and wait for approval:
-sixb login https://api.acme.example --profile production
-
-# Non-interactive fallback with an existing token:
-printf '%s\n' "$SIXB_API_TOKEN" |
-  sixb login https://api.acme.example --profile production --token-stdin
-
-sixb status
-sixb profile list
-sixb profile use production
-sixb ontology list
-sixb objects inspect Customer customer-123
+try {
+  await runInstanceCli({
+    args: process.argv.slice(2),
+    mode: {
+      kind: "sandbox",
+      baseUrl: process.env.SIXB_API_BASE_URL ?? "",
+      runContextPath: process.env.SIXB_RUN_CONTEXT ?? "",
+    },
+  })
+} catch (error) {
+  process.exitCode = reportError(error)
+}
 ```
 
-An auth-disabled local API stores a tokenless profile. Authenticated APIs use a short-lived device
-code: the browser approves the request through the existing session, and the CLI stores the
-session's tokens only after validating them against `/api/project`. The access token lasts 15
-minutes; each command renews it with the refresh token when it is about to expire, so one login
-lasts until the session goes unused past its idle timeout (30 days by default). `sixb logout` ends
-the session on the server. Use `--token-stdin` for automation or when you already have a token.
+Sandbox mode never adds a Bearer token: the sandbox adds the run's token on the way out of
+`SIXB_API_BASE_URL`, so no command holds it.
 
-Remote target resolution is deterministic:
+## Contract
 
 ```text
---api-url (+ optional --token)
---profile (+ optional --token)
-SIXB_API_URL (+ SIXB_API_TOKEN or SIXB_TOKEN)
-SIXB_PROFILE
-current profile
-http://localhost:3001
+success          one JSON value plus newline on stdout
+help/examples    text on stdout
+errors           one {"error": ...} value on stderr
+usage failure    exit 2
+API failure      exit 3
+downloads        atomic file write plus JSON receipt
 ```
 
-Use a named profile for local tools such as Codex or Claude Code:
+The HTTP client accepts only relative `/api` paths, parses structured API errors, and never prints
+credentials.
+
+Both modes reject unknown options, missing values, duplicate scalar options, and invalid positional
+counts before command I/O. Options accept `--name value` or `--name=value`. Use `--` before literal
+identifiers that start with a dash. `--help` and `-h` before that separator show help even after
+positionals, without reading files or contacting the API.
+
+## Core API
+
+```ts
+import {
+  CliError,
+  createInstanceApiClient,
+  INSTANCE_COMMANDS,
+  isInstanceCommand,
+  renderInstanceHelp,
+  reportError,
+  runInstanceCli,
+} from "@sixb/cli-core"
+```
+
+| Export | Purpose |
+| --- | --- |
+| `runInstanceCli` | Parse and execute one instance command |
+| `createInstanceApiClient` | Create the mode-aware HTTP client |
+| `INSTANCE_COMMANDS` | Frozen top-level command names |
+| `isInstanceCommand` | Narrow a string to an instance command |
+| `renderInstanceHelp` | The sandbox CLI's help text, which the agent's prompt includes |
+| `requestsHelp` | Detect help before resolving a local connection |
+| `CliError` | Structured CLI failure with an exit code |
+| `reportError` | Write the stable error envelope and return its exit code |
+| `loadSandboxCliAssets` | The launcher and bundle the agent worker installs as a sandbox's `sixb` |
+
+## Development
 
 ```bash
-sixb objects search "Northline" --profile production
-SIXB_PROFILE=production sixb project show
+bun --filter @sixb/cli-core typecheck
+bun --filter @sixb/cli-core test
+bun --filter @sixb/cli-core build
 ```
 
-CI can keep credentials entirely in the environment:
+The sandbox's `sixb` is committed as `src/generated/sixb.mjs`, and CI fails when it is stale.
+Regenerate it after changing any command, then run its contract on Bun and Node:
 
 ```bash
-SIXB_API_URL=https://api.acme.example \
-SIXB_API_TOKEN=sixb_sat_... \
-sixb objects list
+bun run generate:sandbox-cli
+bun test packages/cli-core/tests/sandbox-cli.test.ts
 ```
-
-## API credential management
-
-Personal access tokens are user-owned credentials. They can list and revoke personal tokens and
-manage service accounts and their tokens within the caller's existing groups and permissions.
-Creating a token of either kind requires a profile signed in with `sixb login`: an access token
-cannot create another.
-
-```bash
-sixb token list
-sixb token create --name "Local CLI" --expires-in 90d --group agents
-sixb token revoke tok_...
-```
-
-Service accounts are machine identities for agents, sandboxes, deploy jobs, and external systems.
-Create the service account first, then mint one or more service-account tokens for it.
-
-```bash
-sixb service-account list
-sixb service-account create \
-  --id svc_sandbox \
-  --name "Sandbox agent" \
-  --description "Used by sandboxed agents" \
-  --group agents
-
-sixb service-account token list svc_sandbox
-sixb service-account token create svc_sandbox \
-  --name "Sandbox token" \
-  --expires-in 30d \
-  --group agents
-sixb service-account token revoke svc_sandbox tok_...
-sixb service-account disable svc_sandbox
-```
-
-Use `--json` on profile and credential-management commands when scripting:
-
-```bash
-sixb service-account token create svc_sandbox --name "CI token" --expires-in 30d --json
-```
-
-Service-account tokens are runtime credentials. They can authenticate API requests that accept
-bearer tokens, but they cannot manage personal tokens, service accounts, or mint more credentials.
-
-`sixb dev` remains the local all-in-one command. Production deployments should prefer one long-running command per process so API, browser UIs, scheduler, orchestrator, rules, and queue workers can scale and fail independently.
-
-### Release order
-
-Run deployment checks as explicit release steps, then start the services. This keeps service
-startup cheap and role-local: roles no longer open the lake catalog at boot, so starting every
-process at once (e.g. with PM2) does not stampede a Postgres-backed DuckLake catalog.
-
-```bash
-sixb build        # bundle runtime and UI/app assets
-sixb check        # probe the configured providers and the storage schema
-sixb lake check   # verify lake dataset definitions are compatible with the catalog
-pm2 start ecosystem.config.cjs
-```
-
-`sixb lake check` is the single place that attaches the lake and validates every dataset
-definition during deploy. Service commands (`api`, `orchestrator`, `rules`, `worker`,
-`worker-group`) do not open the lake catalog at startup, so starting them together does not
-stampede shared infrastructure.
-
-`sixb check` exits non-zero when a probe fails, so it works as a deploy gate. It opens a read-only
-round trip to the storage, its telemetry table, and the broker, reads the storage schema state
-without touching it, and warns when the broker or queues provider only works inside one process —
-the configuration that makes a production role refuse to start. Each probe is bounded at five
-seconds, so an unreachable host is reported rather than waited on. The queues provider is named but
-not probed: every operation in that contract claims or enqueues work, so there is nothing read-only
-to call.
-
-### Storage migrations
-
-Roles that read or write through the storage schema (`api`, `orchestrator`, `rules`,
-`worker`, `worker-group`) bring it up to date themselves at startup, and print the migration steps
-they applied. `app` does not: it serves a browser bundle and holds no DDL grant.
-
-`sixb db migrate` is no longer a required release step. It stays useful when you want the schema
-change to be its own deploy stage — run it first, then start the roles with `--no-migrate` (or
-`SIXB_SKIP_MIGRATION=1`), which reports the skip instead of staying silent about it.
-
-Concurrent replicas are safe on Postgres: migrators serialize on a session advisory lock, so late
-starters find the schema current and no-op. Every adapter also refuses to run against a history it
-does not recognize — a changed checksum, a version newer than the build, an interrupted run — and
-names the condition instead of migrating over it. SQLite has no cross-process lock, so roles
-starting together on one file can collide; migrate it as its own step and pass `--no-migrate`.
-
-The lake is opened only when a role actually does lake work — API dataset routes, sync jobs,
-pipeline jobs, projection jobs, and lake jobs. Write paths re-validate their target dataset through the lake
-provider's `createDataset` before committing, so drift still fails clearly even between deploys.
-
-The orchestrator requests lake retention every `cleanupEvery` and a `lake` worker runs it. Use
-`sixb lake cleanup` to run it now, on providers with lake maintenance. A version stays readable for
-`--keep-versions-for` after a newer version replaced it, and the files only expired versions read
-are deleted `--delete-files-after` later; both default to the project's `lakeMaintenance`. Each
-dataset's latest version and the version each projection applied, read from the project's storage,
-are always kept; the report counts the second ones as kept versions. The command runs passes until
-none is left. Start with `--dry-run`, which measures one pass.
-
-### Production topologies
-
-Both layouts are valid; choose based on the deployment's Postgres/DuckLake connection budget.
-
-**Scaled** — one process per queue type, each independently scalable with its own lake pool:
-
-```bash
-sixb api
-sixb orchestrator
-sixb worker sync
-sixb worker pipeline
-sixb worker projection
-sixb worker lake
-sixb worker render
-SIXB_API_PUBLIC_ORIGIN=https://api.example.com sixb worker agent
-```
-
-**Constrained** — co-host the queue workers in one process to shrink the provider footprint
-(one lake pool instead of one per worker), trading per-worker event-loop isolation:
-
-```bash
-sixb api
-sixb orchestrator
-sixb worker-group sync pipeline projection lake
-```
-
-`sixb worker-group` with no positional types starts every registered queue worker type in one
-process, including the agent worker when agents and agent storage are configured, and the lake
-worker when lake retention runs on its own. A list that leaves `lake` out starts with a warning:
-nothing else consumes that queue. Agent workers require the API origin through
-`--api-public-origin` or `SIXB_API_PUBLIC_ORIGIN`.
-
-`sixb dev` uses separated local ports by default:
-
-```txt
-http://localhost:3000 -> the app, with its built-in pages even without an app/ folder
-http://localhost:3001 -> API, auth, docs, and runtime WebSockets
-```
-
-Production serving commands require explicit public origins through flags or environment variables.
-Both `sixb api` and `sixb app` require `SIXB_API_PUBLIC_ORIGIN`. `SIXB_APP_PUBLIC_ORIGIN` is the
-API's browser allowlist: without it the API admits no browser, as a deploy without the app wants.
-On `sixb app` it only labels the startup output.
-
-`sixb app` serves only prebuilt assets. Run `sixb build` before starting it. It fails with a clear
-error instead of compiling assets at startup. It never loads `sixb.config.ts`, so it needs neither
-the project's environment nor access to its database: the served page asks the API whether auth is
-enabled.
-
-`sixb worker <type>` is intended for queue backends that can be shared across processes. Each
-worker process owns exactly one queue type. `sixb worker-group [types...]` co-hosts several queue
-workers in a single process for constrained deployments; with no positional types it starts every
-registered worker type. Agent workers require `--api-public-origin` or
-`SIXB_API_PUBLIC_ORIGIN`. Both commands reject the built-in `InMemoryQueues` — use `sixb dev`,
-which co-hosts workers in-process.

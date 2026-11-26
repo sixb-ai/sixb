@@ -18,7 +18,7 @@ import {
   ComputerRunner,
   runApiCredential,
 } from "@sixb/agent"
-import { agentMemoryFileHash } from "@sixb/cli-core"
+import { agentMemoryFileHash } from "@sixb/cli"
 import {
   AgentDefinitionError,
   type AgentMessagePart,

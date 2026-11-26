@@ -61,7 +61,7 @@ import { createTestBrowserPolicy } from "./helpers"
 
 const PROJECT_ID = "agent-run-token-tests"
 const NOW = new Date("2026-06-28T12:00:00.000Z")
-const SANDBOX_CLI_ARTIFACT = resolve(import.meta.dir, "../../cli-core/src/generated/sixb.mjs")
+const SANDBOX_CLI_ARTIFACT = resolve(import.meta.dir, "../../cli/src/generated/sixb.mjs")
 
 function fileRefJson(fileRef: FileRef): Record<string, string | number> {
   return Object.fromEntries(

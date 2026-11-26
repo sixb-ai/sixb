@@ -1,4 +1,4 @@
-import { EXIT_API, INSTANCE_CLI_VERSION, type StatusReport } from "@sixb/cli-core"
+import { EXIT_API, INSTANCE_CLI_VERSION, type StatusReport } from "@sixb/cli"
 import type { CommandResult, Sandbox } from "@sixb/core"
 import { loginShell } from "../login-shell"
 import { AgentRuntimeProfileError } from "./errors"

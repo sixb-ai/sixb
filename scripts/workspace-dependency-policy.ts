@@ -44,7 +44,7 @@ export const coreInternalCompanions: ReadonlySet<string> = new Set([
 
 export const coreInternalConsumers: ReadonlySet<string> = new Set([
   ...coreInternalCompanions,
-  "@sixb/cli",
+  "@sixb/project-cli",
 ])
 
 const extensionRoots = new Set([
@@ -81,7 +81,7 @@ export function expectedWorkspaceDependency(
     return { field: "dependencies", protocol: exactWorkspaceProtocol }
   }
 
-  if (name === "@sixb/cli") {
+  if (name === "@sixb/project-cli") {
     return {
       field: "dependencies",
       protocol:

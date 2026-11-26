@@ -1,0 +1,126 @@
+import { stat } from "node:fs/promises"
+import { resolve } from "node:path"
+import { ACTION_RUN_DRAIN_TIMEOUT_MS } from "@sixb/core/internal/actions"
+import { createSixbServer, requestTimingOptionsFromEnv, type SixbServer } from "@sixb/server"
+import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
+import type { LoadedSixbHost } from "../lib/loadSixb"
+import { builtAppOutdir, loadProductionSixb } from "../lib/production"
+import { resolveDrainTimeoutMs, runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
+import { stopSixbProviders } from "../lib/runtime"
+import { migrateStorageForRole } from "../lib/storage-migration"
+import { printStopping, renderCliError, renderStatic, roleView, startTask } from "../ui"
+
+export interface ApiOptions {
+  entry?: string
+  noMigrate?: boolean
+  port?: string
+  host?: string
+  apiPort?: string
+  apiHost?: string
+  apiPublicOrigin?: string
+  appPublicOrigin?: string
+  trustedProxies?: string
+}
+
+export async function runApi(options: ApiOptions = {}) {
+  process.env.NODE_ENV = "production"
+
+  const loaded = await loadProductionSixb({ entry: options.entry, role: "api" })
+  const app = startTask("api", "Preparing runtime")
+
+  let sixb: LoadedSixbHost | null = loaded.sixb
+  let server: SixbServer | null = null
+
+  try {
+    // Ahead of `server.start()`, which is what kicks off the read-only schema probe
+    // behind `/ready`. Migrating after it would leave the probe racing the change it
+    // reports on, and the first `/ready` answer would be stale by construction.
+    const migration = await migrateStorageForRole(sixb, {
+      role: "api",
+      noMigrate: options.noMigrate,
+      onStart: () => app.step("Migrating storage"),
+    })
+
+    const appOutdir = builtAppOutdir(loaded.buildOutdir)
+    const authExperienceOutdir = resolve(appOutdir, "auth")
+    const hasAuthExperience = await stat(resolve(authExperienceOutdir, "index.html"))
+      .then(() => true)
+      .catch(() => false)
+    const topology = resolveBrowserTopology({
+      role: "api",
+      host: options.host,
+      apiHost: options.apiHost,
+      port: options.port,
+      apiPort: options.apiPort,
+      apiPublicOrigin: options.apiPublicOrigin,
+      appPublicOrigin: options.appPublicOrigin,
+    })
+
+    const trustedProxies = (options.trustedProxies ?? process.env.SIXB_TRUSTED_PROXIES ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+    server = createSixbServer({
+      host: sixb,
+      port: topology.apiPort,
+      hostname: topology.apiHost,
+      quiet: true,
+      // `sixb orchestrator` owns it.
+      ontologyMaintenance: false,
+      // A lake worker owns it. Without one, changes wait where `sixb check` and the Console show.
+      ingestFlush: false,
+      browser: {
+        publicOrigin: topology.apiPublicOrigin,
+        allowedOrigins: topology.allowedBrowserOrigins,
+      },
+      ...(hasAuthExperience ? { authExperience: { outdir: authExperienceOutdir } } : {}),
+      ...(trustedProxies.length > 0 ? { trustedProxies } : {}),
+      timing: requestTimingOptionsFromEnv(),
+    })
+    await server.start()
+
+    app.stop()
+    await renderStatic(
+      roleView({
+        command: "api",
+        name: sixb.id,
+        items: [
+          { label: "api", value: apiUrl(topology) },
+          { label: "docs", value: apiDocsUrl(topology) },
+          { label: "events", value: apiEventsUrl(topology) },
+        ],
+        storage: migration.summary,
+        warnings: [
+          "This process runs no upkeep. Keep `sixb orchestrator` running, even with no schedules: it delivers events left undelivered, purges expired records, and runs cron.",
+        ],
+      })
+    )
+
+    await runUntilSignal(
+      async (signal) => {
+        app.stop()
+        printStopping("api")
+        const timeoutMs =
+          signal === "SIGTERM" ? resolveDrainTimeoutMs(ACTION_RUN_DRAIN_TIMEOUT_MS) : 0
+        await stopQuietly(() => server?.stop({ timeoutMs }) ?? Promise.resolve())
+        if (sixb) {
+          await stopSixbProviders(sixb)
+        }
+        sixb = null
+      },
+      {
+        onInterrupt: () => {
+          void stopQuietly(() => server?.stop({ timeoutMs: 0 }) ?? Promise.resolve())
+        },
+      }
+    )
+  } catch (error) {
+    app.stop()
+    await stopQuietly(() => server?.stop({ timeoutMs: 0 }) ?? Promise.resolve())
+    if (sixb) {
+      await stopSixbProviders(sixb)
+    }
+    await renderCliError(error)
+    process.exit(1)
+  }
+}

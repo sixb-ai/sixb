@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { renderInstanceHelp } from "@sixb/cli-core"
+import { renderInstanceHelp } from "@sixb/cli"
 import { ARTIFACT_LIMITS, quoteArtifactComment } from "@sixb/core/artifacts"
 import { VIDEO_FRAME_RATES } from "../../core/src/artifacts/video/composition"
 import { PUBLISH_ARTIFACT_TOOL_SPEC } from "../src/artifacts/publish-tool"

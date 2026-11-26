@@ -1,5 +1,5 @@
 import { posix } from "node:path"
-import { renderInstanceHelp } from "@sixb/cli-core"
+import { renderInstanceHelp } from "@sixb/cli"
 import type { AgentSkillDefinition, AgentSystemPromptPartName } from "@sixb/core"
 import type { AgentSystemPromptSize, SandboxModel } from "@sixb/core/internal/agents"
 import type { OntologyDocsIndexEntry } from "@sixb/core/internal/ontology"

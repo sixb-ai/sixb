@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import { runInstanceCli } from "@sixb/cli-core"
+import { runInstanceCli } from "@sixb/cli"
 import { parseArtifactQuery } from "../../core/src/artifacts/queries"
 import {
   ObjectQueryFacetsRequestSchema,

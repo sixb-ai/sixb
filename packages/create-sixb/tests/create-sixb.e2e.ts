@@ -7,7 +7,7 @@ import { scaffoldProject } from "../src/scaffold"
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const createPackageDir = join(repoRoot, "packages", "create-sixb")
 const cliPackageDir = join(repoRoot, "packages", "cli")
-const cliCorePackageDir = join(repoRoot, "packages", "cli-core")
+const projectCliPackageDir = join(repoRoot, "packages", "project-cli")
 
 // Packing invokes prepack builds. On Bun 1.3.14, letting the default 5s hook timeout
 // interrupt those builds can leave a parallel test worker spinning at 100% CPU.
@@ -33,23 +33,23 @@ beforeAll(async () => {
   runRoot = join(layoutRoot, "run")
   await mkdir(artifactsDir, { recursive: true })
   await mkdir(join(nodeModulesDir, "@sixb", "cli"), { recursive: true })
-  await mkdir(join(nodeModulesDir, "@sixb", "cli-core"), { recursive: true })
+  await mkdir(join(nodeModulesDir, "@sixb", "project-cli"), { recursive: true })
   await mkdir(join(nodeModulesDir, "create-sixb"), { recursive: true })
   await mkdir(runRoot, { recursive: true })
 
   const createTarball = await packPackage(createPackageDir, artifactsDir)
   const cliTarball = await packPackage(cliPackageDir, artifactsDir)
-  const cliCoreTarball = await packPackage(cliCorePackageDir, artifactsDir)
+  const projectCliTarball = await packPackage(projectCliPackageDir, artifactsDir)
   await extractPackage(createTarball, join(nodeModulesDir, "create-sixb"))
   await extractPackage(cliTarball, join(nodeModulesDir, "@sixb", "cli"))
-  await extractPackage(cliCoreTarball, join(nodeModulesDir, "@sixb", "cli-core"))
+  await extractPackage(projectCliTarball, join(nodeModulesDir, "@sixb", "project-cli"))
 
   // Nothing else is linked: every Sixb package stays isolated from workspace symlinks, and the
   // commands run here print plain screens, which load no third-party package. The live screens'
   // renderer loads only in a terminal.
 
   createEntry = join(nodeModulesDir, "create-sixb", "dist", "index.js")
-  cliEntry = join(nodeModulesDir, "@sixb", "cli", "src", "index.tsx")
+  cliEntry = join(nodeModulesDir, "@sixb", "project-cli", "src", "index.tsx")
 }, SETUP_BUDGET_MS)
 
 afterAll(async () => {
@@ -62,16 +62,20 @@ describe("create-sixb packed artifacts", () => {
       join(layoutRoot, "node_modules", "create-sixb")
     )
     const cliManifest = await readPackageManifest(join(layoutRoot, "node_modules", "@sixb", "cli"))
-    const [createSourceManifest, cliCoreSourceManifest] = await Promise.all([
+    const projectCliManifest = await readPackageManifest(
+      join(layoutRoot, "node_modules", "@sixb", "project-cli")
+    )
+    const [createSourceManifest, cliSourceManifest] = await Promise.all([
       readPackageManifest(createPackageDir),
-      readPackageManifest(cliCorePackageDir),
+      readPackageManifest(cliPackageDir),
     ])
 
     expect(createManifest.dependencies).toBeUndefined()
-    // Keep checking workspace:^ packing across releases. To reproduce the old failure,
-    // restore the hard-coded ^0.1.5 cli-core expectation and run this E2E with cli-core 0.1.6.
-    expect(cliManifest.dependencies?.["create-sixb"]).toBe(`^${createSourceManifest.version}`)
-    expect(cliManifest.dependencies?.["@sixb/cli-core"]).toBe(`^${cliCoreSourceManifest.version}`)
+    expect(cliManifest.dependencies).toBeUndefined()
+    expect(projectCliManifest.dependencies?.["create-sixb"]).toBe(
+      `^${createSourceManifest.version}`
+    )
+    expect(projectCliManifest.dependencies?.["@sixb/cli"]).toBe(`^${cliSourceManifest.version}`)
   })
 
   test.concurrent(

@@ -11,7 +11,7 @@ import type { DeployStatus } from "@sixb/core/deploy"
 const host = process.env.SIXB_DEPLOY_TEST_HOST
 const domain = process.env.SIXB_DEPLOY_TEST_DOMAIN
 const northline = resolve(import.meta.dir, "../../../examples/northline")
-const cli = resolve(import.meta.dir, "../../../packages/cli/src/index.tsx")
+const cli = resolve(import.meta.dir, "../../../packages/cli/src/main.ts")
 
 async function sixb(...args: string[]) {
   const child = Bun.spawn([process.execPath, cli, ...args], {

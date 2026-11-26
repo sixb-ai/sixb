@@ -188,7 +188,7 @@
       "@sixb/env-azure-key-vault": ["./env/azure-key-vault/src/index.ts"],
       "@sixb/env-doppler": ["./env/doppler/src/index.ts"],
       "@sixb/ducklake": ["./storage/ducklake/src/index.ts"],
-      "@sixb/cli-core": ["./packages/cli-core/src/index.ts"],
+      "@sixb/cli": ["./packages/cli/src/index.ts"],
       "@sixb/desktop": ["./packages/desktop/src/index.ts"],
       "@sixb/lake-local": ["./storage/lake-local/src/index.ts"],
       "@sixb/lake-worker": ["./packages/lake-worker/src/index.ts"],

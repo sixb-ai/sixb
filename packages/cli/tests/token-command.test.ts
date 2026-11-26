@@ -1,20 +1,77 @@
 import { afterAll, describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { assertCliSucceeded, runCliToCompletion } from "./shared/cli-process"
-import { signedInProfile } from "./shared/signed-in-profile"
+import { updateConfig } from "../src/profiles"
 
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
-const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
+const cliEntry = resolve(import.meta.dir, "..", "src", "main.ts")
 const servers: Bun.Server<undefined>[] = []
 const cleanups: (() => Promise<void>)[] = []
 
-// The tests run at once, each against its own server: clean up after all of them.
 afterAll(async () => {
   while (servers.length > 0) {
     servers.pop()?.stop(true)
   }
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()))
 })
+
+async function signedInProfile(apiUrl: string, accessToken: string) {
+  const root = await mkdtemp(resolve(tmpdir(), "sixb-cli-signed-in-"))
+  await updateConfig(
+    () => ({
+      version: 1,
+      currentProfile: "acme",
+      profiles: {
+        acme: {
+          apiUrl,
+          projectId: "acme",
+          session: {
+            accessToken,
+            refreshToken: "sixb_rt_ses_cli.secret",
+            accessExpiresAt: "2099-01-01T00:00:00.000Z",
+          },
+        },
+      },
+    }),
+    { env: { XDG_CONFIG_HOME: root } }
+  )
+  return {
+    env: {
+      XDG_CONFIG_HOME: root,
+      SIXB_API_URL: undefined,
+      SIXB_API_BASE_URL: undefined,
+      SIXB_API_PUBLIC_ORIGIN: undefined,
+      SIXB_API_TOKEN: undefined,
+      SIXB_TOKEN: undefined,
+      SIXB_PROFILE: undefined,
+      SIXB_RUN_ID: undefined,
+    },
+    cleanup: () => rm(root, { recursive: true, force: true }),
+  }
+}
+
+async function runCli(
+  args: readonly string[],
+  env: Readonly<Record<string, string | undefined>>
+): Promise<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }> {
+  const merged: Record<string, string> = {}
+  for (const [k, v] of Object.entries({ ...process.env, ...env })) {
+    if (v !== undefined) merged[k] = v
+  }
+  const child = Bun.spawn(["bun", cliEntry, ...args], {
+    cwd: repoRoot,
+    env: merged,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ])
+  return { exitCode, stdout, stderr }
+}
 
 describe("sixb tokens command", () => {
   test.concurrent("creates a token from the profile's sign-in", async () => {
@@ -50,12 +107,11 @@ describe("sixb tokens command", () => {
     )
     cleanups.push(profile.cleanup)
 
-    const result = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "tokens", "create", "CI", "--expires-at", "2099-01-01T00:00:00.000Z"],
-      cwd: repoRoot,
-      env: profile.env,
-    })
-    assertCliSucceeded(result)
+    const result = await runCli(
+      ["tokens", "create", "CI", "--expires-at", "2099-01-01T00:00:00.000Z"],
+      profile.env
+    )
+    expect(result.exitCode, result.stderr).toBe(0)
 
     expect(authorizationHeader).toBe("Bearer sixb_at_ses_cli.secret")
     expect(requestBody).toEqual({ name: "CI", expiresAt: "2099-01-01T00:00:00.000Z" })
@@ -76,13 +132,11 @@ describe("sixb tokens command", () => {
     })
     servers.push(server)
 
-    const result = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "tokens", "create", "CI", "--json"],
-      cwd: repoRoot,
-      env: {
-        SIXB_API_URL: `http://127.0.0.1:${server.port}`,
-        SIXB_API_TOKEN: "sixb_pat_tok_cli.secret",
-      },
+    const result = await runCli(["tokens", "create", "CI", "--json"], {
+      SIXB_API_URL: `http://127.0.0.1:${server.port}`,
+      SIXB_API_BASE_URL: undefined,
+      SIXB_API_TOKEN: "sixb_pat_tok_cli.secret",
+      SIXB_RUN_ID: undefined,
     })
 
     expect(result.exitCode).toBe(2)

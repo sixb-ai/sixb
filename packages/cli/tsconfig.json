@@ -1,9 +1,9 @@
 {
   "extends": "../../tsconfig.json",
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
   "compilerOptions": {
-    "jsx": "react-jsx",
+    "types": ["bun"],
     "incremental": true,
     "tsBuildInfoFile": "./.tsbuild/tsconfig.tsbuildinfo"
-  },
-  "include": ["src/**/*.tsx", "src/**/*.ts"]
+  }
 }

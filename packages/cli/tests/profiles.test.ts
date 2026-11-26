@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { readConfig, resolveConfigPath, resolveProfile, updateConfig } from "../src/lib/profiles"
+import { readConfig, resolveConfigPath, resolveProfile, updateConfig } from "../src/profiles"
 
 const tempDirectories: string[] = []
 

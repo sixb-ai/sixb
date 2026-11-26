@@ -12,7 +12,7 @@
   "include": ["src/**/*", "src/skills/**/*.json"],
   "references": [
     {
-      "path": "../cli-core/tsconfig.build.json"
+      "path": "../cli/tsconfig.build.json"
     },
     {
       "path": "../core/tsconfig.build.json"

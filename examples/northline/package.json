@@ -4,18 +4,18 @@
   "type": "module",
   "scripts": {
     "dev": "bun scripts/dev.ts",
-    "dev:runtime": "bun ../../packages/cli/src/index.tsx dev",
+    "dev:runtime": "bun ../../packages/cli/src/main.ts dev",
     "desktop": "bun scripts/dev.ts --desktop",
-    "desktop:build": "bun ../../packages/cli/src/index.tsx desktop build",
-    "build": "bun ../../packages/cli/src/index.tsx build",
-    "check": "bun ../../packages/cli/src/index.tsx check",
-    "deploy": "bun ../../packages/cli/src/index.tsx deploy",
+    "desktop:build": "bun ../../packages/cli/src/main.ts desktop build",
+    "build": "bun ../../packages/cli/src/main.ts build",
+    "check": "bun ../../packages/cli/src/main.ts check",
+    "deploy": "bun ../../packages/cli/src/main.ts deploy",
     "demo:reset": "bun scripts/reset-demo.ts",
     "demo:sync": "bun scripts/sync-demo.ts",
     "demo:alarm": "bun scripts/send-alarm.ts",
     "demo:approve-quote": "bun scripts/approve-quote.ts",
     "demo:artifacts": "bun scripts/demo-artifacts.ts",
-    "typecheck": "bun ../../packages/cli/src/index.tsx typegen && tsc --noEmit --paths null"
+    "typecheck": "bun ../../packages/cli/src/main.ts typegen && tsc --noEmit --paths null"
   },
   "dependencies": {
     "@sixb/app": "workspace:*",
@@ -43,6 +43,7 @@
   },
   "devDependencies": {
     "@sixb/cli": "workspace:*",
+    "@sixb/project-cli": "workspace:*",
     "@sixb/deploy-ssh": "workspace:*",
     "@sixb/desktop": "workspace:*",
     "@sixb/server": "workspace:*",

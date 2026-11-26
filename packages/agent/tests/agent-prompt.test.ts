@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { renderInstanceHelp } from "@sixb/cli-core"
+import { renderInstanceHelp } from "@sixb/cli"
 import { listSandboxModels } from "@sixb/core/internal/agents"
 import { createModelCatalog } from "@sixb/core/models"
 import {
