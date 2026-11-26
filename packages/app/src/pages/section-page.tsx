@@ -1,10 +1,12 @@
+import { getProjectInfoOptions } from "@sixb/client/hooks"
 import { Toaster, toast } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
+import { useQuery } from "@tanstack/react-query"
 import { ChevronLeft } from "lucide-react"
 import type { ComponentType, ReactNode } from "react"
 import { Link, Navigate, useLocation } from "react-router-dom"
 import { useAppMessages } from "../locale"
-import type { AppSectionId } from "../sections/catalog"
+import { type AppSectionId, sectionCatalog } from "../sections/catalog"
 import {
   useOpenSections,
   useSectionNavMounted,
@@ -13,7 +15,14 @@ import {
 } from "../sections/sections"
 import { useCurrentUser } from "../session"
 import { isCurrentItem } from "../shell/nav-items"
-import { NoAccessPanel, Panel, PanelEmpty, PanelSkeleton, useLoadFailure } from "./section-ui"
+import {
+  NoAccessPanel,
+  Panel,
+  PanelEmpty,
+  PanelSkeleton,
+  ProductionOnlyPanel,
+  useLoadFailure,
+} from "./section-ui"
 
 // Section pages draw their own toasts so they never double up with a toaster of the project's.
 const SECTION_TOASTER = "sixb-sections"
@@ -203,8 +212,9 @@ export function WorkspaceHeader({ back, icon, title, meta, actions }: WorkspaceH
 
 /**
  * A page this person may not open. Signed in, they read which page it is and that an admin can
- * give access, rather than land somewhere else without knowing why. Signed out, or on a shared
- * link without sections, home takes over.
+ * give access, rather than land somewhere else without knowing why; on a branch, a page only
+ * production has says so, with the way there. Signed out, or on a shared link without sections,
+ * home takes over.
  */
 function NotAllowed({ section, page }: { readonly section: AppSectionId; readonly page: string }) {
   const signedIn = useCurrentUser() !== null
@@ -212,8 +222,23 @@ function NotAllowed({ section, page }: { readonly section: AppSectionId; readonl
   const labels = useAppMessages().sections[section]
   const pageLabels: Record<string, string> = labels.pages
   const label = pageLabels[page] ?? labels.label
+  // Read from what the app loaded when it started, never fetched for this.
+  const branch = useQuery({ ...getProjectInfoOptions(), enabled: false }).data?.branch
+  const definition = sectionCatalog
+    .find((candidate) => candidate.id === section)
+    ?.pages.find((candidate) => candidate.id === page)
 
   if (!signedIn || !enabled) return <Navigate to="/" replace />
+
+  if (branch && definition?.productionOnly) {
+    const href = branch.productionUrl ? `${branch.productionUrl}${definition.path}` : null
+    return (
+      <PageFrame title={label}>
+        <ProductionOnlyPanel href={href} />
+      </PageFrame>
+    )
+  }
+
   return (
     <PageFrame title={label}>
       <NoAccessPanel page={label} />

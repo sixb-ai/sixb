@@ -15,7 +15,7 @@ import {
 } from "@sixb/ui/components"
 import { defineMessages, type MessageTree, type Translation, useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { Check, CircleAlert, Copy, DatabaseZap, Lock } from "lucide-react"
+import { ArrowLeft, Check, CircleAlert, Copy, DatabaseZap, GitFork, Lock } from "lucide-react"
 import { type ComponentType, type ReactNode, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 
@@ -32,6 +32,11 @@ export const en = {
   deniedTitle: "No access",
   denied: "Your role does not allow this. Ask an admin if you should have it.",
   noAccess: (page: string) => `You don't have access to ${page}. Ask a project admin.`,
+  productionOnly: {
+    title: "Managed from production",
+    description: "This page isn't on a branch: you manage it from production.",
+    open: "Open in production",
+  },
   tryAgain: "Try again in a moment.",
   status: {
     queued: "Queued",
@@ -72,6 +77,11 @@ export const fr: Translation<typeof en> = {
   deniedTitle: "Accès refusé",
   noAccess: (page: string) =>
     `Vous n’avez pas accès à « ${page} ». Demandez à un administrateur du projet.`,
+  productionOnly: {
+    title: "Se gère en production",
+    description: "Cette page n’existe pas sur une branche : elle se gère depuis la production.",
+    open: "Ouvrir en production",
+  },
   denied:
     "Votre rôle ne le permet pas. Demandez à un administrateur si vous devriez y avoir accès.",
   tryAgain: "Réessayez dans un instant.",
@@ -939,6 +949,33 @@ export function NoAccessPanel({ page }: { readonly page: string }) {
   return (
     <Panel>
       <PanelEmpty icon={Lock} title={messages.deniedTitle} description={messages.noAccess(page)} />
+    </Panel>
+  )
+}
+
+/**
+ * A page only production has, opened on a branch: where it is managed, and, on a branch
+ * production runs, the way there.
+ */
+export function ProductionOnlyPanel({ href }: { readonly href: string | null }) {
+  const messages = useSectionUiMessages().productionOnly
+  return (
+    <Panel>
+      <PanelEmpty
+        icon={GitFork}
+        title={messages.title}
+        description={messages.description}
+        action={
+          href ? (
+            <Button asChild size="sm" variant="outline">
+              <a href={href}>
+                <ArrowLeft />
+                {messages.open}
+              </a>
+            </Button>
+          ) : undefined
+        }
+      />
     </Panel>
   )
 }

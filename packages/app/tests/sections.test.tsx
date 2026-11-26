@@ -5,6 +5,7 @@ import {
   getAuthInvitationOptionsQueryKey,
   getAuthMembershipOptionsQueryKey,
   getAuthSessionQueryKey,
+  getProjectInfoQueryKey,
   listActionsOptions,
   listAuthInvitationsQueryKey,
   listAuthMembersQueryKey,
@@ -22,6 +23,7 @@ import type { ReactNode } from "react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { type AppSectionId, AppShell, useSections } from "../src"
 import {
+  ConsoleBranchesPage,
   ConsoleSyncPage,
   ConsoleSyncsPage,
   SectionsProvider,
@@ -480,6 +482,36 @@ describe("who may open a section page", () => {
       expect(view.getByText("You don't have access to Syncs. Ask a project admin.")).toBeDefined()
       cleanup()
     }
+  })
+
+  // A developer who opens the Console's Branches on a branch once read that they had no access.
+  // Red check: drop the `productionOnly` case from `NotAllowed` (`section-page.tsx`).
+  test("on a branch, a page only production has says so, with the way there", () => {
+    const view = renderApp(<ConsoleBranchesPage />, {
+      path: "/console/branches",
+      session: sessionFor(["staff"], manager),
+      data: [
+        [
+          getProjectInfoQueryKey(),
+          {
+            id: "northline",
+            locale: "en",
+            timeZone: "UTC",
+            branch: {
+              name: "feature/route-planner",
+              dataTakenAt: null,
+              productionUrl: "https://app.northline.test",
+            },
+          },
+        ],
+      ],
+    })
+
+    expect(view.getByText("Managed from production")).toBeDefined()
+    expect(view.queryByText(/You don't have access/)).toBeNull()
+    expect(view.getByRole("link", { name: "Open in production" }).getAttribute("href")).toBe(
+      "https://app.northline.test/console/branches"
+    )
   })
 
   test("signed out, a page sends its URL home", () => {
