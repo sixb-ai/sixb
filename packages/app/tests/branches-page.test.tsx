@@ -229,6 +229,28 @@ describe("Console › Branches", () => {
     expect(view.queryByRole("button", { name: "New branch" })).toBeNull()
   })
 
+  // smolvm serves branches on production's loopback: Open would lead nowhere. Red check: drop the
+  // `preview-domain` case from `branchesUnavailable` (`core/branches/hosting.ts`), and the worker
+  // test that asks for it fails; drop its line from `setup`, and this one does.
+  test("asks for a preview domain when the machines can't be reached", () => {
+    const { view } = renderPage({
+      branches: [],
+      unavailable: { code: "preview-domain", message: "a preview domain" },
+      now: NOW,
+    })
+
+    expect(
+      view.getByText(
+        "These machines can only be reached from production's own server. Give branches a web address of their own in sixb.config.ts:"
+      )
+    ).toBeDefined()
+    expect(
+      view.getByText(
+        'source: { repository: "your-org/your-repo", previewDomain: "your-preview.dev" },'
+      )
+    ).toBeDefined()
+  })
+
   // Hiding the page protects no data: the page says why there is nothing, rather than leave.
   test("tells someone without the grant that they don't have access", () => {
     const { view } = renderPage(

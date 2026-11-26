@@ -23,6 +23,8 @@ export const en = {
     sandboxes: "Each branch runs on a machine of its own. Add one in sixb.config.ts:",
     "sandbox-shares-host":
       "The local machine setting would run branches on production's own server. Use separate machines instead:",
+    "preview-domain":
+      "These machines can only be reached from production's own server. Give branches a web address of their own in sixb.config.ts:",
     "sandbox-env":
       "The machine setup gives every branch its own environment variables. Remove them: branches use your project's development settings.",
   },
@@ -165,6 +167,8 @@ export const fr: Translation<BranchesMessages> = {
     sandboxes: "Chaque branche tourne sur sa propre machine. Ajoutez-en une dans sixb.config.ts :",
     "sandbox-shares-host":
       "Le réglage de machine locale exécuterait les branches sur le serveur de production. Utilisez plutôt des machines séparées :",
+    "preview-domain":
+      "Ces machines ne sont joignables que depuis le serveur de production. Donnez aux branches une adresse web à elles dans sixb.config.ts :",
     "sandbox-env":
       "La configuration des machines donne à chaque branche ses propres variables d’environnement. Retirez-les : les branches utilisent les paramètres de développement de votre projet.",
   },

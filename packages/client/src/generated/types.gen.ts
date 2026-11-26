@@ -8579,7 +8579,13 @@ export type ListBranchesResponses = {
       lastSeenAt: string
     }>
     unavailable: {
-      code: "storage" | "source" | "sandboxes" | "sandbox-shares-host" | "sandbox-env"
+      code:
+        | "storage"
+        | "source"
+        | "sandboxes"
+        | "sandbox-shares-host"
+        | "preview-domain"
+        | "sandbox-env"
       message: string
     } | null
     now: string

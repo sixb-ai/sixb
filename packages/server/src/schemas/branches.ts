@@ -59,7 +59,14 @@ export const BranchListResponseSchema = z.object({
   /** What production lacks to run branches, or null when it can. */
   unavailable: z
     .object({
-      code: z.enum(["storage", "source", "sandboxes", "sandbox-shares-host", "sandbox-env"]),
+      code: z.enum([
+        "storage",
+        "source",
+        "sandboxes",
+        "sandbox-shares-host",
+        "preview-domain",
+        "sandbox-env",
+      ]),
       message: z.string(),
     })
     .nullable(),

@@ -104,6 +104,8 @@ const SETUP_SNIPPETS: Partial<Record<Unavailable["code"], string>> = {
   source: 'source: { repository: "your-org/your-repo" },',
   sandboxes: "sandboxes: new VercelSandboxFactory({ credentials }),",
   "sandbox-shares-host": "sandboxes: new VercelSandboxFactory({ credentials }),",
+  "preview-domain":
+    'source: { repository: "your-org/your-repo", previewDomain: "your-preview.dev" },',
 }
 
 const SETUP_GUIDE = "https://docs.sixb.ai/deployment/branches"

@@ -25476,6 +25476,7 @@
                             "source",
                             "sandboxes",
                             "sandbox-shares-host",
+                            "preview-domain",
                             "sandbox-env"
                           ]
                         },

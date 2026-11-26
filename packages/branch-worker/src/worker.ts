@@ -75,16 +75,7 @@ export class BranchWorker extends Worker {
     environment: string | undefined = process.env.NODE_ENV
   ): string | null {
     const unavailable = branchesUnavailable(host, environment)
-    if (unavailable) return `needs ${unavailable.message}`
-
-    if (
-      environment === "production" &&
-      host.sandboxes?.servesOnLoopback &&
-      !host.source?.previewDomain
-    ) {
-      return "needs a preview domain with this sandbox provider: it serves branches on this host's loopback, which nobody's browser reaches. Name one with createSixb({ source: { previewDomain } })"
-    }
-    return null
+    return unavailable ? `needs ${unavailable.message}` : null
   }
 
   constructor(

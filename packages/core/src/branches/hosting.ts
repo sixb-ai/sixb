@@ -3,7 +3,13 @@ import { isBranchHostingStorage } from "./data"
 
 /** Why production cannot run branches yet: what the Console says, and the worker refuses. */
 export interface BranchesUnavailable {
-  readonly code: "storage" | "source" | "sandboxes" | "sandbox-shares-host" | "sandbox-env"
+  readonly code:
+    | "storage"
+    | "source"
+    | "sandboxes"
+    | "sandbox-shares-host"
+    | "preview-domain"
+    | "sandbox-env"
   /** What is missing, said as the rest of a sentence that starts with "Branches need…". */
   readonly message: string
 }
@@ -63,6 +69,18 @@ export function branchesUnavailable(
       code: "sandbox-shares-host",
       message:
         "a sandbox that keeps branches from this host's network and files in production: use @sixb/sandboxes-vercel or @sixb/sandboxes-smolvm, as @sixb/sandboxes-local runs a branch on this host itself",
+    }
+  }
+  // Open would send people to their own machine's loopback.
+  if (
+    environment === "production" &&
+    host.sandboxes.servesOnLoopback &&
+    !host.source.previewDomain
+  ) {
+    return {
+      code: "preview-domain",
+      message:
+        "a preview domain with this sandbox provider: it serves branches on this host's loopback, which nobody's browser reaches. Name one with createSixb({ source: { previewDomain } })",
     }
   }
   if (host.sandboxRecipeEnv.length > 0) {
