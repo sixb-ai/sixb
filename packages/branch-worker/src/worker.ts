@@ -85,8 +85,8 @@ export class BranchWorker extends Worker {
     if (host.sandboxDefinition?.auth && host.sandboxes.forwardsRequestCredentials) {
       return "needs a sandbox provider whose commands carry the source's credentials themselves to clone a private repository: this one hands them to a forwarder git does not use. Use @sixb/sandboxes-vercel, or drop the sandbox factory's auth for a public repository"
     }
-    if (host.sandboxes.resume && !host.sandboxes.destroy) {
-      return "needs a sandbox provider that deletes a saved sandbox by name (destroy), as it resumes them: a branch's sandbox is deleted with the branch"
+    if (host.sandboxes.resume && (!host.sandboxes.destroy || !host.sandboxes.stop)) {
+      return "needs a sandbox provider that stops and deletes a saved sandbox by name (stop, destroy), as it resumes them: a branch's sandbox goes with the branch, and a dead worker's session is stopped"
     }
     if (environment === "production" && host.sandboxes.sharesHost) {
       return "needs a sandbox that keeps branches from this host's network and files in production: use @sixb/sandboxes-vercel or @sixb/sandboxes-smolvm, as @sixb/sandboxes-local runs a branch on this host itself"

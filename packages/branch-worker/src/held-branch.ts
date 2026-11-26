@@ -448,9 +448,9 @@ export class HeldBranch {
     }
 
     this.sandbox = (await this.resumeSaved(sandboxes, session)) ?? undefined
-    // The worker is stopping: the branch is the next worker's to open, and `close` saves what
-    // was resumed.
-    if (this.signal.aborted) return
+    // The worker is stopping, or the branch is no longer wanted running: `close` saves what was
+    // resumed, and the tick does the rest.
+    if (this.signal.aborted || this.branch.wanted !== "running") return
 
     const resumed = this.sandbox !== undefined
     this.sandbox ??= await this.createSandbox(sandboxes, session)
@@ -495,6 +495,7 @@ export class HeldBranch {
     if (!sandboxes.resume || !name || this.branch.port === null) return null
 
     const deadline = Date.now() + RESUME_WAIT_MS
+    let stoppedStale = false
     for (;;) {
       try {
         const sandbox = await sandboxes.resume(name, session)
@@ -513,7 +514,22 @@ export class HeldBranch {
           )
           return null
         }
-        if (!(error instanceof SandboxStillRunningError) || Date.now() >= deadline) throw error
+        if (!(error instanceof SandboxStillRunningError)) throw error
+        if (Date.now() >= deadline) {
+          throw new Error(
+            `[SixbBranchWorker] The last session of branch '${this.branch.name}''s sandbox still runs after ${RESUME_WAIT_MS / 60_000} minutes. Stop it from the provider's dashboard, then open the branch again.`,
+            { cause: error }
+          )
+        }
+      }
+
+      // Its worker died holding it, and the provider keeps it up while its deadline lasts: this
+      // hold owns the branch now, so it stops that session, saving its state, then resumes it.
+      if (!stoppedStale && sandboxes.stop) {
+        await this.fence()
+        await sandboxes.stop(name)
+        stoppedStale = true
+        continue
       }
 
       console.error(
@@ -521,6 +537,9 @@ export class HeldBranch {
       )
       await waitUnlessAborted(RESUME_RETRY_MS, this.signal)
       if (this.signal.aborted) return null
+
+      // Stopped or deleted meanwhile: the tick does what was asked.
+      if ((await this.read()).wanted !== "running") return null
     }
   }
 
@@ -909,8 +928,9 @@ export class HeldBranch {
 
   /**
    * Drops this worker's hold without touching the sandbox's saved state. A hold that lost the
-   * branch to another worker stops only its own runtime: a provider that resumes sandboxes by
-   * name gave that worker the same sandbox, which is no longer this hold's to stop.
+   * branch to another worker stops its own session still: a saved sandbox's handle is pinned to
+   * the session this hold resumed or made, so stopping it never reaches the session another
+   * worker resumes, and a session left running would keep the name from resuming.
    */
   private async release(options: { readonly lost?: boolean } = {}): Promise<void> {
     await this.stopRuntime()
@@ -925,7 +945,6 @@ export class HeldBranch {
         )
       })
     }
-    if (options.lost && this.host.sandboxes?.resume) return
     await this.sandbox?.stop().catch(() => {})
     if (!this.host.sandboxes?.resume) await this.sandbox?.destroy().catch(() => {})
   }

@@ -99,10 +99,11 @@ describe("the lease on a branch", () => {
     expect(lab.destroyed).toEqual(["sandbox-1"])
   })
 
-  // A worker paused past its lease, its machine asleep, came back to a branch another worker had
-  // taken, and stopped the sandbox that worker had resumed. Guard check: release a lost branch
-  // as any other in `failed` (`held-branch.ts`).
-  test("stops only its own runtime when it comes back to a branch another worker took", async () => {
+  // A worker paused past its lease came back to a branch another worker had taken: it stops its
+  // own session, which its handle is pinned to, and touches nothing of the branch's. A session it
+  // left running kept Vercel from resuming the name. Guard check: return before the sandbox's stop
+  // in `release` when the hold is lost, or release a lost branch as any other in `failed`.
+  test("stops only its own session when it comes back to a branch another worker took", async () => {
     const { lab, host } = await setup({ resumable: true })
     const held = await hold(host)
     await ready(host)
@@ -117,8 +118,9 @@ describe("the lease on a branch", () => {
     await settled(held.life)
 
     expect(lab.kills).toEqual([1])
-    expect(lab.stopped).toEqual([])
+    expect(lab.stopped).toEqual(["sandbox-1"])
     expect(lab.destroyed).toEqual([])
+    expect(lab.closed).toEqual([])
     expect(await row(host)()).toMatchObject({ owner: "worker-b" })
   })
 

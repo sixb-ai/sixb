@@ -121,6 +121,8 @@ export interface Lab {
   readonly saved: Set<string>
   /** The names resumed, in order. */
   readonly resumed: string[]
+  /** The names stopped by name, in order: sessions a dead worker left running. */
+  readonly stoppedByName: string[]
   /** Fails the first checkout step whose script holds `step`, as that command would. */
   checkoutFailure: {
     readonly step: string
@@ -278,7 +280,10 @@ function fakeSandboxes(
   })
 
   // A provider that saves sandboxes, as Vercel does: by name, deleted by name.
-  const saving: Pick<SandboxFactory, "resume" | "destroy"> = {
+  const saving: Pick<SandboxFactory, "resume" | "destroy" | "stop"> = {
+    async stop(name) {
+      lab.stoppedByName.push(name)
+    },
     async resume(name) {
       const failure = lab.resumeFailures.shift()
       if (failure) throw failure
@@ -356,6 +361,7 @@ export async function setup(
     resumeFailures: [],
     saved: new Set(),
     resumed: [],
+    stoppedByName: [],
     checkoutFailure: null,
     checkout: [],
     marked: new Set(),

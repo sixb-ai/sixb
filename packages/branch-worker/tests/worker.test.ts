@@ -315,14 +315,18 @@ describe("the branch worker", () => {
 
   // A branch's saved sandbox goes with it, by name. Guard check: drop the `destroy` check from
   // `unmetRequirement`.
-  test("refuses a provider that resumes sandboxes but cannot delete one by name", async () => {
+  test.each([
+    "destroy",
+    "stop",
+  ] as const)("refuses a provider that resumes sandboxes but cannot %s one by name", async (missing) => {
     const { host } = await setup({ resumable: true })
-    const undeletable = hostWith(host, {
-      sandboxes: { ...host.sandboxes!, destroy: undefined },
+    const lacking = hostWith(host, {
+      sandboxes: { ...host.sandboxes!, [missing]: undefined },
     })
 
-    expect(BranchWorker.unmetRequirement(undeletable, "development")).toContain(
-      "deletes a saved sandbox by name"
+    expect(BranchWorker.unmetRequirement(host, "development")).toBeNull()
+    expect(BranchWorker.unmetRequirement(lacking, "development")).toContain(
+      "stops and deletes a saved sandbox by name"
     )
   })
 

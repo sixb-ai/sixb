@@ -627,8 +627,51 @@ describe("a held branch", () => {
     await second.stop()
 
     expect(lab.created).toHaveLength(1)
+    // Guard check: wait without stopping it in `resumeSaved`: Vercel extends a session its
+    // keep-alive pushed out, past any wait.
+    expect(lab.stoppedByName).toEqual([opened!.sandbox!])
     expect(lab.resumed).toEqual([opened!.sandbox!])
     expect(reopened).toMatchObject({ sandbox: opened!.sandbox, port: opened!.port, notices: [] })
+  })
+
+  // Guard check: drop the row's re-read from the wait in `resumeSaved`: the branch waits on.
+  test("stops waiting for its saved sandbox once it is deleted", async () => {
+    const { lab, host, bo } = await setup({ resumable: true })
+    const first = await hold(host)
+    await ready(host)
+    await bo.branches.stop(NAME)
+    await settled(first.life)
+
+    lab.resumeFailures = Array.from({ length: 100 }, stillRunning)
+    await bo.branches.open(NAME)
+    const second = await hold(host)
+    await until(
+      async () => lab.stoppedByName.length,
+      (stops) => stops === 1
+    )
+    await bo.branches.delete(NAME)
+    await until(row(host), (branch) => branch === null, { stepMs: 15_000, steps: 10 })
+    await settled(second.life)
+
+    expect(lab.created).toHaveLength(1)
+  })
+
+  test("fails in its own words when its saved sandbox's session never stops", async () => {
+    const { lab, host, bo } = await setup({ resumable: true })
+    const first = await hold(host)
+    await ready(host)
+    await bo.branches.stop(NAME)
+    await settled(first.life)
+
+    lab.resumeFailures = Array.from({ length: 100 }, stillRunning)
+    await bo.branches.open(NAME)
+    const second = await hold(host)
+    await until(row(host), (branch) => branch?.state === "failed", { stepMs: 60_000, steps: 20 })
+    await settled(second.life)
+
+    expect((await row(host)())?.error?.message).toStartWith(
+      "[SixbBranchWorker] The last session of branch 'feature/invoices''s sandbox still runs after 12 minutes."
+    )
   })
 
   // Guard check: drop the `destroySaved` before `create` in `createSandbox`, or draw a new port.
