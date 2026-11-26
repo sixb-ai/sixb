@@ -4,6 +4,7 @@ import {
   ShareError,
   type SixbHostView,
 } from "@sixb/core"
+import { isSixbError } from "@sixb/core/internal/errors"
 import { ObjectNotFoundError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -57,6 +58,7 @@ export function registerShareGrantRoutes(app: Elysia, _host: SixbHostView) {
           401: ErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
           500: ErrorResponseSchema,
           501: ErrorResponseSchema,
         },
@@ -189,6 +191,11 @@ function handleShareGrantRouteError(
   }
   if (error instanceof ObjectNotFoundError) {
     set.status = 404
+    return { error: error.message }
+  }
+  // A branch production runs issues no link: the refusal says why, and where to share instead.
+  if (isSixbError(error) && error.code === "branch.refused") {
+    set.status = 409
     return { error: error.message }
   }
 

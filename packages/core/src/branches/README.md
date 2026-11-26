@@ -148,8 +148,10 @@ branch      BranchHandover.exchange        a native cookie session, CSRF cookie 
 On a hosted branch the project's strategy is replaced by `branchHandoverAuth`, which has no
 sign-in method: the handover is the only way in, and the sessions it makes are the project's own,
 so CSRF, guards and attribution work unchanged. Its sessions last 4 hours at most: production
-checks the grant only at the handover. Its cookies are `Secure` when the branch's public origin is
-https, which its API, behind the front's plain http, cannot see. `hostOnBranch` makes the
+checks the grant only at the handover. Nothing else lets anyone in: the branch makes no access
+token (`AuthRuntime`) and issues no share link (`shares/execution.ts`), and says why. Its cookies
+are `Secure` when the branch's public origin is https, which its API, behind the front's plain
+http, cannot see. `hostOnBranch` makes the
 replacement, from the runtime's `hosted` part (its key and its origin), and the server reads both
 from there: it registers the handover with the key, and admits browsers from that origin only,
 whatever it was given, so a page on production's own origin never acts in the branch.

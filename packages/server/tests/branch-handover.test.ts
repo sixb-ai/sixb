@@ -4,6 +4,7 @@ import {
   defineGroup,
   defineObjectType,
   defineRole,
+  defineShare,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -27,6 +28,7 @@ import {
 } from "@sixb/core/internal/branches"
 import { putOnBranch } from "@sixb/core/internal/runtime"
 import type { BranchRecord } from "@sixb/core/storage"
+import { createTestSixb } from "@sixb/core/testing"
 import {
   BRANCH_PREVIEW_HEADERS_TIMEOUT_MS,
   BRANCH_PREVIEW_MAX_IN_FLIGHT,
@@ -110,7 +112,7 @@ function branchApp(
     quiet: true,
     browser: { publicOrigin: origin, allowedOrigins },
   })
-  return { app: createSixbApi(server), server, storage, origin }
+  return { app: createSixbApi(server), server, storage, origin, host }
 }
 
 async function prepare(app: ReturnType<typeof createSixbApi>, key = KEY, person = ada) {
@@ -334,6 +336,55 @@ describe("a branch's credentials", () => {
 
     expect(minted.status).toBe(403)
     expect(await minted.text()).toContain("makes no access tokens")
+  })
+
+  // A link is anonymous and lasts as long as its issuer says: it would let people into the copy
+  // past the session's 4 hours, the grant, and production's handover.
+  // Red check: drop the `signsInThroughProduction` refusal from `issueByDefinition`
+  // (`shares/execution.ts`): the link is issued, 201.
+  test("issues no share link", async () => {
+    const OrderLink = defineShare("order-link", {
+      target: Order,
+      grants: ({ target }) => [can.view(target)],
+    })
+    const { app, host } = branchApp("http://branch.localhost", {
+      shares: [OrderLink],
+      roles: [
+        defineRole("developers", {
+          grantedTo: [developers],
+          grants: [can.view(Order), can.share(OrderLink), can.manage(project.source)],
+        }),
+      ],
+    })
+    await createTestSixb(host)
+      .objects(Order)
+      .upsert({ properties: { id: "o1" } })
+    const { code } = (await (await prepare(app)).json()) as { code: string }
+    const cookie = cookiesOf(await exchange(app, code))
+    const csrf = /sixb_csrf_app=([^;]+)/.exec(cookie)?.[1] ?? ""
+
+    const issued = await app.fetch(
+      new Request("http://branch.localhost/api/share-grants", {
+        method: "POST",
+        headers: {
+          cookie,
+          origin: "http://branch.localhost",
+          "content-type": "application/json",
+          "x-sixb-csrf": csrf,
+        },
+        body: JSON.stringify({
+          definitionId: "order-link",
+          target: { objectTypeId: "order", primaryId: "o1" },
+          destinationPath: "/orders/o1",
+          expiresAt: "2098-01-01T00:00:00.000Z",
+        }),
+      })
+    )
+
+    expect(issued.status).toBe(409)
+    expect(await issued.json()).toMatchObject({
+      error: expect.stringContaining("no share link is issued on a branch production runs"),
+    })
   })
 
   // The project lets its sessions last 30 days; a branch's still end at 4 hours.

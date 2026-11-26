@@ -11385,6 +11385,12 @@ export type IssueSharedAccessGrantErrors = {
     error: string
   }
   /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+  /**
    * Response for status 500
    */
   500: {

@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import type { Principal } from "../auth"
 import { AuthorizationError, assertAuthorized, isRuntimeAllowed } from "../authorization"
+import { branchRefusals } from "../branch-mode/refusals"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import type { ObjectRef } from "../ontology"
@@ -110,7 +111,14 @@ const REVOKING_PRIMITIVE_KINDS = new Set(["action", "workflow"])
 export function createSharesRuntime(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  definitions: DefinitionCatalog<ShareDefinition>
+  definitions: DefinitionCatalog<ShareDefinition>,
+  options: {
+    /**
+     * People sign in only through production's handover, for sessions it caps: a link, anonymous
+     * and long-lived, would let them in without it.
+     */
+    readonly signsInThroughProduction: boolean
+  }
 ): SharesRuntime {
   const managementPrincipal = (): AuthorizablePrincipal => {
     const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
@@ -165,6 +173,10 @@ export function createSharesRuntime(
     definition: ShareDefinition,
     input: IssueSharedAccessInput
   ): Promise<SharedAccessInvitation> => {
+    if (runtime.branch && options.signsInThroughProduction) {
+      throw branchRefusals.shareLink(runtime.branch)
+    }
+
     assertInputObject(input, "Shared access issue input")
     const issuer = managementPrincipal()
     assertCanManage(runtime, definition.id)

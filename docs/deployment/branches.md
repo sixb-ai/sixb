@@ -86,7 +86,8 @@ You sign in from production only: production checks your grant, the branch lets 
 production has you now (a member, in your groups), and the one-time link signs you in there. The
 link works once, for you, for a minute. The branch's session lasts 4 hours at most, so losing the
 grant reaches the branch within that. The branch has no other sign-in, and its project's own
-strategy signs nobody in.
+strategy signs nobody in. It makes no access token and issues no share link: either would let
+someone in past that session.
 A branch on your laptop (`sixb dev --from production`) needs no sign-in: it runs as you, and answers
 your machine only.
 

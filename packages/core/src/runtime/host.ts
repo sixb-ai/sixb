@@ -30,6 +30,7 @@ import {
   resolveHostBranch,
   type SixbBranch,
 } from "../branch-mode"
+import { BRANCH_HANDOVER_STRATEGY_ID } from "../branches/handover"
 import { captureProjectSource, type ProjectSource } from "../branches/source"
 import type { Broker } from "../broker"
 import { canonicalTimeZone } from "../calendar"
@@ -700,6 +701,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       blobStorage: this.blobStorage,
       apiPublicOrigin: () => getApiPublicOrigin(this),
       source: this.source,
+      signsInThroughProduction: this.auth.getStrategy()?.id === BRANCH_HANDOVER_STRATEGY_ID,
       lakeStorage: this.lakeStorage,
       datasetVersionMarkings: this.datasetVersionMarkings,
       datasetIngest: this.datasetIngest,
