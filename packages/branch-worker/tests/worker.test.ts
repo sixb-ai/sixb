@@ -128,7 +128,7 @@ describe("the branch worker", () => {
     await bo.branches.delete(NAME)
     const failed = await until(row(host), (branch) => branch?.error !== null)
     await settled(held.life)
-    expect(failed).toMatchObject({ wanted: "deleted", owner: null })
+    expect(failed).toMatchObject({ wanted: "deleted", owner: expect.any(String) })
     expect(lab.destroyed).toEqual([])
 
     const worker = new BranchWorker(host, { apiPublicOrigin: "https://api.shop.test" })
@@ -173,7 +173,7 @@ describe("the branch worker", () => {
     const worker = new BranchWorker(host, { apiPublicOrigin: "https://api.shop.test" })
     await worker.start()
     const failed = await until(row(host), (branch) => branch?.error !== null)
-    expect(failed).toMatchObject({ wanted: "deleted", owner: null })
+    expect(failed).toMatchObject({ wanted: "deleted", owner: expect.any(String) })
 
     await until(row(host), (branch) => branch === null)
     await settled(worker.stop())
@@ -219,6 +219,25 @@ describe("the branch worker", () => {
       error: null,
       owner: null,
     })
+  })
+
+  // A delete that kept failing was tried again every 3 s, for good. Guard check: write
+  // `owner: null` with the error in `failed` (`held-branch.ts`).
+  test("tries a failing delete again minutes later, not at every tick", async () => {
+    const { host, lab, bo } = await setup()
+    lab.dropsFail = true
+    await bo.branches.delete(NAME)
+
+    const worker = new BranchWorker(host, { apiPublicOrigin: "https://api.shop.test" })
+    await worker.start()
+    await until(row(host), (branch) => branch?.error !== null)
+    const first = lab.drops
+    await pass(60_000)
+    expect(lab.drops).toBe(first)
+
+    await pass(2 * 60_000)
+    expect(lab.drops).toBe(first + 1)
+    await settled(worker.stop())
   })
 
   // A worker stopping mid-pass once claimed the branch its own hold had just let go, and made a

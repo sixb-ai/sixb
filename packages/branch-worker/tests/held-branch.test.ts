@@ -480,7 +480,7 @@ describe("a held branch", () => {
     ["open", "running", false],
     ["delete", "deleted", true],
     ["open", "running", true],
-  ] as const)("keeps the %s asked while it stops the branch, wanted %s, heartbeat between: %s", async (asked, wanted, heartbeat) => {
+  ] as const)("keeps the %s asked while it stops the branch, wanted %s, heartbeat between: %p", async (asked, wanted, heartbeat) => {
     const { lab, host, bo } = await setup()
     const held = await hold(host)
     await ready(host)

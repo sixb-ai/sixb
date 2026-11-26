@@ -113,6 +113,10 @@ export interface Lab {
   closure: BranchClosure | null
   /** What the next drop of the branch's data throws, once. */
   dropFailure: Error | null
+  /** Every drop of the branch's data fails while set. */
+  dropsFail: boolean
+  /** How many times production was asked to drop the branch's data. */
+  drops: number
   /** Thrown by the next sandbox destroy, once. */
   destroyFailure: Error | null
   /** Thrown by the next resumes, one each, before a resume succeeds again. */
@@ -357,6 +361,8 @@ export async function setup(
     closed: [],
     closure: null,
     dropFailure: null,
+    dropsFail: false,
+    drops: 0,
     destroyFailure: null,
     resumeFailures: [],
     saved: new Set(),
@@ -414,6 +420,8 @@ export async function setup(
       schemaName: `branch_${name}`,
     }),
     dropHostedBranch: async (name: string) => {
+      lab.drops += 1
+      if (lab.dropsFail) throw new Error("lock timeout")
       const failure = lab.dropFailure
       lab.dropFailure = null
       if (failure) throw failure

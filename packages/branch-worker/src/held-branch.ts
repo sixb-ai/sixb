@@ -76,6 +76,11 @@ const INSTALL_TIMEOUT_MS = 10 * 60_000
 const RESUME_WAIT_MS = KEEP_ALIVE_MS + 2 * 60_000
 /** How often it asks again meanwhile. */
 const RESUME_RETRY_MS = 15_000
+/**
+ * A delete or an expiry that failed is tried again after this long, not at the next tick: the
+ * worker keeps its name on the row until then, so no worker claims it before.
+ */
+const RETRY_MS = 2 * 60_000
 /** A runtime that keeps exiting is started again after 5 s, then twice as long, up to 5 min. */
 const RESTART_BACKOFF_MS = { first: 5_000, max: 5 * 60_000 } as const
 
@@ -224,7 +229,7 @@ export class HeldBranch {
       await this.write({ ...STOPPED, data: null, sandbox: null, port: null })
     } catch (error) {
       console.error(`[SixbBranchWorker] Branch '${this.branch.name}' kept its expired copy.`, error)
-      await this.write({ owner: null, leaseExpiresAt: null }).catch(() => {})
+      await this.write({ leaseExpiresAt: new Date(Date.now() + RETRY_MS) }).catch(() => {})
     }
   }
 
@@ -249,12 +254,12 @@ export class HeldBranch {
 
     await this.release()
 
-    // A delete that failed stays wanted: the next claim tries it again.
+    // A delete that failed stays wanted: a claim tries it again once the lease, held a while
+    // longer, lapses.
     if (this.branch.wanted === "deleted") {
       console.error(`[SixbBranchWorker] Branch '${this.branch.name}' is not deleted yet.`, error)
       await this.write({
-        owner: null,
-        leaseExpiresAt: null,
+        leaseExpiresAt: new Date(Date.now() + RETRY_MS),
         error: { message: errorMessage(error) },
       }).catch(() => {})
       return
