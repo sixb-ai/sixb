@@ -164,6 +164,52 @@ describe("Vercel named persistence", () => {
     expect(f.requests.filter((request) => request.method === "DELETE")).toHaveLength(1)
   })
 
+  // A worker that died holding a sandbox's session left it running for as long as Vercel kept
+  // extending it. Guard check: return at once in `stop`.
+  test("stops a running session by name, network closed first, without resuming it", async () => {
+    const f = fixture()
+    await f.factory.create({ persistence: { name: "workspace-1" } })
+    const before = f.requests.length
+
+    await f.factory.stop("workspace-1")
+
+    expect(f.requests.slice(before).map((request) => `${request.method} ${request.path}`)).toEqual([
+      "GET /v2/sandboxes/workspace-1?teamId=team&projectId=project&resume=false",
+      "POST /v2/sandboxes/sessions/session-1/network-policy?teamId=team",
+      "POST /v2/sandboxes/sessions/session-1/stop?teamId=team",
+    ])
+    await f.factory.resume("workspace-1")
+  })
+
+  test("stops nothing that is not running, and a name gone is done", async () => {
+    const f = fixture()
+    await f.factory.stop("workspace-1")
+    await f.factory.create({ persistence: { name: "workspace-1" } })
+    f.setStatus("stopped")
+    const before = f.requests.length
+
+    await f.factory.stop("workspace-1")
+
+    expect(f.requests.slice(before).map((request) => request.method)).toEqual(["GET"])
+  })
+
+  // A session that failed or was aborted once read as still running: its branch waited forever.
+  // Guard check: throw `SandboxStillRunningError` for every state but stopped in
+  // `assertStoppedPersistent`.
+  test.each([
+    ["pending", SandboxStillRunningError],
+    ["stopping", SandboxStillRunningError],
+    ["snapshotting", SandboxStillRunningError],
+    ["failed", SandboxStateUnavailableError],
+    ["aborted", SandboxStateUnavailableError],
+  ] as const)("resume tells a %s session apart", async (status, kind) => {
+    const f = fixture()
+    await f.factory.create({ persistence: { name: "workspace-1" } })
+    f.setStatus(status)
+
+    await expect(f.factory.resume("workspace-1")).rejects.toBeInstanceOf(kind)
+  })
+
   // A caller forgets a sandbox only once it is gone. Guard check: catch every error in `destroy`.
   test.each([
     403, 500,

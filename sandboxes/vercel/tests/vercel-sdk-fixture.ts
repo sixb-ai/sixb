@@ -10,7 +10,14 @@ export interface RecordedRequest {
 
 /** Exercise the installed SDK over a fake transport, not a fake auto-resume implementation. */
 export function fixture(setup?: readonly string[]) {
-  type Status = "running" | "stopped" | "failed"
+  type Status =
+    | "pending"
+    | "running"
+    | "stopping"
+    | "snapshotting"
+    | "stopped"
+    | "failed"
+    | "aborted"
   const requests: RecordedRequest[] = []
   let status: Status = "running"
   let generation = 1

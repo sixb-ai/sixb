@@ -258,7 +258,13 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly queues: Queues
   readonly sandboxes?: Pick<
     SandboxFactory,
-    "create" | "resume" | "destroy" | "sharesHost" | "runsBranches" | "forwardsRequestCredentials"
+    | "create"
+    | "resume"
+    | "destroy"
+    | "stop"
+    | "sharesHost"
+    | "runsBranches"
+    | "forwardsRequestCredentials"
   >
   /**
    * The variables the sandbox recipe sets, by name. Its provider gives them to every sandbox it

@@ -288,10 +288,16 @@ export interface SandboxFactory<in out TParams extends ParamsConfig = ParamsConf
    */
   resume?(name: string, options?: ResumeSandboxOptions): Promise<Sandbox>
   /**
-   * Present with `resume`. Deletes the named sandbox and its saved state, running or stopped,
+   * Optional, with `resume`. Deletes the named sandbox and its saved state, running or stopped,
    * without a session: it needs no credentials and resumes nothing. A name already gone resolves.
    * Any other failure rejects, so a caller keeps the name and tries again: a sandbox it forgot
    * would keep its files, and its name, for good.
    */
   destroy?(name: string): Promise<void>
+  /**
+   * Optional, with `resume`. Stops the named sandbox's running session as its own handle's
+   * `stop()` would, saving its state, for a caller that lost that handle (its process died). A
+   * sandbox not running, or a name gone, resolves; any other failure rejects.
+   */
+  stop?(name: string): Promise<void>
 }

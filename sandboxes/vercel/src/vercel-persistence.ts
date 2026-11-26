@@ -33,7 +33,7 @@ export const vercelPersistenceOperations: VercelPersistenceOperations = VercelSd
 
 export function persistentSandboxError(
   error: unknown,
-  operation: "create" | "resume" | "configure" | "destroy"
+  operation: "create" | "resume" | "configure" | "destroy" | "stop"
 ): SandboxError {
   if (error instanceof SandboxError) return error
   if (error instanceof APIError) {
@@ -82,13 +82,29 @@ export function assertPersistentName(name: string): void {
   }
 }
 
+/** The session states Vercel is still running, or still saving: resume waits for them. */
+export const ACTIVE_SESSION_STATES: ReadonlySet<string> = new Set([
+  "pending",
+  "running",
+  "stopping",
+  "snapshotting",
+])
+
 export function assertStoppedPersistent(client: VercelPersistentClient): void {
   if (!client.persistent) {
     throw new SandboxError("[Sandbox] Cannot resume a non-persistent Vercel sandbox.")
   }
-  if (client.currentSession().status !== "stopped") {
+
+  const { status } = client.currentSession()
+  if (ACTIVE_SESSION_STATES.has(status)) {
     throw new SandboxStillRunningError(
       "[Sandbox] Vercel sandbox must be stopped before resume. Serialize its lifecycle and resolve any previous execution first."
+    )
+  }
+  // Its last session failed or was aborted: nothing it saved can be trusted to resume.
+  if (status !== "stopped") {
+    throw new SandboxStateUnavailableError(
+      `[Sandbox] Vercel sandbox's last session ended ${status}; no replacement was created.`
     )
   }
 }

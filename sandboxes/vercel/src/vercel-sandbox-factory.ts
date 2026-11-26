@@ -231,6 +231,30 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
     }
   }
 
+  /**
+   * Stops the named sandbox's running session, as its own handle would: network closed first,
+   * then a snapshot saved. For a caller whose process died holding that session, which Vercel
+   * keeps running while its deadline lasts. Not running, or gone, resolves.
+   */
+  async stop(name: string): Promise<void> {
+    assertPersistentName(name)
+    const params = { ...resolveCredentials(this.defaults.credentials), name }
+
+    try {
+      const session = (
+        await this.persistentRemote.get({ ...params, resume: false })
+      ).currentSession()
+      // One already stopping saves itself.
+      if (session.status !== "pending" && session.status !== "running") return
+
+      await session.update({ networkPolicy: "deny-all" })
+      await session.stop()
+    } catch (error) {
+      if (error instanceof APIError && error.response.status === 404) return
+      throw persistentSandboxError(error, "stop")
+    }
+  }
+
   private runtimeOptions(options: SandboxSessionOptions): SandboxSessionOptions {
     return {
       workingDirectory: options.workingDirectory,
