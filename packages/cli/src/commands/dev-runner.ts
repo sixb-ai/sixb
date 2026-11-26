@@ -9,6 +9,7 @@ import { createSixbServer, requestTimingOptionsFromEnv } from "@sixb/server"
 import {
   type BranchFromProduction,
   branchFromProduction,
+  type CopyLoadReport,
   currentGitBranch,
   localGitBranches,
 } from "../lib/branch-from-production"
@@ -113,7 +114,9 @@ export async function runDevRuntime(options: DevOptions = {}) {
     })
     const branch =
       options.from === "production"
-        ? await openBranch(loaded, projectRoot, topology, (done) => send({ type: "loading", done }))
+        ? await openBranch(loaded, projectRoot, topology, (done, progress) =>
+            send({ type: "loading", done, progress })
+          )
         : null
     const host = branch?.host ?? loaded
     if (branch) {
@@ -253,7 +256,7 @@ async function openBranch(
   host: LoadedSixbHost,
   projectRoot: string,
   topology: BrowserTopology,
-  onLoading: (done: boolean) => void
+  onLoading: CopyLoadReport
 ): Promise<BranchFromProduction> {
   // Every request runs as that person, unauthenticated: only this machine may send them.
   const exposed = exposedBeyondThisMachine(topology)

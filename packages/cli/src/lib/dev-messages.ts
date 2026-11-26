@@ -28,6 +28,13 @@ export interface DevReadyView {
   readonly warnings: readonly string[]
 }
 
+/** How far a branch's copy has loaded: bytes of its spooled copy read so far. */
+export interface DevLoadProgress {
+  readonly bytesRead: number
+  readonly bytes: number
+  readonly elapsedMs: number
+}
+
 export interface DevStartupFailure {
   readonly message: string
   readonly remediation?: string
@@ -36,10 +43,11 @@ export interface DevStartupFailure {
 export type DevChildMessage =
   | { readonly type: "status"; readonly step: DevStartupStep }
   /**
-   * A branch's copy of production starts loading (`done: false`) or is loaded: it takes as long
-   * as the copy is big, so the startup deadline waits for it.
+   * A branch's copy of production loading: when it starts, every few seconds while it loads, and
+   * once it is loaded (`done`). It takes as long as the copy is big, so the startup deadline waits
+   * for it while it makes progress.
    */
-  | { readonly type: "loading"; readonly done: boolean }
+  | { readonly type: "loading"; readonly done: boolean; readonly progress: DevLoadProgress }
   | {
       readonly type: "ready"
       readonly watchesApp: boolean
@@ -48,9 +56,29 @@ export type DevChildMessage =
     }
   | { readonly type: "startup-error"; readonly error?: DevStartupFailure }
 
-/** What `sixb dev` says while a branch's copy of production loads, and once it has. */
-export function loadingLine(done: boolean): string {
-  return done
-    ? "Loaded this branch's copy of production's data."
-    : "Loading this branch's copy of production's data. A large copy takes minutes: startup waits for it."
+/** What `sixb dev` says when a branch's copy starts loading, as it loads, and once it has. */
+export function loadingLine(message: {
+  readonly done: boolean
+  readonly progress: DevLoadProgress
+}): string {
+  const { bytesRead, bytes, elapsedMs } = message.progress
+  if (message.done)
+    return `Loaded this branch's copy of production's data in ${seconds(elapsedMs)}.`
+  if (bytesRead === 0) {
+    return `Loading this branch's copy of production's data (${size(bytes)}). A large copy takes minutes: startup waits while it makes progress.`
+  }
+
+  const percent = bytes > 0 ? Math.min(100, Math.floor((bytesRead / bytes) * 100)) : 100
+  return `Loading this branch's copy: ${size(bytesRead)} of ${size(bytes)} (${percent}%), ${seconds(elapsedMs)}.`
+}
+
+function size(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`
+}
+
+function seconds(ms: number): string {
+  const total = Math.round(ms / 1000)
+  return total < 60 ? `${total} s` : `${Math.floor(total / 60)} min ${total % 60} s`
 }

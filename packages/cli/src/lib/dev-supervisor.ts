@@ -20,7 +20,7 @@ export interface DevReporter {
   message(message: DevChildMessage, pid: number | undefined): void
   restarting(filename: string | undefined): void
   exited(code: number | null): void
-  timedOut(): void
+  timedOut(timeout: DevTimeout): void
   error(text: string): void
   stopping(): void
   stop(): Promise<void>
@@ -36,30 +36,63 @@ export interface DevControls {
 /** How long a dev process has to be ready, besides loading a branch's copy. */
 export const DEV_STARTUP_TIMEOUT_MS = 60_000
 
+/** How long a branch's copy may load without progress before its dev process is stopped. */
+export const DEV_LOAD_STALL_MS = 5 * 60_000
+
+/** Why the supervisor stopped a dev process that did not become ready. */
+export interface DevTimeout {
+  readonly message: string
+  readonly remediation: string
+}
+
+const STARTUP_TIMED_OUT: DevTimeout = {
+  message: "Startup timed out.",
+  remediation: "Edit a source file to retry.",
+}
+
+const LOAD_STALLED: DevTimeout = {
+  message: `Loading this branch's copy made no progress for ${DEV_LOAD_STALL_MS / 60_000} minutes.`,
+  remediation:
+    "Edit a source file to retry, or run `sixb dev --from production --refresh` for a new copy.",
+}
+
 /**
- * A dev process's startup deadline. Loading a branch's copy pauses it: a copy of millions of
- * objects loads for minutes, and a process killed mid-load would load it again, and be killed
- * again, on every start. Once the copy is loaded, the rest of the startup has its own minute.
+ * A dev process's startup deadline. A branch's copy loading replaces it with a stall deadline: a
+ * copy of millions of objects loads for minutes, and a process killed mid-load would load it
+ * again, and be killed again, on every start. The load moves the stall deadline each time it
+ * reads further into the copy, and, once it has read the whole copy, each time it reports that it
+ * is still at work. Once the copy is loaded, the rest of the startup has its own minute.
  */
-export function startupDeadline(onExpired: () => void): {
+export function startupDeadline(onExpired: (timeout: DevTimeout) => void): {
   observe(message: DevChildMessage): void
   clear(): void
 } {
   let timer: ReturnType<typeof setTimeout> | undefined
-  const arm = () => {
+  let bytesRead = -1
+  const arm = (ms: number, timeout: DevTimeout) => {
     clearTimeout(timer)
-    timer = setTimeout(onExpired, DEV_STARTUP_TIMEOUT_MS)
+    timer = setTimeout(() => onExpired(timeout), ms)
   }
 
-  arm()
+  arm(DEV_STARTUP_TIMEOUT_MS, STARTUP_TIMED_OUT)
 
   return {
     observe(message) {
-      if (message.type === "ready" || (message.type === "loading" && !message.done)) {
+      if (message.type === "ready") {
         clearTimeout(timer)
-      } else if (message.type === "loading") {
-        arm()
+        return
       }
+      if (message.type !== "loading") return
+
+      if (message.done) {
+        arm(DEV_STARTUP_TIMEOUT_MS, STARTUP_TIMED_OUT)
+        return
+      }
+
+      const { progress } = message
+      const moved = progress.bytesRead > bytesRead || progress.bytesRead >= progress.bytes
+      bytesRead = progress.bytesRead
+      if (moved) arm(DEV_LOAD_STALL_MS, LOAD_STALLED)
     },
     clear() {
       clearTimeout(timer)
@@ -76,7 +109,7 @@ export function plainDevReporter(root: string): DevReporter {
     },
     message(message, pid) {
       if (message.type === "ready") console.log(`[SixbDev] Ready (pid ${pid}). Watching ${root}`)
-      if (message.type === "loading") console.log(`[SixbDev] ${loadingLine(message.done)}`)
+      if (message.type === "loading") console.log(`[SixbDev] ${loadingLine(message)}`)
     },
     restarting(filename) {
       console.log(`[SixbDev] Source changed${filename ? `: ${filename}` : ""}. Restarting…`)
@@ -84,8 +117,8 @@ export function plainDevReporter(root: string): DevReporter {
     exited(code) {
       console.error(`[SixbDev] Dev process exited (${code}). Waiting for source changes.`)
     },
-    timedOut() {
-      console.error("[SixbDev] Startup timed out. Edit a source file to retry.")
+    timedOut(timeout) {
+      console.error(`[SixbDev] ${timeout.message} ${timeout.remediation}`)
     },
     error(text) {
       console.error(`[SixbDev] ${text}`)
@@ -228,9 +261,9 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
           }
         })
         child = current
-        startup = startupDeadline(() => {
+        startup = startupDeadline((timeout) => {
           if (child === current) {
-            reporter.timedOut()
+            reporter.timedOut(timeout)
             terminate(current, "SIGKILL")
           }
         })

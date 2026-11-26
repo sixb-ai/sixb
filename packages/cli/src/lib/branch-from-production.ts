@@ -127,9 +127,21 @@ export interface BranchFromProductionInput {
   /** The branch this process runs as, and every local git branch. */
   readonly gitBranch: string
   readonly gitBranches: readonly string[]
-  /** Told when a new copy starts loading, and once it is loaded: a large one takes minutes. */
-  readonly onLoading?: (done: boolean) => void
+  /**
+   * Told when a new copy starts loading, every few seconds while it loads, and once it is loaded:
+   * a large one takes minutes.
+   */
+  readonly onLoading?: CopyLoadReport
 }
+
+/** How far a copy has loaded: the bytes of its spool the load has read. */
+export type CopyLoadReport = (
+  done: boolean,
+  progress: { readonly bytesRead: number; readonly bytes: number; readonly elapsedMs: number }
+) => void
+
+/** How often a loading copy says how far it got. */
+export const COPY_LOAD_REPORT_EVERY_MS = 10_000
 
 export interface BranchFromProduction {
   /** The project's host on the branch's own data. */
@@ -176,9 +188,21 @@ export async function branchFromProduction(
       await dropBranch(storage, directory, index, name)
     }
 
-    input.onLoading?.(false)
-    await loadCopy({ host: input.host, storage, directory, index, name, spool })
-    input.onLoading?.(true)
+    const load = trackCopyLoad((await stat(spool)).size, input.onLoading ?? (() => {}))
+    try {
+      await loadCopy({
+        host: input.host,
+        storage,
+        directory,
+        index,
+        name,
+        spool,
+        onRead: load.read,
+      })
+    } finally {
+      load.stop()
+    }
+    load.done()
   }
 
   const namespace = await storage.openBranchNamespace(name)
@@ -243,6 +267,35 @@ export async function checkoutOf(projectRoot: string): Promise<string> {
   return checkout
 }
 
+/**
+ * Counts what a load reads of its copy, and reports it when the load starts, every
+ * `COPY_LOAD_REPORT_EVERY_MS`, and once the caller says it is done.
+ */
+export function trackCopyLoad(
+  bytes: number,
+  report: CopyLoadReport
+): { read(count: number): void; stop(): void; done(): void } {
+  const started = Date.now()
+  let bytesRead = 0
+  const progress = () => ({ bytesRead, bytes, elapsedMs: Date.now() - started })
+
+  report(false, progress())
+  const ticker = setInterval(() => report(false, progress()), COPY_LOAD_REPORT_EVERY_MS)
+
+  return {
+    read(count) {
+      bytesRead += count
+    },
+    stop() {
+      clearInterval(ticker)
+    },
+    done() {
+      clearInterval(ticker)
+      report(true, progress())
+    },
+  }
+}
+
 /** What the CLI keeps in a branch's directory: its lake's catalog, its own rows, and its cache. */
 const BRANCH_LAKE_FILES = ["lake.ducklake", "lake.ducklake.wal", "lake", "lake-cache"]
 
@@ -255,11 +308,13 @@ async function loadCopy(input: {
   readonly index: BranchIndex
   readonly name: string
   readonly spool: string
+  /** Told how many bytes of the spool the load read, as it reads them. */
+  readonly onRead: (count: number) => void
 }): Promise<void> {
   const pending = JSON.parse(await readFile(`${input.spool}.json`, "utf8")) as PendingCopy
   const namespace = await input.storage.createBranchNamespace(input.name)
   const copy = readBranchCopy(
-    Bun.file(input.spool).stream() as unknown as AsyncIterable<Uint8Array>
+    counted(Bun.file(input.spool).stream() as unknown as AsyncIterable<Uint8Array>, input.onRead)
   )
   // Read once: the copy's stream is spent after it.
   let rest: Awaited<ReturnType<typeof copy.rest>> | undefined
@@ -392,6 +447,16 @@ async function dropBranch(
   // Production keeps a slice two weeks unless told: say it is no longer read.
   if (record?.credential && record.lake) {
     await deleteSlice(record.apiUrl, record.credential, record.lake.sliceId).catch(() => undefined)
+  }
+}
+
+async function* counted(
+  stream: AsyncIterable<Uint8Array>,
+  onRead: (count: number) => void
+): AsyncGenerator<Uint8Array> {
+  for await (const chunk of stream) {
+    onRead(chunk.length)
+    yield chunk
   }
 }
 

@@ -119,10 +119,7 @@ export async function startDevFooter(options: {
         }
         set({ phase: { kind: "ready" }, view, readySince: Date.now() })
       } else if (message.type === "loading") {
-        event(
-          tone.blue(message.done ? glyph.ok : glyph.idle),
-          tone.muted(loadingLine(message.done))
-        )
+        event(tone.blue(message.done ? glyph.ok : glyph.idle), tone.muted(loadingLine(message)))
       } else if (message.type === "startup-error") {
         const error = message.error ?? { message: "The dev process failed to start." }
         set({ phase: { kind: "failed", error } })
@@ -151,14 +148,9 @@ export async function startDevFooter(options: {
       set({ phase: { kind: "exited", code } })
       event(tone.fail(glyph.fail), tone.muted(`dev process exited (${code})`))
     },
-    timedOut() {
-      set({
-        phase: {
-          kind: "failed",
-          error: { message: "Startup timed out.", remediation: "Edit a source file to retry." },
-        },
-      })
-      event(tone.fail(glyph.fail), "Startup timed out. Edit a source file to retry.")
+    timedOut(timeout) {
+      set({ phase: { kind: "failed", error: timeout } })
+      event(tone.fail(glyph.fail), `${timeout.message} ${timeout.remediation}`)
     },
     error(text) {
       event(tone.fail(glyph.fail), text)
