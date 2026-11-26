@@ -107,8 +107,12 @@ function branchApp(
       hosted: { key: KEY, origin },
     },
   })
+  // Some tests start it: on a port of its own, on the address they read, never 3000 beside a
+  // parallel file.
   const server = new SixbServer({
     host,
+    port: 0,
+    hostname: "127.0.0.1",
     quiet: true,
     browser: { publicOrigin: origin, allowedOrigins },
   })
@@ -495,6 +499,7 @@ describe("signing into a branch from production", () => {
   test("follows no redirect the branch answers with", async () => {
     const reached: Request[] = []
     const internal = Bun.serve({
+      hostname: "127.0.0.1",
       port: 0,
       fetch: (request) => {
         reached.push(request)
@@ -503,6 +508,7 @@ describe("signing into a branch from production", () => {
     })
     stops.push(async () => internal.stop(true))
     const branch = Bun.serve({
+      hostname: "127.0.0.1",
       port: 0,
       fetch: () =>
         new Response(null, {
