@@ -1,6 +1,5 @@
 import { isPlainRecord } from "../json"
 import { RuntimeError } from "../runtime/errors"
-import type { SandboxEnvironment } from "../sandboxes/configuration"
 
 /** Where the project's own code lives, so production can run one of its git branches. */
 export interface ProjectSource {
@@ -79,17 +78,30 @@ export function assertGitBranchName(branch: unknown): asserts branch is string {
   }
 }
 
+/** One step of a branch's checkout: a shell script, run in the sandbox's working directory. */
+export interface BranchCheckoutStep {
+  /** What it does, as a failure names it: "clone the branch". */
+  readonly name: string
+  readonly script: string
+}
+
 /**
- * A fresh checkout of `branch` in the sandbox's working directory, with the repository's
- * dependencies installed. The clone is a setup command rather than a sandbox `source`, so any URL
- * git takes works, a path on this machine included; HTTPS credentials still come from the
- * session's request credentials, outside the guest. The project's sandbox recipe sets the network
- * and adds its variables.
+ * Where a checkout that finished leaves its mark, inside `.git` so no status shows it: a saved
+ * sandbox without it never finished its first checkout, and is made anew.
+ */
+export const BRANCH_CHECKOUT_MARK = ".git/sixb-checkout-done"
+
+/**
+ * A fresh checkout of `branch` in the sandbox's working directory, with Bun where the image has
+ * none and the repository's dependencies installed, then the mark that it finished. The worker
+ * runs each step as its own command, so a slow or failed one says which it was, in its own
+ * words. Any URL git takes works, a path on this machine included; HTTPS credentials come from
+ * the session's request credentials, outside the guest.
  */
 export function branchCheckout(input: {
   readonly source: ProjectSource
   readonly branch: string
-}): Pick<SandboxEnvironment, "setup"> {
+}): readonly BranchCheckoutStep[] {
   const { source, branch } = input
   assertGitBranchName(branch)
 
@@ -98,19 +110,47 @@ export function branchCheckout(input: {
     throw new RuntimeError(`[Sixb] source.repository '${url}' cannot be cloned: it holds a quote.`)
   }
 
-  return {
-    setup: [
-      `git clone --quiet -- '${url}' . && git checkout --quiet '${branch}'`,
-      BRANCH_INSTALL_COMMAND,
-    ],
-  }
+  return [
+    { name: "install Bun", script: BRANCH_BUN_COMMAND },
+    {
+      name: "clone the branch",
+      script: `git clone --quiet -- '${url}' . && git checkout --quiet '${branch}'`,
+    },
+    { name: "install the branch's dependencies", script: BRANCH_INSTALL_COMMAND },
+    { name: "finish the checkout", script: `touch ${BRANCH_CHECKOUT_MARK}` },
+  ]
 }
+
+/**
+ * The Bun a branch's sandbox installs when its image has none, as Vercel's stock runtime has
+ * only Node: the one this repository builds with (`.bun-version`).
+ */
+export const BRANCH_BUN_VERSION = "1.4.4"
+
+/**
+ * Where that Bun is, outside the checkout. A branch's commands look there after the image's own
+ * tools, so an image with Bun keeps its own.
+ */
+export const BRANCH_TOOLS_PATH = "$HOME/.sixb-branch/node_modules/.bin"
+
+/**
+ * Installs Bun from the npm registry, which a branch already reaches, unless the image has it.
+ * The `bun` package carries each platform's binary in a package of its own.
+ */
+export const BRANCH_BUN_COMMAND = [
+  `export PATH="$PATH:${BRANCH_TOOLS_PATH}"`,
+  "if command -v bun >/dev/null 2>&1; then exit 0; fi",
+  'if ! command -v npm >/dev/null 2>&1; then echo "The sandbox has neither Bun nor npm: boot it from an image with Bun." >&2; exit 1; fi',
+  `npm install --prefix "$HOME/.sixb-branch" --no-audit --no-fund --loglevel=error bun@${BRANCH_BUN_VERSION}`,
+  "bun --version >/dev/null",
+].join("; ")
 
 /**
  * Installs JavaScript dependencies when the repository has a root manifest, and nothing else: at
  * checkout, and again when a push changes the manifest or a lockfile.
  */
 export const BRANCH_INSTALL_COMMAND = [
+  `export PATH="$PATH:${BRANCH_TOOLS_PATH}"`,
   "if [ -f bun.lock ] || [ -f bun.lockb ]; then bun install --frozen-lockfile || bun install",
   "elif [ -f package-lock.json ]; then npm ci || npm install",
   "elif [ -f pnpm-lock.yaml ]; then COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack pnpm install --frozen-lockfile",

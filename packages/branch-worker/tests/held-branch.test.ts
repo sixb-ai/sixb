@@ -444,7 +444,7 @@ describe("a held branch", () => {
     await second.stop()
 
     expect(lab.destroyed).toEqual([opened!.sandbox!])
-    expect(lab.created.map((options) => options.ports)).toEqual([[opened!.port], [opened!.port]])
+    expect(lab.created.map((options) => options.ports)).toEqual([[opened!.port!], [opened!.port!]])
     expect(reopened?.notices.map((notice) => notice.code)).toEqual(["data-reset"])
   })
 
@@ -470,6 +470,57 @@ describe("a held branch", () => {
     })
     expect(lab.created).toHaveLength(1)
     expect([...lab.saved]).toEqual([opened!.sandbox!])
+  })
+
+  // The provider ran the checkout as its setup, bound to 2 minutes, failing with "Sandbox
+  // environment initialization failed" alone. Guard check: pass `branchCheckout` to `create` as
+  // its `environment`, or drop the stderr from the error in `checkOut`.
+  test("checks out with its own commands, and fails in the words of the step that failed", async () => {
+    const { lab, host } = await setup()
+    lab.checkoutFailure = {
+      step: "--frozen-lockfile",
+      stderr: "error: lockfile had changes, but lockfile is frozen",
+    }
+    const held = await hold(host)
+    await settled(held.life)
+
+    expect(lab.created[0]?.environment).toEqual({})
+    expect(lab.checkout).toHaveLength(3)
+    expect((await row(host)())?.error?.message).toBe(
+      "[SixbBranchWorker] Could not install the branch's dependencies: error: lockfile had changes, but lockfile is frozen"
+    )
+    expect(lab.destroyed).toEqual(["sandbox-1"])
+  })
+
+  test("says which step ran out of time", async () => {
+    const { lab, host } = await setup()
+    lab.checkoutFailure = { step: "git clone", stderr: "", timedOut: true }
+    const held = await hold(host)
+    await settled(held.life)
+
+    expect((await row(host)())?.error?.message).toBe(
+      "[SixbBranchWorker] Could not clone the branch: it took longer than 10 minutes."
+    )
+  })
+
+  // A first checkout that failed left a saved sandbox with no checkout, which every open then
+  // resumed. Guard check: return the resumed sandbox whatever `finishedCheckout` says.
+  test("makes its saved sandbox anew when its first checkout never finished", async () => {
+    const { lab, host, bo } = await setup({ resumable: true })
+    lab.checkoutFailure = { step: "git clone", stderr: "fatal: unable to access the repository" }
+    const first = await hold(host)
+    await settled(first.life)
+    const failed = await row(host)()
+    expect(failed).toMatchObject({ state: "failed", sandbox: expect.any(String) })
+
+    await bo.branches.open(NAME)
+    const second = await hold(host)
+    await ready(host)
+    await second.stop()
+
+    expect(lab.destroyed).toEqual([failed!.sandbox!])
+    expect(lab.created).toHaveLength(2)
+    expect(lab.created[1]?.ports).toEqual([failed!.port!])
   })
 
   // A port drawn from the kernel's ephemeral range collided with an outgoing connection's.

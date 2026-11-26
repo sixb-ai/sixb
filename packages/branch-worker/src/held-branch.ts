@@ -19,6 +19,7 @@ import {
   BRANCH_PORT_ENV,
   BRANCH_PUBLIC_ORIGIN_ENV,
   BRANCH_RUNTIME_COMMAND,
+  BRANCH_CHECKOUT_MARK,
   BRANCH_STATUS_PATH,
   branchCheckout,
   branchDatabaseAddress,
@@ -57,7 +58,7 @@ const KEEP_ALIVE_MS = 10 * 60_000
 const ANSWER_DEADLINE_MS = 3 * 60_000
 /** Source credentials are renewed this long before they expire. */
 const CREDENTIALS_MARGIN_MS = 5 * 60_000
-/** How long a reinstall after a push may take. */
+/** How long each step of a checkout may take, and a reinstall after a push. */
 const INSTALL_TIMEOUT_MS = 10 * 60_000
 /**
  * How long a branch waits for the last session of its saved sandbox to stop: that session's
@@ -428,7 +429,15 @@ export class HeldBranch {
     const deadline = Date.now() + RESUME_WAIT_MS
     for (;;) {
       try {
-        return await sandboxes.resume(name, session)
+        const sandbox = await sandboxes.resume(name, session)
+        if (await this.finishedCheckout(sandbox)) return sandbox
+
+        // Its first checkout failed, or its worker died during it: it is made anew.
+        console.error(
+          `[SixbBranchWorker] Branch '${this.branch.name}''s saved sandbox never finished its checkout; making it anew.`
+        )
+        await sandbox.stop()
+        return null
       } catch (error) {
         if (error instanceof SandboxStateUnavailableError) {
           console.error(
@@ -464,13 +473,56 @@ export class HeldBranch {
 
     // Written first, so a crash during creation still names what it left behind.
     await this.write({ sandbox: name, port })
-    return await sandboxes.create({
+    const sandbox = await sandboxes.create({
       ...session,
       signal: this.signal,
-      environment: branchCheckout({ source: requireSource(host), branch: this.branch.name }),
+      environment: {},
       ports: [port],
       ...(name ? { persistence: { name } } : {}),
     })
+
+    try {
+      await this.checkOut(sandbox)
+    } catch (error) {
+      // A saved sandbox keeps its name, unmarked: its next open makes it anew.
+      await (name ? sandbox.stop() : sandbox.destroy()).catch(() => {})
+      throw error
+    }
+    return sandbox
+  }
+
+  /**
+   * Clones the branch into a new sandbox and installs what it needs, each step a command of the
+   * worker's own: bounded as a reinstall is, and failing with its own words.
+   */
+  private async checkOut(sandbox: Sandbox): Promise<void> {
+    const steps = branchCheckout({ source: requireSource(this.host), branch: this.branch.name })
+
+    for (const step of steps) {
+      const result = await sandbox.runCommand("sh", ["-c", step.script], {
+        timeout: INSTALL_TIMEOUT_MS,
+        signal: this.signal,
+      })
+      if (result.timedOut) {
+        throw new Error(
+          `[SixbBranchWorker] Could not ${step.name}: it took longer than ${INSTALL_TIMEOUT_MS / 60_000} minutes.`
+        )
+      }
+      if (result.exitCode !== 0) {
+        throw new Error(
+          `[SixbBranchWorker] Could not ${step.name}: ${lastLines(result.stderr) || `exit ${result.exitCode}`}`
+        )
+      }
+    }
+  }
+
+  /** Whether a resumed sandbox's checkout finished: its last step leaves a mark. */
+  private async finishedCheckout(sandbox: Sandbox): Promise<boolean> {
+    const mark = await sandbox.runCommand("test", ["-f", BRANCH_CHECKOUT_MARK], {
+      timeout: 30_000,
+      signal: this.signal,
+    })
+    return mark.exitCode === 0
   }
 
   /**
@@ -861,6 +913,11 @@ function requireApiOrigin(settings: HeldBranchSettings): string {
     )
   }
   return settings.apiPublicOrigin.replace(/\/+$/, "")
+}
+
+/** The end of a command's output: where git and installers say what went wrong. */
+function lastLines(output: string, count = 20): string {
+  return output.trim().split("\n").slice(-count).join("\n")
 }
 
 function errorMessage(error: unknown): string {

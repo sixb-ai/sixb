@@ -20,6 +20,7 @@ import {
   type SixbHostOptions,
 } from "@sixb/core"
 import {
+  BRANCH_CHECKOUT_MARK,
   BRANCH_INSTALL_COMMAND,
   BRANCH_KEY_HEADER,
   BRANCH_STATUS_PATH,
@@ -109,6 +110,16 @@ export interface Lab {
   readonly saved: Set<string>
   /** The names resumed, in order. */
   readonly resumed: string[]
+  /** Fails the first checkout step whose script holds `step`, as that command would. */
+  checkoutFailure: {
+    readonly step: string
+    readonly stderr: string
+    readonly timedOut?: boolean
+  } | null
+  /** The scripts of every checkout step run, in order. */
+  readonly checkout: string[]
+  /** The sandboxes whose checkout finished, by name or id. */
+  readonly marked: Set<string>
   /** Whether production may cap a branch role's temporary files. */
   tempFileLimit: boolean
   readonly created: CreateSandboxOptions[]
@@ -147,6 +158,22 @@ function fakeSandboxes(
         timedOut: false,
         durationMs: 1,
       })
+
+      // A new sandbox's checkout, step by step, until its last step marks it done.
+      const key = name ?? id
+      if (command === "test" && args[1] === BRANCH_CHECKOUT_MARK) {
+        return result("", lab.marked.has(key) ? 0 : 1)
+      }
+      if (command === "sh" && !lab.marked.has(key)) {
+        lab.checkout.push(script)
+        const failure = lab.checkoutFailure
+        if (failure && script.includes(failure.step)) {
+          lab.checkoutFailure = null
+          return { ...result("", 1), stderr: failure.stderr, timedOut: failure.timedOut ?? false }
+        }
+        if (script === `touch ${BRANCH_CHECKOUT_MARK}`) lab.marked.add(key)
+        return result()
+      }
 
       if (command === "git" && args[0] === "rev-parse") return result(`${lab.head}\n`)
       if (command === "sh" && script.includes("git fetch")) {
@@ -308,6 +335,9 @@ export async function setup(
     resumeFailures: [],
     saved: new Set(),
     resumed: [],
+    checkoutFailure: null,
+    checkout: [],
+    marked: new Set(),
     tempFileLimit: true,
     created: [],
     destroyed: [],

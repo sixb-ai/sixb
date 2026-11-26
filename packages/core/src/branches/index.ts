@@ -56,8 +56,12 @@ export {
 } from "./runtime"
 export {
   assertGitBranchName,
+  BRANCH_BUN_COMMAND,
+  BRANCH_BUN_VERSION,
+  BRANCH_CHECKOUT_MARK,
   BRANCH_DEPENDENCY_FILES,
   BRANCH_INSTALL_COMMAND,
+  type BranchCheckoutStep,
   branchCheckout,
   type ProjectSource,
   sourceGitUrl,
