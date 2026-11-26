@@ -27,12 +27,16 @@ function message(seq: number, role: AgentMessageRecord["role"], text: string): A
   }
 }
 
-/** An OpenAI encrypted reasoning item of `bytes`, as a provider stores it to replay it. */
-function encryptedReasoning(bytes: number) {
+/**
+ * An OpenAI encrypted reasoning item of `bytes`, as a provider stores it to replay it, with the
+ * reasoning tokens its step was billed when its response said.
+ */
+function encryptedReasoning(bytes: number, tokens?: number) {
   return {
     type: "provider-state" as const,
     providerId: "openai",
     data: { item: { type: "reasoning", summary: [], encrypted_content: "g".repeat(bytes) } },
+    ...(tokens === undefined ? {} : { tokens }),
   }
 }
 
@@ -54,20 +58,40 @@ const fetchedPage = {
 }
 
 describe("agent context token estimation", () => {
-  // Reproduce: return the item's JSON bytes from providerStateBytes; the encrypted reasoning,
-  // which the provider bills a few dozen tokens for, then counts as 27,000 bytes.
-  test("weighs a replayed reasoning item as nothing", () => {
+  // Reproduce: return its JSON as bytes from providerStateSize whatever its tokens; the 55 KB
+  // GPT-6.2 Sol stored 3,613 reasoning tokens in then count as 13,800 tokens. Count its reasoning
+  // text in measureMessage whatever countsReasoningText says, and its summary counts on top.
+  test("weighs a replayed reasoning item at what its step was billed, and its text not beside it", () => {
     const base = message(2, "assistant", "answer")
-    const withState: AgentMessageRecord = {
+    const replayed: AgentMessageRecord = {
       ...base,
-      parts: [...base.parts, encryptedReasoning(27_000)],
+      parts: [
+        { type: "reasoning", text: "Counting the derangements first.".repeat(20) },
+        ...base.parts,
+        encryptedReasoning(55_208, 3_613),
+      ],
     }
-    expect(estimateAgentContextMessagesTokens([withState], bytesPerToken).tokens).toBe(
-      estimateAgentContextMessagesTokens([base], bytesPerToken).tokens
+    expect(estimateAgentContextMessagesTokens([replayed], bytesPerToken).tokens).toBe(
+      estimateAgentContextMessagesTokens([base], bytesPerToken).tokens + 3_613
     )
   })
 
-  // Reproduce: weigh all provider state as nothing in providerStateBytes; the page a provider tool
+  // Reproduce: weigh state with no tokens as nothing in providerStateSize; an item its response
+  // never counted, as a thread stored before, then weighs nothing though its provider bills it.
+  test("weighs one its response never counted as its JSON, the most it can weigh", () => {
+    const base = message(2, "assistant", "answer")
+    const item = encryptedReasoning(27_000)
+    const uncounted: AgentMessageRecord = { ...base, parts: [...base.parts, item] }
+    const asText: AgentMessageRecord = {
+      ...base,
+      parts: [...base.parts, { type: "text", text: stableJsonStringify(item.data) }],
+    }
+    expect(estimateAgentContextMessagesTokens([uncounted], bytesPerToken).tokens).toBe(
+      estimateAgentContextMessagesTokens([asText], bytesPerToken).tokens
+    )
+  })
+
+  // Reproduce: weigh state with no tokens as nothing in providerStateSize; the page a provider tool
   // fetched, which the model reads and the provider bills, then counts for nothing.
   test("counts other provider state, as a provider tool's result, as the model reads it", () => {
     const base = message(2, "assistant", "answer")

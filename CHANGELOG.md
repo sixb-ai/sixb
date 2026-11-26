@@ -8,9 +8,11 @@ Sixb packages are versioned independently. Each release entry names the packages
 
 - Conversations on models that replay encrypted reasoning, such as OpenAI's GPT and Google's
   Gemini, no longer compact long before their limit. The context estimate counted that reasoning
-  as text, about 27 KB an item for a few dozen tokens, and put such threads at two to four times
-  what their calls cost; the bytes per token the model's runs measured fell out of range, and
-  were dropped. Readable reasoning, such as DeepSeek's, now counts once instead of twice.
+  as text, up to 15 bytes a token, and put such threads at two to four times what their calls
+  cost; the bytes per token the model's runs measured fell out of range, and were dropped. Each
+  item a step stores from now on weighs the reasoning tokens that step was billed, which is what
+  the provider bills to read it again, and readable reasoning, such as DeepSeek's, no longer counts
+  on top. Items stored before still count as text until their thread compacts.
 
 ## 2026-11-25 — Sixb 0.2.10
 

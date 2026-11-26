@@ -392,3 +392,23 @@ describe("owned model adapters", () => {
     expect(agentTraceFromPartialModelLoop([step], [])).toEqual(agentTraceFromModelSteps([step]))
   })
 })
+
+describe("a replayed reasoning item's billed tokens", () => {
+  // Reproduce: drop `tokens` from the provider-state case of agentTraceFromModelSteps, or of
+  // toModelMessages in core's adapters.ts; a thread's next turn then weighs the reasoning it
+  // replays as its JSON, two to four times what its provider bills.
+  test("survive the stored message, and come back in the next turn's request", () => {
+    const reasoning: ModelAssistantPart = {
+      type: "provider-state",
+      providerId: "openai",
+      data: { item: { type: "reasoning", summary: [], encrypted_content: "g".repeat(4_400) } },
+      tokens: 185,
+    }
+
+    const stored = agentTraceFromModelSteps([modelStep([reasoning])])
+    expect(stored).toContainEqual(reasoning)
+    expect(toModelMessages([{ role: "assistant", parts: stored }])).toEqual([
+      { role: "assistant", content: [reasoning] },
+    ])
+  })
+})

@@ -326,17 +326,19 @@ describe("agent conversation token rate", () => {
   })
 
   // Reproduce: weigh provider state as its JSON in context-compaction.ts's measureMessage, not by
-  // providerStateBytes. The thread then reads 4.56 bytes per token, kept to 2.625, and its whole
+  // providerStateSize. The thread then reads 4.56 bytes per token, kept to 2.625, and its whole
   // request, the reasoning it replays included, outweighs what its call read two and a half times.
   // Production threads compacted at two to four times what their calls cost.
   test("estimates a thread that replays its reasoning at what its call read", () => {
+    // Each step's encrypted item, and the 40 reasoning tokens that step was billed.
     const reasoning = {
       type: "provider-state" as const,
       providerId: model.providerId,
       data: { item: { type: "reasoning", summary: [], encrypted_content: "g".repeat(27_000) } },
+      tokens: 40,
     }
-    // The call above, its 30,000 bytes of text read, each step replaying an encrypted item, and
-    // its 500 tokens of output written.
+    // The call above, its 30,000 bytes of text read with the first step's reasoning, and its 500
+    // tokens of output written.
     const replaying = record(
       "answer",
       "assistant",
@@ -353,11 +355,11 @@ describe("agent conversation token rate", () => {
     const estimate = estimateAgentConversation({
       plan,
       budget,
-      threadContext: context({ inputTokens: 12_526 }, [user, replaying, next]),
+      threadContext: context({ inputTokens: 12_566 }, [user, replaying, next]),
       systemPrompt: "",
       tools: [],
     })
-    const read = 12_526 + 500 + estimateAgentContextMessagesTokens([next], 2.4).tokens
+    const read = 12_566 + 500 + estimateAgentContextMessagesTokens([next], 2.4).tokens
 
     expect(estimate.bytesPerToken).toBe(2.4)
     expect(estimate.tokens).toBeLessThan(read * 1.01)

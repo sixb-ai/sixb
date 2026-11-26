@@ -126,20 +126,22 @@ describe("measureAgentStepRequest", () => {
 })
 
 describe("measureAgentStepRequest, with replayed provider state", () => {
-  // Reproduce: weigh provider state as its JSON in context-parts.ts, not by providerStateBytes; a
-  // step then records 27,000 bytes of encrypted reasoning its estimate does not count.
-  test("weighs it as the estimate does: a reasoning item as nothing, a tool's result as JSON", () => {
+  // Reproduce: weigh provider state as its JSON in context-parts.ts, not by providerStateSize; a
+  // step then records 55,208 bytes of encrypted reasoning where its estimate counts 3,613 tokens.
+  test("weighs it as the estimate does: a reasoning item at what it was billed, a tool's result as JSON", () => {
     const result = { block: { type: "web_search_tool_result", content: [{ title: "Bun" }] } }
     const request = measureAgentStepRequest({
       messages: [
         {
           role: "assistant",
           content: [
+            { type: "reasoning", text: "A summary the provider never reads." },
             { type: "text", text: "Done." },
             {
               type: "provider-state",
               providerId: "openai",
-              data: { item: { type: "reasoning", encrypted_content: "g".repeat(27_000) } },
+              data: { item: { type: "reasoning", encrypted_content: "g".repeat(55_208) } },
+              tokens: 3_613,
             },
             { type: "provider-state", providerId: "anthropic", data: result },
           ],
@@ -151,6 +153,27 @@ describe("measureAgentStepRequest, with replayed provider state", () => {
     expect(request.history).toEqual({
       messages: bytes("Done.") + bytes(stableJsonStringify(result)),
     })
+    expect(request.reasoningTokens).toBe(3_613)
+  })
+})
+
+describe("apportionAgentContextTokens, with replayed reasoning", () => {
+  // Reproduce: drop reasoningTokens from apportionAgentContextTokens' weights; the 3,000 tokens
+  // of reasoning a thread replays then show as tool results and files, not as its messages.
+  test("counts it with the messages", () => {
+    const parts = apportionAgentContextTokens({
+      totalTokens: 4_000,
+      prompt: {},
+      promptBytesPerToken: 4,
+      history: { messages: 2_000, toolResults: 2_000 },
+      reasoningTokens: 3_000,
+      bytesPerToken: 4,
+    })
+
+    expect(parts).toEqual([
+      { part: "messages", tokens: 3_500 },
+      { part: "toolResults", tokens: 500 },
+    ])
   })
 })
 

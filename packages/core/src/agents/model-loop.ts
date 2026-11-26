@@ -36,6 +36,7 @@ import type { ModelCallCost, ModelReportedCost } from "../models/pricing"
 import type { ModelOutput, ModelTool } from "../models/tools"
 import { waitUnlessAborted } from "../shared/backoff"
 import { MODEL_CALL_RETRY, modelCallInterrupted, modelCallRetryDelay } from "./model-call-retry"
+import { withBilledReasoning } from "./replayed-reasoning"
 import { coerceToolInput } from "./tool-input-coercion"
 
 const MAX_PROVIDER_DATA_BYTES = 256 * 1024
@@ -960,13 +961,15 @@ class StreamAccumulator {
       }
     }
     const parsed = this.parseParts(false)
+    const facts = this.meter.facts()
     return {
-      content: parsed.content,
+      // What its reasoning costs to read again, as the step's own count says, travels with it.
+      content: withBilledReasoning(parsed.content, facts.usage.reasoningOutputTokens),
       toolCalls: parsed.toolCalls,
       finishReason: this.finishReason,
       ...(this.rawFinishReason === undefined ? {} : { rawFinishReason: this.rawFinishReason }),
       ...(this.contextWindowExceeded ? { contextWindowExceeded: true } : {}),
-      ...this.meter.facts(),
+      ...facts,
       ...(this.projectionError === undefined ? {} : { projectionError: this.projectionError }),
     }
   }

@@ -55,6 +55,11 @@ export interface ModelProviderStatePart {
   readonly type: "provider-state"
   readonly providerId: string
   readonly data: JsonValue
+  /**
+   * The input tokens the provider bills to read this state again, when its response said: a
+   * reasoning item's share of the reasoning tokens its step was billed.
+   */
+  readonly tokens?: number
 }
 
 export type ModelAssistantPart =

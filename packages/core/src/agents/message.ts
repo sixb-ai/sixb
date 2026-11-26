@@ -93,6 +93,8 @@ export interface AgentStepRequestSize {
   readonly tools: { readonly count: number; readonly bytes: number }
   readonly history: AgentContextPartBytes<AgentHistoryPartName>
   readonly images?: number
+  /** Replayed reasoning the request sent, as its provider billed it: part of the messages. */
+  readonly reasoningTokens?: number
   /** Where the run's context files were, which its reads were attributed by. */
   readonly contextDirectory?: string
 }
@@ -180,6 +182,8 @@ export interface AgentProviderStatePart {
   readonly type: "provider-state"
   readonly providerId: string
   readonly data: JsonValue
+  /** What the provider bills to read it again, when known: see ModelProviderStatePart. */
+  readonly tokens?: number
 }
 
 /**

@@ -1,4 +1,4 @@
-import { isJsonObject, type JsonValue, stableJsonStringify } from "../json"
+import { stableJsonStringify } from "../json"
 import type { ModelMessage, ModelResponseFormat, ModelToolSpecification } from "../models"
 import type { AgentMessageRecord } from "../storage/agents/types"
 import { AGENT_CONTINUATION_INSTRUCTION, agentMessageSteps } from "./adapters"
@@ -12,13 +12,15 @@ import type {
   AgentMessage,
   AgentMessagePart,
 } from "./message"
+import { countsReasoningText, providerStateSize } from "./replayed-reasoning"
 import { isAgentThreadSummaryText } from "./thread-context-projection"
 import { isAgentToolResult } from "./tool-result"
 
 /**
  * 2: text counts in UTF-8 bytes at the model's own bytes per token; retained attachments, the
  * images tools returned and stored model-facing tool output count as the model reads them.
- * 3: a replayed reasoning item weighs nothing (see providerStateBytes).
+ * 3: a replayed reasoning item weighs the reasoning tokens its step was billed, and its text
+ * nothing beside it (see replayed-reasoning.ts).
  */
 export const AGENT_CONTEXT_ESTIMATOR_VERSION = 3 as const
 
@@ -56,6 +58,8 @@ export interface AgentContextSize {
 /** A history's size, with its bytes split by part (see AgentHistoryPartName). */
 export interface AgentContextHistorySize extends AgentContextSize {
   readonly parts: AgentContextPartBytes<AgentHistoryPartName>
+  /** The replayed reasoning among `tokens`, as its provider billed it: part of the messages. */
+  readonly reasoningTokens?: number
 }
 
 export interface AgentContextTokenEstimate {
@@ -150,7 +154,7 @@ export function measureAgentContextHistory(input: {
   readonly contextDirectory?: string
 }): AgentContextHistorySize {
   const images = { remaining: AGENT_INLINE_IMAGE_LIMITS.maxImages }
-  const size: MeasuredHistory = { bytes: 0, tokens: 0, parts: {} }
+  const size: MeasuredHistory = { bytes: 0, tokens: 0, reasoningTokens: 0, parts: {} }
   for (const message of input.messages) {
     measureMessage(
       message,
@@ -161,7 +165,12 @@ export function measureAgentContextHistory(input: {
     )
     if (message.role === "assistant") size.tokens += toolImageTokens(message, images)
   }
-  return { ...size, images: AGENT_INLINE_IMAGE_LIMITS.maxImages - images.remaining }
+  const { reasoningTokens, ...measured } = size
+  return {
+    ...measured,
+    images: AGENT_INLINE_IMAGE_LIMITS.maxImages - images.remaining,
+    ...(reasoningTokens > 0 ? { reasoningTokens } : {}),
+  }
 }
 
 /** Two sizes of one request, added. */
@@ -213,19 +222,6 @@ export function measureAgentModelRequest(request: {
 }
 
 /**
- * What replayed provider state weighs as text. A model's reasoning item weighs nothing: its text is
- * the reasoning part beside it, counted already, and the rest is replay data a provider bills far
- * below its bytes. OpenAI's and Gemini's encrypted reasoning runs about 27 KB an item for a few
- * dozen tokens: counted, a GPT request measured 10.65 bytes per token, out of the band a rate is
- * stored in, and threads that replayed such items compacted at two to four times what their calls
- * cost. Any other state, such as a provider tool's call or result, is content the model reads.
- */
-export function providerStateBytes(data: JsonValue): number {
-  const item = isJsonObject(data) ? data.item : undefined
-  return isJsonObject(item) && item.type === "reasoning" ? 0 : utf8Bytes(stableJsonStringify(data))
-}
-
-/**
  * Weigh one outgoing model request the same way as a stored conversation: the same parts, the
  * same overheads. A file part counts by its name and media type only; what an attached file costs
  * is the caller's call.
@@ -253,18 +249,24 @@ export function measureModelRequest(request: {
       size.bytes += utf8Bytes(message.content)
       continue
     }
+    const reasoningText = countsReasoningText(message.content)
     for (const part of message.content) {
       switch (part.type) {
         case "text":
-        case "reasoning":
           size.bytes += utf8Bytes(part.text)
+          break
+        case "reasoning":
+          if (reasoningText) size.bytes += utf8Bytes(part.text)
           break
         case "file":
           size.bytes += utf8Bytes(`${part.filename ?? ""} ${part.mediaType}`)
           break
-        case "provider-state":
-          size.bytes += providerStateBytes(part.data)
+        case "provider-state": {
+          const state = providerStateSize(part)
+          size.bytes += state.bytes
+          size.tokens += state.tokens
           break
+        }
         case "tool-call":
           size.tokens += TOOL_OVERHEAD_TOKENS
           size.bytes += utf8Bytes(part.toolName) + utf8Bytes(stableJsonStringify(part.input))
@@ -323,6 +325,7 @@ export function selectAgentContextCompactionBoundary(input: {
 interface MeasuredHistory {
   bytes: number
   tokens: number
+  reasoningTokens: number
   readonly parts: { [Part in AgentHistoryPartName]?: number }
 }
 
@@ -339,6 +342,7 @@ function measureMessage(
   contextDirectory: string | undefined
 ): void {
   size.tokens += MESSAGE_OVERHEAD_TOKENS
+  const reasoningText = countsReasoningText(message.parts)
   for (const part of message.parts) {
     switch (part.type) {
       case "text":
@@ -349,7 +353,7 @@ function measureMessage(
         )
         break
       case "reasoning":
-        addBytes(size, "messages", utf8Bytes(part.text))
+        if (reasoningText) addBytes(size, "messages", utf8Bytes(part.text))
         break
       case "step-start":
         size.tokens += STEP_OVERHEAD_TOKENS
@@ -366,9 +370,13 @@ function measureMessage(
       case "context":
         addBytes(size, "messages", utf8Bytes(stableJsonStringify(part.context)))
         break
-      case "provider-state":
-        addBytes(size, "messages", providerStateBytes(part.data))
+      case "provider-state": {
+        const state = providerStateSize(part)
+        addBytes(size, "messages", state.bytes)
+        size.tokens += state.tokens
+        size.reasoningTokens += state.tokens
         break
+      }
       case "tool-call":
         size.tokens += TOOL_OVERHEAD_TOKENS
         addBytes(

@@ -1071,6 +1071,7 @@ describe("agent routes", () => {
           type: "provider-state",
           providerId: "vercel-ai-gateway",
           data: { item: { type: "reasoning", encrypted_content: "signed" } },
+          tokens: 185,
         },
         {
           type: "reasoning",
