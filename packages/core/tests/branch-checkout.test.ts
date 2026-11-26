@@ -47,7 +47,12 @@ async function sandbox() {
         'chmod +x "$2/node_modules/.bin/bun"',
       ].join("\n")
     )
-  const imageBun = () => tool(join(bin, "bun"), `echo "image bun $*" >> "${calls}"`)
+  // The image's own Bun, which says whether it is recent enough when asked.
+  const imageBun = (recent = true) =>
+    tool(
+      join(bin, "bun"),
+      `if [ "$1" = "-e" ]; then exit ${recent ? 0 : 1}; fi\necho "image bun $*" >> "${calls}"`
+    )
 
   const run = async (script: string, cwd = work) => {
     const child = Bun.spawn(["sh", "-c", script], {
@@ -97,6 +102,24 @@ describe("a branch's checkout", () => {
 
     expect((await box.run(BRANCH_BUN_COMMAND)).exitCode).toBe(0)
     expect(await box.called()).toEqual([])
+  })
+
+  // An image with a Bun older than Sixb's packages take failed their install. Guard check: drop
+  // the version check from `BRANCH_BUN_COMMAND`, or put `BRANCH_TOOLS_PATH` after the image's
+  // PATH in `BRANCH_INSTALL_COMMAND`.
+  test("installs the pinned Bun over an image's older one, and uses it first", async () => {
+    const box = await sandbox()
+    await box.npm()
+    await box.imageBun(false)
+    await writeFile(join(box.work, "bun.lock"), "")
+
+    expect((await box.run(BRANCH_BUN_COMMAND)).exitCode).toBe(0)
+    expect((await box.run(BRANCH_INSTALL_COMMAND)).exitCode).toBe(0)
+    expect(await box.called()).toEqual([
+      expect.stringContaining(`bun@${BRANCH_BUN_VERSION}`),
+      "bun --version",
+      "bun install --frozen-lockfile",
+    ])
   })
 
   test("says what to do when the image has neither Bun nor npm", async () => {

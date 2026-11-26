@@ -42,7 +42,7 @@ sixb worker branches            reads the remote's heads (git ls-remote, every 1
 | Event | What happens |
 |---|---|
 | Open | A row, with its namespace and key. The worker claims it once the remote has the branch; a branch the remote never had fails, and says so |
-| Claim | Sandbox resumed, or made: its checkout runs as the worker's own commands, each bounded at 10 min and failing in its own words, Bun installed from npm first where the image has none. A last step marks the checkout done. Copy taken, runtime started |
+| Claim | Sandbox resumed, or made: its checkout runs as the worker's own commands, each bounded at 10 min and failing in its own words, Bun installed from npm first where the image has none or one older than 1.4.2, then first on the PATH. A last step marks the checkout done. Copy taken, runtime started |
 | Push | The read of the remote writes the head to `remoteCommit`; the worker holding the branch resets its checkout to it, and the runtime's watcher reloads the code. A push that changes `package.json` or a lockfile stops the runtime, installs, then starts it. The data stays |
 | Refresh | A new copy: the database and its role are made anew, so what the branch wrote goes. The row has no copy until the new one is loaded |
 | Stop, or 20 min unused | The runtime stops and the role's login goes (`closeBranchData`); a provider that persists sandboxes keeps its state. A copy delivered and not loaded yet lets its lake slice go |

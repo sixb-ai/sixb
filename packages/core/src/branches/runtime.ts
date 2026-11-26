@@ -149,13 +149,13 @@ export interface BranchRuntimeStatus {
 
 /**
  * Starts the project's own `sixb dev` as the branch's runtime, from the project's folder, its own
- * `sixb` first on the PATH and the Bun its checkout installed last, its log in
+ * `sixb` first on the PATH, then the Bun its checkout installed, if any, its log in
  * `.sixb/branch.log`.
  */
 export const BRANCH_RUNTIME_COMMAND = [
   "mkdir -p .sixb",
   'root="$(git rev-parse --show-toplevel)"',
-  `PATH="$PWD/node_modules/.bin:$root/node_modules/.bin:$PATH:${BRANCH_TOOLS_PATH}"`,
+  `PATH="$PWD/node_modules/.bin:$root/node_modules/.bin:${BRANCH_TOOLS_PATH}:$PATH"`,
   `exec sixb dev --port "$${BRANCH_PORT_ENV}" --host 0.0.0.0 >> .sixb/branch.log 2>&1`,
 ].join("; ")
 

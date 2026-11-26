@@ -122,26 +122,33 @@ export function branchCheckout(input: {
 }
 
 /**
- * The Bun a branch's sandbox installs when its image has none, as Vercel's stock runtime has
- * only Node: the one this repository builds with (`.bun-version`).
+ * The Bun a branch's sandbox installs when its image has none, or one older than Sixb's packages
+ * take, as Vercel's stock runtime has only Node: the one this repository builds with
+ * (`.bun-version`).
  */
 export const BRANCH_BUN_VERSION = "1.4.4"
 
+/** The oldest Bun Sixb's packages run on (their `engines.bun`). */
+export const BRANCH_BUN_MINIMUM = "1.4.2"
+
 /**
- * Where that Bun is, outside the checkout. A branch's commands look there after the image's own
- * tools, so an image with Bun keeps its own.
+ * Where that Bun is, outside the checkout. A branch's commands look there first: it is there
+ * only when the image's own Bun was missing or too old.
  */
 export const BRANCH_TOOLS_PATH = "$HOME/.sixb-branch/node_modules/.bin"
 
 /**
- * Installs Bun from the npm registry, which a branch already reaches, unless the image has it.
- * The `bun` package carries each platform's binary in a package of its own.
+ * Installs Bun from the npm registry, which a branch already reaches, unless the image has a
+ * recent enough one. The `bun` package carries each platform's binary in a package of its own;
+ * npm checks each against the sha512 the registry gives for it.
  */
 export const BRANCH_BUN_COMMAND = [
-  `export PATH="$PATH:${BRANCH_TOOLS_PATH}"`,
-  "if command -v bun >/dev/null 2>&1; then exit 0; fi",
+  `export PATH="${BRANCH_TOOLS_PATH}:$PATH"`,
+  `if command -v bun >/dev/null 2>&1 && bun -e 'process.exit(Bun.semver.satisfies(Bun.version, ">=${BRANCH_BUN_MINIMUM}") ? 0 : 1)' >/dev/null 2>&1; then exit 0; fi`,
   'if ! command -v npm >/dev/null 2>&1; then echo "The sandbox has neither Bun nor npm: boot it from an image with Bun." >&2; exit 1; fi',
   `npm install --prefix "$HOME/.sixb-branch" --no-audit --no-fund --loglevel=error bun@${BRANCH_BUN_VERSION}`,
+  // The shell remembers where it found `bun` before the install.
+  "hash -r",
   "bun --version >/dev/null",
 ].join("; ")
 
@@ -150,7 +157,7 @@ export const BRANCH_BUN_COMMAND = [
  * checkout, and again when a push changes the manifest or a lockfile.
  */
 export const BRANCH_INSTALL_COMMAND = [
-  `export PATH="$PATH:${BRANCH_TOOLS_PATH}"`,
+  `export PATH="${BRANCH_TOOLS_PATH}:$PATH"`,
   "if [ -f bun.lock ] || [ -f bun.lockb ]; then bun install --frozen-lockfile || bun install",
   "elif [ -f package-lock.json ]; then npm ci || npm install",
   "elif [ -f pnpm-lock.yaml ]; then COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack pnpm install --frozen-lockfile",
