@@ -54,7 +54,8 @@ read closes at export speed.
 `format.ts`: an 8-byte signature ending in the format's version, then frames of
 `[u32 length][u8 codec][JSON record]`, zstd by default, 512 MB at most: a page that would not fit
 is written in halves. Objects are columnar per page. The `end` record counts what the stream holds,
-and the importer checks it, so a cut or doubled stream never imports.
+and the importer checks it, with nothing after it, before the provider commits: a cut, doubled or
+extended stream never imports.
 
 The manifest carries each type's definition fingerprints, the properties hidden from the person,
 the vector configurations, and the projection feeding the type with the version production

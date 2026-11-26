@@ -107,8 +107,36 @@ describe("what an import reports of what the person read", () => {
       )),
     ]
 
-    const refused = await importInto(new InMemoryStorage(), frames).catch((error: unknown) => error)
+    const branch = new InMemoryStorage()
+    const refused = await importInto(branch, frames).catch((error: unknown) => error)
     expect(String(refused)).toContain("it says it holds")
+
+    // Reproduce: check the counts after `loadSnapshot` returns, and the rows stay.
+    expect((await branch.objects.list({ projectId, limit: 1 })).total).toBe(0)
+  })
+
+  // Reproduce: return the end record in `loadRecords` without awaiting what was read ahead, and
+  // both streams import.
+  test("a frame or bytes after the end are refused, and nothing is loaded", async () => {
+    const { host, optionsFor } = await deploy()
+    const { chunks, records } = await readAll(
+      exportSnapshot(hostSnapshotSource(host), optionsFor(["agents"]))
+    )
+    const { encodeSnapshotFrame } = await import("../src/snapshots/format")
+    const extraFrame = await encodeSnapshotFrame(records.at(-1)!, { compress: true })
+
+    for (const [trailer, error] of [
+      [extraFrame, "frames follow its end"],
+      [new Uint8Array([1, 2, 3]), "The snapshot is incomplete"],
+    ] as const) {
+      const branch = new InMemoryStorage()
+      const refused = await importInto(branch, [...chunks, trailer]).catch(
+        (failure: unknown) => failure
+      )
+
+      expect(String(refused)).toContain(error)
+      expect((await branch.objects.list({ projectId, limit: 1 })).total).toBe(0)
+    }
   })
 })
 

@@ -109,21 +109,19 @@ export async function importSnapshot(input: ImportSnapshotInput): Promise<Snapsh
     const users = await importMembers(storage, manifest.projectId, members)
     const commit = await baseCommit(storage, manifest, members, plan, input.ontology)
 
-    const end = await storage.loadSnapshot(
+    // The checks run before the provider commits: a stream they refuse leaves nothing behind.
+    await storage.loadSnapshot(
       {
         projectId: manifest.projectId,
         commit,
         uniqueProperties: plan.uniqueProperties(),
         objectTypeIds: plan.objectTypeIds(),
       },
-      (loader) => loadRecords(records, plan, loader, commit.id)
+      async (loader) => {
+        const end = await loadRecords(records, plan, loader, commit.id)
+        assertComplete(end, plan, members.users.length)
+      }
     )
-    assertComplete(end, plan, members.users.length)
-
-    // Read the stream to its close, which checks nothing follows its end and lets its source end.
-    if (!(await records.next()).done) {
-      throw new Error("[Sixb] The snapshot cannot be read: frames follow its end.")
-    }
 
     return report(manifest, plan, commit.id, users)
   } catch (error) {
@@ -411,6 +409,10 @@ async function loadRecords(
         await loadVectors(plan, loader, record, commitId)
         break
       case "end":
+        // What was read ahead is what follows the end: the stream must close there.
+        if (!(await pending).done) {
+          throw new Error("[Sixb] The snapshot cannot be read: frames follow its end.")
+        }
         return record
       default:
         throw new Error(
