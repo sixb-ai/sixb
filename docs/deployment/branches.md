@@ -37,7 +37,7 @@ SIXB_BRANCH_ALLOW=https://redis.dev.shop.example \
 | Production's database closed to `PUBLIC` | `REVOKE CONNECT ON DATABASE <production's> FROM PUBLIC` (grant it back to production's user): a branch's role could connect to it otherwise, so production refuses to host branches until then |
 | `max_prepared_transactions = 0` | PostgreSQL's default. A prepared transaction outlives its session, and no limit production sets on a branch could end it |
 | A lock table that fits the ontology | A branch's copy takes about 120 locks plus 20 per object type, within a quarter of the lock table (`max_locks_per_transaction` × connections): raise `max_locks_per_transaction` for a large ontology. Production says so before the worker starts |
-| `@sixb/sandboxes-vercel` or `@sixb/sandboxes-smolvm` | The branch serves from it. `@sixb/sandboxes-local` runs it on production's own host, so production refuses it |
+| `@sixb/sandboxes-vercel` or `@sixb/sandboxes-smolvm` | The branch serves from it. smolvm also needs a [preview domain](#use-a-branch-in-the-browser). `@sixb/sandboxes-local` runs it on production's own host, so production refuses it |
 | The sandbox factory's `auth` for a private repository | Production reads the repository's branches and the branch clones with it: `githubApp(...)`, or `githubOAuth(...)`, which reads and clones as the branch's creator, so its creator connects GitHub first. Without it, the branch says production cannot read the repository. smolvm cannot clone with it, so production refuses that pair |
 | Bun 1.4.2+ in the sandbox | A branch installs and runs with Bun: boot the sandbox from the [Sixb agent image](https://github.com/sixb-ai/sixb/tree/main/sandboxes/agent-image#use-with-a-sandbox-provider), which has it. Otherwise, as on Vercel's stock runtime (Node only), the branch installs Bun 1.4.4 from the npm registry first, checked against the registry's sha512 |
 | A sandbox recipe without `env` | A provider gives its recipe's `env` to every sandbox, a branch's too |
@@ -70,7 +70,9 @@ const { url } = await sixb.branches.signIn("feature/invoices") // POST /api/bran
 ```
 
 A branch has an origin of its own, never production's: `<branch>.<previewDomain>` when the
-project names one, else its sandbox's URL (Vercel's own domain).
+project names one, else its sandbox's URL (Vercel's own domain). smolvm serves branches on its
+host's loopback, which nobody's browser reaches: name a preview domain with it, or the branch
+worker refuses to start in production.
 
 ```ts
 source: { repository: "acme/shop", previewDomain: "shop-preview.dev" },

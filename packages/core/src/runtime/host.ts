@@ -266,6 +266,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     | "sharesHost"
     | "runsBranches"
     | "forwardsRequestCredentials"
+    | "servesOnLoopback"
   >
   /**
    * The variables the sandbox recipe sets, by name. Its provider gives them to every sandbox it

@@ -63,6 +63,8 @@ export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<ne
   readonly supportsRequestCredentials = true
   readonly forwardsRequestCredentials = true
   readonly runsBranches = true
+  /** smolvm publishes each port on the host's loopback. */
+  readonly servesOnLoopback = true
   readonly configuration: SandboxConfig<TParams>
   private cli: SmolvmCliConfig | undefined
   private probe: SmolvmProbe | undefined

@@ -81,6 +81,10 @@ A sandbox created with `ports` publishes each one on the same port of the host's
 unprivileged, in a process group of its own that its `kill` ends whole. Its variables reach the
 guest through smolvm's own environment, never its arguments.
 
+A branch production runs on smolvm is served there too, so people reach it only through the
+project's preview domain (`source: { previewDomain }`): without one, the branch worker refuses to
+start in production.
+
 ## Options
 
 | Option | Default | Notes |

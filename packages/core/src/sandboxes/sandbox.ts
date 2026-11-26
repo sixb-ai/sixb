@@ -258,6 +258,12 @@ export interface SandboxFactory<in out TParams extends ParamsConfig = ParamsConf
    */
   readonly runsBranches?: boolean
   /**
+   * Its sandboxes' URLs are on the host's loopback (`http://127.0.0.1:<port>`): only that host
+   * reaches them. In production, people then reach a branch through the project's preview domain,
+   * which production forwards to it.
+   */
+  readonly servesOnLoopback?: boolean
+  /**
    * Supports initial and renewable request credentials on ephemeral and named sessions. An
    * agent's sandboxes need it: the run's token for the Sixb API is one of the credentials.
    */
