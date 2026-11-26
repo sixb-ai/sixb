@@ -243,6 +243,9 @@ export async function checkoutOf(projectRoot: string): Promise<string> {
   return checkout
 }
 
+/** What the CLI keeps in a branch's directory: its lake's catalog, its own rows, and its cache. */
+const BRANCH_LAKE_FILES = ["lake.ducklake", "lake.ducklake.wal", "lake", "lake-cache"]
+
 async function loadCopy(input: {
   readonly host: LoadedSixbHost
   readonly storage: { createBranchNamespace(name: string): Promise<BranchNamespace> } & {
@@ -272,9 +275,14 @@ async function loadCopy(input: {
       ontology: input.host.definitions.ontology as never,
     })
 
+    // The branch's directory may hold its database too, as `SqliteStorage({ path: ".sixb" })` keeps
+    // a namespace in `.sixb/branches/<name>/`: only the CLI's own files go.
     const branchDirectory = join(input.directory, input.name)
-    await rm(branchDirectory, { recursive: true, force: true })
-    await mkdir(branchDirectory, { mode: 0o700 })
+    await mkdir(branchDirectory, { recursive: true, mode: 0o700 })
+    await chmod(branchDirectory, 0o700)
+    for (const file of BRANCH_LAKE_FILES) {
+      await rm(join(branchDirectory, file), { recursive: true, force: true })
+    }
     if (rest) {
       await writeFile(join(branchDirectory, "lake.ducklake"), rest.catalog, { mode: 0o600 })
     }

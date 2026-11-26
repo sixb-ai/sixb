@@ -391,7 +391,10 @@ describe.each(laptops)("a laptop branch on %s", (_name, localStorage) => {
 describe("sixb dev --from production", () => {
   const cli = resolve(import.meta.dir, "../src/index.tsx")
 
-  /** A project checked out on `feature/x`, its local storage SQLite and its lake DuckLake. */
+  /**
+   * A project checked out on `feature/x`, laid out as the template: SQLite at `.sixb`, which keeps
+   * a branch's namespace in `.sixb/branches/<name>/` beside the CLI's files, and DuckLake.
+   */
   async function checkout() {
     const scratch = resolve(import.meta.dir, "../../../.local")
     await mkdir(scratch, { recursive: true })
@@ -413,20 +416,22 @@ export const Ticket = defineObjectType({ id: "BranchTicket", name: "Ticket", pro
     )
     await write(
       "sixb.config.ts",
-      `import { can, col, createSixb, defineDataset, defineGroup, defineRole, InMemoryBlobStorage,
+      `import { mkdirSync } from "node:fs"
+import { can, col, createSixb, defineDataset, defineGroup, defineRole, InMemoryBlobStorage,
   InMemoryBroker, InMemoryQueues, project } from "@sixb/core"
 import { DuckLakeStorage } from "@sixb/ducklake"
 import { migrateSqliteStorage, SqliteStorage } from "@sixb/sqlite"
 import { Ticket } from "./ontology/Ticket"
+mkdirSync(import.meta.dir + "/.sixb/lake", { recursive: true })
 const orders = defineDataset("branch.orders", { schema: [col("id", "string"), col("total", "float64")], primaryKey: "id" })
 const developers = defineGroup("developers")
 const readers = defineGroup("readers")
-await migrateSqliteStorage(import.meta.dir + "/.sixb/storage")
+await migrateSqliteStorage(import.meta.dir + "/.sixb")
 export const sixb = await createSixb({
   id: "branch-copy", projectRoot: import.meta.dir,
   broker: new InMemoryBroker(), queues: new InMemoryQueues(), blobStorage: new InMemoryBlobStorage(),
-  storage: new SqliteStorage({ path: import.meta.dir + "/.sixb/storage" }),
-  lakeStorage: new DuckLakeStorage({ catalog: { type: "duckdb", path: import.meta.dir + "/.sixb/lake.ducklake" }, dataPath: import.meta.dir + "/.sixb/lake" }),
+  storage: new SqliteStorage({ path: import.meta.dir + "/.sixb" }),
+  lakeStorage: new DuckLakeStorage({ catalog: { type: "duckdb", path: import.meta.dir + "/.sixb/lake/metadata.ducklake" }, dataPath: import.meta.dir + "/.sixb/lake/data" }),
   datasets: [orders], groups: [developers, readers],
   roles: [
     defineRole("developers", { grantedTo: [developers], grants: [can.manage(project.source),
@@ -536,9 +541,8 @@ await Bun.write(import.meta.dir + "/.sixb/runtime-seen.txt", process.env.SIXB_BR
 
   /** Edit t-1 straight in the branch's SQLite file, as the branch's own write would land. */
   async function editOnBranch(root: string) {
-    const directory = join(root, ".sixb/storage/branches", await namespaceOf(root, "feature/x"))
-    const file = (await readdir(directory)).find((name) => !name.includes("-"))!
-    const db = new Database(join(directory, file))
+    const directory = join(root, ".sixb/branches", await namespaceOf(root, "feature/x"))
+    const db = new Database(join(directory, "storage.sqlite"))
     db.run(
       "UPDATE objects SET properties = json_set(properties, '$.title', 'Edited on the branch') WHERE primary_id = 't-1'"
     )
@@ -549,7 +553,9 @@ await Bun.write(import.meta.dir + "/.sixb/runtime-seen.txt", process.env.SIXB_BR
   // the API serves the laptop's empty storage. In commands/dev.ts, leave `refresh` out of
   // `fetchBranchCopy`: --refresh reuses the copy, as it once did before this test found it; drop
   // the loop over `PRODUCTION_SIGN_IN_ENV`: the branch's code reads the developer's token; drop
-  // `BRANCH_RUNTIME_ENV`: the branch runs as no checkout in particular.
+  // `BRANCH_RUNTIME_ENV`: the branch runs as no checkout in particular. In
+  // lib/branch-from-production.ts, empty the branch's whole directory in `loadCopy` again: the
+  // template's SQLite namespace in it goes, and the second run has no copy.
   test("copies, serves the copy as the person, reuses it, refreshes it, and drops it with its git branch", async () => {
     const root = await checkout()
     const alice = (await signedIn("usr_alice")).authorization
@@ -587,9 +593,9 @@ await Bun.write(import.meta.dir + "/.sixb/runtime-seen.txt", process.env.SIXB_BR
       const onMain = await dev(root, token)
       expect(onMain.output()).toContain("Dropped the copy of deleted git branch feature/x")
       await onMain.stop()
-      expect(await readdir(join(root, ".sixb/storage/branches"))).toEqual([
-        await namespaceOf(root, "main"),
-      ])
+      const branches = await readdir(join(root, ".sixb/branches"))
+      expect(branches).toContain(await namespaceOf(root, "main"))
+      expect(branches).not.toContain(await namespaceOf(root, "feature/x"))
     } finally {
       await rm(root, { recursive: true, force: true })
     }
