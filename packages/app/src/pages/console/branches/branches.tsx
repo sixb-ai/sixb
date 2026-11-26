@@ -536,13 +536,21 @@ function BranchRow({
   const onTheWay = ON_THE_WAY.has(status)
   const running = branch.wanted === "running" && status !== "attention"
   const pill = <Pill tone={statusTones[status]}>{messages.status[status]}</Pill>
+  // Production closed it for what its database held: starting it again would close it again.
+  const closedForDatabase =
+    status === "stopped" && branch.notices.some((notice) => notice.code === "database-limit")
   // Each status has one thing to do, which the row's button does: Open a ready branch, Start a
-  // stopped one, Try again one whose machine failed.
+  // stopped one, Refresh one production closed, Try again one whose machine failed.
   const primary =
     status === "ready" ? (
       <Button type="button" size="sm" onClick={onOpen} disabled={opening}>
         {opening ? <Loader2 className="motion-safe:animate-spin" /> : <ArrowUpRight />}
         {messages.actions.open}
+      </Button>
+    ) : closedForDatabase ? (
+      <Button type="button" size="sm" variant="outline" onClick={onRefresh}>
+        <RefreshCw />
+        {messages.actions.refreshShort}
       </Button>
     ) : status === "stopped" ? (
       <Button type="button" size="sm" variant="outline" onClick={onStart}>
@@ -632,19 +640,7 @@ function BranchRow({
           {status === "waiting" && workerHint ? <WaitingForWorker count={1} /> : null}
           {status === "attention" ? <NeedsAttention branch={branch} /> : null}
           {branch.notices.map((notice) => (
-            <Callout
-              key={notice.code}
-              icon={Info}
-              action={
-                // Production closed it for what it held: a new copy starts it over.
-                notice.code === "database-limit" ? (
-                  <Button type="button" size="sm" variant="outline" onClick={onRefresh}>
-                    <RefreshCw />
-                    {messages.actions.refresh}
-                  </Button>
-                ) : undefined
-              }
-            >
+            <Callout key={notice.code} icon={Info}>
               {messages.notices[notice.code]}
             </Callout>
           ))}
@@ -881,19 +877,15 @@ function withCode(text: string, code: string): ReactNode {
 /** A calm line about the branch, such as its data having been reset. */
 function Callout({
   icon: Icon,
-  action,
   children,
 }: {
   readonly icon: typeof Info
-  /** The one thing to do about it, at the end of the line. */
-  readonly action?: ReactNode
   readonly children: ReactNode
 }) {
   return (
-    <div className="flex flex-wrap items-start gap-x-2.5 gap-y-2 rounded-lg bg-muted/60 px-3.5 py-2.5 text-[0.8125rem] text-muted-foreground">
+    <div className="flex items-start gap-2.5 rounded-lg bg-muted/60 px-3.5 py-2.5 text-[0.8125rem] text-muted-foreground">
       <Icon aria-hidden className="mt-0.5 size-4 shrink-0" />
-      <div className="min-w-0 flex-1 basis-56">{children}</div>
-      {action ? <div className="-my-1 ml-6.5 shrink-0 sm:ml-0">{action}</div> : null}
+      <div className="min-w-0">{children}</div>
     </div>
   )
 }

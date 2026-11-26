@@ -68,6 +68,7 @@ export const en = {
     retry: "Try again",
     more: (name: string) => `More for ${name}`,
     refresh: "Refresh from production…",
+    refreshShort: "Refresh…",
     stop: "Stop",
     delete: "Delete…",
   },
@@ -97,7 +98,7 @@ export const en = {
     "temp-files-uncapped":
       "A heavy query on this branch could fill production's database disk. Ask whoever runs production's database to let Sixb cap it (SET on temp_file_limit).",
     "database-limit":
-      "Production stopped this branch: its data grew past its limit, or it held up production's database. A new copy starts it over.",
+      "Production stopped this branch: its data grew past its limit, or it held up production's database. Refresh it to start over from a new copy.",
   },
   notCopied: {
     summary: (types: number, datasets: number) => {
@@ -216,6 +217,7 @@ export const fr: Translation<BranchesMessages> = {
     retry: "Réessayer",
     more: (name: string) => `Plus d’options pour ${name}`,
     refresh: "Actualiser depuis la production…",
+    refreshShort: "Actualiser…",
     stop: "Arrêter",
     delete: "Supprimer…",
   },
@@ -247,7 +249,7 @@ export const fr: Translation<BranchesMessages> = {
     "temp-files-uncapped":
       "Une requête lourde sur cette branche pourrait remplir le disque de la base de production. Demandez à qui gère cette base de laisser Sixb la plafonner (SET sur temp_file_limit).",
     "database-limit":
-      "La production a arrêté cette branche : ses données ont dépassé leur limite, ou elle bloquait la base de production. Une nouvelle copie la relance.",
+      "La production a arrêté cette branche : ses données ont dépassé leur limite, ou elle bloquait la base de production. Actualisez-la pour repartir d’une nouvelle copie.",
   },
   notCopied: {
     summary: (types: number, datasets: number) => {

@@ -416,8 +416,8 @@ describe("Console › Branches", () => {
     expect(view.getAllByText("sixb worker branches")).toHaveLength(1)
   })
 
-  // Production closed the branch for what its database held: a new copy starts it over, from
-  // the notice itself. Red check: drop the notice's action in `BranchRow`.
+  // Production closed the branch for what its database held: starting it again would close it
+  // again, so its one action is a refresh. Red check: drop `closedForDatabase` from `BranchRow`.
   test("offers a refresh on a branch production stopped for its database", async () => {
     const { view } = renderPage({
       branches: [
@@ -433,10 +433,11 @@ describe("Console › Branches", () => {
 
     expect(
       view.getByText(
-        "Production stopped this branch: its data grew past its limit, or it held up production's database. A new copy starts it over."
+        "Production stopped this branch: its data grew past its limit, or it held up production's database. Refresh it to start over from a new copy."
       )
     ).toBeDefined()
-    fireEvent.click(view.getByRole("button", { name: "Refresh from production…" }))
+    expect(view.queryByRole("button", { name: "Start" })).toBeNull()
+    fireEvent.click(view.getByRole("button", { name: "Refresh…" }))
     expect(within(await view.findByRole("alertdialog")).getByRole("heading").textContent).toBe(
       "Refresh feature/route-planner from production?"
     )
