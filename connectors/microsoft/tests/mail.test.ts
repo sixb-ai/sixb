@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import {
+  isItemNotFound,
   MicrosoftConfigurationError,
   MicrosoftMailSubmissionError,
   MicrosoftProtocolError,
@@ -77,6 +78,29 @@ describe("Outlook messages and folders", () => {
       status: 403,
       code: "accessDenied",
     })
+  })
+
+  // Countercheck: drop the code comparison from isItemNotFound; a mailbox that can't be reached
+  // must not read as a deleted message.
+  test("isItemNotFound matches only a message that is gone", async () => {
+    const { mail } = await connect()
+    const failure = (response: Response) => {
+      mockFetch(() => response)
+      return mail.messages.get(mailbox, "id").catch((error: unknown) => error)
+    }
+    expect(isItemNotFound(await failure(apiError(404, "ErrorItemNotFound")))).toBe(true)
+    for (const response of [
+      apiError(404, "MailboxNotEnabledForRESTAPI"),
+      apiError(404, "ErrorInvalidUser"),
+      apiError(400, "ErrorInvalidIdMalformed"),
+      apiError(403, "ErrorItemNotFound"),
+    ])
+      expect(isItemNotFound(await failure(response))).toBe(false)
+    for (const error of [
+      new Error("ErrorItemNotFound"),
+      { status: 404, code: "ErrorItemNotFound" },
+    ])
+      expect(isItemNotFound(error)).toBe(false)
   })
 
   test("keeps draft creation, patching, replies and forwards separate from sending", async () => {

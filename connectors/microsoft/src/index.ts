@@ -7,6 +7,7 @@ export type {
 export type { MicrosoftClient } from "./client"
 export type { GraphErrorDetail } from "./errors"
 export {
+  isItemNotFound,
   isMailboxNotEnabled,
   MicrosoftApiError,
   MicrosoftAuthError,

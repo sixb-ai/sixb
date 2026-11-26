@@ -115,11 +115,20 @@ data through their own connection; pass the account's id where a method takes a 
 record whose row it is:
 
 ```ts
+// The fields every read of a message asks for, so each path writes the same row.
+export const MESSAGE = {
+  select: [
+    "subject", "from", "toRecipients", "receivedDateTime",
+    "parentFolderId", "isDraft", "hasAttachments", "body",
+  ],
+  bodyContentType: "text",
+} as const
+
 export const syncInbox = defineSync("inbox", { mode: "merge" })
   .from(outlook)
   .read(async function* (graph, { connection }) {
     const owner = connection.owner.type === "user" ? connection.owner.id : null
-    for await (const message of graph.mail.messages.listAll(connection.account.id)) {
+    for await (const message of graph.mail.messages.listAll(connection.account.id, MESSAGE)) {
       yield change.upsert({ ...toRow(message), owner_id: owner, slot: connection.slot })
     }
   })
@@ -151,8 +160,9 @@ What to expect:
 ### Notifications from people's accounts
 
 Each person subscribes to their own mailbox, and `onEvent` gets the connections of the person whose
-subscription sent the notification. A change runs the inbox sync for that person alone, and
-notifications that arrive before that run starts join it:
+subscription sent the notification. A notification names the message that changed, so a workflow
+reads that one message and writes its row: one Graph call, with the body. Graph wants an answer
+within three seconds, so the webhook only queues the workflow:
 
 ```ts
 // connectors/outlook.ts
@@ -169,6 +179,14 @@ export const outlook = defineConnector(
     webhookSecret: process.env.MICROSOFT_WEBHOOK_SECRET!, // 1–128 characters
     async onEvent({ event, accountId, connections, sixb }) {
       if (connections.length === 0) return // They disconnected; the subscription expires on its own.
+      const messageId = event.kind === "change" ? event.resourceData?.id : undefined
+      if (messageId) {
+        await sixb.workflows.requestById({
+          workflowId: "outlook-message",
+          input: { accountId, messageId },
+        })
+        return
+      }
       if (event.kind === "change" || event.lifecycleEvent === "missed") {
         for (const { connection } of connections)
           await sixb.syncs.request({ syncId: "inbox", connectionId: connection.id })
@@ -186,6 +204,47 @@ export const outlook = defineConnector(
   }),
   { owners: ["user"] }
 )
+```
+
+`outlook-message` reads the message with the sync's `MESSAGE` and `toRow`. A message deleted
+since the notification reads as gone, and its row is deleted:
+
+```ts
+// workflows/outlook-message.ts
+import { isItemNotFound } from "@sixb/connector-microsoft"
+import { change, defineWorkflow, defineWorkflowStep } from "@sixb/core"
+import { outlook } from "../connectors/outlook"
+import { inbox } from "../datasets/inbox"
+import { MESSAGE, toRow } from "../syncs/inbox"
+
+const readMessage = defineWorkflowStep("read-message")
+  .input({ accountId: "string", messageId: "string" })
+  .output({ found: "boolean" })
+  .run(async ({ input, sixb }) => {
+    const [handle] = await sixb.connector.connections(outlook).forAccount(input.accountId)
+    if (!handle) return { found: false } // They disconnected since.
+    const { connection } = handle
+    const graph = await handle.client()
+    const message = await graph.mail.messages
+      .get(input.accountId, input.messageId, MESSAGE)
+      .catch((error: unknown) => {
+        if (isItemNotFound(error)) return undefined
+        throw error
+      })
+    const owner = connection.owner.type === "user" ? connection.owner.id : null
+    await sixb.datasets.ingest(inbox, {
+      changes: [
+        message
+          ? change.upsert({ ...toRow(message), owner_id: owner, slot: connection.slot })
+          : change.delete({ id: input.messageId }),
+      ],
+    })
+    return { found: message !== undefined }
+  })
+
+export const outlookMessage = defineWorkflow("outlook-message")
+  .input({ accountId: "string", messageId: "string" })
+  .then(readMessage)
 ```
 
 A workflow subscribes each person as soon as they connect, and a nightly one keeps everyone
@@ -227,11 +286,20 @@ export const renewNightly = defineWorkflow("outlook-renew")
 
 | Moment | What happens |
 | --- | --- |
+| A message arrives, changes or is deleted | `outlook-message` reads it and writes or deletes its row within seconds |
 | Someone connects or reconnects | `outlook-subscribe` subscribes their inbox |
 | Every night | `outlook-renew` renews subscriptions with under three days left and recreates missing ones |
 | Graph asks to reauthorize, or removed a subscription | `onEvent` reauthorizes or recreates it with that person's client |
 | Someone disconnects, is revoked or suspended | Their subscriptions to this connector are deleted while their token still works, unless the same account stays connected in another slot |
 
+- **One Graph call per notification.** Outlook sends several notifications for one new message,
+  and Graph retries a delivery that failed. Each run reads the message as it is then, so a repeat
+  costs one call and changes nothing.
+- **The inbox sync is the safety net.** Keep it on a schedule: it catches a notification Graph
+  never sent and a run that failed, for example because the person must reconnect. A notification
+  without a message id, and Graph's `missed` event, request it at once.
+- **Gone means `ErrorItemNotFound`.** `isItemNotFound` is `true` only for that answer, never for a
+  mailbox Graph can't reach, so a lost mailbox never deletes rows.
 - **Only the person's own token** can renew, reauthorize or delete their subscription, so use one of
   `connections`. `event.accountId` is their Entra object id.
 - **The nightly run is the backstop.** A missed connection event, a failed run or an expired
@@ -525,7 +593,7 @@ renews or creates the mailbox's subscription and stores nothing; see
 
 | Event | Queued work |
 | --- | --- |
-| `kind: "change"` | Run delta for the mailbox's tracked folders |
+| `kind: "change"` | Read the message `resourceData.id` names with `messages.get`; `isItemNotFound` means it was deleted. Without an id, run delta for the mailbox's tracked folders |
 | `kind: "lifecycle"`, `lifecycleEvent: "missed"` | Catch up with delta |
 | `kind: "lifecycle"`, `lifecycleEvent: "subscriptionRemoved"` | Recreate the subscription, then catch up |
 | `kind: "lifecycle"`, `lifecycleEvent: "reauthorizationRequired"` | Renew, which also reauthorizes |
