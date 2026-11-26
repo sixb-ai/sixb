@@ -73,7 +73,7 @@ import type {
 } from "@sixb/core/storage"
 import { readerConversations } from "./agents/readers"
 import type { SQLClient, SqlParameter } from "./pg-client"
-import { lockAdvisoryKeys, type PgStoreClient, runPgTransaction } from "./transactions"
+import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 interface PgRow {
   readonly [column: string]: unknown
@@ -670,15 +670,15 @@ export class PgArtifactStorage implements ArtifactStorage {
       if (!artifact) throw artifactStorageErrors.notFound(input.artifactId)
       // One reader's writes to one artifact take turns, so two at once cannot both fit under the
       // limits; other readers' writes do not wait.
-      await lockAdvisoryKeys(tx, [
-        JSON.stringify([
+      await tx`
+        SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify([
           "artifact_state",
           input.projectId,
           input.artifactId,
           input.principal.type,
           input.principal.id,
-        ]),
-      ])
+        ])}, 0))
+      `
       const [others] = await tx<PgRow[]>`
         SELECT count(*) AS keys, coalesce(sum(size_bytes), 0) AS bytes FROM artifact_state
         WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}

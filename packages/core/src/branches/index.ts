@@ -12,10 +12,15 @@ export {
   isBranchSliceRelease,
 } from "./credential"
 export {
+  type BranchClosure,
+  type BranchEnforcement,
   type BranchHostingStorage,
   type BranchRoleLimits,
+  branchClosureNotice,
   branchDatabaseAddress,
+  branchHostingRequirement,
   branchNamespaceName,
+  closeBranchData,
   dropBranchData,
   enforceBranchLimits,
   hostBranchDatabase,

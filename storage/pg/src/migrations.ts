@@ -221,12 +221,9 @@ function postgresMigrationSession(
     },
     state: {
       async ensure() {
-        // Creating a schema takes the database's CREATE privilege, even with IF NOT EXISTS. A role
-        // given its own schema, such as a hosted branch's, holds none: it only checks it is there.
-        const [exists] = await sql`SELECT 1 FROM pg_namespace WHERE nspname = ${schemaName}`
-        if (!exists) await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${schema}`)
-
         await sql.unsafe(`
+          CREATE SCHEMA IF NOT EXISTS ${schema};
+
           CREATE TABLE IF NOT EXISTS ${migrationsTable} (
             adapter_id TEXT NOT NULL,
             version INTEGER NOT NULL,
@@ -331,7 +328,9 @@ async function withPostgresMigrationLock<T>(
   },
   run: (sql: ReservedSQL) => Promise<T>
 ): Promise<T> {
-  const [first, second] = postgresMigrationLock(params.schemaName, params.migrations.adapterId)
+  const [first, second] = advisoryLockParts(
+    `storage:migration:${params.schemaName}:${params.migrations.adapterId}`
+  )
 
   // A session-level lock outlives any transaction, so it is released before the connection goes
   // back to the pool — except when the connection was lost, which already released it.
@@ -342,14 +341,6 @@ async function withPostgresMigrationLock<T>(
     await unlock()
     return result
   })
-}
-
-/** The advisory lock a schema's migrations of one adapter run under. */
-export function postgresMigrationLock(
-  schemaName: string,
-  adapterId: string
-): readonly [number, number] {
-  return advisoryLockParts(`storage:migration:${schemaName}:${adapterId}`)
 }
 
 function advisoryLockParts(key: string): readonly [number, number] {

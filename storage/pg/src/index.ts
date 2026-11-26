@@ -49,20 +49,16 @@ import { PgAuthStorage } from "./auth-storage"
 import { PgConnectorConnectionStorage } from "./connector-connection-storage"
 import {
   type HostedBranchConnection,
+  type HostedBranchEnforcement,
   type HostedBranchLimits,
   type HostedBranchLogin,
   hostedBranchLoginUrl,
   PgHostedBranches,
 } from "./hosted-branches"
-import {
-  createPostgresStorageMigrators,
-  dropSchema,
-  postgresMigrationLock,
-  quoteIdent,
-} from "./migrations"
+import { createPostgresStorageMigrators, dropSchema, quoteIdent } from "./migrations"
 import { PgObjectStorage, PgSortIndexCatalog } from "./objects"
 import { ensureObjectPartition } from "./objects/partitions"
-import { preparePgObjectQueries, TRIGRAM_EXTENSION_LOCK } from "./objects/prepare-queries"
+import { preparePgObjectQueries } from "./objects/prepare-queries"
 import { ensurePgObjectQueryIndexes, type PgObjectQueryIndex } from "./objects/query-indexes"
 import { PgBranchStorage } from "./pg-branch-storage"
 
@@ -255,6 +251,7 @@ export class PostgresStorage
   private readonly shutdownTimeoutSeconds: number
   private readonly transactionScope = new AsyncLocalStorage<boolean>()
   private readonly sortIndexes = new PgSortIndexCatalog()
+  private hosting: PgHostedBranches | undefined
 
   constructor(options: PostgresStorageOptions) {
     if (
@@ -614,7 +611,15 @@ export class PostgresStorage
   }
 
   /**
-   * A hosted branch's empty schema on this instance, owned by a role of its own, which logs in
+   * What this database user lacks to host branches, such as `CREATEDB`, or null. See
+   * `hosted-branches.ts`.
+   */
+  unmetHostedBranchRequirement(): Promise<string | null> {
+    return this.branchHosting.unmetRequirement()
+  }
+
+  /**
+   * A hosted branch's empty database on this instance, owned by a role of its own, which logs in
    * once `openHostedBranch` gives it a password. See `hosted-branches.ts`.
    */
   createHostedBranch(
@@ -629,23 +634,33 @@ export class PostgresStorage
     return this.branchHosting.open(name)
   }
 
-  /** Drops a hosted branch's schema, with everything in it, and its role. */
+  /** Takes a hosted branch's login away and ends its sessions. */
+  closeHostedBranch(name: string): Promise<void> {
+    return this.branchHosting.close(name)
+  }
+
+  /** Drops a hosted branch's database, with everything in it, and its role. */
   dropHostedBranch(name: string): Promise<void> {
     return this.branchHosting.drop(name)
   }
 
-  /** Stops a hosted branch's statements and transactions past their limits. */
-  enforceHostedBranchLimits(name: string, limits: HostedBranchLimits = {}): Promise<number> {
+  /** Stops a hosted branch's statements and sessions past their limits, or closes it. */
+  enforceHostedBranchLimits(
+    name: string,
+    limits: HostedBranchLimits = {}
+  ): Promise<HostedBranchEnforcement> {
     return this.branchHosting.enforce(name, limits)
   }
 
   /** Where a hosted branch reaches this instance: production's own host and port. */
   hostedBranchDatabaseAddress(): { readonly host: string; readonly port: number } {
-    const url = new URL(hostedBranchLoginUrl(this.connection(), { user: "branch", password: "" }))
+    const url = new URL(
+      hostedBranchLoginUrl(this.connection(), { user: "branch", password: "", database: "" })
+    )
     return { host: url.hostname, port: Number(url.port || 5432) }
   }
 
-  /** The role, and the schema it owns, a hosted branch of this namespace runs as. */
+  /** The role a hosted branch of this namespace runs as, and the name of the database it owns. */
   hostedBranchRole(name: string): Promise<string> {
     return this.branchHosting.roleName(name)
   }
@@ -655,16 +670,33 @@ export class PostgresStorage
     return { connectionString, host, port, database, ssl }
   }
 
+  /** Kept: it remembers when it last measured each branch's database. */
   private get branchHosting(): PgHostedBranches {
-    return new PgHostedBranches(this.sql, {
+    this.hosting ??= new PgHostedBranches(this.sql, {
       productionSchema: this.schemaName,
       connection: this.connection(),
-      productionLocks: [
-        ...this.migrators.map((migrator) => ({
-          pair: postgresMigrationLock(this.schemaName, migrator.adapterId),
-        })),
-        { text: TRIGRAM_EXTENSION_LOCK },
-      ],
+      connect: (database) => this.connectTo(database),
+    })
+    return this.hosting
+  }
+
+  /** This storage's own login, one connection, on another database of its instance. */
+  private connectTo(database: string): SQL {
+    const { connectionString, host, port, user, password, ssl, connectTimeoutMillis } = this.options
+    const url = connectionString === undefined ? undefined : new URL(connectionString)
+    if (url) url.pathname = `/${encodeURIComponent(database)}`
+
+    return createPgClient({
+      ...(url ? { connectionString: url.toString() } : {}),
+      ...(host !== undefined ? { host } : {}),
+      ...(port !== undefined ? { port } : {}),
+      ...(user !== undefined ? { user } : {}),
+      ...(password !== undefined ? { password } : {}),
+      ...(ssl !== undefined ? { ssl } : {}),
+      ...(connectTimeoutMillis !== undefined ? { connectTimeoutMillis } : {}),
+      database,
+      max: 1,
+      schemaName: "public",
     })
   }
 
@@ -855,5 +887,10 @@ function isDuplicateSchema(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === "42P06"
 }
 
-export type { HostedBranchLimits, HostedBranchLogin } from "./hosted-branches"
+export type {
+  HostedBranchClosure,
+  HostedBranchEnforcement,
+  HostedBranchLimits,
+  HostedBranchLogin,
+} from "./hosted-branches"
 export { migratePostgresStorage } from "./migrations"

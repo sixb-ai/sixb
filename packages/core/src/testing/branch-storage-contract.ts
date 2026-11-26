@@ -58,7 +58,12 @@ export function runBranchStorageContractSuite<TStorage extends BranchStorage>(
           refreshRequestedAt: new Date("2026-11-24T12:02:00.000Z"),
           port: 20_000,
           remoteCommit: "b".repeat(40),
-          notices: [{ code: "data-reset", message: "Its machine was lost." }],
+          // Guard check: drop a code from `NOTICES` in `storage/branches/record.ts`: its notice
+          // is then lost on the way back.
+          notices: [
+            { code: "data-reset", message: "Its machine was lost." },
+            { code: "database-limit", message: "Its data grew past its limit." },
+          ],
           owner: "branch-worker-1",
           leaseExpiresAt: new Date("2026-11-24T12:05:00.000Z"),
         }

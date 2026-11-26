@@ -9,6 +9,8 @@ import {
   type SixbHostOptions,
 } from "../src"
 import {
+  branchClosureNotice,
+  branchHostingRequirement,
   branchNamespaceName,
   dropBranchData,
   hostBranchDatabase,
@@ -20,7 +22,7 @@ import { createTestSixb } from "../src/testing"
 import { groupsOf } from "./helpers/view-conditions"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
-// A shop: Bo reads orders, not payslips. Production's side of a branch Bo opened: a schema made
+// A shop: Bo reads orders, not payslips. Production's side of a branch Bo opened: a database made
 // anew for each copy, for the branch's runtime to load its copy into.
 
 const projectId = "branch-data"
@@ -44,11 +46,12 @@ const roles = [
 ]
 
 /**
- * In memory there is no instance to host a role on: a namespace stands for the branch's schema.
+ * In memory there is no instance to host a role on: a namespace stands for the branch's database.
  * `@sixb/pg`'s own tests run the real one.
  */
 function hosting(storage: InMemoryStorage): InMemoryStorage {
   return Object.assign(storage, {
+    unmetHostedBranchRequirement: async () => null,
     createHostedBranch: async (name: string) => {
       await storage.createBranchNamespace(name)
       return { tempFileLimit: true }
@@ -57,8 +60,9 @@ function hosting(storage: InMemoryStorage): InMemoryStorage {
       url: "postgres://role@db/prod",
       schemaName: name,
     }),
+    closeHostedBranch: async () => {},
     dropHostedBranch: (name: string) => storage.dropBranchNamespace(name),
-    enforceHostedBranchLimits: async () => 0,
+    enforceHostedBranchLimits: async () => ({ stopped: 0, closed: null }),
   })
 }
 
@@ -120,7 +124,7 @@ function row(): Omit<BranchRecord, "updatedAt" | "revision"> {
 describe("a branch's data", () => {
   // Guard check: drop the `dropHostedBranch` before `createHostedBranch` in `prepareBranchData`
   // (`branches/data.ts`): the second home finds the namespace and fails.
-  test("lives in a schema made anew, and empty, for each copy", async () => {
+  test("lives in a database made anew, and empty, for each copy", async () => {
     const { host, branch } = await deploy()
     const namespaces = branchNamespaces(host.storage)
 
@@ -143,6 +147,21 @@ describe("a branch's data", () => {
 
     const refused = await hostBranchDatabase(host, branch).catch((error: unknown) => error)
 
-    expect(String(refused)).toContain("Use @sixb/pg for production's storage")
+    expect(String(refused)).toContain("need @sixb/pg for production's storage")
+    expect(await branchHostingRequirement(host)).toStartWith("@sixb/pg for production's storage")
+  })
+
+  // The worker writes it on the branch's row, and the Console shows it as is.
+  test("says in plain words why production stopped a branch", () => {
+    expect(
+      branchClosureNotice({ reason: "disk", bytes: 21 * 1024 ** 3, limitBytes: 20 * 1024 ** 3 })
+    ).toEqual({
+      code: "database-limit",
+      message:
+        "This branch stopped: its data grew past 20 GB on production's database, its limit. Refresh it from production to start again from a new copy.",
+    })
+    expect(branchClosureNotice({ reason: "locks", locks: 15_000 }).message).toContain(
+      "held 15000 database locks at once"
+    )
   })
 })
