@@ -59,7 +59,8 @@ branch's code runs, and keeps it under `.sixb/branches/`, readable by you only. 
 gets none of that sign-in: it holds only its own credential, which reads production as you for its
 objects' files and its datasets, and nothing else. It ends with the copy, or as soon as the
 session or token the copy was taken with is signed out or revoked: revoking a leaked token stops
-the branches it copied for too. Production runs two
+the branches it copied for too. `sixb logout`, and a new `sixb login` on the same profile, sign the
+old session out. Production runs two
 copies at a time per server process, one per person, and records each copy in its log, with your
 name, the branch and how you signed in.
 
