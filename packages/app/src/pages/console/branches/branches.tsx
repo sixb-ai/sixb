@@ -188,7 +188,12 @@ const statusTones: Record<BranchStatus, Tone> = {
   deleting: "muted",
 }
 
-type Confirm = { readonly kind: "refresh" | "delete"; readonly name: string }
+type Confirm = {
+  readonly kind: "refresh" | "delete"
+  readonly name: string
+  /** Whose view of production a refresh copies: the branch's creator, whoever asks. */
+  readonly createdBy: string
+}
 
 /**
  * Console › Branches: the git branches production runs next to itself, each on a copy of what its
@@ -219,9 +224,8 @@ export function ConsoleBranchesPage() {
   const wantsRefresh = searchParams.get("refresh") === "1"
   useEffect(() => {
     if (!wantsRefresh || !highlighted || !branches) return
-    if (branches.some((branch) => branch.name === highlighted)) {
-      setConfirm({ kind: "refresh", name: highlighted })
-    }
+    const target = branches.find((branch) => branch.name === highlighted)
+    if (target) setConfirm({ kind: "refresh", name: target.name, createdBy: target.createdBy })
     setSearchParams(
       (params) => {
         params.delete("refresh")
@@ -363,8 +367,12 @@ export function ConsoleBranchesPage() {
               onOpen={() => openInTab(branch.name)}
               onStart={() => openMutation.mutate({ body: { name: branch.name } })}
               onStop={() => stopMutation.mutate({ body: { name: branch.name } })}
-              onRefresh={() => setConfirm({ kind: "refresh", name: branch.name })}
-              onDelete={() => setConfirm({ kind: "delete", name: branch.name })}
+              onRefresh={() =>
+                setConfirm({ kind: "refresh", name: branch.name, createdBy: branch.createdBy })
+              }
+              onDelete={() =>
+                setConfirm({ kind: "delete", name: branch.name, createdBy: branch.createdBy })
+              }
             />
           ))
         )}
@@ -669,6 +677,19 @@ function useStartedBy(userId: string): string {
   return messages.startedBy(person?.displayName || person?.email || userId)
 }
 
+/**
+ * Who started the branch, as a refresh names them: null for the reader, their name when the
+ * directory says, else the person who started it.
+ */
+function useCreatorName(userId: string | null): string | null {
+  const messages = useBranchesMessages()
+  const me = useCurrentUser()
+  const mine = userId === null || me?.id === userId
+  const person = useUser(userId ?? "", { enabled: !mine, retry: false }).data
+  if (mine) return null
+  return person?.displayName || person?.email || messages.refresh.someone
+}
+
 /** The steps a branch takes on its way up, the current one live, the rest done or waiting. */
 function Progress({ step, waiting }: { readonly step: BranchStep; readonly waiting: boolean }) {
   const messages = useBranchesMessages()
@@ -931,8 +952,16 @@ function ConfirmDialog({
   useEffect(() => {
     if (confirm) setShown(confirm)
   }, [confirm])
-  const text = shown?.kind === "delete" ? messages.remove : messages.refresh
+  const creator = useCreatorName(shown?.createdBy ?? null)
   const name = shown?.name ?? ""
+  const text = shown?.kind === "delete" ? messages.remove : messages.refresh
+  // A refresh copies what the branch's creator sees, whoever asks for it.
+  const description =
+    shown?.kind === "delete"
+      ? messages.remove.description
+      : creator === null
+        ? messages.refresh.description
+        : messages.refresh.descriptionOf(creator)
 
   return (
     <AlertDialog open={confirm !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
@@ -941,7 +970,7 @@ function ConfirmDialog({
           <AlertDialogTitle className="break-words">
             {withCode(text.title(name), name)}
           </AlertDialogTitle>
-          <AlertDialogDescription>{text.description}</AlertDialogDescription>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{messages.cancel}</AlertDialogCancel>

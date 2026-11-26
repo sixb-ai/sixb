@@ -481,6 +481,32 @@ describe("Console › Branches", () => {
     expect(await refresh.json()).toEqual({ name: "feature/route-planner" })
   })
 
+  // A refresh copies what the branch's creator sees, whoever asks: Ada refreshing Sam's branch
+  // gets Sam's view, not hers. Red check: show `refresh.description` whoever started the branch.
+  test("says a refresh copies what the branch's creator sees", async () => {
+    answerWith((request) =>
+      request.url.includes("usr_sam")
+        ? Response.json({
+            id: "usr_sam",
+            email: "sam@northline.test",
+            displayName: "Sam Ortiz",
+            status: "active",
+          })
+        : Response.json({ branches: [], unavailable: null, now: NOW })
+    )
+    const { view } = renderPage(
+      { branches: [branch({ createdBy: "usr_sam" })], unavailable: null, now: NOW },
+      "/console/branches?branch=feature%2Froute-planner&refresh=1"
+    )
+
+    const dialog = await view.findByRole("alertdialog")
+    expect(
+      await within(dialog).findByText(
+        "It takes a new copy of what Sam Ortiz sees in production now. Changes made on this branch are discarded."
+      )
+    ).toBeDefined()
+  })
+
   // The tab opens on the click, or the browser blocks it, and only then is the person signed in.
   // The branch's page gets no handle on the Console's tab. Removal proof: open the tab after the
   // sign-in answers, and `window.open` is called outside the click.

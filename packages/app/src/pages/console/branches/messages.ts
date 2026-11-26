@@ -114,6 +114,10 @@ export const en = {
     title: (name: string) => `Refresh ${name} from production?`,
     description:
       "It takes a new copy of what you see in production now. Changes made on this branch are discarded.",
+    /** On someone else's branch: the copy is always what its creator sees. */
+    descriptionOf: (name: string) =>
+      `It takes a new copy of what ${name} sees in production now. Changes made on this branch are discarded.`,
+    someone: "the person who started it",
     confirm: "Refresh",
   },
   remove: {
@@ -260,6 +264,9 @@ export const fr: Translation<BranchesMessages> = {
     title: (name: string) => `Actualiser ${name} depuis la production ?`,
     description:
       "Elle reprend une copie de ce que vous voyez en production maintenant. Les modifications faites sur cette branche sont perdues.",
+    descriptionOf: (name: string) =>
+      `Elle reprend une copie de ce que ${name} voit en production maintenant. Les modifications faites sur cette branche sont perdues.`,
+    someone: "la personne qui l’a démarrée",
     confirm: "Actualiser",
   },
   remove: {
