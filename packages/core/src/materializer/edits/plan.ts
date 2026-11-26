@@ -145,7 +145,10 @@ async function stageObject(
   appendObjectOverrideWork(items, working, identity)
 
   const resolved = resolveObject(context.ontology, working)
-  if (resolved) validateEffectiveObject(context.ontology, resolved.ref, resolved.properties)
+  if (resolved) {
+    const withheld = context.withheld.of(working.before)
+    validateEffectiveObject(context.ontology, resolved.ref, resolved.properties, withheld)
+  }
   const change = diffEffectiveObject({
     before: working.before,
     resolved,

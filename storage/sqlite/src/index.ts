@@ -4,6 +4,9 @@
 
 import { Database } from "bun:sqlite"
 import { AsyncLocalStorage } from "node:async_hooks"
+import { existsSync } from "node:fs"
+import { readdir, rm } from "node:fs/promises"
+import { join } from "node:path"
 import type {
   MigrationCapableStorage,
   Storage,
@@ -12,6 +15,8 @@ import type {
 } from "@sixb/core"
 import { ProviderMaterializationTransactionLifecycle } from "@sixb/core/internal/ontology-storage-provider"
 import {
+  assertBranchNamespaceName,
+  branchNamespaceExists,
   createTransactionStorageProxy,
   throwNestedStorageTransaction,
 } from "@sixb/core/internal/storage"
@@ -28,8 +33,13 @@ import {
   type AiCostStorage,
   type AiLimitStorage,
   type AiUsageStorage,
+  type BranchNamespace,
+  type BranchNamespaceStorage,
   type ShareGrantStorage,
   type ShareSessionStorage,
+  type SnapshotLoader,
+  type SnapshotLoadInput,
+  type SnapshotLoadStorage,
   type SnapshotReadOptions,
   type SnapshotReadStorage,
   type SnapshotReadView,
@@ -58,6 +68,7 @@ import { SqliteProjectionRunStorage } from "./projection-run-storage"
 import { SqliteRulesStorage } from "./rules-storage"
 import { SqliteShareGrantStorage } from "./share-grant-storage"
 import { SqliteShareSessionStorage } from "./share-session-storage"
+import { SqliteSnapshotLoad } from "./snapshot-load"
 import { readSqliteLatestPoints, readSqliteMemberships, readSqliteVectors } from "./snapshot-read"
 import { SqliteSyncRunStorage } from "./sync-run-storage"
 import { registerSqliteStorageTestingAdapter } from "./testing"
@@ -95,7 +106,13 @@ export interface SqliteStorageOptions {
  * })
  * ```
  */
-export class SqliteStorage implements MigrationCapableStorage, SnapshotReadStorage {
+export class SqliteStorage
+  implements
+    MigrationCapableStorage,
+    SnapshotReadStorage,
+    SnapshotLoadStorage,
+    BranchNamespaceStorage
+{
   readonly objects: Storage["objects"]
   readonly ontology: SqliteOntologyStorage
   readonly auth: SqliteAuthStorage
@@ -126,6 +143,8 @@ export class SqliteStorage implements MigrationCapableStorage, SnapshotReadStora
   readonly migrators: readonly StorageMigrator[]
 
   private readonly basePath: string | undefined
+  /** Branches opened through this storage; without a path, the only place they live. */
+  private readonly branches = new Map<string, SqliteStorage>()
   private readonly connection: SqliteStoreConnection
   private readonly readConnection: SqliteStoreConnection
   private readonly transactionScope = new AsyncLocalStorage<{ active: boolean }>()
@@ -266,6 +285,8 @@ export class SqliteStorage implements MigrationCapableStorage, SnapshotReadStora
   }
 
   close(): void {
+    for (const branch of this.branches.values()) branch.close()
+    this.branches.clear()
     if (this.readConnection !== this.connection) closeSqliteStoreConnection(this.readConnection)
     closeSqliteStoreConnection(this.connection)
   }
@@ -315,6 +336,96 @@ export class SqliteStorage implements MigrationCapableStorage, SnapshotReadStora
       endSqliteSnapshot(connection.db)
       closeSqliteStoreConnection(connection)
     }
+  }
+
+  async loadSnapshot<T>(
+    input: SnapshotLoadInput,
+    run: (loader: SnapshotLoader) => Promise<T>
+  ): Promise<T> {
+    this.assertRootOperationAvailable()
+
+    // A branch is a copy production can take again: the load skips the flush after each write and
+    // sorts its indexes in memory. It skips CHECK constraints too: they would parse every JSON
+    // value again, which production's storage and the loader's own row shapes already guarantee.
+    // Each setting is put back once the load ends.
+    const db = this.connection.db
+    const pragmas = ["synchronous", "cache_size", "temp_store", "ignore_check_constraints"].map(
+      (name) => ({
+        name,
+        value: Object.values(db.query(`PRAGMA ${name}`).get() as Record<string, unknown>)[0],
+      })
+    )
+
+    return this.withTransactionLock(async () => {
+      db.run("PRAGMA synchronous = OFF")
+      db.run("PRAGMA cache_size = -262144")
+      db.run("PRAGMA temp_store = MEMORY")
+      db.run("PRAGMA ignore_check_constraints = ON")
+
+      try {
+        return await runImmediateTransactionAsync(db, async () => {
+          const load = new SqliteSnapshotLoad(db, input)
+          const result = await run({ write: async (batch) => load.write(batch) })
+          load.finish()
+          return result
+        })
+      } finally {
+        for (const { name, value } of pragmas) db.run(`PRAGMA ${name} = ${Number(value)}`)
+      }
+    })
+  }
+
+  /** A file of its own under `branches/`, or, without a path, a database of its own in memory. */
+  async createBranchNamespace(name: string): Promise<BranchNamespace> {
+    assertBranchNamespaceName(name)
+    if (this.branches.has(name) || this.branchFileExists(name)) throw branchNamespaceExists(name)
+
+    return this.openBranch(name)
+  }
+
+  async openBranchNamespace(name: string): Promise<BranchNamespace | null> {
+    assertBranchNamespaceName(name)
+    if (!this.branches.has(name) && !this.branchFileExists(name)) return null
+
+    return this.openBranch(name)
+  }
+
+  async listBranchNamespaces(): Promise<readonly string[]> {
+    const names = new Set(this.branches.keys())
+    if (this.basePath) {
+      const entries = await readdir(join(this.basePath, "branches")).catch(() => [])
+      for (const entry of entries) if (this.branchFileExists(entry)) names.add(entry)
+    }
+    return [...names].sort()
+  }
+
+  async dropBranchNamespace(name: string): Promise<void> {
+    assertBranchNamespaceName(name)
+    this.branches.get(name)?.close()
+    this.branches.delete(name)
+    if (this.basePath) await rm(this.branchPath(name), { recursive: true, force: true })
+  }
+
+  private async openBranch(name: string): Promise<SqliteStorage> {
+    const opened = this.branches.get(name)
+    if (opened) return opened
+
+    const branch = this.basePath
+      ? new SqliteStorage({ path: this.branchPath(name) })
+      : new SqliteStorage()
+    for (const migrator of branch.migrators) await migrator.migrate()
+
+    this.branches.set(name, branch)
+    return branch
+  }
+
+  private branchPath(name: string): string {
+    if (!this.basePath) throw new Error("[SixbSqlite] A branch file needs a storage path.")
+    return join(this.basePath, "branches", name)
+  }
+
+  private branchFileExists(name: string): boolean {
+    return this.basePath !== undefined && existsSync(sqliteStoragePath(this.branchPath(name)))
   }
 
   private createTransactionStorage(

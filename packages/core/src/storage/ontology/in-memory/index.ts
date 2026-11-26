@@ -48,7 +48,7 @@ export class InMemoryOntologyStorage implements OntologyStorage {
   readonly replacementPlans: InMemoryOntologyReplacementPlanStorage
   readonly outbox: InMemoryOntologyOutboxStorage
   readonly uniqueValues: InMemoryOntologyUniqueValueStorage
-  /** @internal What the in-memory storage reads a snapshot through. */
+  /** @internal What the in-memory storage loads and reads a snapshot through. */
   readonly snapshots: InMemorySnapshots
   private testHooks: InMemoryOntologyStorageTestHooks = {}
   private readonly testingAdapter: InMemoryOntologyStorageTestingAdapter = {
@@ -87,7 +87,7 @@ export class InMemoryOntologyStorage implements OntologyStorage {
       options.readExecution
     )
     this.uniqueValues = new InMemoryOntologyUniqueValueStorage(objects, options.runRootOperation)
-    this.snapshots = new InMemorySnapshots(this.state)
+    this.snapshots = new InMemorySnapshots(this.state, objects, timeseries)
     const hooks: InMemoryOntologyStorageTestHooks = {
       beforeRead: (boundary) => this.testHooks.beforeRead?.(boundary),
       beforeWrite: (boundary, ordinal) => this.testHooks.beforeWrite?.(boundary, ordinal),

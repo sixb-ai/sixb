@@ -31,6 +31,8 @@ export type KernelOperation =
   | { readonly type: "ontology.indexVectors"; readonly indexingId: string }
   /** Transcribing a video or a sound for what Sixb derives from it, by the digest of its bytes. */
   | { readonly type: "artifacts.transcribeMedia"; readonly digest: string }
+  /** Loading a snapshot into a branch as one base commit, by the snapshot's id. */
+  | { readonly type: "ontology.loadSnapshot"; readonly snapshotId: string }
 
 /** Workload currently executing. This is provenance and never grants authority by itself. */
 export type ExecutionExecutor =

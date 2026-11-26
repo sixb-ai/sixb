@@ -3,7 +3,7 @@ import type { OntologyDefinitionCatalog } from "../ontology/registry"
 import type { ObjectLink, ObjectType, Property, ValueType } from "../ontology/types"
 import type { SnapshotTypeManifest } from "./format"
 
-/** What the manifest records of a type's definition, for an importer to compare with its own. */
+/** What the manifest records of a type's definition, for {@link checkTypeFits} to compare. */
 export type TypeDefinitionManifest = Pick<
   SnapshotTypeManifest,
   "primaryPropertyId" | "properties" | "requiredPropertyIds" | "uniquePropertyIds" | "links"
@@ -27,6 +27,66 @@ export function typeDefinitionManifest(
     uniquePropertyIds: objectType.properties.filter((p) => p.unique).map((p) => p.id),
     links: Object.fromEntries(
       objectType.links.map((link) => [link.id, linkFingerprint(link, valueTypes)])
+    ),
+  }
+}
+
+/** How a type of the snapshot fits the importing runtime's definition of it. */
+export type TypeFit =
+  | {
+      readonly fits: true
+      /** Properties the branch no longer defines: their values are left out. */
+      readonly droppedPropertyIds: readonly string[]
+      /** Links the branch removed or redefined: their rows are left out. */
+      readonly droppedLinkIds: readonly string[]
+    }
+  | { readonly fits: false; readonly reason: string }
+
+/**
+ * Whether objects stored under production's definition of a type are valid under the branch's.
+ * A type fits unless the branch removed it, changed its primary property, changed a property both
+ * define, or requires a property production does not. A required property hidden from the person
+ * does not skip the type: its objects and links travel and read normally, any write to one of
+ * them, a new link included, fails while the property is unset, and a delete works.
+ */
+export function checkTypeFits(
+  manifest: SnapshotTypeManifest,
+  ontology: OntologyDefinitionCatalog
+): TypeFit {
+  const objectType = ontology.getObjectTypeById(manifest.objectTypeId)
+  if (!objectType) return { fits: false, reason: "the branch no longer defines this type" }
+
+  const branch = typeDefinitionManifest(objectType, ontology)
+  if (branch.primaryPropertyId !== manifest.primaryPropertyId) {
+    return {
+      fits: false,
+      reason: `its primary property changed from '${manifest.primaryPropertyId}' to '${branch.primaryPropertyId}'`,
+    }
+  }
+
+  for (const [propertyId, fingerprint] of Object.entries(branch.properties)) {
+    const production = manifest.properties[propertyId]
+    if (production !== undefined && production !== fingerprint) {
+      return { fits: false, reason: `property '${propertyId}' changed its type or mode` }
+    }
+  }
+
+  for (const propertyId of branch.requiredPropertyIds) {
+    if (!manifest.requiredPropertyIds.includes(propertyId)) {
+      return {
+        fits: false,
+        reason: `property '${propertyId}' is required on the branch but not in production`,
+      }
+    }
+  }
+
+  return {
+    fits: true,
+    droppedPropertyIds: Object.keys(manifest.properties).filter(
+      (propertyId) => branch.properties[propertyId] === undefined
+    ),
+    droppedLinkIds: Object.keys(manifest.links).filter(
+      (linkId) => branch.links[linkId] !== manifest.links[linkId]
     ),
   }
 }

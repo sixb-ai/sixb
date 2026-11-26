@@ -203,7 +203,12 @@ function applyObjectTransition(
   try {
     const resolved = resolveObject(context.ontology, working)
     if (resolved) {
-      validateEffectiveObject(context.ontology, resolved.ref, resolved.properties)
+      validateEffectiveObject(
+        context.ontology,
+        resolved.ref,
+        resolved.properties,
+        context.withheld.of(working.before)
+      )
       validateResolved?.(resolved)
     }
     validateWorkingCardinality(state.links.slots)

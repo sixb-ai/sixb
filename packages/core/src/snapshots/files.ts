@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto"
 import { rename, rm } from "node:fs/promises"
+import { join } from "node:path"
 
 /**
  * Write a snapshot to a file, for a branch on another machine to import. It is written beside the
@@ -29,7 +31,7 @@ export async function writeSnapshotFile(
   return { bytes }
 }
 
-/** A snapshot file's bytes, as an importer reads them. */
+/** A snapshot file's bytes, as {@link importSnapshot} reads them. */
 export async function* readSnapshotFile(path: string): AsyncGenerator<Uint8Array> {
   const file = Bun.file(path)
   if (!(await file.exists())) {
@@ -37,4 +39,23 @@ export async function* readSnapshotFile(path: string): AsyncGenerator<Uint8Array
   }
 
   yield* file.stream()
+}
+
+/**
+ * A snapshot written to a file in `directory` first, then read back: production's read closes
+ * at export speed, however slowly the consumer goes, as for a load into a branch on the same
+ * instance. The file is removed once read, or once the reader stops.
+ */
+export async function* spoolSnapshot(
+  snapshot: AsyncIterable<Uint8Array>,
+  directory: string
+): AsyncGenerator<Uint8Array> {
+  const path = join(directory, `snapshot-${randomUUID()}.sixbsnap`)
+  await writeSnapshotFile(path, snapshot)
+
+  try {
+    yield* readSnapshotFile(path)
+  } finally {
+    await rm(path, { force: true })
+  }
 }

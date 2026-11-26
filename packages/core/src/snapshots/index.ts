@@ -6,5 +6,12 @@ export {
   hostSnapshotSource,
   type SnapshotSource,
 } from "./export"
-export { readSnapshotFile, writeSnapshotFile } from "./files"
+export { readSnapshotFile, spoolSnapshot, writeSnapshotFile } from "./files"
 export type { SnapshotCounts, SnapshotManifest, SnapshotTypeManifest } from "./format"
+export {
+  type ImportedSnapshotType,
+  type ImportSnapshotInput,
+  importSnapshot,
+  type SnapshotImportReport,
+} from "./import"
+export { branchNamespaces } from "./namespaces"

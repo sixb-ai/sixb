@@ -3,6 +3,7 @@
 // source.
 
 import { AsyncLocalStorage } from "node:async_hooks"
+import { createHash } from "node:crypto"
 import type {
   MigrationCapableStorage,
   Storage,
@@ -11,6 +12,8 @@ import type {
 } from "@sixb/core"
 import { ProviderMaterializationTransactionLifecycle } from "@sixb/core/internal/ontology-storage-provider"
 import {
+  assertBranchNamespaceName,
+  branchNamespaceExists,
   createTransactionStorageProxy,
   throwNestedStorageTransaction,
 } from "@sixb/core/internal/storage"
@@ -27,10 +30,15 @@ import {
   type AiCostStorage,
   type AiLimitStorage,
   type AiUsageStorage,
+  type BranchNamespace,
+  type BranchNamespaceStorage,
   type ObjectQueryPreparationPlan,
   type ObjectQueryPreparationResult,
   type ObjectStorage,
   type QueryPreparationCapableStorage,
+  type SnapshotLoader,
+  type SnapshotLoadInput,
+  type SnapshotLoadStorage,
   type SnapshotReadOptions,
   type SnapshotReadStorage,
   type SnapshotReadView,
@@ -39,8 +47,9 @@ import {
 import { PgAgentStorage } from "./agents"
 import { PgAuthStorage } from "./auth-storage"
 import { PgConnectorConnectionStorage } from "./connector-connection-storage"
-import { createPostgresStorageMigrators, dropSchema } from "./migrations"
+import { createPostgresStorageMigrators, dropSchema, quoteIdent } from "./migrations"
 import { PgObjectStorage, PgSortIndexCatalog } from "./objects"
+import { ensureObjectPartition } from "./objects/partitions"
 import { preparePgObjectQueries } from "./objects/prepare-queries"
 import { ensurePgObjectQueryIndexes, type PgObjectQueryIndex } from "./objects/query-indexes"
 
@@ -74,6 +83,7 @@ import { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storag
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
 import { PgShareGrantStorage } from "./share-grant-storage"
 import { PgShareSessionStorage } from "./share-session-storage"
+import { type BranchSchemaState, PgSnapshotLoad, SNAPSHOT_LANES } from "./snapshot-load"
 import { readPgLatestPoints, readPgMemberships, readPgRanges, readPgVectors } from "./snapshot-read"
 import { isRetryableTransactionConflict } from "./storage-errors"
 import { registerPostgresStorageTestingAdapter } from "./testing"
@@ -175,7 +185,12 @@ export interface PostgresStorageOptions {
  * ```
  */
 export class PostgresStorage
-  implements MigrationCapableStorage, QueryPreparationCapableStorage, SnapshotReadStorage
+  implements
+    MigrationCapableStorage,
+    QueryPreparationCapableStorage,
+    SnapshotReadStorage,
+    SnapshotLoadStorage,
+    BranchNamespaceStorage
 {
   readonly objects: ObjectStorage
   readonly ontology: PgOntologyStorage
@@ -209,6 +224,10 @@ export class PostgresStorage
   private readonly sql: SQL
   private readonly options: PostgresStorageOptions
   private readonly schemaName: string
+  /** Branch schemas opened through this storage, closed with it. */
+  private readonly branches = new Map<string, PostgresStorage>()
+  /** Set on a branch namespace's storage: the only kind a snapshot loads into. */
+  private branchName: string | undefined
   private readonly shutdownTimeoutSeconds: number
   private readonly transactionScope = new AsyncLocalStorage<boolean>()
   private readonly sortIndexes = new PgSortIndexCatalog()
@@ -401,6 +420,8 @@ export class PostgresStorage
    * queries to finish before destroying connections.
    */
   async close(): Promise<void> {
+    await Promise.all([...this.branches.values()].map((branch) => branch.close()))
+    this.branches.clear()
     await this.sql.end({ timeout: this.shutdownTimeoutSeconds })
   }
 
@@ -451,6 +472,162 @@ export class PostgresStorage
       readMemberships: ({ projectId }) => readPgMemberships(connection, projectId),
       readRanges: (input) => readPgRanges(connection, input),
     }
+  }
+
+  /**
+   * Load into this branch schema, and only into one: the load empties the tables it fills. Each
+   * type's partition is created first, then the tables load in parallel lanes, one connection
+   * and transaction each, on at most half the pool; see `PgSnapshotLoad`. One load at a time.
+   */
+  async loadSnapshot<T>(
+    input: SnapshotLoadInput,
+    run: (loader: SnapshotLoader) => Promise<T>
+  ): Promise<T> {
+    this.assertRootOperationAvailable()
+    const branch = this.branchName
+    if (branch === undefined) {
+      throw new Error(
+        "[SixbPg] A snapshot loads into a branch namespace only: create one with createBranchNamespace, then load into it."
+      )
+    }
+
+    const count = Math.max(1, Math.min(SNAPSHOT_LANES, Math.floor((this.options.max ?? 10) / 2)))
+    const connections: ReservedSQL[] = []
+    let locked = false
+
+    try {
+      for (let index = 0; index < count; index += 1) connections.push(await this.sql.reserve())
+      const first = connections[0]!
+
+      const [lock] = await first<{ locked: boolean }[]>`
+        SELECT pg_try_advisory_lock(hashtext(${`${this.schemaName}:snapshot-load`})) AS locked
+      `
+      locked = lock?.locked === true
+      if (!locked) {
+        throw new Error(
+          `[SixbPg] Branch namespace '${branch}' is loading a snapshot already: wait for that load to end.`
+        )
+      }
+
+      for (const objectTypeId of input.objectTypeIds) {
+        await ensureObjectPartition(first, this.schemaName, objectTypeId)
+      }
+
+      return await PgSnapshotLoad.run(connections, input, { sixbBranch: branch }, (load) =>
+        run({ write: (batch) => load.write(batch) })
+      )
+    } finally {
+      if (locked) {
+        await connections[0]!`
+          SELECT pg_advisory_unlock(hashtext(${`${this.schemaName}:snapshot-load`}))
+        `.catch(() => undefined)
+      }
+      for (const connection of connections) connection.release()
+    }
+  }
+
+  /** A schema of its own, migrated and ready to load a snapshot into. */
+  async createBranchNamespace(name: string): Promise<BranchNamespace> {
+    assertBranchNamespaceName(name)
+    const schema = this.branchSchemaName(name)
+
+    // Creating the schema is the check: two callers cannot both create it.
+    try {
+      await runPgTransaction(this.sql, async (tx) => {
+        await tx.unsafe(`CREATE SCHEMA ${quoteIdent(schema)}`)
+        await tx.unsafe(
+          `COMMENT ON SCHEMA ${quoteIdent(schema)} IS '${JSON.stringify({ sixbBranch: name })}'`
+        )
+      })
+    } catch (error) {
+      if (isDuplicateSchema(error)) throw branchNamespaceExists(name)
+      throw error
+    }
+
+    return this.openBranch(name)
+  }
+
+  async openBranchNamespace(name: string): Promise<BranchNamespace | null> {
+    assertBranchNamespaceName(name)
+    const state = await this.branchSchemaState(name)
+    if (!state) return null
+
+    if (state.loading) {
+      throw new Error(
+        `[SixbPg] Branch namespace '${name}' stopped while a snapshot was loading into it: drop it and load the snapshot again.`
+      )
+    }
+    return this.openBranch(name)
+  }
+
+  async listBranchNamespaces(): Promise<readonly string[]> {
+    const rows = await this.sql<{ comment: string | null }[]>`
+      SELECT obj_description(oid, 'pg_namespace') AS comment FROM pg_namespace
+      WHERE starts_with(nspname, ${this.branchSchemaPrefix()})
+    `
+    return rows
+      .flatMap((row) => {
+        const state = parseBranchState(row.comment)
+        return state ? [state.sixbBranch] : []
+      })
+      .sort()
+  }
+
+  /** Drop the branch's schema and everything in it. */
+  async dropBranchNamespace(name: string): Promise<void> {
+    assertBranchNamespaceName(name)
+    await this.branches.get(name)?.close()
+    this.branches.delete(name)
+
+    await this.sql.unsafe(
+      `DROP SCHEMA IF EXISTS ${quoteIdent(this.branchSchemaName(name))} CASCADE`
+    )
+  }
+
+  private async openBranch(name: string): Promise<PostgresStorage> {
+    const opened = this.branches.get(name)
+    if (opened) return opened
+
+    const branch = new PostgresStorage({ ...this.options, schemaName: this.branchSchemaName(name) })
+    branch.branchName = name
+    for (const migrator of branch.migrators) await migrator.migrate()
+
+    this.branches.set(name, branch)
+    return branch
+  }
+
+  private branchSchemaPrefix(): string {
+    return `${this.schemaName}_branch_`
+  }
+
+  /**
+   * `<schema>_branch_<name>`, dashes as underscores. PostgreSQL cuts a name at 63 bytes, so a
+   * longer one keeps a prefix and a hash of the branch's name: two names never share a schema.
+   */
+  private branchSchemaName(name: string): string {
+    const full = `${this.branchSchemaPrefix()}${name.replaceAll("-", "_")}`
+    if (Buffer.byteLength(full) <= MAX_IDENTIFIER_BYTES) return full
+
+    const hash = createHash("sha256").update(name).digest("hex").slice(0, 12)
+    const kept = Buffer.from(full).subarray(0, MAX_IDENTIFIER_BYTES - hash.length - 1)
+    return `${kept.toString("utf8").replace(/\uFFFD$/, "")}_${hash}`
+  }
+
+  /** The schema's state, read from its comment; null when the schema is not this branch's. */
+  private async branchSchemaState(name: string): Promise<BranchSchemaState | null> {
+    const [row] = await this.sql<{ comment: string | null }[]>`
+      SELECT obj_description(oid, 'pg_namespace') AS comment FROM pg_namespace
+      WHERE nspname = ${this.branchSchemaName(name)}
+    `
+    if (!row) return null
+
+    const state = parseBranchState(row.comment)
+    if (state?.sixbBranch !== name) {
+      throw new Error(
+        `[SixbPg] Schema '${this.branchSchemaName(name)}' exists but is not branch namespace '${name}': drop it or choose another name.`
+      )
+    }
+    return state
   }
 
   /**
@@ -569,6 +746,25 @@ function resolveTimeoutMillis(value: number | undefined, label: string): number 
   }
 
   return Math.trunc(value)
+}
+
+const MAX_IDENTIFIER_BYTES = 63
+
+function parseBranchState(comment: string | null): BranchSchemaState | null {
+  if (!comment) return null
+  try {
+    const state = JSON.parse(comment) as unknown
+    if (typeof state === "object" && state !== null && "sixbBranch" in state) {
+      return state as BranchSchemaState
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+function isDuplicateSchema(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === "42P06"
 }
 
 export { migratePostgresStorage } from "./migrations"
