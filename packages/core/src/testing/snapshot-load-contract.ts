@@ -4,8 +4,8 @@ import { InMemoryBlobStorage } from "../blob-storage"
 import { InMemoryBroker } from "../broker"
 import { InMemoryLakeStorage } from "../lake-storage"
 import type { OntologyRegistry } from "../ontology"
+import { typeShape } from "../ontology/type-shapes"
 import { InMemoryQueues } from "../queues"
-import { typeDefinitionManifest } from "../snapshots/definitions"
 import { exportSnapshot, hostSnapshotSource } from "../snapshots/export"
 import {
   encodeSnapshotFrame,
@@ -32,6 +32,7 @@ import {
   seededHost,
   TIMEOUT_MS,
 } from "./snapshot-contract-fixture"
+import { runSnapshotShapesCases } from "./snapshot-shapes-contract"
 
 export interface SnapshotLoadContractProvider<TStorage extends Storage> {
   /** A migrated storage holding no project yet. */
@@ -401,6 +402,8 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
     },
     TIMEOUT_MS
   )
+
+  runSnapshotShapesCases(name, withStorage)
 }
 
 const Device = defineObjectType({
@@ -461,7 +464,7 @@ async function* devicesSnapshot(host: SixbHost): AsyncGenerator<Uint8Array> {
   const records: SnapshotRecord[] = [
     {
       kind: "manifest",
-      format: 2,
+      format: 3,
       projectId: PROJECT,
       takenAt: DEVICE_EDIT.updatedAt,
       takenBy: { type: "user", id: "usr_alice" },
@@ -469,7 +472,12 @@ async function* devicesSnapshot(host: SixbHost): AsyncGenerator<Uint8Array> {
       types: [
         {
           objectTypeId: Device.id,
-          ...typeDefinitionManifest(Device, host.definitions.ontology),
+          primaryPropertyId: "id",
+          shape: {
+            fits: typeShape(Device, host.definitions.ontology),
+            state: "current",
+            settledMigrationIds: [],
+          },
           hiddenPropertyIds: [],
           throughCondition: false,
           vectors: [],

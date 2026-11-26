@@ -93,7 +93,12 @@ import { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storag
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
 import { PgShareGrantStorage } from "./share-grant-storage"
 import { PgShareSessionStorage } from "./share-session-storage"
-import { type BranchSchemaState, PgSnapshotLoad, SNAPSHOT_LANES } from "./snapshot-load"
+import {
+  type BranchSchemaState,
+  PgSnapshotLoad,
+  SNAPSHOT_LANES,
+  unloadPgSnapshot,
+} from "./snapshot-load"
 import {
   readPgLatestPoints,
   readPgLinkEdits,
@@ -559,6 +564,28 @@ export class PostgresStorage
         `.catch(() => undefined)
       }
       for (const connection of connections) connection.release()
+    }
+  }
+
+  /** Empty this branch schema's load, under the same lock a load takes. */
+  async unloadSnapshot(input: {
+    readonly projectId: string
+    readonly commitId: string
+  }): Promise<void> {
+    this.assertRootOperationAvailable()
+    const branch = this.branchName
+    if (branch === undefined) {
+      throw new Error("[SixbPg] Only a branch namespace holds a snapshot load to empty.")
+    }
+
+    const connection = await this.sql.reserve()
+    const lockKey = `${this.schemaName}:snapshot-load`
+    try {
+      await connection`SELECT pg_advisory_lock(hashtext(${lockKey}))`
+      await unloadPgSnapshot(connection, input, { sixbBranch: branch })
+    } finally {
+      await connection`SELECT pg_advisory_unlock(hashtext(${lockKey}))`.catch(() => undefined)
+      connection.release()
     }
   }
 

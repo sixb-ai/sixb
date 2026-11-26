@@ -47,7 +47,9 @@ export interface ValuePlanType {
   readonly projected: ReadonlySet<string>
 }
 
-interface Failure {
+/** An object the value steps refuse, or a unique key two of them would share. */
+export interface ValuePlanFailure {
+  readonly objectTypeId: string
   readonly migrationId: string
   readonly line: string
   /** How many failed objects the line names: one, or each staged object of a collision. */
@@ -86,9 +88,9 @@ export async function planValueSteps(input: {
   readonly ontology: OntologyDefinitionCatalog
   readonly types: readonly ValuePlanType[]
 }): Promise<void> {
-  const failures: Failure[] = []
+  const failures: ValuePlanFailure[] = []
   let failed = 0
-  const fail = (failure: Failure) => {
+  const fail = (failure: ValuePlanFailure) => {
     failed += 1
     if (failures.length < LISTED_FAILURES) failures.push(failure)
   }
@@ -113,7 +115,12 @@ export async function planValueSteps(input: {
       const migrationId = valueMigrationOf(input.types, collision)
       failed += collision.primaryIds.length
       const objects = collision.primaryIds.length
-      failures.push({ migrationId, line: collisionLine(collision), objects })
+      failures.push({
+        objectTypeId: collision.objectTypeId,
+        migrationId,
+        line: collisionLine(collision),
+        objects,
+      })
     }
   }
 
@@ -123,7 +130,7 @@ export async function planValueSteps(input: {
 function typePlanner(
   input: Parameters<typeof planValueSteps>[0],
   planned: ValuePlanType,
-  fail: (failure: Failure) => void,
+  fail: (failure: ValuePlanFailure) => void,
   staging: () => boolean
 ) {
   const { storage, values, projectId, ontology, startedAt } = input
@@ -215,6 +222,7 @@ function typePlanner(
       if (given === null) continue
       if ("reason" in given) {
         fail({
+          objectTypeId,
           migrationId: step.migrationId,
           line: objectLine(objectTypeId, primaryId, given.reason),
         })
@@ -261,7 +269,7 @@ function typePlanner(
         validateEffectiveObject(ontology, state.ref, after)
       } catch (error) {
         const line = objectLine(objectTypeId, primaryId, messageOf(error))
-        fail({ migrationId: lastMigrationId, line })
+        fail({ objectTypeId, migrationId: lastMigrationId, line })
         return null
       }
     }
@@ -272,7 +280,7 @@ function typePlanner(
       if (after && Object.keys(effective).length > 0) vectors = vectorRequests(before, after)
     } catch (error) {
       const line = objectLine(objectTypeId, primaryId, messageOf(error))
-      fail({ migrationId: lastMigrationId, line })
+      fail({ objectTypeId, migrationId: lastMigrationId, line })
       return null
     }
 
@@ -555,21 +563,56 @@ function objectLine(objectTypeId: string, primaryId: string, reason: string): st
   return `${objectTypeId} '${primaryId}': ${reason.replace(/^\[Sixb\] /, "")}`
 }
 
-function planFailure(failures: readonly Failure[], failed: number): Error {
+function planFailure(failures: readonly ValuePlanFailure[], failed: number): ValuePlanError {
+  return new ValuePlanError(failures, failed)
+}
+
+/**
+ * The value steps' plan refused objects: what a deploy prints, and per type the lines that name
+ * its objects, so a branch's copy can leave out only the types that fail.
+ */
+export class ValuePlanError extends Error {
+  readonly failures: readonly ValuePlanFailure[]
+
+  constructor(failures: readonly ValuePlanFailure[], failed: number) {
+    super(
+      [
+        `[Sixb] ${failureLines(failures, failed).join("\n")}`,
+        "Nothing was written. Fix the functions or the data, then deploy again.",
+      ].join("\n")
+    )
+    this.name = "ValuePlanError"
+    this.failures = failures
+  }
+
+  /** The types whose objects fail, each with its lines: the migrations, then each object. */
+  byType(): ReadonlyMap<string, readonly string[]> {
+    const types = new Map<string, ValuePlanFailure[]>()
+    for (const failure of this.failures) {
+      types.set(failure.objectTypeId, [...(types.get(failure.objectTypeId) ?? []), failure])
+    }
+
+    const failed = (of: readonly ValuePlanFailure[]) =>
+      of.reduce((sum, failure) => sum + (failure.objects ?? 1), 0)
+    return new Map(
+      [...types].map(([objectTypeId, of]) => [objectTypeId, failureLines(of, failed(of))])
+    )
+  }
+}
+
+/** `Migration 'x' cannot apply: 2 objects fail.`, then a line per named object. */
+function failureLines(failures: readonly ValuePlanFailure[], failed: number): string[] {
   const ids = [...new Set(failures.map((failure) => failure.migrationId))].sort()
   const names = ids.map((id) => `'${id}'`).join(", ")
   const objects = failed === 1 ? "1 object fails" : `${failed.toLocaleString("en-US")} objects fail`
   const named = failures.reduce((sum, failure) => sum + (failure.objects ?? 1), 0)
   const more = failed - named
 
-  return new Error(
-    [
-      `[Sixb] ${ids.length === 1 ? "Migration" : "Migrations"} ${names} cannot apply: ${objects}.`,
-      ...failures.map((failure) => `  ${failure.line}`),
-      ...(more > 0 ? [`  … and ${more.toLocaleString("en-US")} more.`] : []),
-      "Nothing was written. Fix the functions or the data, then deploy again.",
-    ].join("\n")
-  )
+  return [
+    `${ids.length === 1 ? "Migration" : "Migrations"} ${names} cannot apply: ${objects}.`,
+    ...failures.map((failure) => `  ${failure.line}`),
+    ...(more > 0 ? [`  … and ${more.toLocaleString("en-US")} more.`] : []),
+  ]
 }
 
 function messageOf(error: unknown): string {

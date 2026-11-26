@@ -69,7 +69,7 @@ import { SqliteProjectionRunStorage } from "./projection-run-storage"
 import { SqliteRulesStorage } from "./rules-storage"
 import { SqliteShareGrantStorage } from "./share-grant-storage"
 import { SqliteShareSessionStorage } from "./share-session-storage"
-import { SqliteSnapshotLoad } from "./snapshot-load"
+import { LOADED_TABLES, SqliteSnapshotLoad } from "./snapshot-load"
 import {
   readSqliteLatestPoints,
   readSqliteLinkEdits,
@@ -158,6 +158,9 @@ export class SqliteStorage
   private readonly readConnection: SqliteStoreConnection
   private readonly transactionScope = new AsyncLocalStorage<{ active: boolean }>()
   private transactionTail: Promise<void> = Promise.resolve()
+
+  /** Set on a branch namespace: the one place a snapshot load may be emptied. */
+  #branchNamespace = false
 
   constructor(options: SqliteStorageOptions = {}) {
     const path = options.path ? sqliteStoragePath(options.path) : undefined
@@ -388,6 +391,43 @@ export class SqliteStorage
     })
   }
 
+  /** Empty what a load wrote: the database held nothing before, so its tables take only the load's rows. */
+  async unloadSnapshot(input: {
+    readonly projectId: string
+    readonly commitId: string
+  }): Promise<void> {
+    this.assertRootOperationAvailable()
+    if (!this.#branchNamespace) {
+      throw new Error(
+        "[SixbSqlite] A snapshot load is emptied in a branch namespace only: this database is not one."
+      )
+    }
+    const db = this.connection.db
+
+    await this.withTransactionLock(async () => {
+      await runImmediateTransactionAsync(db, async () => {
+        // Its commit must be the project's only one: nothing written since goes with it.
+        const counted = db
+          .query(
+            "SELECT count(*) AS commits, sum(id = ?) AS loads FROM ontology_commits WHERE project_id = ?"
+          )
+          .get(input.commitId, input.projectId) as { commits: number; loads: number | null }
+        if (counted.loads !== 1 || counted.commits !== 1) {
+          throw new Error(
+            `[SixbSqlite] This branch holds no load of '${input.commitId}' alone: something was written since, so emptying it would take that too. Drop the branch and take a new copy.`
+          )
+        }
+
+        for (const table of LOADED_TABLES) db.run(`DELETE FROM ${table}`)
+        db.query("DELETE FROM object_unique_properties WHERE project_id = ?").run(input.projectId)
+        db.query("DELETE FROM ontology_commits WHERE project_id = ? AND id = ?").run(
+          input.projectId,
+          input.commitId
+        )
+      })
+    })
+  }
+
   /** A file of its own under `branches/`, or, without a path, a database of its own in memory. */
   async createBranchNamespace(name: string): Promise<BranchNamespace> {
     assertBranchNamespaceName(name)
@@ -428,6 +468,7 @@ export class SqliteStorage
       : new SqliteStorage()
     for (const migrator of branch.migrators) await migrator.migrate()
 
+    branch.#branchNamespace = true
     this.branches.set(name, branch)
     return branch
   }

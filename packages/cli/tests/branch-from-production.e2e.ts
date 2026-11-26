@@ -9,6 +9,7 @@ import {
   col,
   defineDataset,
   defineGroup,
+  defineMigration,
   defineObjectType,
   defineRole,
   InMemoryBlobStorage,
@@ -32,6 +33,7 @@ import { createTestBrowserPolicy } from "../../server/tests/helpers"
 import {
   branchFromProduction,
   fetchBranchCopy,
+  loadedCopyOf,
   namespaceOf,
 } from "../src/lib/branch-from-production"
 import type { LoadedSixbHost } from "../src/lib/loadSixb"
@@ -202,7 +204,8 @@ const laptops: readonly [string, (directory: string) => Promise<Storage>][] = [
 ]
 
 describe.each(laptops)("a laptop branch on %s", (_name, localStorage) => {
-  async function laptop() {
+  /** A laptop running the project's code, or the branch's own `changes` to it. */
+  async function laptop(changes: Partial<SixbHostOptions> = {}) {
     const projectRoot = await mkdtemp(join(rootDir, "laptop-"))
     const storage = await localStorage(projectRoot)
     await migrateStorage(storage)
@@ -212,7 +215,10 @@ describe.each(laptops)("a laptop branch on %s", (_name, localStorage) => {
     })
     // As `sixb dev --from production` loads the project: on the branch, with its own providers.
     const host = new SixbHost(
-      putOnBranch(hostOptions(storage, lake), { name: "feature/x", dataFrom: "production" })
+      putOnBranch(
+        { ...hostOptions(storage, lake), ...changes },
+        { name: "feature/x", dataFrom: "production" }
+      )
     ) as unknown as LoadedSixbHost
     return { projectRoot, storage, lake, host }
   }
@@ -328,6 +334,90 @@ describe.each(laptops)("a laptop branch on %s", (_name, localStorage) => {
       await local.lake.close()
       await local.storage.close?.()
     }
+  }, 120_000)
+
+  // Red check: in `loadCopy` (lib/branch-from-production.ts), pass no `migrations` to the
+  // import: `title` is left out of the copy, and every heading is empty.
+  test("runs the branch's migrations on the copy", async () => {
+    const Retitled = defineObjectType({
+      id: Ticket.id,
+      name: "Ticket",
+      properties: [
+        prop("id", "string", { primary: true, required: true }),
+        prop("status", "string", { query: { searchable: true, filterable: true } }),
+        prop("heading", "string"),
+      ],
+    })
+    const retitle = defineMigration("ticket-heading", Retitled).renameProperty("title", "heading")
+    const local = await laptop({ ontology: [Retitled], migrations: [retitle] })
+    const alice = await signedIn("usr_alice")
+
+    await fetchBranchCopy({
+      projectRoot: local.projectRoot,
+      gitBranch: "feature/x",
+      profile: "alice",
+      connect: async () => alice,
+    })
+    const opened = await branchFromProduction({
+      host: local.host,
+      projectRoot: local.projectRoot,
+      gitBranch: "feature/x",
+      gitBranches: ["feature/x"],
+    })
+
+    const tickets = await createTestSixb(opened.host as never)
+      .objects(Retitled)
+      .query()
+      .list()
+    expect(tickets.objects.map((row) => `${row.properties.id}:${row.properties.heading}`)).toEqual([
+      "t-1:Ticket t-1",
+      "t-3:Ticket t-3",
+    ])
+
+    await opened.host.lakeStorage.close?.()
+    await local.lake.close()
+    await local.storage.close?.()
+  }, 120_000)
+
+  // Red check: in `loadCopy` (lib/branch-from-production.ts), hand the import the spent stream
+  // again instead of reading the spool anew: the second load ends before its manifest.
+  test("loads the copy again from its spool without a type the branch's code doesn't fit", async () => {
+    const Numbered = defineObjectType({
+      id: Ticket.id,
+      name: "Ticket",
+      properties: [
+        prop("id", "string", { primary: true, required: true }),
+        prop("status", "string", { query: { searchable: true, filterable: true } }),
+        prop("title", "integer"),
+      ],
+    })
+    const local = await laptop({ ontology: [Numbered] })
+    const alice = await signedIn("usr_alice")
+
+    await fetchBranchCopy({
+      projectRoot: local.projectRoot,
+      gitBranch: "feature/x",
+      profile: "alice",
+      connect: async () => alice,
+    })
+    const opened = await branchFromProduction({
+      host: local.host,
+      projectRoot: local.projectRoot,
+      gitBranch: "feature/x",
+      gitBranches: ["feature/x"],
+    })
+
+    const loaded = await loadedCopyOf(local.projectRoot, opened.namespace)
+    expect(loaded?.skipped.map((skip) => skip.objectTypeId)).toEqual([Ticket.id])
+    const tickets = await createTestSixb(opened.host as never)
+      .objects(Numbered)
+      .query()
+      .list()
+    expect(tickets.objects).toEqual([])
+
+    await opened.host.lakeStorage.close?.()
+    await local.lake.close()
+    await local.storage.close?.()
   }, 120_000)
 
   // Red check: in `fetchBranchCopy`, reuse whatever copy exists, whoever is signed in.

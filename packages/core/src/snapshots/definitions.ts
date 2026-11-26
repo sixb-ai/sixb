@@ -1,141 +1,218 @@
-import { sha256Canonical } from "../materialization/identity"
+import { stepKindOf } from "../migrations/steps"
+import type { MigrationDefinition } from "../migrations/types"
 import type { OntologyDefinitionCatalog } from "../ontology/registry"
-import type { ObjectLink, ObjectType, Property, ValueType } from "../ontology/types"
-import type { SnapshotTypeManifest } from "./format"
-
-/** What the manifest records of a type's definition, for {@link checkTypeFits} to compare. */
-export type TypeDefinitionManifest = Pick<
-  SnapshotTypeManifest,
-  "primaryPropertyId" | "properties" | "requiredPropertyIds" | "uniquePropertyIds" | "links"
->
-
-export function typeDefinitionManifest(
-  objectType: ObjectType,
-  ontology: OntologyDefinitionCatalog
-): TypeDefinitionManifest {
-  const valueTypes = ontology.getValueTypesById()
-
-  return {
-    primaryPropertyId: ontology.getPrimaryPropertyId(objectType.id),
-    properties: Object.fromEntries(
-      objectType.properties.map((property) => [
-        property.id,
-        propertyFingerprint(property, valueTypes),
-      ])
-    ),
-    requiredPropertyIds: objectType.properties.filter((p) => p.required).map((p) => p.id),
-    uniquePropertyIds: objectType.properties.filter((p) => p.unique).map((p) => p.id),
-    links: Object.fromEntries(
-      objectType.links.map((link) => [link.id, linkFingerprint(link, valueTypes)])
-    ),
-  }
-}
+import { type TypeShape, typeShape } from "../ontology/type-shapes"
+import {
+  formatTypeShapeFindings,
+  type ProbedChange,
+} from "../storage/migrations/type-shape-messages"
+import { classifyTypeChanges } from "../storage/migrations/type-shapes"
+import type { SnapshotSkipKind, SnapshotTypeManifest, SnapshotTypeShape } from "./format"
 
 /** How a type of the snapshot fits the importing runtime's definition of it. */
 export type TypeFit =
   | {
       readonly fits: true
-      /** Properties the branch no longer defines: their values are left out. */
+      /**
+       * What production's objects fit, which the branch records before its gate runs: absent
+       * from a version 2 snapshot, and for a type production never recorded. The gate then reads
+       * the copy as a first deploy does.
+       */
+      readonly recorded?: SnapshotTypeShape
+      /** Production's properties the branch neither declares nor migrates: their values are left out. */
       readonly droppedPropertyIds: readonly string[]
-      /** Links the branch removed or redefined: their rows are left out. */
+      /** Production's links the branch removed or changed, with no step that moves them: left out. */
       readonly droppedLinkIds: readonly string[]
+      /** Links a pending step removes, with production's cardinality: they load, and it runs. */
+      readonly movedLinks: ReadonlyMap<string, "one" | "many">
+      /** Properties unique in production too, whose values the load claims as they are. */
+      readonly uniquePropertyIds: readonly string[]
+      /**
+       * The removals no migration covers, whose data the copy leaves out: a deploy refuses each
+       * one the data holds, counted as the copy loads; a withheld key's is only said to be held.
+       */
+      readonly leftOut: readonly ProbedChange[]
+      /**
+       * Keys production's objects hold that its code no longer declares: their values don't
+       * travel (`SnapshotTypeShape.withheld`).
+       */
+      readonly withheld: readonly string[]
+      /** Withheld keys a deploy refuses to drop with no migration, said from production's data. */
+      readonly refusedWithheld: readonly ProbedChange[]
+      /**
+       * Changes of a withheld key the copy can't check: a pending step moves it, or a view
+       * condition hides objects of the type, so it may be held only by objects the person can't see.
+       */
+      readonly unchecked: readonly ProbedChange[]
+      /** What to do about a left-out removal: the migration lines a deploy prints. */
+      remedy(change: ProbedChange): readonly string[]
+      /** Whether the branch keeps a property's values: it declares it, or a pending step moves it. */
+      keeps(propertyId: string): boolean
     }
-  | { readonly fits: false; readonly reason: string }
+  | {
+      readonly fits: false
+      readonly kind: Exclude<SnapshotSkipKind, "unreadable" | "unfit">
+      readonly reason: string
+      /** The lines a deploy prints for it, when the shapes alone decide them. */
+      readonly findings: readonly string[]
+    }
 
 /**
- * Whether objects stored under production's definition of a type are valid under the branch's.
- * A type fits unless the branch removed it, changed its primary property, changed a property both
- * define, or requires a property production does not. A required property hidden from the person
- * does not skip the type: its objects and links travel and read normally, any write to one of
- * them, a new link included, fails while the property is unset, and a delete works.
+ * What of a type the copy can load, decided from the shapes before anything is read, with the
+ * gate's own classification (`classifyTypeChanges`). Only what can't be stored at all skips the
+ * type here: a removed type, a changed primary property, a type production was migrating, and
+ * pending steps that conflict. A removed property or link nothing migrates is left out of the
+ * objects. Every other change loads, the keys and links a pending step moves included, and the
+ * branch's gate decides it from the copy's data, as a deploy decides from production's.
  */
-export function checkTypeFits(
-  manifest: SnapshotTypeManifest,
-  ontology: OntologyDefinitionCatalog
-): TypeFit {
-  const objectType = ontology.getObjectTypeById(manifest.objectTypeId)
-  if (!objectType) return { fits: false, reason: "the branch no longer defines this type" }
+export function checkTypeFits(input: {
+  readonly manifest: SnapshotTypeManifest
+  readonly ontology: OntologyDefinitionCatalog
+  readonly migrations: readonly MigrationDefinition[]
+  /** Whether the branch's storage applies migrations: without it, a pending one can't run. */
+  readonly appliesMigrations: boolean
+}): TypeFit {
+  const { manifest, ontology, migrations } = input
+  const objectTypeId = manifest.objectTypeId
+  const objectType = ontology.getObjectTypeById(objectTypeId)
+  if (!objectType) return skip("removed", "the branch no longer defines this type")
 
-  const branch = typeDefinitionManifest(objectType, ontology)
-  if (branch.primaryPropertyId !== manifest.primaryPropertyId) {
+  const primaryPropertyId = ontology.getPrimaryPropertyId(objectTypeId)
+  if (primaryPropertyId !== manifest.primaryPropertyId) {
+    return skip(
+      "primary",
+      `its primary property changed from '${manifest.primaryPropertyId}' to '${primaryPropertyId}'`
+    )
+  }
+
+  const shape = manifest.shape
+  if (shape?.state === "migrating") {
+    return skip("migrating", "production was applying a migration to it")
+  }
+
+  // A version 2 snapshot says nothing of what production's objects fit: everything loads, keys
+  // its code no longer declares included, and the branch's gate reads the copy as a first
+  // deploy does.
+  if (!shape) {
     return {
-      fits: false,
-      reason: `its primary property changed from '${manifest.primaryPropertyId}' to '${branch.primaryPropertyId}'`,
+      fits: true,
+      droppedPropertyIds: [],
+      droppedLinkIds: [],
+      movedLinks: new Map(),
+      uniquePropertyIds: [],
+      leftOut: [],
+      withheld: [],
+      refusedWithheld: [],
+      unchecked: [],
+      remedy: () => [],
+      keeps: () => true,
     }
   }
 
-  for (const [propertyId, fingerprint] of Object.entries(branch.properties)) {
-    const production = manifest.properties[propertyId]
-    if (production !== undefined && production !== fingerprint) {
-      return { fits: false, reason: `property '${propertyId}' changed its type or mode` }
-    }
+  const withheld = shape.withheld ?? []
+  const from = withWithheldKeys(shape.fits, withheld)
+  const code = typeShape(objectType, ontology)
+  const classes = classifyTypeChanges({
+    objectTypeId,
+    from,
+    code,
+    ontology,
+    migrations,
+    settled: new Set(shape.settledMigrationIds),
+    appliesMigrations: input.appliesMigrations,
+  })
+  if (classes.conflicts.length > 0) {
+    return skip(
+      "conflict",
+      "two of the branch's pending migrations change the same thing",
+      formatTypeShapeFindings(classes.conflicts)
+    )
   }
 
-  for (const propertyId of branch.requiredPropertyIds) {
-    if (!manifest.requiredPropertyIds.includes(propertyId)) {
-      return {
-        fits: false,
-        reason: `property '${propertyId}' is required on the branch but not in production`,
-      }
-    }
-  }
+  // The keys and links a pending step reads or moves load with their values, so the step has them.
+  const subjects = classes.coverage.steps.flatMap(({ step }) => stepKindOf(step).subjects(step))
+  const moved = new Set(
+    subjects.flatMap((subject) => (subject.role === "link" ? [] : [subject.id]))
+  )
+  const movedLinks = new Map(
+    subjects.flatMap((subject) => {
+      const link = subject.role === "link" ? from.links[subject.id] : undefined
+      return link ? [[subject.id, link.cardinality] as const] : []
+    })
+  )
+  const keeps = (propertyId: string) =>
+    code.properties[propertyId] !== undefined || moved.has(propertyId)
+
+  const changed = [...classes.missing, ...classes.runnable, ...classes.blocked]
+  const changedLinks = new Set(
+    changed.flatMap((change) => ("linkId" in change ? [change.linkId] : []))
+  )
+
+  // A withheld key's removal is refused from production's data; any other change of it can't be
+  // read here, nor its removal when the key may be held only by objects the person can't see.
+  const leftOut = classes.missing.filter(isRemoval)
+  const ofWithheld = (change: ProbedChange) =>
+    "propertyId" in change &&
+    (withheld.includes(change.propertyId) ||
+      withheld.includes(classes.coverage.storedKey(change.propertyId)))
+  const refusedWithheld = manifest.throughCondition
+    ? []
+    : leftOut.filter((change) => ofWithheld(change))
 
   return {
     fits: true,
-    droppedPropertyIds: Object.keys(manifest.properties).filter(
-      (propertyId) => branch.properties[propertyId] === undefined
+    ...(shape.state === "current" ? { recorded: shape } : {}),
+    droppedPropertyIds: Object.keys(shape.fits.properties).filter((id) => !keeps(id)),
+    droppedLinkIds: Object.keys(shape.fits.links).filter(
+      (linkId) =>
+        !movedLinks.has(linkId) && (code.links[linkId] === undefined || changedLinks.has(linkId))
     ),
-    droppedLinkIds: Object.keys(manifest.links).filter(
-      (linkId) => branch.links[linkId] !== manifest.links[linkId]
+    movedLinks,
+    uniquePropertyIds: Object.keys(shape.fits.properties).filter(
+      (propertyId) => shape.fits.properties[propertyId]!.unique
     ),
+    leftOut,
+    withheld,
+    refusedWithheld,
+    unchecked: changed.filter((change) => ofWithheld(change) && !refusedWithheld.includes(change)),
+    remedy: (change) => classes.coverage.remedy(change),
+    keeps,
   }
 }
 
-function propertyFingerprint(property: Property, valueTypes: ReadonlyMap<string, ValueType>) {
-  return sha256Canonical({
-    schema: inlineSchema(property.schema, valueTypes, new Set()),
-    mode: property.mode ?? "static",
-    nullable: property.nullable ?? false,
-  })
+/** Production's shape, with the keys its objects hold that it no longer declares. */
+function withWithheldKeys(shape: TypeShape, withheld: readonly string[]): TypeShape {
+  const missing = withheld.filter((propertyId) => !(propertyId in shape.properties))
+  if (missing.length === 0) return shape
+
+  const unknown = { schema: "unknown", unknown: true } as const
+  return {
+    ...shape,
+    properties: {
+      ...shape.properties,
+      ...Object.fromEntries(missing.map((propertyId) => [propertyId, unknown])),
+    },
+  }
 }
 
-function linkFingerprint(link: ObjectLink, valueTypes: ReadonlyMap<string, ValueType>) {
-  const targets = [link.targetObjectTypeId].flat().sort()
-
-  return sha256Canonical({
-    targets,
-    cardinality: link.cardinality ?? "many",
-    properties: (link.properties ?? []).map((property) => ({
-      id: property.id,
-      fingerprint: propertyFingerprint(property, valueTypes),
-    })),
-  })
+/** A removal whose data the copy leaves out: the branch no longer has anything to hold it. */
+function isRemoval(change: ProbedChange): boolean {
+  switch (change.kind) {
+    case "property-removed":
+    case "link-removed":
+    case "link-targets":
+    case "link-cardinality":
+    case "link-added":
+      return true
+    default:
+      return false
+  }
 }
 
-/**
- * A schema with every value type it references written in place, without descriptions: renaming
- * or documenting a value type does not change what its values may be.
- */
-function inlineSchema(
-  schema: unknown,
-  valueTypes: ReadonlyMap<string, ValueType>,
-  seen: ReadonlySet<string>
-): unknown {
-  if (typeof schema !== "object" || schema === null) return schema
-  if (Array.isArray(schema)) return schema.map((item) => inlineSchema(item, valueTypes, seen))
-
-  const record = schema as Record<string, unknown>
-  if (record.type === "valueTypeRef" && typeof record.valueTypeId === "string") {
-    const valueType = valueTypes.get(record.valueTypeId)
-    if (!valueType || seen.has(valueType.id)) return { valueType: record.valueTypeId }
-
-    return inlineSchema(valueType.schema, valueTypes, new Set([...seen, valueType.id]))
-  }
-
-  const inlined: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(record)) {
-    if (key === "description" || key === "_resolved") continue
-    inlined[key] = inlineSchema(value, valueTypes, seen)
-  }
-  return inlined
+function skip(
+  kind: Extract<TypeFit, { fits: false }>["kind"],
+  reason: string,
+  findings: readonly string[] = []
+): TypeFit {
+  return { fits: false, kind, reason, findings }
 }

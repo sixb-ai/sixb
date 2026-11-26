@@ -95,6 +95,16 @@ export interface OntologyTypeShapeStorage {
     readonly seriesPropertyIds: readonly string[]
   }>
 
+  /**
+   * The property keys the type's objects and edits hold, whatever the code declares: in object
+   * values, `create.properties`, `patch.set` and `unset`, edit times, and telemetry series. Keys
+   * only, in one pass over the type: no value is read or returned.
+   */
+  listHeldPropertyKeys(input: {
+    readonly projectId: string
+    readonly objectTypeId: string
+  }): Promise<readonly string[]>
+
   /** A keyset page of the type's `create` and `patch` edits, by primary id. Deletes hold no values. */
   listEdits(input: ListObjectEditsInput): Promise<{
     readonly edits: readonly StoredObjectEdit[]

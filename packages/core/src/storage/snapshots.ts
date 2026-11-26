@@ -43,6 +43,14 @@ export interface SnapshotLoadStorage extends Storage {
    * the storage while it loads.
    */
   loadSnapshot<T>(input: SnapshotLoadInput, run: (loader: SnapshotLoader) => Promise<T>): Promise<T>
+
+  /**
+   * Empty what a committed load wrote, its base commit included, so that the storage holds no
+   * object again and takes a load anew: what a failed load leaves. Members stay; rows written
+   * since the load may stay or go, and the caller writes them again. Called before the storage
+   * serves anything: an import that must load its copy again without some types.
+   */
+  unloadSnapshot(input: { readonly projectId: string; readonly commitId: string }): Promise<void>
 }
 
 export interface SnapshotReadOptions {

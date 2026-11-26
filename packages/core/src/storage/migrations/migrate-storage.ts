@@ -154,7 +154,17 @@ export async function applyTypeShapes(
   // starts the run: its properties' unique keys are checked there, as the plan stages them.
   const renames = runRenames(shapes, migrations)
   const valued = runValueProperties(shapes, migrations)
-  await checkUniqueProperties({ ...options, storage, keepObjectTypeIds, rebuild, renames, valued })
+  // A check that ran the dry run itself made its duplicates findings already.
+  if (!shapes.uniqueChecked) {
+    await checkUniqueProperties({
+      ...options,
+      storage,
+      keepObjectTypeIds,
+      rebuild,
+      renames,
+      valued,
+    })
+  }
 
   // A run records the code's shapes as it finishes: a crash before the preparation below leaves
   // them recorded, and the next deploy would trust what a failed one built. Values the recorded

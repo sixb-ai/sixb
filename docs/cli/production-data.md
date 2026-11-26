@@ -37,6 +37,21 @@ defineRole("developers", { grantedTo: [developers], grants: [can.manage(project.
   its datasets. Files the branch writes stay on it.
 - **Types fed by a projection** keep updating: a pipeline you change on the branch updates only
   the objects its new rows change. When a type cannot, `sixb dev` says why.
+- **Your migrations, run on the copy.** The copy carries the shapes production's objects fit, so
+  the branch's pending [migrations](../ontology/migrations.md) run on it as a deploy would:
+
+  | The branch's code | Its copy |
+  |---|---|
+  | Renames `gate` with `renameProperty("gate", "gateCode")` | Holds `gateCode`, edits included |
+  | Makes `hours` required, and every job has one | Loads, as a deploy would pass |
+  | Retypes `hours`, and some jobs hold values it refuses, with no migration | Leaves the type out, with the lines a deploy prints |
+  | Removes a property or link with no migration | Leaves it out of the objects, and says a deploy would refuse it |
+
+  The copy decides as a deploy would on the data you read. Properties hidden from you and objects
+  a view condition hides are copied without those values, so the migrations ran on what you read
+  only. Values your production code no longer declares never travel. A migration added after the
+  copy needs a new copy (`--refresh`, or **Refresh from production** in the Console) to run on
+  the keys the copy left out.
 
 ## What is off, and what is not
 
