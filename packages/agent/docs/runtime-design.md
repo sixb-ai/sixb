@@ -157,7 +157,12 @@ turn N's last request sent, on every storage:
 ## Compacting a conversation
 
 A turn's preflight (`context-compaction.ts`) compacts once the estimate crosses the model's limit,
-its window less the output reserve (see `context-budget.ts`):
+its window less the output reserve (see `context-budget.ts`). The estimate weighs text in UTF-8
+bytes at the bytes per token the model's runs measured, anchored on the latest call's real count.
+A replayed reasoning item weighs the reasoning tokens its step was billed, which the loop gives it
+as the response ends: providers bill it at that count, whatever its bytes, and never read the
+reasoning text beside it (`replayed-reasoning.ts`). An item replays only to the model that wrote
+it: a call that carries another model's, after a switch or a fallback, measures no rate.
 
 - **It aims at 60 % of the limit**: the system prompt and tools, the summary at its longest, and
   the recent turns that fit the rest stay; the next turns grow into the room left. A context that

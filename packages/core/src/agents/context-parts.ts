@@ -10,6 +10,7 @@ import type {
   AgentStepRequestSize,
   AgentSystemPromptPartName,
 } from "./message"
+import { countsReasoningText, providerStateSize } from "./replayed-reasoning"
 import { isAgentThreadSummaryText } from "./thread-context-projection"
 
 /** The parts in the order a context meter lists them. */
@@ -47,6 +48,7 @@ export function measureAgentStepRequest(input: {
   const system: { [Part in AgentSystemPromptPartName]?: number } = {}
   const history: { [Part in AgentHistoryPartName]?: number } = {}
   let images = 0
+  let reasoningTokens = 0
   const add = <TPart extends string>(
     into: { [Part in TPart]?: number },
     part: TPart,
@@ -95,16 +97,22 @@ export function measureAgentStepRequest(input: {
           }
         }
         break
-      case "assistant":
+      case "assistant": {
+        const reasoningText = countsReasoningText(message.content)
         for (const part of message.content) {
           switch (part.type) {
             case "text":
-            case "reasoning":
               add(history, "messages", utf8Bytes(part.text))
               break
-            case "provider-state":
-              add(history, "messages", utf8Bytes(stableJsonStringify(part.data)))
+            case "reasoning":
+              if (reasoningText) add(history, "messages", utf8Bytes(part.text))
               break
+            case "provider-state": {
+              const state = providerStateSize(part)
+              add(history, "messages", state.bytes)
+              reasoningTokens += state.tokens
+              break
+            }
             case "tool-call":
               add(
                 history,
@@ -118,6 +126,7 @@ export function measureAgentStepRequest(input: {
           }
         }
         break
+      }
       case "tool":
         for (const part of message.content) {
           add(history, resultPart(part.toolCallId), toolResultBytes(part.output))
@@ -141,6 +150,7 @@ export function measureAgentStepRequest(input: {
     },
     history,
     ...(images > 0 ? { images } : {}),
+    ...(reasoningTokens > 0 ? { reasoningTokens } : {}),
     ...(input.contextDirectory === undefined ? {} : { contextDirectory: input.contextDirectory }),
   }
 }
@@ -149,8 +159,8 @@ export function measureAgentStepRequest(input: {
  * Split a request's tokens by part. The total is what the meter counts; the split is an estimate.
  * The prompt's parts and the tools weigh their bytes at the rate a run starts from, so they stay
  * put from one turn to the next; the history shares what is left by its bytes, each image at what a
- * provider charges at most for one. A prompt that alone outweighs the total is scaled down to it.
- * Rounded so the parts add up to the total exactly.
+ * provider charges at most for one, replayed reasoning at what it was billed. A prompt that alone
+ * outweighs the total is scaled down to it. Rounded so the parts add up to the total exactly.
  */
 export function apportionAgentContextTokens(input: {
   readonly totalTokens: number
@@ -159,20 +169,29 @@ export function apportionAgentContextTokens(input: {
   readonly promptBytesPerToken: number
   readonly history: AgentContextPartBytes<AgentContextPartName>
   readonly images?: number
+  /** Replayed reasoning, as its provider billed it: part of the messages. */
+  readonly reasoningTokens?: number
   readonly bytesPerToken: number
 }): readonly { readonly part: AgentContextPartName; readonly tokens: number }[] {
   const total = Math.max(0, Math.round(input.totalTokens))
-  const weigh = (bytes: AgentContextPartBytes<AgentContextPartName>, rate: number, images = 0) =>
+  const weigh = (
+    bytes: AgentContextPartBytes<AgentContextPartName>,
+    rate: number,
+    images = 0,
+    reasoningTokens = 0
+  ) =>
     AGENT_CONTEXT_PARTS.map((part) => ({
       part,
       weight:
-        (bytes[part] ?? 0) / rate + (part === "files" ? images * AGENT_IMAGE_INPUT_TOKENS : 0),
+        (bytes[part] ?? 0) / rate +
+        (part === "files" ? images * AGENT_IMAGE_INPUT_TOKENS : 0) +
+        (part === "messages" ? reasoningTokens : 0),
     }))
   const sum = (weights: readonly { readonly weight: number }[]) =>
     weights.reduce((tokens, { weight }) => tokens + weight, 0)
 
   let prompt = weigh(input.prompt, input.promptBytesPerToken)
-  let history = weigh(input.history, input.bytesPerToken, input.images)
+  let history = weigh(input.history, input.bytesPerToken, input.images, input.reasoningTokens)
   const promptTokens = sum(prompt)
   const historyTokens = sum(history)
   if (total === 0 || promptTokens + historyTokens === 0) return []

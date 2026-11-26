@@ -84,6 +84,51 @@ const echo: ModelTool<{ value: string }> = {
   },
 }
 
+describe("runModelLoop, with replayed reasoning", () => {
+  // Reproduce: return parsed.content from the response's complete() in model-loop.ts, without
+  // withBilledReasoning; the reasoning the next call reads again then weighs its JSON, up to 15
+  // bytes a token, and the thread compacts at two to four times what its calls cost.
+  test("gives each reasoning item what its step was billed, in the step and the next request", async () => {
+    const reasoning = {
+      type: "provider-state" as const,
+      providerId: "test",
+      data: { item: { type: "reasoning", summary: [], encrypted_content: "g".repeat(4_400) } },
+    }
+    const model = modelFromCalls([
+      [
+        { type: "stream-start" },
+        reasoning,
+        { type: "tool-call", toolCallId: "call", toolName: "echo", input: '{"value":"ok"}' },
+        {
+          type: "finish",
+          finishReason: "tool-calls",
+          usage: { inputTokens: 86, outputTokens: 200, reasoningOutputTokens: 185 },
+        },
+      ],
+      [{ type: "stream-start" }, finish()],
+    ])
+    const sent: ModelMessage[][] = []
+
+    const result = await runModelLoop({
+      model,
+      messages: [{ role: "user", content: [{ type: "text", text: "Count them." }] }],
+      tools: [echo],
+      maxSteps: 2,
+      signal: new AbortController().signal,
+      prepareStep: ({ messages }) => {
+        sent.push([...messages])
+        return undefined
+      },
+    })
+
+    const billed = { ...reasoning, tokens: 185 }
+    expect(result.steps[0]?.content).toContainEqual(billed)
+    expect(
+      sent[1]?.flatMap((message) => (message.role === "assistant" ? message.content : []))
+    ).toContainEqual(billed)
+  })
+})
+
 describe("runModelLoop", () => {
   // Removal proof: remove the unsuccessful-finish guard before executeToolCall.
   // Complete, valid JSON must not make an interrupted response executable.

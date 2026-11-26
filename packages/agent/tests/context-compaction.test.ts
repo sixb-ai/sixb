@@ -276,10 +276,14 @@ describe("agent conversation token rate", () => {
     ],
     2
   )
-  const context = (usage: { providerId?: string; inputTokens: number }) =>
+  const next = record("next", "user", [{ type: "text", text: "Next" }], 3)
+  const context = (
+    usage: { providerId?: string; inputTokens: number },
+    messages: readonly AgentMessageRecord[] = [user, answer, next]
+  ) =>
     agentThreadModelContext({
       checkpoint: null,
-      messages: [user, answer, record("next", "user", [{ type: "text", text: "Next" }], 3)],
+      messages,
       sentTimeZones: {},
       usageAnchor: {
         messageId: answer.id,
@@ -319,6 +323,46 @@ describe("agent conversation token rate", () => {
   test("measures the rate on what the anchored call read", () => {
     // 30,000 bytes over 12,500 text tokens: the provider's count less 8 + 2 × 8 + 2 overhead.
     expect(rate({ inputTokens: 12_526 })).toBe(2.4)
+  })
+
+  // Reproduce: weigh provider state as its JSON in context-compaction.ts's measureMessage, not by
+  // providerStateSize. The thread then reads 4.56 bytes per token, kept to 2.625, and its whole
+  // request, the reasoning it replays included, outweighs what its call read two and a half times.
+  // Production threads compacted at two to four times what their calls cost.
+  test("estimates a thread that replays its reasoning at what its call read", () => {
+    // Each step's encrypted item, and the 40 reasoning tokens that step was billed.
+    const reasoning = {
+      type: "provider-state" as const,
+      providerId: model.providerId,
+      data: { item: { type: "reasoning", summary: [], encrypted_content: "g".repeat(27_000) } },
+      tokens: 40,
+    }
+    // The call above, its 30,000 bytes of text read with the first step's reasoning, and its 500
+    // tokens of output written.
+    const replaying = record(
+      "answer",
+      "assistant",
+      [
+        { type: "step-start" },
+        reasoning,
+        { type: "text", text: "b".repeat(10_000) },
+        { type: "step-start" },
+        reasoning,
+        { type: "text", text: "c".repeat(1_200) },
+      ],
+      2
+    )
+    const estimate = estimateAgentConversation({
+      plan,
+      budget,
+      threadContext: context({ inputTokens: 12_566 }, [user, replaying, next]),
+      systemPrompt: "",
+      tools: [],
+    })
+    const read = 12_566 + 500 + estimateAgentContextMessagesTokens([next], 2.4).tokens
+
+    expect(estimate.bytesPerToken).toBe(2.4)
+    expect(estimate.tokens).toBeLessThan(read * 1.01)
   })
 
   // Reproduce: start a run from the 10th percentile of its model's measurements again; the run

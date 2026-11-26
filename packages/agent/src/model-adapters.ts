@@ -198,6 +198,7 @@ function tracePartsFromModelContent(
               type: "provider-state",
               providerId: part.providerId,
               data: part.data,
+              ...(part.tokens === undefined ? {} : { tokens: part.tokens }),
             },
           ]
         case "tool-call": {

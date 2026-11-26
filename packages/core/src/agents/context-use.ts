@@ -169,6 +169,9 @@ function contextUsed(
       promptBytesPerToken: budget.bytesPerToken,
       history: estimate.history.parts,
       ...(estimate.history.images ? { images: estimate.history.images } : {}),
+      ...(estimate.history.reasoningTokens
+        ? { reasoningTokens: estimate.history.reasoningTokens }
+        : {}),
       bytesPerToken: estimate.bytesPerToken,
     }),
   }

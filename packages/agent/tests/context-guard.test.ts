@@ -600,6 +600,63 @@ describe("a request nothing more can reduce", () => {
   })
 })
 
+describe("the room an answer has after a step that reasoned", () => {
+  // Reproduce: weigh provider state with tokens as nothing in replayed-reasoning's
+  // providerStateSize. The 8,800 tokens of reasoning the provider reads again then leave the next
+  // answer some 8,800 tokens more room than the window has: it is cut off, its calls lost.
+  test("leaves out of it the reasoning the provider reads again", async () => {
+    const guard = createAgentContextGuard({ budget: BUDGET, tools: [] })
+    const first: ModelMessage[] = [
+      { role: "system", content: "You read." },
+      { role: "user", content: [{ type: "text", text: "word ".repeat(48_000) }] },
+    ]
+    await guard.prepareStep(step(0, first))
+
+    // The first call read 80,000 tokens, reasoned 8,800, which the loop gave its item, and called
+    // grep, whose result is short.
+    const reasoned: ModelMessage[] = [
+      ...first,
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "provider-state",
+            providerId: "openai",
+            data: {
+              item: { type: "reasoning", summary: [], encrypted_content: "g".repeat(40_000) },
+            },
+            tokens: 8_800,
+          },
+          { type: "tool-call", toolCallId: "call_0", toolName: "grep", input: { pattern: "x" } },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_0",
+            toolName: "grep",
+            output: { type: "text", value: "src/x.ts:1: x" },
+          },
+        ],
+      },
+    ]
+    const prepared = await guard.prepareStep(
+      step(
+        1,
+        reasoned,
+        steps(1, { inputTokens: 80_000, outputTokens: 8_900, reasoningOutputTokens: 8_800 })
+      )
+    )
+
+    // What the provider reads: the 80,000 tokens before, and the 8,800 of reasoning again.
+    expect(80_000 + 8_800 + (prepared?.maxOutputTokens ?? 0)).toBeLessThanOrEqual(
+      BUDGET.windowTokens
+    )
+  })
+})
+
 describe("the room a first call's answer has", () => {
   // Reproduce: size a first call's room by its estimate alone (return this.weighed in
   // ContextGuard.heaviest when nothing was counted); a request the provider counts 3 % above its

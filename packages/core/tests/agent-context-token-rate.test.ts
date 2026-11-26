@@ -7,11 +7,15 @@ import {
   measureModelRequest,
   readAgentContextTokenRates,
 } from "../src/agents"
-import { measureAgentContextRequest } from "../src/agents/context-compaction"
+import {
+  measureAgentContextRequest,
+  measureAgentModelRequest,
+} from "../src/agents/context-compaction"
 import {
   AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
   type AgentContextTokenRateSample,
   learnedAgentContextBytesPerToken,
+  measuringAgentContextTokenRates,
   recordAgentContextTokenRate,
 } from "../src/agents/context-token-rate"
 import type { AgentMessage } from "../src/agents/message"
@@ -19,6 +23,7 @@ import type { ModelMessage, ModelToolSpecification } from "../src/models"
 import { type AgentTokenRateStore, InMemoryAgentStorage } from "../src/storage/agents"
 import { InMemoryAuthStorage } from "../src/storage/auth"
 import { InMemoryExecutionStorage } from "../src/storage/executions/in-memory"
+import { MockLanguageModel, streamFromArray } from "./helpers/models"
 
 const text = (bytes: number) => "a".repeat(bytes)
 
@@ -191,6 +196,109 @@ describe("a model's learned rate", () => {
 
   const samples = (...rates: number[]): AgentContextTokenRateSample[] =>
     rates.map((rate) => ({ bytes: Math.round(rate * 10_000), tokens: 10_000 }))
+
+  // Reproduce: weigh provider state as its JSON in measureModelRequest, not by providerStateSize.
+  // This request, shaped as the last call of a GPT-6.2 Sol run in production, then measures 9.19
+  // bytes per token, which storage refuses; weigh its billed reasoning as nothing, and it measures
+  // 3.08, a tokenizer far denser than Sol's, which every estimate after it then overstates.
+  test("is measured on a request's text, the reasoning it replays at what it was billed", async () => {
+    // 59,117 input tokens billed: 40,000 of text, at the 4.54 bytes per token GPT-6.1 Sol
+    // measures, and the 19,117 reasoning tokens its steps were billed, which they replay.
+    const inputTokens = 59_117
+    const replayed = [26_514, 27_378, 27_572, 28_397, 28_972, 29_334, 30_194, 30_636, 31_076]
+    replayed.push(31_702, 32_333, 36_092)
+    const reasoningTokens = [1_593, 1_593, 1_593, 1_593, 1_593, 1_593, 1_593, 1_593, 1_593]
+    reasoningTokens.push(1_593, 1_593, 1_594)
+    const request = {
+      messages: [
+        { role: "system", content: text(Math.round(40_000 * 4.54)) },
+        ...replayed.map(
+          (bytes, index): ModelMessage => ({
+            role: "assistant",
+            content: [
+              {
+                type: "provider-state",
+                providerId: "openai",
+                data: { item: { type: "reasoning", encrypted_content: "g".repeat(bytes) } },
+                tokens: reasoningTokens[index] ?? 0,
+              },
+            ],
+          })
+        ),
+      ] satisfies ModelMessage[],
+      tools: [],
+    }
+    const sample = measureAgentContextTokenRate({
+      size: measureAgentModelRequest(request),
+      inputTokens,
+    })
+    if (!sample) throw new Error("Expected a measurement.")
+    expect(sample.bytes / sample.tokens).toBeCloseTo(4.55, 2)
+
+    const tokenRates = project()
+    await recordAgentContextTokenRate({
+      tokenRates,
+      projectId: "project",
+      runId: "run_sol",
+      sample: { ...model, ...sample },
+      measuredAt: new Date(t0),
+    })
+    expect(await learned(tokenRates)).toBeCloseTo(4.55, 2)
+  })
+
+  // Reproduce: measure every call in measuringAgentContextTokenRates. After a switch from GPT-6.2
+  // Sol, a call that never reads Sol's 3,000 tokens of reasoning counts them against the 10,000 it
+  // was billed, and records 6.5 bytes per token where this model reads 4.54.
+  test("is not measured on a call that carries reasoning another model wrote", async () => {
+    const tokenRates = project()
+    // Billed its 10,000 tokens of text, and the reasoning it replays when it is its own.
+    const billed = [10_000, 13_000]
+    const measured = measuringAgentContextTokenRates(
+      new MockLanguageModel({
+        ...model,
+        stream: async () =>
+          streamFromArray([
+            { type: "stream-start" },
+            { type: "finish", finishReason: "stop", usage: { inputTokens: billed.shift() ?? 0 } },
+          ]),
+      }),
+      { tokenRates, projectId: "project", runId: "run_switch" }
+    )
+    const call = async (writer: string) => {
+      const reasoning: ModelMessage = {
+        role: "assistant",
+        content: [
+          {
+            type: "provider-state",
+            providerId: model.providerId,
+            data: {
+              item: { type: "reasoning", encrypted_content: "g".repeat(12_000) },
+              modelId: writer,
+            },
+            tokens: 3_000,
+          },
+        ],
+      }
+      const stream = await measured.stream({
+        callId: `call_${writer}`,
+        messages: [{ role: "system", content: text(45_400) }, reasoning],
+        tools: [],
+        signal: new AbortController().signal,
+      })
+      for await (const _event of stream.events) {
+        // Read to the end: the call is measured once it ends.
+      }
+    }
+    const stored = () => tokenRates.listLatest({ projectId: "project", ...model })
+
+    await call("gpt-6.2-sol")
+    expect(await stored()).toEqual([])
+
+    // Its own model's reasoning, which it reads, leaves the call measured at its text.
+    await call(model.modelId)
+    const [sample] = await stored()
+    expect((sample?.bytes ?? 0) / (sample?.tokens ?? 1)).toBeCloseTo(4.55, 2)
+  })
 
   test("starts a model no run measured at a rate denser than any tokenizer's", async () => {
     // Removal proof: return the median from learnedAgentContextBytesPerToken for an empty window;

@@ -6,6 +6,7 @@ import {
   AGENT_TOKEN_RATE_SAMPLES,
 } from "../storage/agents/types"
 import { type AgentContextSize, measureAgentModelRequest } from "./context-compaction"
+import { carriesOtherModelsReasoning } from "./replayed-reasoning"
 
 /**
  * UTF-8 bytes per token of the text an agent request carries (system prompt, tool catalog,
@@ -32,9 +33,9 @@ const CALIBRATION_MIN_TEXT_TOKENS = 1_000
 
 /**
  * How far a thread's measured rate may move from the rate its run started from. Down is the safe
- * side and goes to half. Up only a quarter: stored bytes the provider bills for less (replayed
- * reasoning, provider state) raise the measured rate, and an estimate too low crosses the window
- * unseen.
+ * side and goes to half. Up only a quarter: stored bytes the provider bills for less (a reasoning
+ * item its response never counted) raise the measured rate, and an estimate too low crosses the
+ * window unseen.
  */
 const CALIBRATION_MIN_FACTOR = 0.5
 const CALIBRATION_MAX_FACTOR = 1.25
@@ -191,8 +192,11 @@ export function measuringAgentContextTokenRates(
   return {
     ...model,
     stream: async (request) => {
-      const size = measureAgentModelRequest(request)
       const stream = await model.stream(request)
+      // A call that carries reasoning it never reads would count its tokens against this model's.
+      if (carriesOtherModelsReasoning(request.messages, model)) return stream
+
+      const size = measureAgentModelRequest(request)
       return { ...stream, events: measuredEvents(stream.events, size, model, run) }
     },
   }

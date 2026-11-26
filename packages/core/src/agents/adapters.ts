@@ -254,6 +254,7 @@ function appendAssistantModelMessages<TMessage extends AgentMessage>(
           type: "provider-state",
           providerId: part.providerId,
           data: part.data,
+          ...(part.tokens === undefined ? {} : { tokens: part.tokens }),
         })
       }
     }

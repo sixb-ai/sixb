@@ -8,6 +8,7 @@ import {
   selectAgentContextCompactionBoundary,
   shouldCompactAgentContext,
 } from "../src/agents"
+import { stableJsonStringify } from "../src/json"
 import type { AgentContextCheckpointRecord, AgentMessageRecord } from "../src/storage/agents"
 
 const bytesPerToken = 4
@@ -26,19 +27,81 @@ function message(seq: number, role: AgentMessageRecord["role"], text: string): A
   }
 }
 
+/**
+ * An OpenAI encrypted reasoning item of `bytes`, as a provider stores it to replay it, with the
+ * reasoning tokens its step was billed when its response said.
+ */
+function encryptedReasoning(bytes: number, tokens?: number) {
+  return {
+    type: "provider-state" as const,
+    providerId: "openai",
+    data: { item: { type: "reasoning", summary: [], encrypted_content: "g".repeat(bytes) } },
+    ...(tokens === undefined ? {} : { tokens }),
+  }
+}
+
+/** An Anthropic web fetch tool's result: the page it fetched, which the model reads. */
+const fetchedPage = {
+  type: "provider-state" as const,
+  providerId: "anthropic",
+  data: {
+    block: {
+      type: "web_fetch_tool_result",
+      tool_use_id: "srvtoolu_1",
+      content: {
+        type: "web_fetch_result",
+        url: "https://example.com",
+        content: "page ".repeat(2_000),
+      },
+    },
+  },
+}
+
 describe("agent context token estimation", () => {
-  test("counts opaque provider state", () => {
-    // Regression proof: remove provider-state from the switch in context-compaction.ts.
+  // Reproduce: return its JSON as bytes from providerStateSize whatever its tokens; the 55 KB
+  // GPT-6.2 Sol stored 3,613 reasoning tokens in then count as 13,800 tokens. Count its reasoning
+  // text in measureMessage whatever countsReasoningText says, and its summary counts on top.
+  test("weighs a replayed reasoning item at what its step was billed, and its text not beside it", () => {
     const base = message(2, "assistant", "answer")
-    const withState: AgentMessageRecord = {
+    const replayed: AgentMessageRecord = {
       ...base,
       parts: [
+        { type: "reasoning", text: "Counting the derangements first.".repeat(20) },
         ...base.parts,
-        { type: "provider-state", providerId: "anthropic", data: { opaque: "secret".repeat(100) } },
+        encryptedReasoning(55_208, 3_613),
       ],
     }
-    expect(estimateAgentContextMessagesTokens([withState], bytesPerToken).tokens).toBeGreaterThan(
-      estimateAgentContextMessagesTokens([base], bytesPerToken).tokens
+    expect(estimateAgentContextMessagesTokens([replayed], bytesPerToken).tokens).toBe(
+      estimateAgentContextMessagesTokens([base], bytesPerToken).tokens + 3_613
+    )
+  })
+
+  // Reproduce: weigh state with no tokens as nothing in providerStateSize; an item its response
+  // never counted, as a thread stored before, then weighs nothing though its provider bills it.
+  test("weighs one its response never counted as its JSON, the most it can weigh", () => {
+    const base = message(2, "assistant", "answer")
+    const item = encryptedReasoning(27_000)
+    const uncounted: AgentMessageRecord = { ...base, parts: [...base.parts, item] }
+    const asText: AgentMessageRecord = {
+      ...base,
+      parts: [...base.parts, { type: "text", text: stableJsonStringify(item.data) }],
+    }
+    expect(estimateAgentContextMessagesTokens([uncounted], bytesPerToken).tokens).toBe(
+      estimateAgentContextMessagesTokens([asText], bytesPerToken).tokens
+    )
+  })
+
+  // Reproduce: weigh state with no tokens as nothing in providerStateSize; the page a provider tool
+  // fetched, which the model reads and the provider bills, then counts for nothing.
+  test("counts other provider state, as a provider tool's result, as the model reads it", () => {
+    const base = message(2, "assistant", "answer")
+    const withPage: AgentMessageRecord = { ...base, parts: [...base.parts, fetchedPage] }
+    const asText: AgentMessageRecord = {
+      ...base,
+      parts: [...base.parts, { type: "text", text: stableJsonStringify(fetchedPage.data) }],
+    }
+    expect(estimateAgentContextMessagesTokens([withPage], bytesPerToken).tokens).toBe(
+      estimateAgentContextMessagesTokens([asText], bytesPerToken).tokens
     )
   })
   test("counts how a held call ended as the model reads it", () => {
