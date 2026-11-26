@@ -373,6 +373,7 @@ function conversationEstimateShape(
         facts: context.requester === undefined ? {} : { requester: context.requester },
         ...(authors?.section === undefined ? {} : { conversation: authors.section }),
         ...(plan.sandboxModels ? { sandboxModels: plan.sandboxModels } : {}),
+        ...(plan.conversationSearch ? { conversationSearch: true } : {}),
         ...(memory ? { memory: memory.prompt } : {}),
         runningModel: plan.model,
       }),

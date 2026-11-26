@@ -43,6 +43,8 @@ export interface ResolvedAgentExecutionPlan {
   readonly maxSteps?: number
   /** Its web tools. Absent: it has none. */
   readonly web?: AgentRunWebPlan
+  /** Its `sixb` searches its requester's earlier conversations, which the prompt says. */
+  readonly conversationSearch?: boolean
 }
 
 /**
@@ -64,6 +66,7 @@ export function resolveRunPlan(
     tools,
     maxSteps,
     web,
+    conversationSearch,
   } = plan
   return Object.freeze({
     model: resolved.model,
@@ -79,5 +82,6 @@ export function resolveRunPlan(
     ...(sandboxModels.length ? { sandboxModels } : {}),
     ...(maxSteps === undefined ? {} : { maxSteps }),
     ...(web === undefined ? {} : { web }),
+    ...(conversationSearch ? { conversationSearch } : {}),
   })
 }

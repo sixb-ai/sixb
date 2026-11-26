@@ -1044,6 +1044,7 @@ async function startAgentEnvironment(
     context,
     actorId,
     run: { id: runId, ...(threadId ? { threadId } : {}) },
+    timeZone: sentSettings(plan, { timeZone: context.timeZone, locale: context.locale }).timeZone,
     apiBaseUrl,
     attachmentContext,
     ...(input.toolOutputs ? { toolOutputs: input.toolOutputs } : {}),
@@ -1198,6 +1199,8 @@ function measureEnvironmentSystemPrompt(input: {
     facts: requester === undefined ? {} : { requester },
     ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
     ...(plan.sandboxModels ? { sandboxModels: plan.sandboxModels } : {}),
+    // A workflow's agent node searches no conversation.
+    ...(mode !== "workflow-task" && plan.conversationSearch ? { conversationSearch: true } : {}),
     ...(input.memory ? { memory: input.memory.prompt } : {}),
     runningModel: plan.model,
   })
@@ -1283,6 +1286,8 @@ interface ProvisionSandboxInput {
   readonly context: AgentExecutionContext
   readonly actorId?: string
   readonly run: { readonly id: string; readonly threadId?: string }
+  /** The requester's time zone, else the project's, as `$SIXB_TIME_ZONE`. */
+  readonly timeZone: string
   readonly apiBaseUrl: string
   readonly attachmentContext: PreparedAgentAttachmentContext
   readonly toolOutputs?: readonly AgentToolCallFile[]
@@ -1316,6 +1321,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<Provision
       ...(actorId === undefined ? {} : { actorId }),
       ...(run.threadId ? { threadId: run.threadId } : {}),
       runId: run.id,
+      timeZone: input.timeZone,
       attachments: input.attachmentContext,
       skills,
       ontologyFiles,

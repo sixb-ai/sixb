@@ -6,6 +6,7 @@ import {
   UNATTENDED_AGENT_MAX_STEPS,
 } from "../src/agents"
 import { defineAgentTool } from "../src/agents/builders"
+import { readAgentRunConversationSearch } from "../src/agents/run-plan"
 import type { AgentSkillDefinition } from "../src/agents/skills"
 import type { AgentToolDefinition } from "../src/agents/types"
 import type { AgentWebOptions } from "../src/agents/web"
@@ -245,5 +246,32 @@ describe("a run's web tools", () => {
     const off = definitions({ webSearch: [search], web: false })
     expect(readAgentRunPlan(off, turn(), VIEW)).not.toHaveProperty("web")
     expect(readAgentRunPlan(off, child, VIEW)).not.toHaveProperty("web")
+  })
+})
+
+describe("a run's conversation search", () => {
+  const withEmbedding = (count: number) =>
+    ({
+      models: { embedding: { list: () => Array.from({ length: count }, () => ({})) } },
+    }) as unknown as Pick<AgentRunPlanDefinitions, "models">
+
+  // Proven by removal: drop either check from readAgentRunConversationSearch.
+  test("needs an embedding model and storage that searches vectors", async () => {
+    let asked = 0
+    const storage = (available: boolean) => ({
+      searchAvailable: async () => {
+        asked += 1
+        return available
+      },
+    })
+
+    expect(await readAgentRunConversationSearch(withEmbedding(1), storage(true))).toBe(true)
+    expect(await readAgentRunConversationSearch(withEmbedding(1), storage(false))).toBe(false)
+    expect(asked).toBe(2)
+
+    // Without a model, storage is never asked.
+    expect(await readAgentRunConversationSearch(withEmbedding(0), storage(true))).toBe(false)
+    expect(await readAgentRunConversationSearch({}, storage(true))).toBe(false)
+    expect(asked).toBe(2)
   })
 })

@@ -168,6 +168,7 @@ var CLI_LIMITS = {
   linkPage: { default: 100, maximum: 1000 },
   users: { default: 20, maximum: 200 },
   history: { default: 20, maximum: 100 },
+  historySearch: { default: 10, maximum: 25 },
   datasetVersions: { default: 20, maximum: 100 },
   datasetRows: { default: 100, maximum: 1000 },
   inspect: {
@@ -386,12 +387,19 @@ var GROUP_HELP = {
   status: "Usage: sixb status",
   context: "Usage: sixb context",
   history: `Usage:
-  sixb history [--offset <n>] [--limit <1-${CLI_LIMITS.history.maximum}>]
-  sixb history <seq>
+  sixb history [--thread <id>] [--offset <n>] [--limit <1-${CLI_LIMITS.history.maximum}>]
+  sixb history [--thread <id>] <seq>
+  sixb history search <text> [--since <date>] [--until <date>] [--limit <1-${CLI_LIMITS.historySearch.maximum}>]
 
 Prints this conversation's messages as text, oldest first, including those summarized when it
 was compacted: what was said, the files sent, and each tool call with its result. A page holds
-${CLI_LIMITS.history.default} messages by default and cuts long text; \`sixb history <seq>\` prints one message whole.`,
+${CLI_LIMITS.history.default} messages by default and cuts long text; \`sixb history <seq>\` prints one message whole.
+--thread reads another of the user's conversations the same way.
+
+\`sixb history search\` finds the user's earlier conversations by meaning, the closest first, each
+with its best turns and the command that reads each; ${CLI_LIMITS.historySearch.default} by default. --since and
+--until take a timestamp with its offset, or a date: a day in the user's time zone
+($SIXB_TIME_ZONE, UTC without it), --since from its start and --until through its end.`,
   project: "Usage: sixb project show",
   ontology: `Usage:
   sixb ontology list [--full]
@@ -2496,10 +2504,19 @@ var PAGE_TOOL_CHARS = 1000;
 async function history(api, args) {
   if (isHelp(args[0]) || requestsHelp(args))
     return writeText(GROUP_HELP.history);
-  const { positionals, options } = parseCommandArgs(args, { "--offset": "string", "--limit": "string" }, "history", [0, 1]);
-  const threadId = process.env.SIXB_THREAD_ID;
+  if (args[0] === "search")
+    return searchHistory(api, args.slice(1));
+  const { positionals, options } = parseCommandArgs(args, { "--thread": "string", "--offset": "string", "--limit": "string" }, "history", [0, 1]);
+  const ownId = process.env.SIXB_THREAD_ID;
+  const threadId = options["--thread"] ?? ownId;
   if (!threadId)
     fail("This run has no conversation to read: SIXB_THREAD_ID is not set.");
+  const own = threadId === ownId;
+  const conversation = {
+    id: threadId,
+    own,
+    command: own ? "sixb history" : `sixb history --thread ${shellWord(threadId)}`
+  };
   const path = `/api/agent-threads/${idSegment(threadId)}/messages`;
   const seq = positionals[0];
   if (seq !== undefined) {
@@ -2509,14 +2526,14 @@ async function history(api, args) {
     if (message?.seq !== wanted) {
       throw new CliError({ code: "not_found", message: `The conversation has no message #${wanted}.` }, EXIT_API);
     }
-    return writeText(renderMessage(message, page, { whole: true }));
+    return writeText(renderMessage(message, page, { whole: true, conversation }));
   }
   const offset = nonNegativeInteger("--offset", options["--offset"] ?? "0");
   const limit = integerInRange("--limit", options["--limit"] ?? String(CLI_LIMITS.history.default), 1, CLI_LIMITS.history.maximum);
   const page = messagePage(await api.get(path, { order: "asc", offset: String(offset), limit: String(limit) }));
-  const shown = page.messages.map((message) => renderMessage(message, page, { whole: false }));
+  const shown = page.messages.map((message) => renderMessage(message, page, { whole: false, conversation }));
   const end = offset + page.messages.length;
-  const footer = page.messages.length === 0 ? `No messages from offset ${offset}: the conversation has ${page.total}.` : page.hasMore ? `Messages ${offset + 1}–${end} of ${page.total}. Next: sixb history --offset ${end}` : `Messages ${offset + 1}–${end} of ${page.total}: the end of the conversation.`;
+  const footer = page.messages.length === 0 ? `No messages from offset ${offset}: the conversation has ${page.total}.` : page.hasMore ? `Messages ${offset + 1}–${end} of ${page.total}. Next: ${conversation.command} --offset ${end}` : `Messages ${offset + 1}–${end} of ${page.total}: the end of the conversation.`;
   writeText([...shown, footer].join(`
 
 `));
@@ -2526,6 +2543,7 @@ function renderMessage(message, page, options) {
   const heading = [`#${message.seq} ${message.role}`, author, message.createdAt].filter(Boolean).join(" · ");
   const bounds = {
     seq: message.seq,
+    command: options.conversation.command,
     textChars: options.whole ? Number.POSITIVE_INFINITY : PAGE_TEXT_CHARS,
     toolChars: options.whole ? Number.POSITIVE_INFINITY : PAGE_TOOL_CHARS
   };
@@ -2533,27 +2551,29 @@ function renderMessage(message, page, options) {
     `── ${heading}`,
     ...message.parts.flatMap((part, index) => [
       ...renderPart(part, bounds),
-      ...renderOutputFile(part, message, index)
+      ...renderOutputFile(part, message, index, options.conversation)
     ])
   ].join(`
 `);
 }
-function renderOutputFile(part, message, index) {
+function renderOutputFile(part, message, index, conversation) {
   const file = part.type === "tool-call" ? record(part.outputFile) : undefined;
   const fileRef = record(file?.fileRef);
   if (typeof file?.path !== "string" || typeof fileRef?.sizeBytes !== "number")
     return [];
+  const size = `${fileRef.sizeBytes.toLocaleString("en-US")} bytes`;
+  const apiBaseUrl = process.env.SIXB_API_BASE_URL;
+  const download = apiBaseUrl && message.id ? `sixb files download url ${apiBaseUrl.replace(/\/$/, "")}/api/agent-threads/${idSegment(conversation.id)}/messages/${idSegment(message.id)}/files/content?path=${encodeURIComponent(`/parts/${index}/outputFile/fileRef`)} --output <file>` : undefined;
+  if (!conversation.own)
+    return [`  [whole output, ${size}${download ? `: ${download}` : ""}]`];
   const contextDir = process.env.SIXB_CONTEXT_DIR;
   const path = contextDir ? `${contextDir.replace(/\/$/, "")}/${file.path}` : file.path;
-  const apiBaseUrl = process.env.SIXB_API_BASE_URL;
-  const threadId = process.env.SIXB_THREAD_ID;
-  const download = apiBaseUrl && threadId && message.id ? `; else: sixb files download url ${apiBaseUrl.replace(/\/$/, "")}/api/agent-threads/${idSegment(threadId)}/messages/${idSegment(message.id)}/files/content?path=${encodeURIComponent(`/parts/${index}/outputFile/fileRef`)} --output <file>` : "";
   return [
-    `  [whole output, ${fileRef.sizeBytes.toLocaleString("en-US")} bytes: ${path}, written back to the sandbox at each run while the conversation shows this call${download}]`
+    `  [whole output, ${size}: ${path}, written back to the sandbox at each run while the conversation shows this call${download ? `; else: ${download}` : ""}]`
   ];
 }
 function renderPart(part, bounds) {
-  const cut = (value, max) => value.length <= max ? value : `${value.slice(0, max)}… [${(value.length - max).toLocaleString("en-US")} more characters: sixb history ${bounds.seq}]`;
+  const cut = (value, max) => value.length <= max ? value : `${value.slice(0, max)}… [${(value.length - max).toLocaleString("en-US")} more characters: ${bounds.command} ${bounds.seq}]`;
   switch (part.type) {
     case "text":
       return typeof part.text === "string" && part.text.trim() ? [cut(part.text, bounds.textChars)] : [];
@@ -2589,6 +2609,126 @@ function messagePage(value) {
 }
 function record(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : undefined;
+}
+var DATE = /^\d{4}-\d{2}-\d{2}$/;
+var TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+async function searchHistory(api, args) {
+  const { positionals, options } = parseCommandArgs(args, { "--since": "string", "--until": "string", "--limit": "string" }, "history search", [1, Number.POSITIVE_INFINITY]);
+  const text = positionals.join(" ").trim();
+  if (!text || text.length > CLI_LIMITS.vectorSearchText.maximum) {
+    fail(`Search text must be nonempty and at most ${CLI_LIMITS.vectorSearchText.maximum} characters.`);
+  }
+  const since = options["--since"] && instant("--since", options["--since"], "start");
+  const until = options["--until"] && instant("--until", options["--until"], "end");
+  if (since && until && Date.parse(since) >= Date.parse(until)) {
+    fail("--since must be before --until.");
+  }
+  const limit = options["--limit"] && integerInRange("--limit", options["--limit"], 1, CLI_LIMITS.historySearch.maximum);
+  const result = record(await api.post("/api/agent-threads/search", {
+    text,
+    ...since ? { since } : {},
+    ...until ? { until } : {},
+    ...limit ? { limit } : {}
+  }));
+  if (!Array.isArray(result?.conversations)) {
+    throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid search result." }, EXIT_API);
+  }
+  const conversations = result.conversations;
+  const searchedFrom = typeof result.searchedFrom === "string" ? result.searchedFrom : undefined;
+  writeText(renderSearch(conversations, searchedFrom));
+}
+function instant(flag, value, edge) {
+  const invalid = () => fail(`${flag} must be a date (2026-11-20) or a timestamp with its offset (2026-11-20T15:04Z).`);
+  if (DATE.test(value)) {
+    const day = new Date(`${value}T00:00:00.000Z`);
+    if (Number.isNaN(day.getTime()) || day.toISOString().slice(0, 10) !== value)
+      invalid();
+    if (edge === "end")
+      day.setUTCDate(day.getUTCDate() + 1);
+    return new Date(startOfDay(day, userTimeZone())).toISOString();
+  }
+  if (!TIMESTAMP.test(value) || Number.isNaN(Date.parse(value)))
+    invalid();
+  return new Date(value).toISOString();
+}
+function userTimeZone() {
+  const timeZone = process.env.SIXB_TIME_ZONE;
+  if (!timeZone)
+    return "UTC";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone });
+    return timeZone;
+  } catch {
+    return "UTC";
+  }
+}
+function startOfDay(day, timeZone) {
+  const midnight = day.getTime();
+  const first = midnight - zoneOffset(midnight, timeZone);
+  return midnight - zoneOffset(first, timeZone);
+}
+function zoneOffset(at, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric"
+  }).formatToParts(new Date(at));
+  const part = (type) => Number(parts.find((each) => each.type === type)?.value);
+  const local = Date.UTC(part("year"), part("month") - 1, part("day"), part("hour"), part("minute"), part("second"));
+  return local - (at - at % 1000);
+}
+function renderSearch(conversations, searchedFrom) {
+  const further = searchedFrom ? [
+    `Only turns from ${searchedFrom} on were searched: add --until ${searchedFrom} to search earlier ones.`
+  ] : [];
+  if (conversations.length === 0) {
+    return ["No earlier conversation matches.", ...further].join(`
+`);
+  }
+  const found = conversations.map(({ thread, turns }) => {
+    const dates = [
+      `started ${minute(thread.createdAt)}`,
+      thread.lastMessageAt ? `last message ${minute(thread.lastMessageAt)}` : undefined,
+      thread.shared ? "shared" : undefined
+    ];
+    return [
+      `── ${thread.id} · ${thread.title ? JSON.stringify(thread.title) : "untitled"}`,
+      dates.filter(Boolean).join(" · "),
+      ...turns.flatMap((turn) => [
+        `  #${turn.firstSeq} · ${minute(turn.at)} · ${turn.excerpt.replace(/\s+/g, " ").trim()}`,
+        ...turn.artifacts.length > 0 ? [
+          `    Published: ${turn.artifacts.map((artifact) => `${JSON.stringify(artifact.title)} (artifact:${artifact.id})`).join(", ")}`
+        ] : [],
+        `    Read it: ${readTurnCommand(thread.id, turn)}`
+      ])
+    ].join(`
+`);
+  });
+  const count = conversations.length;
+  return [
+    `${count} earlier conversation${count === 1 ? "" : "s"} found, the closest first.`,
+    ...found,
+    ["A whole conversation: sixb history --thread <id>.", ...further].join(`
+`)
+  ].join(`
+
+`);
+}
+function readTurnCommand(threadId, turn) {
+  const limit = Math.min(turn.lastSeq - turn.firstSeq + 1, CLI_LIMITS.history.maximum);
+  return `sixb history --thread ${shellWord(threadId)} --offset ${turn.firstSeq - 1} --limit ${limit}`;
+}
+function minute(value) {
+  const at = Date.parse(value);
+  return Number.isNaN(at) ? value : `${new Date(at).toISOString().slice(0, 16)}Z`;
+}
+function shellWord(value) {
+  return /^[\w.:@-]+$/.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 // src/commands/memory.ts

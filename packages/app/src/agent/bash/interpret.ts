@@ -45,6 +45,7 @@ type SixbCommandName =
   | "status"
   | "context"
   | "history"
+  | "history.search"
   | "objects.query-example"
   | CliCommandName
   | "unknown"
@@ -135,6 +136,9 @@ export function classifyCommand(command: string): BashIntent {
   if (!segments)
     return classifyMemoryCommand(command) ?? { kind: "generic", command: command.trim() }
   if (segments.length > 1) {
+    const paged = pagedHistoryCommand(segments)
+    if (paged) return paged
+
     return {
       kind: "compound",
       primary: selectCompoundPrimary(segments),
@@ -142,6 +146,23 @@ export function classifyCommand(command: string): BashIntent {
     }
   }
   return classifyAtomicCommand(segments[0])
+}
+
+/**
+ * `sixb history …` piped only into `head` or `tail`, as models often run it: the same command, its
+ * text output cut short. Its view reads that text line by line, so it shows as the command itself.
+ */
+function pagedHistoryCommand(segments: readonly ShellSegment[]): AtomicBashIntent | null {
+  const [first, ...pagers] = segments
+  const intent = classifyAtomicCommand(first)
+  if (intent.kind !== "sixb" || !intent.command.startsWith("history")) return null
+
+  const onlyPaged = pagers.every(
+    (segment) =>
+      segment.operatorBefore === "|" &&
+      ["head", "tail"].includes(executableName(segment.tokens[0]) ?? "")
+  )
+  return onlyPaged ? intent : null
 }
 
 /**
@@ -243,7 +264,9 @@ function classifySixbCommand(
     return { kind: "sixb", command: "context", args: cliArgs.slice(1) }
   }
   if (cliArgs[0] === "history") {
-    return { kind: "sixb", command: "history", args: cliArgs.slice(1) }
+    return cliArgs[1] === "search"
+      ? { kind: "sixb", command: "history.search", args: cliArgs.slice(2) }
+      : { kind: "sixb", command: "history", args: cliArgs.slice(1) }
   }
 
   const [group, operation, ...args] = cliArgs
@@ -326,6 +349,65 @@ function classifySkillRead(
   return { kind: "read-skill", skillName, reference }
 }
 
+// --- Earlier conversations --------------------------------------------------
+
+/** A conversation `sixb history search` found, as the chat lists it. */
+export interface FoundConversation {
+  readonly id: string
+  readonly title?: string
+  /** When it was last written in, or started. */
+  readonly at?: string
+  readonly shared: boolean
+  /** What was asked in its closest turn. */
+  readonly asked?: string
+}
+
+/**
+ * The conversations a search printed, read from the text the Agent reads: a `── <id> · <title>`
+ * line for each, then its dates, then its turns. Null when the text is not such a listing, an
+ * empty list when nothing matched.
+ */
+export function foundConversations(stdout: string): readonly FoundConversation[] | null {
+  const lines = stdout.split(/\r?\n/)
+  if (lines[0]?.startsWith("No earlier conversation matches")) return []
+
+  const found: FoundConversation[] = []
+  for (const [index, line] of lines.entries()) {
+    const heading = /^── (\S+) · (.+)$/.exec(line)
+    if (!heading?.[1] || !heading[2]) continue
+
+    const dates = lines[index + 1] ?? ""
+    const at = /last message (\S+)/.exec(dates)?.[1] ?? /^started (\S+)/.exec(dates)?.[1]
+    const title = quotedTitle(heading[2])
+    const asked = askedIn(/^ {2}#\d+ · \S+ · (.+)$/.exec(lines[index + 2] ?? "")?.[1])
+
+    found.push({
+      id: heading[1],
+      ...(title ? { title } : {}),
+      ...(at ? { at } : {}),
+      shared: /(?:^| · )shared$/.test(dates),
+      ...(asked ? { asked } : {}),
+    })
+  }
+  return found.length > 0 ? found : null
+}
+
+function quotedTitle(value: string): string | undefined {
+  if (!value.startsWith('"')) return undefined
+  try {
+    const title = JSON.parse(value)
+    return typeof title === "string" && title.trim() ? title : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The request of a turn's excerpt, `Request: … Answer: … Published: …`. */
+function askedIn(excerpt: string | undefined): string | undefined {
+  const request = excerpt?.match(/^Request: (.*?)(?: (?:Answer|Published): .*)?$/)?.[1]?.trim()
+  return request || undefined
+}
+
 // --- Friendly description --------------------------------------------------
 
 export type BashIcon =
@@ -341,6 +423,7 @@ export type BashIcon =
   | "image"
   | "audio"
   | "transcript"
+  | "conversations"
   | "model"
   | "memory"
   | "terminal"
@@ -534,7 +617,20 @@ function describeSixb(
       return icon("project", m.runContext)
     case "history": {
       const seq = positionals(intent.args)[0]
+      // Another of the user's conversations, which a search found, never this one's history.
+      if (intent.args.some((arg) => arg === "--thread" || arg.startsWith("--thread="))) {
+        return seq
+          ? icon("transcript", m.earlierMessage, seq)
+          : icon("transcript", m.earlierConversation)
+      }
       return seq ? icon("transcript", m.historyMessage, seq) : icon("transcript", m.history)
+    }
+    case "history.search": {
+      const query = positionals(intent.args).join(" ").trim()
+      return withDetail(
+        icon("conversations", m.historySearch),
+        query ? m.historyQuery(truncateEnd(query, 80)) : undefined
+      )
     }
     case "ontology.list":
       return withDetail(

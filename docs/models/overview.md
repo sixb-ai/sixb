@@ -231,7 +231,9 @@ kept for 90 days.
 ### It finds earlier conversations
 
 With an embedding model, the agent finds the user's earlier conversations by meaning, such as
-"the reminder we drafted for late invoices", and reads the ones it finds.
+"the reminder we drafted for late invoices", and reads the ones it finds. It does so on its own
+when the user refers to earlier work it does not see, with `sixb history search` in its sandbox;
+the chat lists the conversations it found, and each one opens.
 
 - **What it needs:** a model in `models.embedding` (the first one is used), and storage that can
   search vectors: PostgreSQL with pgvector in `public`, or a SQLite that loads sqlite-vec.

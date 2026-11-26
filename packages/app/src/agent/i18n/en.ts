@@ -694,6 +694,19 @@ export const en = {
       title: (seq: string) => `Read message ${seq}`,
       running: (seq: string) => `Reading message ${seq}`,
     },
+    historySearch: {
+      title: "Searched your earlier conversations",
+      running: "Searching your earlier conversations",
+    },
+    historyQuery: (text: string) => `“${text}”`,
+    earlierConversation: {
+      title: "Read an earlier conversation",
+      running: "Reading an earlier conversation",
+    },
+    earlierMessage: {
+      title: (seq: string) => `Read message ${seq} of an earlier conversation`,
+      running: (seq: string) => `Reading message ${seq} of an earlier conversation`,
+    },
     ontology: { title: "Explored the ontology", running: "Exploring the ontology" },
     objectType: {
       title: (type: string) => `Inspected the ${type || "object"} type`,
@@ -859,6 +872,9 @@ export const en = {
   /** Native views of shell command results. */
   results: {
     noMatchingObjects: "No matching objects.",
+    noEarlierConversations: "No earlier conversation matched.",
+    untitledConversation: "Untitled conversation",
+    sharedConversation: "Shared",
     noBreakdown: "No breakdown available.",
     noReadings: "No readings.",
     noSeries: "No series returned.",

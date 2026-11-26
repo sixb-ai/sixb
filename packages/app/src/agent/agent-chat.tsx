@@ -20,6 +20,7 @@ import { useThreadSharing } from "./hooks/use-thread-sharing"
 import { useAgentMessages } from "./i18n"
 import { knownName, MessageAuthorsContext, useConversationAuthors } from "./message-authors"
 import { personName, threadOwner } from "./sharing"
+import { ThreadNavigationContext } from "./thread-navigation"
 import { ThreadStateContext, threadStateStoreFor } from "./thread-state"
 import type { AgentContextInput, AgentThreadSandboxParams } from "./types"
 
@@ -222,34 +223,36 @@ export function AgentChat({
   )
 
   return (
-    <ThreadStateContext.Provider value={threadState}>
-      <ArtifactPeopleContext.Provider value={artifactPeople}>
-        <ArtifactPanelRoot
-          compact={compact}
-          split={splitArtifacts}
-          overlayHost={artifactHost}
-          scopeKey={threadId ?? "draft"}
-          routeTarget={artifactTarget}
-          onRouteTargetChange={onArtifactTargetChange}
-          {...(readOnly ? {} : { onAgentDraft: conversation.insertDraft })}
-        >
-          <div
-            data-agent-panel={compact ? "" : undefined}
-            className={cn("relative flex h-full min-h-0 flex-col", className)}
+    <ThreadNavigationContext.Provider value={onNavigateThread}>
+      <ThreadStateContext.Provider value={threadState}>
+        <ArtifactPeopleContext.Provider value={artifactPeople}>
+          <ArtifactPanelRoot
+            compact={compact}
+            split={splitArtifacts}
+            overlayHost={artifactHost}
+            scopeKey={threadId ?? "draft"}
+            routeTarget={artifactTarget}
+            onRouteTargetChange={onArtifactTargetChange}
+            {...(readOnly ? {} : { onAgentDraft: conversation.insertDraft })}
           >
-            {!controlsInConversationHeader && conversationHeaderActions ? (
-              <div className="absolute top-1.5 right-2 z-20 flex items-center gap-1">
-                {conversationHeaderActions}
-              </div>
-            ) : null}
-            <MessageAuthorsContext.Provider value={authors}>
-              <main className="min-h-0 min-w-0 flex-1">{content}</main>
-            </MessageAuthorsContext.Provider>
-            <Toaster id={toasterId} position="top-center" />
-          </div>
-        </ArtifactPanelRoot>
-      </ArtifactPeopleContext.Provider>
-    </ThreadStateContext.Provider>
+            <div
+              data-agent-panel={compact ? "" : undefined}
+              className={cn("relative flex h-full min-h-0 flex-col", className)}
+            >
+              {!controlsInConversationHeader && conversationHeaderActions ? (
+                <div className="absolute top-1.5 right-2 z-20 flex items-center gap-1">
+                  {conversationHeaderActions}
+                </div>
+              ) : null}
+              <MessageAuthorsContext.Provider value={authors}>
+                <main className="min-h-0 min-w-0 flex-1">{content}</main>
+              </MessageAuthorsContext.Provider>
+              <Toaster id={toasterId} position="top-center" />
+            </div>
+          </ArtifactPanelRoot>
+        </ArtifactPeopleContext.Provider>
+      </ThreadStateContext.Provider>
+    </ThreadNavigationContext.Provider>
   )
 }
 

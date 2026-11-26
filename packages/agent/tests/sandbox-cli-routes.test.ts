@@ -66,6 +66,7 @@ const CLI_API_ROUTES = [
   "GET /api/artifacts/:artifactId/versions/:version/media/content",
   "POST /api/artifacts/:artifactId/versions/:version/video",
   "GET /api/artifacts/:artifactId/versions/:version/video",
+  "POST /api/agent-threads/search",
   "GET /api/artifacts/:artifactId/comments",
   "POST /api/artifacts/:artifactId/comments",
   "POST /api/artifacts/:artifactId/comments/:commentId/resolve",
@@ -91,10 +92,6 @@ const INTENTIONAL_CLI_ROUTE_ALTERNATIVES = new Map([
   ["GET /api/artifacts/:artifactId/versions/:version/queries/:name", ARTIFACTS_THROUGH_THE_RUNNER],
   ["POST /api/artifacts", ARTIFACTS_THROUGH_THE_RUNNER],
   ["PUT /api/artifacts/:artifactId/content", ARTIFACTS_THROUGH_THE_RUNNER],
-  [
-    "POST /api/agent-threads/search",
-    "Its sandbox CLI command comes with the Agent's instructions to search earlier conversations.",
-  ],
 ])
 
 describe("the sandbox CLI's route coverage", () => {

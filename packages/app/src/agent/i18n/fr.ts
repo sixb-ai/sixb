@@ -664,6 +664,19 @@ export const fr: Translation<AgentMessages> = {
       title: (seq) => `Message ${seq} relu`,
       running: (seq) => `Lecture du message ${seq}`,
     },
+    historySearch: {
+      title: "Recherche effectuée dans vos conversations précédentes",
+      running: "Recherche dans vos conversations précédentes",
+    },
+    historyQuery: (text) => quoted(text),
+    earlierConversation: {
+      title: "Une conversation précédente relue",
+      running: "Lecture d’une conversation précédente",
+    },
+    earlierMessage: {
+      title: (seq) => `Message ${seq} d’une conversation précédente relu`,
+      running: (seq) => `Lecture du message ${seq} d’une conversation précédente`,
+    },
     ontology: { title: "Ontologie explorée", running: "Exploration de l’ontologie" },
     objectType: {
       title: (type) => (type ? `Type ${quoted(type)} examiné` : "Type d’objet examiné"),
@@ -896,6 +909,9 @@ export const fr: Translation<AgentMessages> = {
   },
   results: {
     noMatchingObjects: "Aucun objet correspondant.",
+    noEarlierConversations: "Aucune conversation précédente ne correspond.",
+    untitledConversation: "Conversation sans titre",
+    sharedConversation: "Partagée",
     noBreakdown: "Aucune ventilation disponible.",
     noReadings: "Aucune mesure.",
     noSeries: "Aucune série renvoyée.",

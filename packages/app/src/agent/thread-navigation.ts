@@ -1,3 +1,4 @@
+import { createContext, useContext } from "react"
 import { type AgentMessages, en } from "./i18n/en"
 import type { AgentThread } from "./types"
 
@@ -24,4 +25,15 @@ export function threadPath(threadId: string): string {
 export function threadPathFromLink(link: string): string {
   const legacy = /^\/agents\/([^/?#]+)$/.exec(link)
   return legacy?.[1] ? threadPath(decodeURIComponent(legacy[1])) : link
+}
+
+/**
+ * Opens another conversation the way the chat around it navigates: a page of its own under the
+ * host's routes, or the thread an embedded panel shows. Null outside a chat, such as a
+ * conversation read in Settings, where nothing opens another one.
+ */
+export const ThreadNavigationContext = createContext<((threadId: string) => void) | null>(null)
+
+export function useThreadNavigation(): ((threadId: string) => void) | null {
+  return useContext(ThreadNavigationContext)
 }
