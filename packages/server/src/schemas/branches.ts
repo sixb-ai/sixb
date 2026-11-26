@@ -27,6 +27,7 @@ export const BranchSchema = z.object({
         "machine-ended",
         "temp-files-uncapped",
         "database-limit",
+        "database-closed",
       ]),
       message: z.string(),
     })

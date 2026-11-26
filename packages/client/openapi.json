@@ -25321,7 +25321,8 @@
                                     "no-dev-env",
                                     "machine-ended",
                                     "temp-files-uncapped",
-                                    "database-limit"
+                                    "database-limit",
+                                    "database-closed"
                                   ]
                                 },
                                 "message": {
@@ -25574,7 +25575,8 @@
                               "no-dev-env",
                               "machine-ended",
                               "temp-files-uncapped",
-                              "database-limit"
+                              "database-limit",
+                              "database-closed"
                             ]
                           },
                           "message": {
@@ -25787,7 +25789,8 @@
                               "no-dev-env",
                               "machine-ended",
                               "temp-files-uncapped",
-                              "database-limit"
+                              "database-limit",
+                              "database-closed"
                             ]
                           },
                           "message": {
@@ -26037,7 +26040,8 @@
                               "no-dev-env",
                               "machine-ended",
                               "temp-files-uncapped",
-                              "database-limit"
+                              "database-limit",
+                              "database-closed"
                             ]
                           },
                           "message": {
@@ -26287,7 +26291,8 @@
                               "no-dev-env",
                               "machine-ended",
                               "temp-files-uncapped",
-                              "database-limit"
+                              "database-limit",
+                              "database-closed"
                             ]
                           },
                           "message": {
