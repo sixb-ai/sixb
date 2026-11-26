@@ -90,6 +90,7 @@ describe("sixb worker-group", () => {
       cmd: [
         "bun",
         resolve(import.meta.dir, "..", "src", "index.tsx"),
+        "serve",
         "worker-group",
         "projection",
         "--entry",

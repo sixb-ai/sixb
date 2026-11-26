@@ -13,7 +13,8 @@ Repo-wide agent instructions for `sixb`.
 - `packages/server`: Elysia HTTP/WebSocket API and OpenAPI generation
 - `packages/ui`: shared React component library; knows nothing about Sixb, so the docs site uses it
 - `packages/client`: generated typed client artifacts
-- `packages/cli`: CLI entrypoint for `sixb`
+- `packages/cli`: single zero-dependency `sixb` API CLI used identically by people, CI, and agents (delegates project commands to `@sixb/project-cli`)
+- `packages/project-cli`: project runtime, dev server, `serve` roles, deploy, storage, and TUI (`sixb-project`)
 - `packages/create-sixb`: zero-dependency project scaffolder and template
 - `packages/app`: the project app: shell, built-in pages (Home, the agent, object pages, and the
   Console and Settings sections in `src/pages/`), dev server and build

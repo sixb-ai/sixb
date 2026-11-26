@@ -3875,10 +3875,13 @@ async function signOutSession(options) {
   }
   const baseUrl = normalizeApiUrl(options.baseUrl);
   if (accessToken) {
-    await fetch(`${baseUrl}/api/auth/logout`, {
+    const response = await fetch(`${baseUrl}/api/auth/sign-out`, {
       method: "POST",
       headers: { authorization: `Bearer ${accessToken}` }
-    }).catch(() => {});
+    });
+    if (!response.ok && response.status !== 401) {
+      throw await responseError(response, "sign out");
+    }
   }
   await options.store.clear();
 }
@@ -3919,8 +3922,10 @@ async function postJson(baseUrl, path, body, signal) {
 function parseSessionTokens(record) {
   const accessToken = nonblank(record.accessToken);
   const refreshToken = nonblank(record.refreshToken);
-  const accessExpiresAt = nonblank(record.accessExpiresAt);
-  if (!accessToken || !refreshToken || !accessExpiresAt || Number.isNaN(Date.parse(accessExpiresAt))) {
+  const rawExpiresAt = nonblank(record.accessExpiresAt);
+  const expiresIn = record.expiresIn;
+  const accessExpiresAt = rawExpiresAt && !Number.isNaN(Date.parse(rawExpiresAt)) ? rawExpiresAt : typeof expiresIn === "number" && Number.isFinite(expiresIn) && expiresIn > 0 ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined;
+  if (!accessToken || !refreshToken || !accessExpiresAt) {
     throw new Error("[SixbCLI] The Sixb API returned invalid session tokens.");
   }
   return { accessToken, refreshToken, accessExpiresAt };

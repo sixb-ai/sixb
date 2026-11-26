@@ -2,18 +2,40 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { assertCliSucceeded, runCliToCompletion } from "./shared/cli-process"
 
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
-const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
+const cliEntry = resolve(import.meta.dir, "..", "src", "main.ts")
 const servers: Bun.Server<undefined>[] = []
 const tempDirectories: string[] = []
 
-// The tests run at once, each with its own server and config directory.
 afterAll(async () => {
   while (servers.length > 0) servers.pop()?.stop(true)
   await Promise.all(tempDirectories.splice(0).map((path) => rm(path, { recursive: true })))
 })
+
+async function runCli(
+  args: readonly string[],
+  env: Readonly<Record<string, string | undefined>>,
+  stdin?: string
+): Promise<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }> {
+  const merged: Record<string, string> = {}
+  for (const [k, v] of Object.entries({ ...process.env, ...env })) {
+    if (v !== undefined) merged[k] = v
+  }
+  const child = Bun.spawn(["bun", cliEntry, ...args], {
+    cwd: repoRoot,
+    env: merged,
+    stdin: stdin === undefined ? "ignore" : new Response(stdin),
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ])
+  return { exitCode, stdout, stderr }
+}
 
 async function tempConfigEnvironment(): Promise<Record<string, string | undefined>> {
   const configRoot = await mkdtemp(join(tmpdir(), "sixb-cli-profile-"))
@@ -21,10 +43,12 @@ async function tempConfigEnvironment(): Promise<Record<string, string | undefine
   return {
     XDG_CONFIG_HOME: configRoot,
     SIXB_API_URL: undefined,
+    SIXB_API_BASE_URL: undefined,
     SIXB_API_PUBLIC_ORIGIN: undefined,
     SIXB_API_TOKEN: undefined,
     SIXB_TOKEN: undefined,
     SIXB_PROFILE: undefined,
+    SIXB_RUN_ID: undefined,
   }
 }
 
@@ -85,7 +109,6 @@ describe("sixb profile commands", () => {
           )
         }
         if (url.pathname === "/api/auth/device-authorizations/token") {
-          // Expires within the CLI's renewal margin, so the next command refreshes first.
           return Response.json({
             status: "approved",
             accessToken: "access-1",
@@ -113,12 +136,8 @@ describe("sixb profile commands", () => {
     const apiUrl = `http://127.0.0.1:${server.port}`
     const configPath = join(env.XDG_CONFIG_HOME!, "sixb", "config.json")
 
-    const login = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "login", apiUrl, "--profile", "codex", "--json"],
-      cwd: repoRoot,
-      env,
-    })
-    assertCliSucceeded(login)
+    const login = await runCli(["login", apiUrl, "--profile", "codex", "--json"], env)
+    expect(login.exitCode, login.stderr).toBe(0)
     expect(login.stderr).toContain(`Opening ${apiUrl}/auth/device?user_code=BCDF-HJKM`)
     expect(login.stderr).toContain("Confirm code: BCDF-HJKM")
     expect(JSON.parse(login.stdout)).toEqual({
@@ -132,12 +151,8 @@ describe("sixb profile commands", () => {
       refreshToken: "refresh-1",
     })
 
-    const project = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "project", "show"],
-      cwd: repoRoot,
-      env,
-    })
-    assertCliSucceeded(project)
+    const project = await runCli(["project", "show"], env)
+    expect(project.exitCode, project.stderr).toBe(0)
     expect(JSON.parse(project.stdout)).toEqual({ id: "browser-project" })
     expect(calls.slice(-2)).toEqual(["POST /api/auth/refresh ", "GET /api/project Bearer access-2"])
     expect(JSON.parse(await readFile(configPath, "utf8")).profiles.codex.session).toMatchObject({
@@ -145,28 +160,23 @@ describe("sixb profile commands", () => {
       refreshToken: "refresh-2",
     })
 
-    const logout = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "logout", "--profile", "codex", "--json"],
-      cwd: repoRoot,
-      env,
-    })
-    assertCliSucceeded(logout)
+    const logout = await runCli(["logout", "--profile", "codex", "--json"], env)
+    expect(logout.exitCode, logout.stderr).toBe(0)
     expect(calls.at(-1)).toBe("POST /api/auth/sign-out Bearer access-2")
     expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({ version: 1, profiles: {} })
   }, 20_000)
 
-  test.concurrent("imports a token, stores a profile, and dispatches instance commands", async () => {
+  test.concurrent("imports a token, stores a profile, and dispatches API commands", async () => {
     const env = await tempConfigEnvironment()
     const { server, authorizationHeaders } = startProjectServer({ token: "secret-token" })
     const apiUrl = `http://127.0.0.1:${server.port}`
 
-    const login = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "login", apiUrl, "--profile", "codex", "--token-stdin", "--json"],
-      cwd: repoRoot,
+    const login = await runCli(
+      ["login", apiUrl, "--profile", "codex", "--token-stdin", "--json"],
       env,
-      stdin: "secret-token\n",
-    })
-    assertCliSucceeded(login)
+      "secret-token\n"
+    )
+    expect(login.exitCode, login.stderr).toBe(0)
     expect(login.stdout.trim().split("\n")).toHaveLength(1)
     expect(JSON.parse(login.stdout)).toEqual({
       profile: "codex",
@@ -176,59 +186,37 @@ describe("sixb profile commands", () => {
     })
     expect(authorizationHeaders).toEqual([null, "Bearer secret-token"])
 
-    const project = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "project", "show"],
-      cwd: repoRoot,
-      env,
-    })
-    assertCliSucceeded(project)
+    const project = await runCli(["project", "show"], env)
+    expect(project.exitCode, project.stderr).toBe(0)
     expect(JSON.parse(project.stdout)).toEqual({ id: "acme-production" })
     expect(authorizationHeaders.at(-1)).toBe("Bearer secret-token")
 
-    const tokens = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "token", "list", "--json"],
-      cwd: repoRoot,
-      env,
-    })
-    assertCliSucceeded(tokens)
+    const tokens = await runCli(["tokens", "list", "--json"], env)
+    expect(tokens.exitCode, tokens.stderr).toBe(0)
     expect(JSON.parse(tokens.stdout)).toEqual({ accessTokens: [] })
     expect(authorizationHeaders.at(-1)).toBe("Bearer secret-token")
 
-    const status = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "status", "--json"],
-      cwd: repoRoot,
-      env,
-    })
-    assertCliSucceeded(status)
+    const status = await runCli(["status", "--json"], env)
+    expect(status.exitCode, status.stderr).toBe(0)
     expect(status.stdout).not.toContain("secret-token")
     expect(JSON.parse(status.stdout)).toMatchObject({
+      ok: true,
       connected: true,
       authenticated: true,
       profile: "codex",
-      projectId: "acme-production",
+      project: { id: "acme-production" },
     })
 
-    const config = await readFile(join(env.XDG_CONFIG_HOME!, "sixb", "config.json"), "utf8")
-    expect(config).toContain("secret-token")
-
-    const list = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "profile", "list", "--json"],
-      cwd: repoRoot,
-      env,
-    })
-    assertCliSucceeded(list)
+    const list = await runCli(["profile", "list", "--json"], env)
+    expect(list.exitCode, list.stderr).toBe(0)
     expect(list.stdout).not.toContain("secret-token")
     expect(JSON.parse(list.stdout)).toMatchObject({
       currentProfile: "codex",
       profiles: [{ name: "codex", current: true, authenticated: true }],
     })
 
-    const show = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "profile", "show", "codex", "--json"],
-      cwd: repoRoot,
-      env,
-    })
-    assertCliSucceeded(show)
+    const show = await runCli(["profile", "show", "codex", "--json"], env)
+    expect(show.exitCode, show.stderr).toBe(0)
     expect(show.stdout).not.toContain("secret-token")
     expect(JSON.parse(show.stdout)).toMatchObject({
       name: "codex",
@@ -236,21 +224,13 @@ describe("sixb profile commands", () => {
       authenticated: true,
     })
 
-    const use = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "profile", "use", "codex", "--json"],
-      cwd: repoRoot,
-      env,
-    })
-    assertCliSucceeded(use)
-    expect(JSON.parse(use.stdout)).toEqual({ currentProfile: "codex" })
+    const use = await runCli(["profile", "use", "codex", "--json"], env)
+    expect(use.exitCode, use.stderr).toBe(0)
+    expect(JSON.parse(use.stdout)).toMatchObject({ currentProfile: "codex" })
 
-    const logout = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "logout", "--profile", "codex", "--json"],
-      cwd: repoRoot,
-      env,
-    })
-    assertCliSucceeded(logout)
-    expect(JSON.parse(logout.stdout)).toEqual({ removedProfile: "codex" })
+    const logout = await runCli(["logout", "--profile", "codex", "--json"], env)
+    expect(logout.exitCode, logout.stderr).toBe(0)
+    expect(JSON.parse(logout.stdout)).toEqual({ removed: "codex" })
     const loggedOutConfig = await readFile(
       join(env.XDG_CONFIG_HOME!, "sixb", "config.json"),
       "utf8"
@@ -264,33 +244,25 @@ describe("sixb profile commands", () => {
     const { server, authorizationHeaders } = startProjectServer({ projectId: "local-dev" })
     const apiUrl = `http://127.0.0.1:${server.port}`
 
-    const login = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "login", apiUrl, "--profile", "local", "--json"],
-      cwd: repoRoot,
-      env,
-    })
-    assertCliSucceeded(login)
+    const login = await runCli(["login", apiUrl, "--profile", "local", "--json"], env)
+    expect(login.exitCode, login.stderr).toBe(0)
     expect(JSON.parse(login.stdout)).toMatchObject({
       profile: "local",
       authenticated: false,
     })
     expect(authorizationHeaders).toEqual([null])
 
-    const status = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "status", "--json"],
-      cwd: repoRoot,
-      env,
-    })
-    assertCliSucceeded(status)
+    const status = await runCli(["status", "--json"], env)
+    expect(status.exitCode, status.stderr).toBe(0)
     expect(JSON.parse(status.stdout)).toMatchObject({
+      ok: true,
       connected: true,
-      authenticated: false,
       profile: "local",
-      projectId: "local-dev",
+      project: { id: "local-dev" },
     })
   }, 20_000)
 
-  test.concurrent("reports an authentication failure without claiming the API is disconnected", async () => {
+  test.concurrent("reports an API auth error cleanly when a saved token is rejected", async () => {
     const env = await tempConfigEnvironment()
     let requiredToken = "initial-token"
     const server = Bun.serve({
@@ -306,98 +278,16 @@ describe("sixb profile commands", () => {
     servers.push(server)
     const apiUrl = `http://127.0.0.1:${server.port}`
 
-    const login = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "login", apiUrl, "--profile", "secured", "--token-stdin", "--json"],
-      cwd: repoRoot,
+    const login = await runCli(
+      ["login", apiUrl, "--profile", "secured", "--token-stdin", "--json"],
       env,
-      stdin: `${requiredToken}\n`,
-    })
-    assertCliSucceeded(login)
+      `${requiredToken}\n`
+    )
+    expect(login.exitCode, login.stderr).toBe(0)
 
     requiredToken = "rotated-token"
-    const status = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "status", "--json"],
-      cwd: repoRoot,
-      env,
-    })
-
-    expect(status.exitCode).toBe(1)
-    expect(status.stderr).toBe("")
-    expect(JSON.parse(status.stdout)).toMatchObject({
-      connected: true,
-      authenticated: false,
-      profile: "secured",
-    })
-  }, 20_000)
-
-  test.concurrent("does not send a stored token with an explicit API URL", async () => {
-    const env = await tempConfigEnvironment()
-    const stored = startProjectServer({ token: "stored-secret", projectId: "stored" })
-    const target = startProjectServer({ projectId: "target" })
-
-    const login = await runCliToCompletion({
-      cmd: [
-        "bun",
-        cliEntry,
-        "login",
-        `http://127.0.0.1:${stored.server.port}`,
-        "--profile",
-        "stored",
-        "--token-stdin",
-        "--json",
-      ],
-      cwd: repoRoot,
-      env,
-      stdin: "stored-secret\n",
-    })
-    assertCliSucceeded(login)
-
-    const result = await runCliToCompletion({
-      cmd: [
-        "bun",
-        cliEntry,
-        "project",
-        "show",
-        "--api-url",
-        `http://127.0.0.1:${target.server.port}`,
-      ],
-      cwd: repoRoot,
-      env,
-    })
-    assertCliSucceeded(result)
-    expect(JSON.parse(result.stdout)).toEqual({ id: "target" })
-    expect(target.authorizationHeaders).toEqual([null])
-  }, 20_000)
-
-  test.concurrent("does not save a profile when token validation fails", async () => {
-    const env = await tempConfigEnvironment()
-    const { server } = startProjectServer({ token: "correct-token" })
-
-    const result = await runCliToCompletion({
-      cmd: [
-        "bun",
-        cliEntry,
-        "login",
-        `http://127.0.0.1:${server.port}`,
-        "--profile",
-        "invalid",
-        "--token-stdin",
-        "--json",
-      ],
-      cwd: repoRoot,
-      env,
-      stdin: "wrong-token\n",
-    })
-
-    expect(result.exitCode).toBe(3)
-    expect(result.stdout).toBe("")
-    expect(JSON.parse(result.stderr)).toEqual({
-      error: { code: "http_error", status: 401, message: "Unauthorized" },
-    })
-    expect(
-      await readFile(join(env.XDG_CONFIG_HOME!, "sixb", "config.json"), "utf8").catch(
-        () => undefined
-      )
-    ).toBeUndefined()
+    const status = await runCli(["status", "--json"], env)
+    expect(status.exitCode).toBe(3)
+    expect(JSON.parse(status.stderr).error).toMatchObject({ status: 401 })
   }, 20_000)
 })

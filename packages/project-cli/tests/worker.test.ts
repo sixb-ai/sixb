@@ -85,6 +85,7 @@ describe("sixb worker", () => {
       cmd: [
         "bun",
         resolve(import.meta.dir, "..", "src", "index.tsx"),
+        "serve",
         "worker",
         "projection",
         "--entry",

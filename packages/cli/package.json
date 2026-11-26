@@ -38,6 +38,7 @@
     "check:cli": "bun ./scripts/generate-cli.ts --check",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "test:e2e": "bun --filter @sixb/project-cli test:e2e",
     "prepack": "bun run build"
   },
   "devDependencies": {

@@ -98,10 +98,12 @@ describe("sixb connect", () => {
       env: {
         XDG_CONFIG_HOME: root,
         SIXB_API_URL: undefined,
+        SIXB_API_BASE_URL: undefined,
         SIXB_API_TOKEN: undefined,
         SIXB_API_PUBLIC_ORIGIN: undefined,
         SIXB_TOKEN: undefined,
         SIXB_PROFILE: undefined,
+        SIXB_RUN_ID: undefined,
       },
       stdin: "",
       timeoutMs: FAST_CLI_TIMEOUT_MS,
