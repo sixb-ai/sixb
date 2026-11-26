@@ -30,6 +30,7 @@ import {
   resolveHostBranch,
   type SixbBranch,
 } from "../branch-mode"
+import { BRANCH_HANDOVER_STRATEGY_ID } from "../branches/handover"
 import { captureProjectSource, type ProjectSource } from "../branches/source"
 import type { Broker } from "../broker"
 import { canonicalTimeZone } from "../calendar"
@@ -265,6 +266,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     | "sharesHost"
     | "runsBranches"
     | "forwardsRequestCredentials"
+    | "servesOnLoopback"
   >
   /**
    * The variables the sandbox recipe sets, by name. Its provider gives them to every sandbox it
@@ -316,7 +318,10 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     this.sandboxes = options.sandboxes
     this.sandboxRecipeEnv = Object.keys(options.sandboxes?.configuration?.env ?? {})
     this.projectRoot = resolve(options.projectRoot ?? process.cwd())
-    this.source = options.source === undefined ? null : captureProjectSource(options.source)
+    this.source =
+      options.source === undefined
+        ? null
+        : captureProjectSource(options.source, authCookieDomain(options.auth))
 
     const definitions = resolveDefinitions(options)
     assertViewConditionsReadable({
@@ -697,6 +702,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       blobStorage: this.blobStorage,
       apiPublicOrigin: () => getApiPublicOrigin(this),
       source: this.source,
+      signsInThroughProduction: this.auth.getStrategy()?.id === BRANCH_HANDOVER_STRATEGY_ID,
       lakeStorage: this.lakeStorage,
       datasetVersionMarkings: this.datasetVersionMarkings,
       datasetIngest: this.datasetIngest,
@@ -871,4 +877,9 @@ function delegate<T extends object>(target: T, override: (property: PropertyKey)
       return typeof value === "function" ? value.bind(object) : value
     },
   })
+}
+
+/** Production's `cookieDomain`, which a branch preview domain must stay out of. */
+function authCookieDomain(config: SixbAuthConfig | undefined): string | undefined {
+  return config && "strategy" in config ? config.cookies?.cookieDomain : undefined
 }

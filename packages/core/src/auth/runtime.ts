@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { type AuthorizationContext, resolveAuthorizationContext } from "../authorization"
 import type { SixbBranch } from "../branch-mode"
 import { branchRefusals } from "../branch-mode/refusals"
+import { BRANCH_HANDOVER_STRATEGY_ID } from "../branches/handover"
 import type { DomainEventLog } from "../events/service"
 import type { EventDraft } from "../events/types"
 import {
@@ -49,11 +50,13 @@ import { SessionCache } from "./session-cache"
 import {
   type BearerSessionTokens,
   createBearerSessionTokens,
+  createSessionCredential,
   hashSessionSecret,
   parseBearerSessionToken,
   parseSessionCookieValue,
   SESSION_ACCESS_TOKEN_PREFIX,
   SESSION_REFRESH_TOKEN_PREFIX,
+  type SessionCredential,
 } from "./sessions"
 import type {
   AuthenticatedAuthSession,
@@ -465,6 +468,37 @@ export class AuthRuntime {
   }
 
   /**
+   * A browser session for `userId`, stored now, as a sign-in ends with one: for a sign-in the
+   * strategy does not drive, such as a branch's handover. Its cookie carries `credential`.
+   */
+  async startSession(input: {
+    readonly userId: string
+    readonly now: Date
+    readonly userAgent?: string
+    readonly ipAddress?: string
+  }): Promise<{ readonly credential: SessionCredential; readonly expiresAt: Date }> {
+    const credential = createSessionCredential()
+    const deadlines = this.createSessionDeadlines(input.now)
+
+    await this.requireAuthStorage().sessions.create({
+      id: credential.sessionId,
+      projectId: this.projectId,
+      userId: input.userId,
+      strategyId: this.strategy?.id ?? "session",
+      tokenHash: credential.tokenHash,
+      createdAt: input.now,
+      ...deadlines,
+      ...(input.userAgent ? { userAgent: input.userAgent } : {}),
+      ...(input.ipAddress ? { ipAddress: input.ipAddress } : {}),
+    })
+    // The cookie lasts as long as the session can.
+    const expiresAt = deadlines.absoluteExpiresAt
+      ? new Date(Math.min(deadlines.expiresAt.getTime(), deadlines.absoluteExpiresAt.getTime()))
+      : deadlines.expiresAt
+    return { credential, expiresAt }
+  }
+
+  /**
    * Trade a native client's refresh token for new tokens. Returns null when the token is not
    * accepted; a replaced token presented after the grace window also revokes its session.
    */
@@ -726,6 +760,18 @@ export class AuthRuntime {
     })
   }
 
+  /**
+   * A branch production runs lets people in through production's handover only, for sessions it
+   * caps, so that losing the grant reaches the branch. A token would outlive both: it makes none.
+   */
+  private assertMakesAccessTokens(): void {
+    if (this.strategy?.id !== BRANCH_HANDOVER_STRATEGY_ID) return
+    throw new AuthRuntimeError(
+      "authorization_denied",
+      "[Sixb] A branch production runs makes no access tokens: sign in through production, whose sessions here end within 4 hours."
+    )
+  }
+
   async listPersonalAccessTokens(
     caller: AuthenticatedUserRequestSession
   ): Promise<ListPersonalAccessTokensResult> {
@@ -747,6 +793,7 @@ export class AuthRuntime {
     input: CreatePersonalAccessTokenInput
   ): Promise<CreateAccessTokenResult> {
     assertSessionCaller(caller)
+    this.assertMakesAccessTokens()
     const storage = this.requireAuthStorage()
     // A personal token can only carry groups the caller currently belongs to.
     const groupIds = constrainRequestedGroupIds(input.groupIds, caller.groupIds, {
@@ -911,6 +958,7 @@ export class AuthRuntime {
     input: CreateServiceAccountAccessTokenInput
   ): Promise<CreateServiceAccountAccessTokenResult> {
     assertSessionCaller(caller)
+    this.assertMakesAccessTokens()
     const storage = this.requireAuthStorage()
     const { serviceAccount, groupIds: serviceAccountGroupIds } =
       await this.requireManageableServiceAccount(storage, caller.groupIds, input.serviceAccountId)

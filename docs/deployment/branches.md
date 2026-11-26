@@ -37,7 +37,7 @@ SIXB_BRANCH_ALLOW=https://redis.dev.shop.example \
 | Production's database closed to `PUBLIC` | `REVOKE CONNECT ON DATABASE <production's> FROM PUBLIC` (grant it back to production's user): a branch's role could connect to it otherwise, so production refuses to host branches until then |
 | `max_prepared_transactions = 0` | PostgreSQL's default. A prepared transaction outlives its session, and no limit production sets on a branch could end it |
 | A lock table that fits the ontology | A branch's copy takes about 120 locks plus 20 per object type, within a quarter of the lock table (`max_locks_per_transaction` × connections): raise `max_locks_per_transaction` for a large ontology. Production says so before the worker starts |
-| `@sixb/sandboxes-vercel` or `@sixb/sandboxes-smolvm` | The branch serves from it. `@sixb/sandboxes-local` runs it on production's own host, so production refuses it |
+| `@sixb/sandboxes-vercel` or `@sixb/sandboxes-smolvm` | The branch serves from it. smolvm also needs a [preview domain](#use-a-branch-in-the-browser). `@sixb/sandboxes-local` runs it on production's own host, so production refuses it |
 | The sandbox factory's `auth` for a private repository | Production reads the repository's branches and the branch clones with it: `githubApp(...)`, or `githubOAuth(...)`, which reads and clones as the branch's creator, so its creator connects GitHub first. Without it, the branch says production cannot read the repository. smolvm cannot clone with it, so production refuses that pair |
 | Bun 1.4.2+ in the sandbox | A branch installs and runs with Bun: boot the sandbox from the [Sixb agent image](https://github.com/sixb-ai/sixb/tree/main/sandboxes/agent-image#use-with-a-sandbox-provider), which has it. Otherwise, as on Vercel's stock runtime (Node only), the branch installs Bun 1.4.4 from the npm registry first, checked against the registry's sha512 |
 | A sandbox recipe without `env` | A provider gives its recipe's `env` to every sandbox, a branch's too |
@@ -57,9 +57,41 @@ await sixb.branches.delete("feature/invoices")  // sandbox, database and role go
 ```
 
 The same through the API: `GET /api/branches`, `POST /api/branches` with `{ name }`,
-`POST /api/branches/refresh`, `POST /api/branches/stop`, and `DELETE /api/branches?name=…`. It takes
-`can.manage(project.source)`. Push the branch first: one the remote does not have fails, and says
-so. A copy waits while its creator has another one running, or while two run in the project.
+`POST /api/branches/refresh`, `POST /api/branches/stop`, and `DELETE /api/branches?name=…`. Every
+call takes `can.manage(project.source)`. Push the branch first: one the remote does not have fails,
+and says so. A copy waits while its creator has another one running, or while two run in the
+project.
+
+## Use a branch in the browser
+
+```ts
+const { url } = await sixb.branches.signIn("feature/invoices") // POST /api/branches/sign-in
+// open `url` within a minute: you land on the branch's app, signed in as yourself
+```
+
+A branch has an origin of its own, never production's: `<branch>.<previewDomain>` when the
+project names one, else its sandbox's URL (Vercel's own domain). smolvm serves branches on its
+host's loopback, which nobody's browser reaches: name a preview domain with it, or the branch
+worker refuses to start in production.
+
+```ts
+source: { repository: "acme/shop", previewDomain: "shop-preview.dev" },
+```
+
+| Preview domain | |
+|---|---|
+| Its own site | Register a domain apart from production's: `shop-preview.dev` beside `shop.dev`, never `preview.shop.dev`. On production's site, a branch's pages would get production's cookies, so production refuses one that shares a site with its API, its app or its `cookieDomain`. Vercel's `vercel.app` is safe because it is on the [Public Suffix List](https://publicsuffix.org), which makes every subdomain a site of its own |
+| DNS and TLS | A wildcard record, `*.shop-preview.dev`, to production's API server, and a wildcard certificate for it. Production forwards each host to its branch, WebSockets included |
+| Limits | Branches share 64 of production's connections at once. A request has 30 s to start answering and 5 min to finish, a WebSocket an hour |
+
+You sign in from production only: production checks your grant, the branch lets you in as
+production has you now (a member, in your groups), and the one-time link signs you in there. The
+link works once, for you, for a minute. The branch's session lasts 4 hours at most, so losing the
+grant reaches the branch within that. The branch has no other sign-in, and its project's own
+strategy signs nobody in. It makes no access token and issues no share link: either would let
+someone in past that session.
+A branch on your laptop (`sixb dev --from production`) needs no sign-in: it runs as you, and answers
+your machine only.
 
 | When | The branch |
 |---|---|

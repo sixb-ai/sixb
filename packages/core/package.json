@@ -598,7 +598,8 @@
     "mdast-util-gfm": "3.1.0",
     "mdast-util-to-markdown": "2.1.2",
     "micromark-extension-gfm": "3.0.0",
-    "parse5": "8.0.1"
+    "parse5": "8.0.1",
+    "tldts": "7.4.21"
   },
   "peerDependencies": {
     "yjs": "^13.6.33"

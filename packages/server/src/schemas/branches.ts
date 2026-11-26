@@ -47,3 +47,8 @@ export const BranchSchema = z.object({
 })
 
 export const BranchListResponseSchema = z.object({ branches: z.array(BranchSchema) })
+
+export const BranchSignInResponseSchema = z.object({
+  /** On the branch's own origin: open it within a minute, once. */
+  url: z.string(),
+})

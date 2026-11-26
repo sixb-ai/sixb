@@ -397,6 +397,25 @@ describe("the branch worker", () => {
     expect(BranchWorker.unmetRequirement(local, "development")).toBeNull()
   })
 
+  // smolvm serves a branch at http://127.0.0.1:<port>: Open would send people to their own
+  // machine. Guard check: drop the `servesOnLoopback` check from `unmetRequirement`.
+  test("refuses in production a sandbox on this host's loopback without a preview domain", async () => {
+    const { host } = await setup()
+    const loopback = hostWith(host, {
+      sandboxes: { ...host.sandboxes!, servesOnLoopback: true },
+    })
+
+    expect(BranchWorker.unmetRequirement(loopback, "production")).toContain(
+      "needs a preview domain with this sandbox provider"
+    )
+    expect(BranchWorker.unmetRequirement(loopback, "development")).toBeNull()
+
+    const previewed = hostWith(loopback, {
+      source: { ...host.source!, previewDomain: "shop-preview.dev" },
+    })
+    expect(BranchWorker.unmetRequirement(previewed, "production")).toBeNull()
+  })
+
   test("needs production's PostgreSQL, the repository and a sandbox factory", async () => {
     const { host } = await setup()
 

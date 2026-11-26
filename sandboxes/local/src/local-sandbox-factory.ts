@@ -44,6 +44,7 @@ export class LocalSandboxFactory<const TParams extends ParamsConfig = Record<nev
   readonly supportsRequestCredentials = true
   readonly sharesHost = true
   readonly runsBranches = true
+  readonly servesOnLoopback = true
   readonly configuration: SandboxConfig<TParams>
   constructor(private readonly defaults: LocalSandboxFactoryOptions<TParams> = {}) {
     this.configuration = sandboxConfig<TParams>(defaults)

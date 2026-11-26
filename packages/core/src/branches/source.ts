@@ -1,5 +1,6 @@
 import { isPlainRecord } from "../json"
 import { RuntimeError } from "../runtime/errors"
+import { capturePreviewDomain } from "./preview"
 
 /** Where the project's own code lives, so production can run one of its git branches. */
 export interface ProjectSource {
@@ -10,23 +11,32 @@ export interface ProjectSource {
   readonly repository: string
   /** The project's folder inside the repository, where `sixb.config.ts` is. Defaults to `.`. */
   readonly path?: string
+  /**
+   * Where people open the branches production runs: each at `<branch>.<previewDomain>`, which
+   * production's server forwards to the branch. A domain of its own, outside production's
+   * `cookieDomain`, as Vercel uses vercel.app. Without it, a branch is opened at its sandbox's URL.
+   */
+  readonly previewDomain?: string
 }
 
 const GITHUB_REPOSITORY = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/
 const PATH_SEGMENT = /^[A-Za-z0-9._-]+$/
 
-/** A frozen copy, or a clear error naming what to fix. */
-export function captureProjectSource(source: unknown): ProjectSource {
+/**
+ * A frozen copy, or a clear error naming what to fix. `cookieDomain` is production's, which a
+ * preview domain must stay out of.
+ */
+export function captureProjectSource(source: unknown, cookieDomain?: string): ProjectSource {
   if (
     !isPlainRecord(source) ||
-    Object.keys(source).some((key) => !["repository", "path"].includes(key))
+    Object.keys(source).some((key) => !["repository", "path", "previewDomain"].includes(key))
   ) {
     throw new RuntimeError(
-      "[Sixb] source takes a repository, such as `acme/operations`, and an optional path."
+      "[Sixb] source takes a repository, such as `acme/operations`, an optional path and an optional previewDomain."
     )
   }
 
-  const { repository, path } = source
+  const { repository, path, previewDomain } = source
   if (typeof repository !== "string" || repository.trim() === "") {
     throw new RuntimeError(
       "[Sixb] source.repository must name the project's git repository, such as `acme/operations`."
@@ -41,6 +51,9 @@ export function captureProjectSource(source: unknown): ProjectSource {
   return Object.freeze({
     repository,
     ...(path === undefined || path === "." ? {} : { path: path.replace(/\/+$/, "") }),
+    ...(previewDomain === undefined
+      ? {}
+      : { previewDomain: capturePreviewDomain(previewDomain, cookieDomain) }),
   })
 }
 

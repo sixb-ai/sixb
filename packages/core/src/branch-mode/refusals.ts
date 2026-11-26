@@ -65,6 +65,14 @@ export const branchRefusals = {
       `no ${what} is emailed from a branch: its members are production's people. Invite people ` +
         "in production; on a branch you are signed in through production."
     ),
+
+  shareLink: (branch: SixbBranch) =>
+    branchRefusal(
+      branch,
+      "no share link is issued on a branch production runs: people come in through production " +
+        "only, for sessions that end within 4 hours, and a link would outlive both. Share it " +
+        "from production, once merged."
+    ),
 } as const
 
 /** A coded refusal whose message, the whole explanation, reaches the caller and the run's record. */

@@ -4,6 +4,7 @@ import {
   ShareError,
   type SixbHostView,
 } from "@sixb/core"
+import { isSixbError } from "@sixb/core/internal/errors"
 import { ObjectNotFoundError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -19,6 +20,7 @@ import {
   SharedAccessGrantIdParamsSchema,
   SharedAccessGrantSchema,
 } from "../schemas/share-grants"
+import { handleRouteError } from "../utils/http"
 
 const INTERNAL_ERROR = "[SixbServer] Shared-access operation failed."
 const STORAGE_UNAVAILABLE_ERROR =
@@ -57,6 +59,7 @@ export function registerShareGrantRoutes(app: Elysia, _host: SixbHostView) {
           401: ErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
           500: ErrorResponseSchema,
           501: ErrorResponseSchema,
         },
@@ -191,6 +194,8 @@ function handleShareGrantRouteError(
     set.status = 404
     return { error: error.message }
   }
+  // A branch production runs issues no link: its refusal says why, as on every route.
+  if (isSixbError(error) && error.code === "branch.refused") return handleRouteError(error, set)
 
   set.status = 500
   return { error: INTERNAL_ERROR }

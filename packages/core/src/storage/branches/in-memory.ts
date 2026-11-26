@@ -9,6 +9,17 @@ export class InMemoryBranchStorage implements BranchStorage {
     return row ? structuredClone(row) : null
   }
 
+  async getByNamespace(input: {
+    readonly projectId: string
+    readonly namespace: string
+  }): Promise<BranchRecord | null> {
+    const row = [...this.rows.values()].find(
+      (candidate) =>
+        candidate.projectId === input.projectId && candidate.namespace === input.namespace
+    )
+    return row ? structuredClone(row) : null
+  }
+
   async list(input: { readonly projectId: string }): Promise<readonly BranchRecord[]> {
     return structuredClone(
       [...this.rows.values()]

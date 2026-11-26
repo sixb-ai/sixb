@@ -4293,6 +4293,10 @@ export type GetAiModelCallFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
   }
   url: "/api/ai/model-calls/{callId}/files/content"
 }
@@ -4341,6 +4345,10 @@ export type HeadAiModelCallFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
   }
   url: "/api/ai/model-calls/{callId}/files/content"
 }
@@ -8781,6 +8789,49 @@ export type StopBranchResponses = {
 
 export type StopBranchResponse = StopBranchResponses[keyof StopBranchResponses]
 
+export type SignIntoBranchData = {
+  body: {
+    name: string
+  }
+  path?: never
+  query?: never
+  url: "/api/branches/sign-in"
+}
+
+export type SignIntoBranchErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+}
+
+export type SignIntoBranchError = SignIntoBranchErrors[keyof SignIntoBranchErrors]
+
+export type SignIntoBranchResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    url: string
+  }
+}
+
+export type SignIntoBranchResponse = SignIntoBranchResponses[keyof SignIntoBranchResponses]
+
 export type ListWorkflowsData = {
   body?: never
   path?: never
@@ -10598,6 +10649,10 @@ export type GetWorkflowRunFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
   }
   url: "/api/workflow-runs/{runId}/files/content"
 }
@@ -10650,6 +10705,10 @@ export type HeadWorkflowRunFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
   }
   url: "/api/workflow-runs/{runId}/files/content"
 }
@@ -10700,6 +10759,10 @@ export type GetWorkflowNodeRunFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
   }
   url: "/api/workflow-runs/{runId}/nodes/{nodeKey}/files/content"
 }
@@ -10753,6 +10816,10 @@ export type HeadWorkflowNodeRunFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
   }
   url: "/api/workflow-runs/{runId}/nodes/{nodeKey}/files/content"
 }
@@ -11315,6 +11382,12 @@ export type IssueSharedAccessGrantErrors = {
    * Response for status 404
    */
   404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
     error: string
   }
   /**
@@ -12210,6 +12283,10 @@ export type GetObjectFileContentData = {
      */
     v?: string
     /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
+    /**
      * Share grant selector for elements that cannot send the x-sixb-share-grant header
      */
     shareGrant?: string
@@ -12261,6 +12338,10 @@ export type HeadObjectFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
     /**
      * Share grant selector for elements that cannot send the x-sixb-share-grant header
      */
@@ -13608,6 +13689,10 @@ export type GetActionRunFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
   }
   url: "/api/action-runs/{runId}/files/content"
 }
@@ -13660,6 +13745,10 @@ export type HeadActionRunFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
   }
   url: "/api/action-runs/{runId}/files/content"
 }
@@ -16074,6 +16163,10 @@ export type GetAgentMessageFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
   }
   url: "/api/agent-threads/{threadId}/messages/{messageId}/files/content"
 }
@@ -16127,6 +16220,10 @@ export type HeadAgentMessageFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
   }
   url: "/api/agent-threads/{threadId}/messages/{messageId}/files/content"
 }
@@ -18965,6 +19062,10 @@ export type GetAgentChildFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
     run: string
   }
   url: "/api/agent-threads/{threadId}/child-files/content"
@@ -19018,6 +19119,10 @@ export type HeadAgentChildFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
     run: string
   }
   url: "/api/agent-threads/{threadId}/child-files/content"
@@ -21287,6 +21392,10 @@ export type GetObservedAgentMessageFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
   }
   url: "/api/observed-agent-threads/{threadId}/messages/{messageId}/files/content"
 }
@@ -21581,6 +21690,10 @@ export type GetObservedAgentChildFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
     run: string
   }
   url: "/api/observed-agent-threads/{threadId}/child-files/content"
@@ -25599,6 +25712,10 @@ export type GetArtifactRestorePointFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
   }
   url: "/api/artifacts/{artifactId}/restore-points/{revision}/content"
 }
@@ -27126,6 +27243,10 @@ export type GetArtifactFileContentData = {
      */
     v?: string
     /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
+    /**
      * Share grant selector for elements that cannot send the x-sixb-share-grant header
      */
     shareGrant?: string
@@ -27185,6 +27306,10 @@ export type HeadArtifactFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Only this file, as `sha256:…`: when the path holds another, the route answers 404
+     */
+    digest?: string
     /**
      * Share grant selector for elements that cannot send the x-sixb-share-grant header
      */

@@ -24,9 +24,11 @@ const Order = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true })],
 })
 const developers = defineGroup("developers")
+const operators = defineGroup("operators")
 const sales = defineGroup("sales")
 const roles = [
   defineRole("developers", { grantedTo: [developers], grants: [can.manage(project.source)] }),
+  defineRole("operators", { grantedTo: [operators], grants: [can.observe(project.console)] }),
   defineRole("sales", { grantedTo: [sales], grants: [can.view(Order)] }),
 ]
 
@@ -35,7 +37,7 @@ async function createApp() {
   const host = new SixbHost({
     id: projectId,
     ontology: [Order],
-    groups: [developers, sales],
+    groups: [developers, operators, sales],
     roles,
     source: { repository: "acme/shop" },
     auth: { id: "test", kind: "dev" as const },
@@ -125,13 +127,32 @@ describe("branch routes", () => {
     expect(await deleted.json()).toMatchObject({ wanted: "deleted" })
   })
 
-  test("refuse whoever may not open the console", async () => {
+  // A branch runs code nobody reviewed on its creator's data: who sees one stays a trusted set.
+  // Guard check: take `console.observe` again in `assertMayManageBranches` (`branches/execution.ts`).
+  test("refuse, on every route, whoever does not manage the project's source", async () => {
     const { app, storage } = await createApp()
-    const headers = await signIn(storage, "usr_sales", "sales")
+    const developer = await signIn(storage, "usr_dev", "developers")
+    await call(app, "/api/branches", "POST", developer, { name: "feature/invoices" })
+    const name = "feature/invoices"
 
-    const refused = await call(app, "/api/branches", "POST", headers, { name: "feature/invoices" })
+    for (const [userId, groupId] of [
+      ["usr_ops", "operators"],
+      ["usr_sales", "sales"],
+    ] as const) {
+      const headers = await signIn(storage, userId, groupId)
+      const answers = [
+        await call(app, "/api/branches", "GET", headers),
+        await call(app, "/api/branches", "POST", headers, { name: "feature/other" }),
+        await call(app, "/api/branches/refresh", "POST", headers, { name }),
+        await call(app, "/api/branches/stop", "POST", headers, { name }),
+        await call(app, "/api/branches/sign-in", "POST", headers, { name }),
+        await call(app, `/api/branches?name=${encodeURIComponent(name)}`, "DELETE", headers),
+      ]
+      expect(answers.map((answer) => answer.status)).toEqual([403, 403, 403, 403, 403, 403])
+    }
 
-    expect(refused.status).toBe(403)
-    expect(await storage.hostedBranches.list({ projectId })).toEqual([])
+    expect((await storage.hostedBranches.list({ projectId })).map((row) => row.wanted)).toEqual([
+      "running",
+    ])
   })
 })

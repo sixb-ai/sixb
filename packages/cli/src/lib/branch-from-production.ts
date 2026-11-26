@@ -255,8 +255,8 @@ export interface HostedBranchFromProductionInput {
   readonly projectRoot: string
   /** The schema production made for the branch, as the role limited to it. */
   readonly storage: Storage
-  /** The key production's requests carry. */
-  readonly key: string
+  /** The key production's requests carry, and the origin people open the branch at. */
+  readonly hosted: NonNullable<BranchRuntime["hosted"]>
   /** Told how far a new copy has loaded, as a laptop's branch is. */
   readonly onLoading?: CopyLoadReport
 }
@@ -328,7 +328,7 @@ export async function hostedBranchFromProduction(
       authorization: async () => (credential ? `Bearer ${credential}` : ""),
     },
     takenAt: record.takenAt,
-    hosted: { key: input.key },
+    hosted: input.hosted,
   }
   const host = hostOnBranch(input.host, {
     storage: input.storage,

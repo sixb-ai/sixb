@@ -1,6 +1,10 @@
 import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
 import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
 import { FILE_DOWNLOAD_ROUTE_PREFIX } from "@sixb/core/internal/blob-storage"
+import {
+  BRANCH_HANDOVER_PREPARE_PATH,
+  BRANCH_HANDOVER_SIGN_IN_PATH,
+} from "@sixb/core/internal/branches"
 import { LAKE_SLICE_FILES_ROUTE_PREFIX } from "@sixb/core/internal/lake-slices"
 import { isSharedAccessPublicPath } from "./shared-access"
 
@@ -90,6 +94,15 @@ export function isPublicRoute(pathname: string, method: string): boolean {
   // `"POST"`, so nothing else is ever registered here, and the allow-list should not be
   // wider than what it allows.
   if (pathname.startsWith("/api/webhooks/") && normalizedMethod === "POST") {
+    return true
+  }
+
+  // A branch production runs: production prepares a session with the branch's key, which the
+  // route checks itself; a browser trades the code it was given for that session.
+  if (pathname === BRANCH_HANDOVER_PREPARE_PATH && normalizedMethod === "POST") {
+    return true
+  }
+  if (pathname === BRANCH_HANDOVER_SIGN_IN_PATH && normalizedMethod === "GET") {
     return true
   }
 

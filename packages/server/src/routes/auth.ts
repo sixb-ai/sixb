@@ -2186,7 +2186,7 @@ function resolveSessionDevice(request: Request): {
   }
 }
 
-function sessionCallbackCompletionResponse(input: {
+export function sessionCallbackCompletionResponse(input: {
   readonly host: SixbHostView
   readonly request: Request
   readonly apiOrigin: string
@@ -2981,7 +2981,7 @@ function resolveNavigateToSources(returnTo: string): string {
   }
 }
 
-function htmlMessageResponse(message: string, status = 200, heading?: string): Response {
+export function htmlMessageResponse(message: string, status = 200, heading?: string): Response {
   return authPageResponse(
     [heading ? `<h1>${escapeHtml(heading)}</h1>` : "", `<p>${escapeHtml(message)}</p>`].join(""),
     status

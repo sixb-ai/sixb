@@ -97,6 +97,8 @@ export interface SixbDependencies {
   readonly connectorService: ConnectorService
   readonly connectorConnections?: ConnectorConnectionProcess
   readonly source: ProjectSource | null
+  /** A branch production runs: people sign in through production's handover, and no other way. */
+  readonly signsInThroughProduction: boolean
   readonly members: MemberStatusRuntime
   readonly blobStorage: BlobStorage
   readonly apiPublicOrigin: () => string | undefined
@@ -225,7 +227,9 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
     logs: createLogsRuntime(runtime, dependencies.logging),
     activity: createActivityRuntime(runtime, dependencies.activity),
     schedules: createSchedulesRuntime(runtime, dependencies.definitions),
-    shares: createSharesRuntime(runtime, execution, dependencies.definitions.shares),
+    shares: createSharesRuntime(runtime, execution, dependencies.definitions.shares, {
+      signsInThroughProduction: dependencies.signsInThroughProduction,
+    }),
     users: createUsersRuntime(runtime, dependencies.members),
     branches: createBranchesRuntime(runtime, execution, { source: dependencies.source }),
     connector: createConnectorRuntime(runtime, execution, dependencies.connectorService),

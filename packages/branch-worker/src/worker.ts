@@ -93,6 +93,13 @@ export class BranchWorker extends Worker {
     if (environment === "production" && host.sandboxes.sharesHost) {
       return "needs a sandbox that keeps branches from this host's network and files in production: use @sixb/sandboxes-vercel or @sixb/sandboxes-smolvm, as @sixb/sandboxes-local runs a branch on this host itself"
     }
+    if (
+      environment === "production" &&
+      host.sandboxes.servesOnLoopback &&
+      !host.source.previewDomain
+    ) {
+      return "needs a preview domain with this sandbox provider: it serves branches on this host's loopback, which nobody's browser reaches. Name one with createSixb({ source: { previewDomain } })"
+    }
     if (host.sandboxRecipeEnv.length > 0) {
       return `needs a sandbox recipe without env (it sets ${host.sandboxRecipeEnv.join(", ")}): its provider gives that env to every sandbox, a branch's too, and a branch runs only with the project's dev values`
     }

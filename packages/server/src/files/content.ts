@@ -22,6 +22,8 @@ export interface FileContentResponseInput {
 export interface FileContentQuery {
   readonly path: string
   readonly disposition?: FileContentDisposition
+  /** Only the file with this digest: the path holding another answers as a missing file. */
+  readonly digest?: string
 }
 
 export interface ContextualFileContentResponseInput<TQuery extends FileContentQuery> {
@@ -226,7 +228,7 @@ export async function createContextualFileContentResponse<TQuery extends FileCon
     }
 
     const fileRef = resolveFileRefAtPath(root, parsed.path)
-    if (!fileRef) {
+    if (!fileRef || (parsed.digest !== undefined && fileRef.digest !== parsed.digest)) {
       return fileContentNotFound(input.set, missingMessage)
     }
 

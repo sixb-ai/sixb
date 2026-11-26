@@ -16,7 +16,7 @@ import {
   resolveAuthorizationContext,
   SixbHost,
 } from "@sixb/core"
-import { BRANCH_KEY_HEADER } from "@sixb/core/internal/branches"
+import { BRANCH_STATUS_PATH } from "@sixb/core/internal/branches"
 import { createTestSixb } from "@sixb/core/testing"
 import { PostgresStorage } from "@sixb/pg"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
@@ -214,11 +214,21 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean, ms 
   }
 }
 
-/** What the branch's own API answers, through its front, with production's key. */
+/** Bo signed into the branch, as "Open branch" in production does: the cookies the branch set. */
+async function signedIn(): Promise<string> {
+  const { url } = await bo().branches.signIn(NAME)
+  const response = await fetch(url, { redirect: "manual" })
+  return response.headers
+    .getSetCookie()
+    .map((cookie) => cookie.split(";")[0])
+    .join("; ")
+}
+
+/** What the branch's own API answers Bo, through its front, on the branch's own session. */
 async function branchOrders(): Promise<readonly string[]> {
   const branch = (await row())!
   const response = await fetch(new URL("/api/objects?objectTypeId=order&limit=50", branch.url!), {
-    headers: { [BRANCH_KEY_HEADER]: branch.key },
+    headers: { cookie: await signedIn() },
   })
   const body = (await response.json()) as { objects: { primaryId: string }[] }
   return body.objects.map((object) => object.primaryId).sort()
@@ -245,10 +255,53 @@ describe("a branch production runs", () => {
       ])
       expect(await branchOrders()).toEqual(["ord-1", "ord-2"])
 
-      const unkeyed = await fetch(new URL("/api/objects?objectTypeId=order", ready!.url!))
-      expect(unkeyed.status).toBe(401)
+      // Without a session of the branch's, nobody reads it; only production reads its status.
+      const anonymous = await fetch(new URL("/api/objects?objectTypeId=order", ready!.url!))
+      expect(anonymous.status).toBe(401)
+      const status = await fetch(new URL(BRANCH_STATUS_PATH, ready!.url!))
+      expect(status.status).toBe(401)
     },
     READY_MS + 10_000
+  )
+
+  test(
+    "signs Bo in through production, on the branch's own origin, and counts his use",
+    async () => {
+      const before = (await row())!
+      const { url } = await bo().branches.signIn(NAME)
+      expect(new URL(url).origin).toBe(new URL(before.url!).origin)
+
+      const signIn = await fetch(url, { redirect: "manual" })
+      const cookie = signIn.headers
+        .getSetCookie()
+        .map((value) => value.split(";")[0])
+        .join("; ")
+      const session = (await (
+        await fetch(new URL("/api/auth/session", before.url!), { headers: { cookie } })
+      ).json()) as { user?: { id: string } }
+      expect(session.user?.id).toBe("usr_bo")
+
+      // A code is good once.
+      expect((await fetch(url, { redirect: "manual" })).status).toBe(400)
+
+      // Live updates and agent streams reach the page: its sockets sign in with its session.
+      for (const channel of ["events", "agents"]) {
+        const socket = new WebSocket(`${before.url!.replace(/^http/, "ws")}/ws/${channel}`, {
+          headers: { cookie, origin: new URL(before.url!).origin },
+        } as never)
+        const first = await new Promise<string>((resolve, reject) => {
+          socket.addEventListener("message", (event) => resolve(String(event.data)))
+          socket.addEventListener("close", (event) => reject(new Error(`closed ${event.code}`)))
+        })
+        socket.close()
+        expect(JSON.parse(first)).toMatchObject({ type: "connected", channel })
+      }
+
+      // Real traffic on the branch's origin keeps it up: the worker reads it from the front.
+      const seen = await until(row, (branch) => branch!.lastSeenAt > before.lastSeenAt)
+      expect(seen?.lastSeenAt.getTime()).toBeGreaterThan(before.lastSeenAt.getTime())
+    },
+    READY_MS
   )
 
   test("reaches its own database only, as its role", async () => {

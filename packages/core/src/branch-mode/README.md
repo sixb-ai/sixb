@@ -59,6 +59,7 @@ to do instead (`refusals.ts`). Nothing turned off is a silent no-op. The HTTP AP
 | Directory checks off, and refused when called | `SixbHost.directoryPasses`, `AuthRuntime.checkDirectory` | They suspend people |
 | No invitation and no sign-in link emailed | `withoutEmails` in `auth/runtime.ts` | A branch's members are production's people |
 | The projections pass recovers nothing when the branch's lake is no fork of production's | `recoveryPasses` (`maintenance/passes/recovery-passes.ts`) | That lake cannot tell the branch's versions from the ones the copy was derived from: a first pass would re-derive every projection and re-create every object. A forked lake tells them apart itself (`LakeFork.ownsVersion`). The live `dataset.version.committed` path still projects what the branch commits |
+| On a branch production runs, no access token and no share link | `AuthRuntime.assertMakesAccessTokens`, `issueByDefinition` in `shares/execution.ts` | People come in through production's handover only, for sessions that end within 4 hours |
 | Agent turns and agent steps on | Nothing to gate | A model call writes nothing to production. Their actions and connectors hit the gates above; their sandbox's source access and their web tools do not (below) |
 
 ## Keeping to itself

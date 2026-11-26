@@ -663,6 +663,9 @@ import type {
   SignFileUploadPartData,
   SignFileUploadPartErrors,
   SignFileUploadPartResponses,
+  SignIntoBranchData,
+  SignIntoBranchErrors,
+  SignIntoBranchResponses,
   SignOutAllData,
   SignOutAllErrors,
   SignOutAllResponses,
@@ -2252,6 +2255,25 @@ export const stopBranch = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/branches/stop",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Sign into a running branch: a one-time URL on the branch's own origin
+ */
+export const signIntoBranch = <ThrowOnError extends boolean = false>(
+  options: Options<SignIntoBranchData, ThrowOnError>
+) =>
+  (options.client ?? client).post<SignIntoBranchResponses, SignIntoBranchErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/branches/sign-in",
     ...options,
     headers: {
       "Content-Type": "application/json",

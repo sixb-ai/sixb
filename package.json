@@ -54,7 +54,8 @@
     "ui:add": "bun --filter @sixb/ui shadcn:add"
   },
   "overrides": {
-    "@types/bun": "1.4.4"
+    "@types/bun": "1.4.4",
+    "tldts-core": "7.4.21"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.6",
