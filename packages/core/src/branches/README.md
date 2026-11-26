@@ -14,13 +14,15 @@ sixb worker branches            reads the remote's heads (git ls-remote, every 1
   │                             claims the row once the remote has the branch (lease, revision)
   ├─ every 20 s   renew the lease; past it unrenewed, let the branch go
   ├─ every 3 s    hold the role to its limits, a load or a checkout included
-  ├─ sandbox      restricted network; clone the branch, install
+  ├─ sandbox      restricted network; resumed, or made anew under its name: Bun if missing,
+  │               clone, install, each a worker command
   ├─ copy         empty database + role ◄── production
   │               copyForBranch as the creator ──► sandbox .sixb/branches/hosted.copy
   ├─ runtime      `sixb dev` in branch mode: loads the copy as the role, on its own definitions;
   │               its front, its API, the project's app
   ├─ every 3 s    keep-alive, pull remoteCommit, refresh, status and use from the front
-  └─ stop         unused 20 min → stopped; deleted, or gone from the remote → sandbox, database, role, row
+  └─ stop         unused 20 min, closed by production, or drained → stopped, login taken away;
+                  deleted, or gone from the remote → sandbox (by name), database, role, row
 ```
 
 | Where | What |
@@ -40,14 +42,17 @@ sixb worker branches            reads the remote's heads (git ls-remote, every 1
 | Event | What happens |
 |---|---|
 | Open | A row, with its namespace and key. The worker claims it once the remote has the branch; a branch the remote never had fails, and says so |
-| Claim | Ports drawn, sandbox made, copy taken, runtime started |
+| Claim | Sandbox resumed, or made: its checkout runs as the worker's own commands, each bounded at 10 min and failing in its own words, Bun installed from npm first where the image has none. A last step marks the checkout done. Copy taken, runtime started |
 | Push | The read of the remote writes the head to `remoteCommit`; the worker holding the branch resets its checkout to it, and the runtime's watcher reloads the code. A push that changes `package.json` or a lockfile stops the runtime, installs, then starts it. The data stays |
 | Refresh | A new copy: the database and its role are made anew, so what the branch wrote goes. The row has no copy until the new one is loaded |
-| Stop, or 20 min unused | The runtime stops; a provider that persists sandboxes keeps its state |
-| Reopen | A resumed sandbox runs on its copy. One made anew takes a whole new copy, with a `data-reset` notice: what the branch wrote is gone |
+| Stop, or 20 min unused | The runtime stops and the role's login goes (`closeBranchData`); a provider that persists sandboxes keeps its state. A copy delivered and not loaded yet lets its lake slice go |
+| Closed by production | `enforceBranchLimits` found it taking what the instance cannot spare: it stops, without a restart, with a `database-limit` notice |
+| Reopen | A resumed sandbox runs on its copy. One whose last session still runs (its worker died) is waited for, up to 12 min. One whose state is gone, or whose first checkout never finished, is deleted by name and made anew under the same name and port, as Vercel serves only the ports a sandbox was made with. A sandbox made anew takes a whole new copy, with a `data-reset` notice: what the branch wrote is gone |
 | Machine ended | A provider that ends a session at its limit (Vercel's plan maximum) stops the branch, with a `machine-ended` notice |
 | 14 days unopened | Its copy, database and role go; the next open takes a new copy |
-| Delete, or its remote branch deleted | Sandbox, database, role and row go. A delete that fails stays wanted, and the next claim tries again |
+| Delete, or its remote branch deleted | Sandbox, database, role and row go. A saved sandbox is deleted by name (`SandboxFactory.destroy`), without a session or credentials. A delete that fails stays wanted, and the next claim tries again |
+| Worker drained or stopped | Each branch it holds is put back as a stop puts it, at once: the next worker opens it |
+| Worker died | The next worker finds the lease lapsed: a wanted branch it opens, a stopped one loses its login (`settleStopped`) |
 
 A merge ends nothing by itself: a branch reset to the default branch looks the same, and would
 lose its data. A branch ends when its remote branch is deleted, as a merged one usually is.
@@ -67,6 +72,19 @@ A worker holds a branch for 60 s at a time and renews it every 20 s, apart from 
 clone, a copy or an install outlasting the lease never lets another worker take the branch. A
 worker that cannot renew in time lets the branch go: it stops the runtime and the sandbox, as
 another worker may hold the branch by then. A worker that begins stopping claims nothing more.
+Before each step that drops what the branch has (its database and role, its sandbox), the hold
+checks the lease still holds for 15 s, renewing it first when it does not: a worker back from a
+pause finds another worker's name on the row, and drops nothing.
+
+The worker's writes compare the row's revision. A retry after someone else moved the row on
+writes what the worker found, but never its own `wanted` over a newer delete, stop, open or
+refresh.
+
+The read of the remote (`mirror.ts`) writes why it failed to `remoteError` on the branches that
+wait for it, a private repository read without credentials say, and clears it once a read
+succeeds. Source credentials come from the project's sandbox `auth`, with the host's connector
+connections for an OAuth source: the creator's own for a branch's clone, the project's (or the
+source's `fallback`) for the read of every branch.
 
 ## The runtime
 
@@ -100,12 +118,17 @@ twice as long each time, up to 5 min; one that never answers within 3 min fails 
 
 In production the worker refuses `@sixb/sandboxes-local`, which runs a branch on its own host.
 `@sixb/sandboxes-vercel` serves a port through its public domain (4 ports at most),
-`@sixb/sandboxes-smolvm` on the host's loopback.
+`@sixb/sandboxes-smolvm` on the host's loopback. The worker also refuses a provider that resumes
+sandboxes but cannot delete one by name, and, with source `auth`, one whose commands get request
+credentials only through a forwarder (`forwardsRequestCredentials`: smolvm), which `git clone`
+does not use.
 
 Its network is restricted to production's PostgreSQL instance, production's API, the git host,
-the npm and yarn registries, the providers of the project's models (each says where it calls when
+the npm and yarn registries, `https://extensions.duckdb.org` when the project's lake is DuckLake,
+the providers of the project's models (each says where it calls when
 it is made: `models/origins.ts`), and the origins `SIXB_BRANCH_ALLOW` adds (the services the `dev`
-values point at, a model provider of the project's own). The provider refuses the rest: private ranges, link-local and cloud metadata
+values point at, a model provider of the project's own; HTTP(S) only, as no provider allows a
+plain TCP service by name). The provider refuses the rest: private ranges, link-local and cloud metadata
 included. PostgreSQL is allowed by its addresses, resolved when the sandbox is made: it negotiates
 TLS after it connects, so no firewall that reads TLS names can match its host name.
 
