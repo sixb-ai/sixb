@@ -66,7 +66,9 @@ project.
 
 **Console › Branches** lists the branches with their state, how old their data is and who opened
 each, and updates as they start. **Open** signs you into a branch in a new tab; the menu refreshes
-it from production, stops or deletes it. From code:
+it from production, stops or deletes it. A refresh copies what the branch's creator reads, whoever
+asks for it. A branch no worker takes up within a minute says it is waiting for a free one, or why
+production can't get it from the repository. From code:
 
 ```ts
 const { url } = await sixb.branches.signIn("feature/invoices") // POST /api/branches/sign-in
