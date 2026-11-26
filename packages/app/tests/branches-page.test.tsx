@@ -369,9 +369,9 @@ describe("Console › Branches", () => {
     expect(view.queryByText("Waiting")).toBeNull()
   })
 
-  // The worker's last read of the repository failed: the row says so at once, rather than wait
-  // a minute and blame a worker. Red check: drop the `remoteError` case from `unclaimed` and
-  // `Waiting` (`branches.tsx`).
+  // The worker's last read of the repository failed: someone has to act, and nothing is on its
+  // way. The row says so at once, as needing attention, rather than wait a minute and blame a
+  // worker. Red check: drop the `remoteError` case from `branchStatus` (`branches.tsx`).
   test("says at once when production can't get the branch from the repository", () => {
     const { view } = renderPage({
       branches: [
@@ -386,14 +386,57 @@ describe("Console › Branches", () => {
       now: NOW,
     })
 
-    expect(view.getAllByText("Waiting")).toHaveLength(2)
+    expect(view.getAllByText("Needs attention")).toHaveLength(2)
     expect(
       view.getByText("Production can't get this branch from the git repository.")
     ).toBeDefined()
+    expect(view.queryByRole("list", { name: "Progress" })).toBeNull()
     expect(view.queryByText("sixb worker branches")).toBeNull()
 
     fireEvent.click(view.getByRole("button", { name: "Details" }))
     expect(view.getByText("fatal: could not read Username for 'https://github.com'")).toBeDefined()
+  })
+
+  // Five branches waiting once said the same thing five times. Red check: show the callout under
+  // every waiting row (`workerHint` in `ConsoleBranchesPage`).
+  test("says once, above the list, that several branches wait for a free worker", () => {
+    const waiting = (name: string) =>
+      branch({ name, state: "stopped", data: null, openedAt: ago(5 * 60_000) })
+    const { view } = renderPage({
+      branches: [waiting("feature/a"), waiting("feature/b")],
+      unavailable: null,
+      now: NOW,
+    })
+
+    expect(view.getAllByText(/waiting for a free worker/)).toHaveLength(1)
+    expect(view.getByText(/^2 branches are waiting for a free worker/)).toBeDefined()
+    expect(view.getAllByText("sixb worker branches")).toHaveLength(1)
+  })
+
+  // Production closed the branch for what its database held: a new copy starts it over, from
+  // the notice itself. Red check: drop the notice's action in `BranchRow`.
+  test("offers a refresh on a branch production stopped for its database", async () => {
+    const { view } = renderPage({
+      branches: [
+        branch({
+          wanted: "stopped",
+          state: "stopped",
+          notices: [{ code: "database-limit", message: "Closed past its database's limits." }],
+        }),
+      ],
+      unavailable: null,
+      now: NOW,
+    })
+
+    expect(
+      view.getByText(
+        "Production stopped this branch: its data grew past its limit, or it held up production's database. A new copy starts it over."
+      )
+    ).toBeDefined()
+    fireEvent.click(view.getByRole("button", { name: "Refresh from production…" }))
+    expect(within(await view.findByRole("alertdialog")).getByRole("heading").textContent).toBe(
+      "Refresh feature/route-planner from production?"
+    )
   })
 
   // Removal proof: drop the toast from the status effect, and a branch turns ready unseen.

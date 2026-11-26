@@ -43,7 +43,6 @@ import {
   BookOpen,
   Check,
   ChevronRight,
-  CircleAlert,
   CircleStop,
   Clock,
   GitFork,
@@ -54,6 +53,7 @@ import {
   Plus,
   RefreshCw,
   Trash2,
+  TriangleAlert,
 } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
@@ -75,12 +75,19 @@ import {
 import { SkeletonBlock } from "../skeletons"
 import { type BranchesMessages, useBranchesMessages } from "./messages"
 
-export type Branch = ListBranchesResponse["branches"][number] & {
+type ListedBranch = ListBranchesResponse["branches"][number]
+
+export type Branch = Omit<ListedBranch, "notices"> & {
   /**
    * Why production can't get the branch from its repository, as its last read of the remote
-   * said: a branch that waits for it says so. Optional: a server may not send it.
+   * said. Optional: a server may not send it.
    */
   readonly remoteError?: string | null
+  /** What its creator should know, `database-limit` included: production closed the branch. */
+  readonly notices: readonly {
+    readonly code: ListedBranch["notices"][number]["code"] | "database-limit"
+    readonly message: string
+  }[]
 }
 type Unavailable = NonNullable<ListBranchesResponse["unavailable"]>
 
@@ -121,6 +128,8 @@ export function branchStatus(branch: Branch, now = Date.now()): BranchStatus {
   if (branch.wanted === "deleted") return "deleting"
   if (branch.state === "failed") return "attention"
   if (branch.wanted === "stopped") return branch.state === "stopped" ? "stopped" : "stopping"
+  // Production can't get it from the repository: nothing is on its way until someone acts.
+  if (branch.state === "stopped" && branch.remoteError) return "attention"
   if (unclaimed(branch, now)) return "waiting"
   if (refreshPending(branch)) return "refreshing"
   if (branch.state === "ready") return "ready"
@@ -130,11 +139,9 @@ export function branchStatus(branch: Branch, now = Date.now()): BranchStatus {
 /**
  * Nothing has taken the branch up a minute after it was last asked for, opened or refreshed. Its
  * workers may be busy with other branches, restarting or not running: the page can't tell which.
- * One production can't get from the repository waits at once, and says why.
  */
 function unclaimed(branch: Branch, now: number): boolean {
   if (branch.state !== "stopped") return false
-  if (branch.remoteError) return true
 
   const opened = Date.parse(branch.openedAt)
   const refreshed = branch.refreshRequestedAt ? Date.parse(branch.refreshRequestedAt) : opened
@@ -186,7 +193,7 @@ const statusTones: Record<BranchStatus, Tone> = {
   refreshing: "info",
   stopping: "muted",
   stopped: "muted",
-  attention: "error",
+  attention: "warn",
   deleting: "muted",
 }
 
@@ -221,6 +228,8 @@ export function ConsoleBranchesPage() {
   const unavailable = branchesQuery.data?.unavailable ?? null
   // Production's clock, as of its last answer: the one the branches' times were written in.
   const now = branchesQuery.data ? Date.parse(branchesQuery.data.now) : Date.now()
+  // Several branches waiting for a worker share one word on it, above the list.
+  const waiting = branches?.filter((branch) => branchStatus(branch, now) === "waiting").length ?? 0
 
   // The banner of a branch's app links here to refresh it: ask once the branch is listed.
   const wantsRefresh = searchParams.get("refresh") === "1"
@@ -344,6 +353,11 @@ export function ConsoleBranchesPage() {
       <div aria-live="polite" className="sr-only">
         {announcement}
       </div>
+      {waiting > 1 ? (
+        <div className="mb-3">
+          <WaitingForWorker count={waiting} />
+        </div>
+      ) : null}
       <Panel>
         {branchesQuery.isPending ? (
           <PanelSkeleton rows={2} trailing={<SkeletonBlock className="h-8 w-16 rounded-md" />} />
@@ -364,6 +378,7 @@ export function ConsoleBranchesPage() {
               key={branch.name}
               branch={branch}
               now={now}
+              workerHint={waiting === 1}
               highlighted={branch.name === highlighted}
               opening={opening === branch.name}
               onOpen={() => openInTab(branch.name)}
@@ -486,6 +501,7 @@ function SetupNeeded({ unavailable }: { readonly unavailable: Unavailable }) {
 function BranchRow({
   branch,
   now,
+  workerHint,
   highlighted,
   opening,
   onOpen,
@@ -497,6 +513,8 @@ function BranchRow({
   readonly branch: Branch
   /** Production's time, which the branch's own times are in. */
   readonly now: number
+  /** It is the one branch waiting for a worker: what to check goes under it. */
+  readonly workerHint: boolean
   readonly highlighted: boolean
   readonly opening: boolean
   readonly onOpen: () => void
@@ -611,10 +629,22 @@ function BranchRow({
       {step || status === "attention" || branch.notices.length > 0 || hasSkips(branch) ? (
         <div className="flex flex-col gap-2 sm:pl-[3.125rem]">
           {step ? <Progress step={step} waiting={status === "waiting"} /> : null}
-          {status === "waiting" ? <Waiting branch={branch} /> : null}
+          {status === "waiting" && workerHint ? <WaitingForWorker count={1} /> : null}
           {status === "attention" ? <NeedsAttention branch={branch} /> : null}
           {branch.notices.map((notice) => (
-            <Callout key={notice.code} icon={Info}>
+            <Callout
+              key={notice.code}
+              icon={Info}
+              action={
+                // Production closed it for what it held: a new copy starts it over.
+                notice.code === "database-limit" ? (
+                  <Button type="button" size="sm" variant="outline" onClick={onRefresh}>
+                    <RefreshCw />
+                    {messages.actions.refresh}
+                  </Button>
+                ) : undefined
+              }
+            >
               {messages.notices[notice.code]}
             </Callout>
           ))}
@@ -743,25 +773,16 @@ function Progress({ step, waiting }: { readonly step: BranchStep; readonly waiti
 }
 
 /**
- * Why the branch waits: production can't get it from the repository, with its error folded under
- * Details; or no worker took it up yet, and what to check if that lasts.
+ * No worker took the branches up yet: that they start as soon as one is free, and what to check
+ * if that lasts. Under the one branch that waits, or once above the list when several do.
  */
-function Waiting({ branch }: { readonly branch: Branch }) {
+function WaitingForWorker({ count }: { readonly count: number }) {
   const messages = useBranchesMessages()
-
-  if (branch.remoteError) {
-    return (
-      <Callout icon={Clock}>
-        <span className="block font-medium text-foreground">{messages.remote.title}</span>
-        <span className="mt-0.5 block">{messages.remote.hint}</span>
-        <ErrorDetails message={branch.remoteError} />
-      </Callout>
-    )
-  }
-
   return (
     <Callout icon={Clock}>
-      <span className="block">{messages.waitingForWorker}</span>
+      <span className="block">
+        {count > 1 ? messages.waitingForWorkers(count) : messages.waitingForWorker}
+      </span>
       <span className="mt-2 inline-flex max-w-full">
         <Snippet value={WORKER_COMMAND} />
       </span>
@@ -769,36 +790,44 @@ function Waiting({ branch }: { readonly branch: Branch }) {
   )
 }
 
-/** Why a branch isn't running: a sentence first, the error itself folded under Details. */
+/**
+ * Why a branch isn't running, and who acts: a sentence first, the error itself folded under
+ * Details. Production can't get it from the repository, its code didn't start, or its machine
+ * failed.
+ */
 function NeedsAttention({ branch }: { readonly branch: Branch }) {
-  const messages = useBranchesMessages().attention
+  const messages = useBranchesMessages()
   const error = branch.error
   // A runtime that fails to start keeps its branch wanted: the next push reloads it.
-  const code = branch.wanted === "running"
+  const code = branch.wanted === "running" && branch.state === "failed"
   const file = error?.file
 
+  const [title, hint, details] = branch.remoteError
+    ? [messages.remote.title, messages.remote.hint, { message: branch.remoteError }]
+    : code
+      ? [
+          messages.attention.code,
+          file
+            ? withCode(messages.attention.codeHint(file), file)
+            : messages.attention.codeHintNoFile,
+          error && {
+            message: error.message,
+            copy: file ? `${file}\n\n${error.message}` : undefined,
+          },
+        ]
+      : [messages.attention.machine, null, error && { message: error.message }]
+
   return (
-    <div className="rounded-lg border border-border bg-muted/30 px-3.5 py-2.5">
+    <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 px-3.5 py-2.5">
       <div className="flex items-start gap-2.5">
-        <CircleAlert
+        <TriangleAlert
           aria-hidden
-          className="mt-0.5 size-4 shrink-0 text-red-600 dark:text-red-400"
+          className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400"
         />
         <div className="min-w-0 flex-1">
-          <p className="text-[0.8125rem] font-medium text-foreground">
-            {code ? messages.code : messages.machine}
-          </p>
-          {code ? (
-            <p className="mt-0.5 text-[0.8125rem] text-muted-foreground">
-              {file ? withCode(messages.codeHint(file), file) : messages.codeHintNoFile}
-            </p>
-          ) : null}
-          {error ? (
-            <ErrorDetails
-              message={error.message}
-              copy={file ? `${file}\n\n${error.message}` : error.message}
-            />
-          ) : null}
+          <p className="text-[0.8125rem] font-medium text-foreground">{title}</p>
+          {hint ? <p className="mt-0.5 text-[0.8125rem] text-muted-foreground">{hint}</p> : null}
+          {details ? <ErrorDetails message={details.message} copy={details.copy} /> : null}
         </div>
       </div>
     </div>
@@ -852,15 +881,19 @@ function withCode(text: string, code: string): ReactNode {
 /** A calm line about the branch, such as its data having been reset. */
 function Callout({
   icon: Icon,
+  action,
   children,
 }: {
   readonly icon: typeof Info
+  /** The one thing to do about it, at the end of the line. */
+  readonly action?: ReactNode
   readonly children: ReactNode
 }) {
   return (
-    <div className="flex items-start gap-2.5 rounded-lg bg-muted/60 px-3.5 py-2.5 text-[0.8125rem] text-muted-foreground">
+    <div className="flex flex-wrap items-start gap-x-2.5 gap-y-2 rounded-lg bg-muted/60 px-3.5 py-2.5 text-[0.8125rem] text-muted-foreground">
       <Icon aria-hidden className="mt-0.5 size-4 shrink-0" />
-      <div className="min-w-0">{children}</div>
+      <div className="min-w-0 flex-1 basis-56">{children}</div>
+      {action ? <div className="-my-1 ml-6.5 shrink-0 sm:ml-0">{action}</div> : null}
     </div>
   )
 }

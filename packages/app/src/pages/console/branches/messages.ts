@@ -49,6 +49,8 @@ export const en = {
   },
   waitingForWorker:
     "Waiting for a free worker: the branch starts as soon as one is free. If it keeps waiting, ask a developer to check the branch worker:",
+  waitingForWorkers: (count: number) =>
+    `${count} branches are waiting for a free worker: each starts as soon as one is free. If they keep waiting, ask a developer to check the branch worker:`,
   remote: {
     title: "Production can't get this branch from the git repository.",
     hint: "Check that the branch is pushed, and that production may read the repository.",
@@ -94,6 +96,8 @@ export const en = {
     "machine-ended": "This branch stopped at its time limit. Start it to keep going.",
     "temp-files-uncapped":
       "A heavy query on this branch could fill production's database disk. Ask whoever runs production's database to let Sixb cap it (SET on temp_file_limit).",
+    "database-limit":
+      "Production stopped this branch: its data grew past its limit, or it held up production's database. A new copy starts it over.",
   },
   notCopied: {
     summary: (types: number, datasets: number) => {
@@ -193,6 +197,8 @@ export const fr: Translation<BranchesMessages> = {
   },
   waitingForWorker:
     "En attente d’un worker libre : la branche démarre dès qu’il y en a un. Si l’attente dure, demandez à un développeur de vérifier le worker de branches :",
+  waitingForWorkers: (count: number) =>
+    `${count} branches attendent un worker libre : chacune démarre dès qu’il y en a un. Si l’attente dure, demandez à un développeur de vérifier le worker de branches :`,
   remote: {
     title: "La production n’arrive pas à récupérer cette branche depuis le dépôt git.",
     hint: "Vérifiez que la branche est poussée et que la production peut lire le dépôt.",
@@ -240,6 +246,8 @@ export const fr: Translation<BranchesMessages> = {
       "Cette branche s’est arrêtée à sa limite de durée. Démarrez-la pour continuer.",
     "temp-files-uncapped":
       "Une requête lourde sur cette branche pourrait remplir le disque de la base de production. Demandez à qui gère cette base de laisser Sixb la plafonner (SET sur temp_file_limit).",
+    "database-limit":
+      "La production a arrêté cette branche : ses données ont dépassé leur limite, ou elle bloquait la base de production. Une nouvelle copie la relance.",
   },
   notCopied: {
     summary: (types: number, datasets: number) => {
