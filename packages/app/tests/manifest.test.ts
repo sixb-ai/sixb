@@ -284,7 +284,7 @@ describe("custom app metadata and manifest generation", () => {
       "dir"
     )
     await symlink(
-      join(process.cwd(), "packages", "cli", "node_modules", "@sixb", "client"),
+      join(process.cwd(), "packages", "client"),
       join(fixtureModules, "@sixb", "client"),
       "dir"
     )

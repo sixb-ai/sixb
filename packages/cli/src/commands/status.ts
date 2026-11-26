@@ -1,93 +1,100 @@
-import { CliError, createInstanceApiClient, writeJson } from "@sixb/cli-core"
-import { resolveProfile } from "../lib/profiles"
-import { keyValueResultView, renderStatic } from "../ui"
+import type { ApiClient } from "../api-client"
+import { isHelp } from "../arguments"
+import { renderKeyValues, renderOutput } from "../format"
+import { CliError, EXIT_API, fail, INSTANCE_CLI_VERSION, writeText } from "../output"
+import { GROUP_HELP } from "./metadata"
+import { asRecord } from "./shared"
 
-export interface StatusCommandOptions {
-  readonly apiUrl?: string
-  readonly token?: string
-  readonly profile?: string
-  readonly json?: boolean
-}
-
-export async function runStatus(options: StatusCommandOptions = {}): Promise<void> {
-  const resolved = await resolveProfile(options)
-  try {
-    const project = await createInstanceApiClient({
-      kind: "local",
-      baseUrl: resolved.apiUrl,
-      ...(resolved.token ? { token: resolved.token } : {}),
-      ...(resolved.profile ? { profile: resolved.profile } : {}),
-    }).get("/api/project")
-    const projectId = projectIdFrom(project)
-    await renderStatus({
-      connected: true,
-      authenticated: Boolean(resolved.token),
-      apiUrl: resolved.apiUrl,
-      source: resolved.source,
-      ...(resolved.profile ? { profile: resolved.profile } : {}),
-      projectId,
-      json: options.json,
-    })
-  } catch (error) {
-    if (!(error instanceof CliError) || (error.body.status !== 401 && error.body.status !== 403)) {
-      throw error
-    }
-    await renderStatus({
-      connected: true,
-      authenticated: false,
-      apiUrl: resolved.apiUrl,
-      source: resolved.source,
-      ...(resolved.profile ? { profile: resolved.profile } : {}),
-      message: error.message,
-      json: options.json,
-    })
-    process.exitCode = 1
-  }
-}
-
-async function renderStatus(input: {
-  readonly connected: boolean
-  readonly authenticated: boolean
+/** Stable JSON emitted by `sixb status`. */
+export interface StatusReport {
+  readonly ok: true
+  readonly connected: true
   readonly apiUrl: string
-  readonly source: string
-  readonly profile?: string
-  readonly projectId?: string
-  readonly message?: string
-  readonly json?: boolean
-}): Promise<void> {
-  if (input.json) {
-    const { json: _json, ...result } = input
-    writeJson(result)
-    return
+  readonly cli: { readonly version: string }
+  readonly runtime: {
+    readonly name: "bun" | "node"
+    readonly version: string
   }
-
-  await renderStatic(
-    keyValueResultView({
-      title: input.message ? "Authentication failed" : "Connected",
-      titleColor: input.message ? "red" : "green",
-      items: [
-        ...(input.profile ? [{ label: "Profile", value: input.profile }] : []),
-        ...(input.projectId ? [{ label: "Project", value: input.projectId }] : []),
-        { label: "API", value: input.apiUrl },
-        {
-          label: "Authentication",
-          value: input.authenticated ? "token" : input.message ? "failed" : "not required",
-        },
-      ],
-      message: input.message,
-    })
-  )
+  readonly project: {
+    readonly id: string
+    readonly locale?: string
+    readonly timeZone?: string
+  }
+  readonly authenticated?: boolean
+  readonly profile?: string
+  readonly source?: string
 }
 
-function projectIdFrom(value: unknown): string {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("id" in value) ||
-    typeof value.id !== "string" ||
-    !value.id.trim()
-  ) {
-    throw new Error("[SixbCLI] The Sixb API returned project metadata without a project id.")
+export interface StatusContext {
+  readonly apiUrl?: string
+  readonly authenticated?: boolean
+  readonly profile?: string
+  readonly source?: string
+}
+
+export async function fetchStatus(
+  api: ApiClient,
+  context: StatusContext = {}
+): Promise<StatusReport> {
+  const project = asRecord(await api.get("/api/project"))
+  if (typeof project.id !== "string" || project.id.length === 0) {
+    throw new CliError(
+      { code: "invalid_api_response", message: "The Sixb API returned an invalid project." },
+      EXIT_API
+    )
   }
-  return value.id.trim()
+  return {
+    ok: true,
+    connected: true,
+    apiUrl: context.apiUrl ?? api.baseUrl,
+    cli: { version: INSTANCE_CLI_VERSION },
+    runtime: javascriptRuntime(),
+    project: {
+      id: project.id,
+      ...(typeof project.locale === "string" ? { locale: project.locale } : {}),
+      ...(typeof project.timeZone === "string" ? { timeZone: project.timeZone } : {}),
+    },
+    ...(context.authenticated === undefined ? {} : { authenticated: context.authenticated }),
+    ...(context.profile === undefined ? {} : { profile: context.profile }),
+    ...(context.source === undefined ? {} : { source: context.source }),
+  }
+}
+
+export async function status(
+  api: ApiClient,
+  args: readonly string[],
+  context: StatusContext = {}
+): Promise<void> {
+  if (isHelp(args[0])) return writeText(GROUP_HELP.status)
+  if (args.some((arg) => arg !== "--json")) fail("status accepts no arguments but --json.")
+  const report = await fetchStatus(api, context)
+  renderOutput(report, {
+    json: args.includes("--json"),
+    renderText: () =>
+      renderKeyValues({
+        title: "Connected",
+        titleTone: "green",
+        items: [
+          ...(report.profile ? [{ label: "Profile", value: report.profile }] : []),
+          { label: "Project", value: report.project.id },
+          { label: "API", value: report.apiUrl },
+          ...(report.authenticated === undefined
+            ? []
+            : [
+                {
+                  label: "Authentication",
+                  value: report.authenticated ? "token" : "not required",
+                },
+              ]),
+          { label: "Runtime", value: `${report.runtime.name} ${report.runtime.version}` },
+        ],
+      }),
+  })
+}
+
+function javascriptRuntime(): StatusReport["runtime"] {
+  if (typeof globalThis.Bun === "object") {
+    return { name: "bun", version: globalThis.Bun.version }
+  }
+  return { name: "node", version: process.versions.node }
 }

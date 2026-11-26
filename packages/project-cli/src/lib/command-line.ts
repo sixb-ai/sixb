@@ -1,0 +1,853 @@
+type OptionKind = "boolean" | "string"
+
+export const CLI_OPTION_DEFINITIONS = {
+  entry: {
+    syntax: "--entry <path>",
+    summary: "Entry file (default: sixb.config.ts)",
+    kind: "string",
+  },
+  "no-migrate": {
+    syntax: "--no-migrate",
+    summary: "Start a role without migrating storage (or SIXB_SKIP_MIGRATION=1)",
+    kind: "boolean",
+  },
+  port: { syntax: "--port <port>", summary: "Role port; dev: the app port", kind: "string" },
+  host: {
+    syntax: "--host <host>",
+    summary: "Bind host (dev: 127.0.0.1, production roles: 0.0.0.0)",
+    kind: "string",
+  },
+  "api-port": {
+    syntax: "--api-port <port>",
+    summary: "API port (default: app port + 1)",
+    kind: "string",
+  },
+  "api-host": {
+    syntax: "--api-host <host>",
+    summary: "API bind host (default: --host)",
+    kind: "string",
+  },
+  "api-public-origin": {
+    syntax: "--api-public-origin <origin>",
+    summary: "Public API origin",
+    kind: "string",
+  },
+  concurrency: {
+    syntax: "--concurrency <value>",
+    summary: "Concurrent jobs: count for worker; repeat type=count for dev/worker-group",
+    kind: "string",
+  },
+  "vector-concurrency": {
+    syntax: "--vector-concurrency <count>",
+    summary: "Concurrent embedding calls for vector indexing (default: 4)",
+    kind: "string",
+  },
+  "subagent-concurrency": {
+    syntax: "--subagent-concurrency <count>",
+    summary: "Child agents an agent worker runs at once (default: 4)",
+    kind: "string",
+  },
+  "subagent-concurrency-per-run": {
+    syntax: "--subagent-concurrency-per-run <count>",
+    summary: "Child agents one Agent turn keeps at work at once (default: 4)",
+    kind: "string",
+  },
+  "app-public-origin": {
+    syntax: "--app-public-origin <origin>",
+    summary: "Public app origin",
+    kind: "string",
+  },
+  desktop: {
+    syntax: "--desktop",
+    summary: "Also open the app in a desktop window",
+    kind: "boolean",
+  },
+  "trusted-proxies": {
+    syntax: "--trusted-proxies <ranges>",
+    summary: "Proxies trusted for client addresses (default: private)",
+    kind: "string",
+  },
+  profile: { syntax: "--profile <name>", summary: "Use a saved API profile", kind: "string" },
+  "api-url": {
+    syntax: "--api-url <url>",
+    summary: "Use an API without a saved profile",
+    kind: "string",
+  },
+  token: {
+    syntax: "--token <token>",
+    summary: "Bearer token for an explicit API URL",
+    kind: "string",
+  },
+  "token-stdin": {
+    syntax: "--token-stdin",
+    summary: "Import a login token from standard input",
+    kind: "boolean",
+  },
+  id: { syntax: "--id <id>", summary: "Token or service-account id", kind: "string" },
+  name: { syntax: "--name <name>", summary: "Token or service-account name", kind: "string" },
+  description: {
+    syntax: "--description <text>",
+    summary: "Service-account description",
+    kind: "string",
+  },
+  "expires-in": {
+    syntax: "--expires-in <duration>",
+    summary: "Token lifetime, e.g. 30d or 1y",
+    kind: "string",
+  },
+  "expires-at": {
+    syntax: "--expires-at <iso>",
+    summary: "Token expiration timestamp",
+    kind: "string",
+  },
+  group: { syntax: "--group <id>", summary: "Assignable token group; may repeat", kind: "string" },
+  json: { syntax: "--json", summary: "Print JSON instead of formatted output", kind: "boolean" },
+  thread: {
+    syntax: "--thread <id>",
+    summary: "Continue this conversation instead of starting one",
+    kind: "string",
+  },
+  cloud: {
+    syntax: "--cloud",
+    summary: "Run a new conversation in the cloud, not on this computer",
+    kind: "boolean",
+  },
+  "approval-mode": {
+    syntax: "--approval-mode <manual|accept-edits|auto>",
+    summary: "What this turn may do without asking (default: your mode in the conversation)",
+    kind: "string",
+  },
+  detach: {
+    syntax: "--detach",
+    summary: "Send the message and exit, without following the turn",
+    kind: "boolean",
+  },
+  yes: {
+    syntax: "--yes",
+    summary: "Go ahead without asking: allow the folders named, or run on the deployment",
+    kind: "boolean",
+  },
+  deployed: {
+    syntax: "--deployed",
+    summary: "Run on the deployment sixb.deploy.ts describes",
+    kind: "boolean",
+  },
+  outdir: { syntax: "--outdir <path>", summary: "Build output directory", kind: "string" },
+  ref: {
+    syntax: "--ref <ref>",
+    summary: "Branch, tag, or commit to deploy (default: HEAD)",
+    kind: "string",
+  },
+  migrate: {
+    syntax: "--migrate",
+    summary: "Bring the storage schema up to date first, as a deploy does",
+    kind: "boolean",
+  },
+  lake: {
+    syntax: "--lake",
+    summary: "Check the lake's dataset definitions too",
+    kind: "boolean",
+  },
+  follow: { syntax: "--follow", summary: "Keep printing new log lines", kind: "boolean" },
+  env: {
+    syntax: "--env <dev|prod>",
+    summary: "Environment (default for pull: dev)",
+    kind: "string",
+  },
+  dev: {
+    syntax: "--dev <file>",
+    summary: "The file holding the current dev values",
+    kind: "string",
+  },
+  prod: {
+    syntax: "--prod <file>",
+    summary: "The file holding the current prod values",
+    kind: "string",
+  },
+  "token-file": {
+    syntax: "--token-file <path>",
+    summary: "Read the source's token from this file, as a server does",
+    kind: "string",
+  },
+  force: {
+    syntax: "--force",
+    summary: "Replace a hand-written .env, losing what the source doesn't have",
+    kind: "boolean",
+  },
+  tail: {
+    syntax: "--tail <lines>",
+    summary: "Recent log lines to print (default: 100)",
+    kind: "string",
+  },
+  check: {
+    syntax: "--check",
+    summary: "Only report pending migrations, exiting with 3 when there are some",
+    kind: "boolean",
+  },
+  "dry-run": {
+    syntax: "--dry-run",
+    summary: "Show what would change without changing it",
+    kind: "boolean",
+  },
+  dataset: {
+    syntax: "--dataset <id>",
+    summary: "Show one dataset's rejected deliveries (default: every dataset)",
+    kind: "string",
+  },
+  "keep-versions-for": {
+    syntax: "--keep-versions-for <duration>",
+    summary:
+      "How long a replaced lake version stays readable (default: `lakeMaintenance`, at least 1h)",
+    kind: "string",
+  },
+  "delete-files-after": {
+    syntax: "--delete-files-after <duration>",
+    summary: "How long unread lake files wait before deletion (default: `lakeMaintenance`)",
+    kind: "string",
+  },
+} as const satisfies Record<string, { syntax: string; summary: string; kind: OptionKind }>
+
+export type CliOptionName = keyof typeof CLI_OPTION_DEFINITIONS
+export type LocalCommandId =
+  | "agent"
+  | "connect"
+  | "dev"
+  | "serve:api"
+  | "serve:app"
+  | "serve:orchestrator"
+  | "serve:rules"
+  | "serve:worker"
+  | "serve:worker-group"
+  | "check"
+  | "run"
+  | "typegen"
+  | "build"
+  | "desktop:build"
+  | "db:migrate"
+  | "db:prepare"
+  | "lake:check"
+  | "lake:cleanup"
+  | "lake:rejected"
+  | "deploy"
+  | "deploy:status"
+  | "deploy:logs"
+  | "deploy:restart"
+  | "deploy:start"
+  | "deploy:stop"
+  | "deploy:check"
+  | "env:init"
+  | "env:pull"
+  | "env:set"
+  | "env:status"
+  | "init"
+
+interface CommandNode {
+  readonly name: string
+  readonly summary: string
+  readonly usage: string
+  readonly id?: LocalCommandId
+  readonly children?: readonly CommandNode[]
+  readonly options?: readonly CliOptionName[]
+  readonly repeatable?: readonly CliOptionName[]
+  readonly minimumPositionals?: number
+  readonly maximumPositionals?: number
+  readonly requiredInputs?: readonly {
+    readonly option: CliOptionName
+    readonly positional: number
+  }[]
+  readonly rootHelpLabel?: string
+  /** Everything after the first positional is a positional too, passed on untouched. */
+  readonly passthrough?: boolean
+}
+
+const commandTree: readonly CommandNode[] = [
+  command("dev", "Run the project locally, restarting as you edit", {
+    options: [
+      "entry",
+      "port",
+      "host",
+      "api-port",
+      "api-host",
+      "api-public-origin",
+      "concurrency",
+      "vector-concurrency",
+      "subagent-concurrency",
+      "subagent-concurrency-per-run",
+      "app-public-origin",
+      "desktop",
+    ],
+    repeatable: ["concurrency"],
+  }),
+  {
+    name: "serve",
+    summary: "Run production roles: api, app, orchestrator, rules, worker, worker-group",
+    usage: "sixb serve <api|app|orchestrator|rules|worker|worker-group> [options]",
+    rootHelpLabel: "serve <role>",
+    children: [
+      command("serve:api", "Start the production API, docs, and event stream", {
+        path: ["serve", "api"],
+        options: [
+          "entry",
+          "no-migrate",
+          "port",
+          "host",
+          "api-port",
+          "api-host",
+          "api-public-origin",
+          "app-public-origin",
+          "trusted-proxies",
+        ],
+      }),
+      command("serve:app", "Start the production app server", {
+        path: ["serve", "app"],
+        options: ["entry", "port", "host", "api-public-origin", "app-public-origin"],
+      }),
+      command(
+        "serve:orchestrator",
+        "Start the production orchestrator: cron, event dispatch and upkeep",
+        {
+          path: ["serve", "orchestrator"],
+          options: ["entry", "no-migrate"],
+        }
+      ),
+      command("serve:rules", "Start the production rules runtime", {
+        path: ["serve", "rules"],
+        options: ["entry", "no-migrate"],
+      }),
+      command(
+        "serve:worker",
+        "Start one queue worker: sync, agent, pipeline, projection, workflow",
+        {
+          path: ["serve", "worker"],
+          usage: "sixb serve worker <sync|agent|pipeline|projection|workflow> [options]",
+          options: [
+            "entry",
+            "no-migrate",
+            "api-public-origin",
+            "concurrency",
+            "vector-concurrency",
+            "subagent-concurrency",
+            "subagent-concurrency-per-run",
+          ],
+          minimumPositionals: 1,
+          maximumPositionals: 1,
+        }
+      ),
+      command("serve:worker-group", "Run several queue workers in one process", {
+        path: ["serve", "worker-group"],
+        usage: "sixb serve worker-group [types...] [options]",
+        options: [
+          "entry",
+          "no-migrate",
+          "api-public-origin",
+          "concurrency",
+          "vector-concurrency",
+          "subagent-concurrency",
+          "subagent-concurrency-per-run",
+        ],
+        repeatable: ["concurrency"],
+        maximumPositionals: Number.POSITIVE_INFINITY,
+      }),
+    ],
+  },
+  command("agent", "Ask the agent; it works in this folder", {
+    usage:
+      'sixb agent "<message>" [--thread <id>] [--cloud] [--approval-mode <mode>] [--detach] [--json]',
+    // No --token: a command the agent runs could read it from this one's arguments. A token comes
+    // from a profile or SIXB_API_TOKEN.
+    options: ["api-url", "profile", "thread", "cloud", "approval-mode", "detach", "json"],
+    // The message, quoted or not; standard input when there is none.
+    maximumPositionals: Number.POSITIVE_INFINITY,
+    rootHelpLabel: 'agent "<message>"',
+  }),
+  command("connect", "Run messages from the web in folders on this computer", {
+    usage: "sixb connect [folder...] [--yes] [--json]",
+    options: ["api-url", "profile", "yes", "json"],
+    maximumPositionals: Number.POSITIVE_INFINITY,
+    rootHelpLabel: "connect [folder...]",
+  }),
+  command("check", "Validate project configuration and health", {
+    options: ["entry", "migrate", "lake"],
+  }),
+  command("run", "Run a script against the project, here or in production", {
+    usage: "sixb run [--deployed] [--yes] [--entry <path>] <script> [args...]",
+    options: ["entry", "deployed", "yes"],
+    minimumPositionals: 1,
+    maximumPositionals: Number.POSITIVE_INFINITY,
+    passthrough: true,
+    rootHelpLabel: "run <script>",
+  }),
+  command("typegen", "Generate ontology types for typed queries", { options: ["entry"] }),
+  command("build", "Build the runtime and the app for production", {
+    options: ["entry", "outdir"],
+  }),
+  {
+    name: "desktop",
+    summary: "Ship the app as a desktop app",
+    usage: "sixb desktop build",
+    children: [
+      command("desktop:build", "Package the deployed app as a desktop app for this machine", {
+        path: ["desktop", "build"],
+        options: ["app-public-origin", "api-public-origin"],
+        rootHelpLabel: "desktop build",
+      }),
+    ],
+  },
+  {
+    name: "db",
+    summary: "Manage runtime storage",
+    usage: "sixb db <migrate|prepare>",
+    children: [
+      command(
+        "db:prepare",
+        "Prepare ontology query indexes and exact aggregates (may block writes)",
+        {
+          path: ["db", "prepare"],
+          options: ["entry"],
+          rootHelpLabel: "db prepare",
+        }
+      ),
+      command("db:migrate", "Run database migrations ahead of a role", {
+        path: ["db", "migrate"],
+        options: ["entry", "check"],
+        rootHelpLabel: "db migrate",
+      }),
+    ],
+  },
+  {
+    name: "lake",
+    summary: "Inspect and maintain lake storage",
+    usage: "sixb lake <check|cleanup>",
+    children: [
+      command("lake:check", "Check lake dataset definitions for drift", {
+        path: ["lake", "check"],
+        options: ["entry"],
+        rootHelpLabel: "lake check",
+      }),
+      command("lake:cleanup", "Clean up old lake snapshots and files", {
+        path: ["lake", "cleanup"],
+        options: ["entry", "dry-run", "keep-versions-for", "delete-files-after"],
+        rootHelpLabel: "lake cleanup",
+      }),
+      command("lake:rejected", "Show ingested deliveries refused after they were accepted", {
+        path: ["lake", "rejected"],
+        options: ["entry", "dataset"],
+        rootHelpLabel: "lake rejected",
+      }),
+    ],
+  },
+  {
+    ...command("deploy", "Deploy the project described in sixb.deploy.ts", {
+      usage: "sixb deploy [--dry-run] [--ref <ref>] [--json]",
+      options: ["dry-run", "ref", "json"],
+      rootHelpLabel: "deploy ...",
+    }),
+    children: [
+      command("deploy:check", "Check what stands between you and a working deploy", {
+        path: ["deploy", "check"],
+        options: ["json"],
+      }),
+      command("deploy:status", "Show what the deployment runs, and which commit", {
+        path: ["deploy", "status"],
+        options: ["json"],
+      }),
+      command("deploy:logs", "Print the deployment's logs", {
+        path: ["deploy", "logs"],
+        usage: "sixb deploy logs [service] [--follow] [--tail <lines>]",
+        options: ["follow", "tail"],
+        maximumPositionals: 1,
+      }),
+      ...(["restart", "start", "stop"] as const).map((action) =>
+        command(`deploy:${action}`, `${capitalize(action)} one service, or every service`, {
+          path: ["deploy", action],
+          usage: `sixb deploy ${action} [service]`,
+          maximumPositionals: 1,
+        })
+      ),
+    ],
+  },
+  {
+    name: "env",
+    summary: "Keep the project's environment variables in one place",
+    usage: "sixb env <init|pull|set|status>",
+    rootHelpLabel: "env ...",
+    children: [
+      command("env:init", "Move a project's values to its source and write sixb.env.ts", {
+        path: ["env", "init"],
+        usage: "sixb env init [doppler-project] [--dev <file>] [--prod <file>]",
+        options: ["dev", "prod"],
+        maximumPositionals: 1,
+      }),
+      command("env:pull", "Write .env from the project's source", {
+        path: ["env", "pull"],
+        options: ["env", "token-file", "force"],
+      }),
+      command("env:set", "Set one value in the project's source", {
+        path: ["env", "set"],
+        usage: "sixb env set <name> --env <dev|prod>",
+        options: ["env"],
+        minimumPositionals: 1,
+        maximumPositionals: 1,
+      }),
+      command("env:status", "Show which variables have values, without showing them", {
+        path: ["env", "status"],
+      }),
+    ],
+  },
+  command("init", "Create a Sixb project in a directory", {
+    usage: "sixb init [dir]",
+    maximumPositionals: 1,
+    rootHelpLabel: "init [dir]",
+  }),
+]
+
+export interface CliHelpItem {
+  readonly label: string
+  readonly value: string
+}
+
+export interface CliHelp {
+  readonly path: readonly string[]
+  readonly usage: string
+  readonly summary: string
+  readonly commands: readonly CliHelpItem[]
+  readonly options: readonly CliHelpItem[]
+}
+
+export interface ParsedCliOptions {
+  readonly [name: string]: string | boolean | readonly string[] | undefined
+}
+
+export type ParsedCli =
+  | { readonly kind: "help"; readonly help: CliHelp }
+  | { readonly kind: "version" }
+  | {
+      readonly kind: "command"
+      readonly id: LocalCommandId
+      readonly path: readonly string[]
+      readonly positionals: readonly string[]
+      readonly options: ParsedCliOptions
+    }
+
+export class CliUsageError extends Error {
+  readonly help: CliHelp
+  readonly exitCode = 2
+
+  constructor(message: string, help: CliHelp) {
+    super(message)
+    this.name = "CliUsageError"
+    this.help = help
+  }
+}
+
+export const ROOT_HELP: CliHelp = {
+  path: [],
+  usage: "sixb [command] [options]",
+  summary: "Real-time digital twin framework",
+  commands: rootHelpItems(commandTree),
+  // Each command lists its own options; the root names the ones most commands share. Its last
+  // line points to `--help`.
+  options: (["entry", "profile", "json"] as const).map((name) => ({
+    label: CLI_OPTION_DEFINITIONS[name].syntax,
+    value: CLI_OPTION_DEFINITIONS[name].summary,
+  })),
+}
+
+/** The root help's commands, grouped by what they are for. Order is the reading order. */
+const ROOT_HELP_GROUP_COMMANDS: readonly {
+  readonly title: string
+  readonly names: readonly string[]
+  /** Listed by name only: each has its own help. */
+  readonly compact?: boolean
+}[] = [
+  { title: "Agent", names: ["agent", "connect"] },
+  { title: "Develop", names: ["init", "dev", "env", "check", "run", "typegen", "build"] },
+  { title: "Deploy", names: ["deploy", "desktop", "serve"] },
+  { title: "Storage", names: ["db", "lake"] },
+]
+
+export const ROOT_HELP_GROUPS: readonly {
+  readonly title: string
+  readonly items: readonly CliHelpItem[]
+  readonly compact?: boolean
+}[] = (() => {
+  const grouped = new Set(ROOT_HELP_GROUP_COMMANDS.flatMap((group) => group.names))
+  const ungrouped = commandTree.filter((node) => !grouped.has(node.name))
+  const groups = ROOT_HELP_GROUP_COMMANDS.map((group) => ({
+    title: group.title,
+    ...(group.compact ? { compact: true } : {}),
+    items: [
+      // `sixb` alone is no command, but it is how most people meet the agent.
+      ...(group.title === "Agent"
+        ? [{ label: "(no command)", value: "Open Sixb here: talk to the agent in this folder" }]
+        : []),
+      ...rootHelpItems(
+        group.names.flatMap((name) => commandTree.filter((node) => node.name === name))
+      ),
+    ],
+  }))
+  // A command added without a group still shows up.
+  return ungrouped.length > 0
+    ? [...groups, { title: "More", items: rootHelpItems(ungrouped) }]
+    : groups
+})()
+
+export const CLI_EXAMPLES = [
+  "sixb init my-project",
+  "sixb dev",
+  "sixb login https://api.example.com",
+  "sixb deploy",
+] as const
+
+export function parseCliArgs(args: readonly string[]): ParsedCli {
+  const first = args[0]
+  if (!first) return { kind: "help", help: ROOT_HELP }
+  if (first === "--help" || first === "-h") {
+    if (args.length !== 1) throw new CliUsageError(`${first} accepts no arguments.`, ROOT_HELP)
+    return { kind: "help", help: ROOT_HELP }
+  }
+  if (first === "--version" || first === "-v") {
+    if (args.length !== 1) throw new CliUsageError("--version accepts no arguments.", ROOT_HELP)
+    return { kind: "version" }
+  }
+  if (first === "help") return parseHelpArgs(args.slice(1))
+  if (first.startsWith("-")) throw new CliUsageError(`Unknown option '${first}'.`, ROOT_HELP)
+
+  const root = commandTree.find((node) => node.name === first)
+  if (!root) throw new CliUsageError(`Unknown command '${first}'.`, ROOT_HELP)
+  return parseLocalCommand(root, args)
+}
+
+export function stringOption(options: ParsedCliOptions, name: CliOptionName): string | undefined {
+  const value = options[name]
+  return typeof value === "string" ? value : undefined
+}
+
+export function booleanOption(options: ParsedCliOptions, name: CliOptionName): boolean {
+  return options[name] === true
+}
+
+export function repeatedOption(options: ParsedCliOptions, name: CliOptionName): readonly string[] {
+  const value = options[name]
+  return Array.isArray(value) ? value : typeof value === "string" ? [value] : []
+}
+
+export function wantsManagementJson(args: readonly string[]): boolean {
+  return (
+    ["deploy", "agent", "connect"].includes(args[0] ?? "") &&
+    args.some((argument) => argument === "--json" || argument.startsWith("--json="))
+  )
+}
+
+function command(
+  id: LocalCommandId,
+  summary: string,
+  input: {
+    readonly path?: readonly string[]
+    readonly usage?: string
+    readonly options?: readonly CliOptionName[]
+    readonly repeatable?: readonly CliOptionName[]
+    readonly minimumPositionals?: number
+    readonly maximumPositionals?: number
+    readonly requiredInputs?: readonly {
+      readonly option: CliOptionName
+      readonly positional: number
+    }[]
+    readonly rootHelpLabel?: string
+    readonly passthrough?: boolean
+  } = {}
+): CommandNode {
+  const path = input.path ?? [id]
+  return {
+    name: path.at(-1) ?? id,
+    id,
+    summary,
+    usage: input.usage ?? `sixb ${path.join(" ")}`,
+    options: input.options,
+    repeatable: input.repeatable,
+    minimumPositionals: input.minimumPositionals,
+    maximumPositionals: input.maximumPositionals ?? 0,
+    requiredInputs: input.requiredInputs,
+    rootHelpLabel: input.rootHelpLabel ?? (path.length === 1 ? path[0] : undefined),
+    ...(input.passthrough ? { passthrough: true } : {}),
+  }
+}
+
+function parseHelpArgs(path: readonly string[]): ParsedCli {
+  if (path.length === 0) return { kind: "help", help: ROOT_HELP }
+  const root = commandTree.find((node) => node.name === path[0])
+  if (!root) throw new CliUsageError(`Unknown command '${path[0]}'.`, ROOT_HELP)
+
+  let node = root
+  for (const name of path.slice(1)) {
+    const child = node.children?.find((candidate) => candidate.name === name)
+    if (!child) throw new CliUsageError(`Unknown command '${path.join(" ")}'.`, helpFor(node, path))
+    node = child
+  }
+  return { kind: "help", help: helpFor(node, path) }
+}
+
+function parseLocalCommand(root: CommandNode, args: readonly string[]): ParsedCli {
+  let node = root
+  let index = 1
+  const path = [root.name]
+
+  while (node.children) {
+    const next = args[index]
+    const child = node.children.find((candidate) => candidate.name === next)
+    // A command that also has subcommands runs itself when no subcommand follows.
+    if (!child && node.id && (next === undefined || next.startsWith("-"))) break
+    if (!next || next === "--help" || next === "-h") {
+      return { kind: "help", help: helpFor(node, path) }
+    }
+    if (next.startsWith("-")) {
+      throw new CliUsageError(`'${path.join(" ")}' requires a subcommand.`, helpFor(node, path))
+    }
+    if (!child) {
+      throw new CliUsageError(`Unknown ${path.join(" ")} command '${next}'.`, helpFor(node, path))
+    }
+    node = child
+    path.push(next)
+    index++
+  }
+
+  if (!node.id) throw new Error(`[SixbCLI] Command '${path.join(" ")}' has no handler.`)
+  const remaining = args.slice(index)
+  if (requestsHelp(node.passthrough ? remaining.slice(0, firstPositional(remaining)) : remaining)) {
+    return { kind: "help", help: helpFor(node, path) }
+  }
+  const { options, positionals } = parseOptions(node, path, remaining)
+  return { kind: "command", id: node.id, path, positionals, options }
+}
+
+/** Where the first positional is, past options and the values they take. */
+function firstPositional(args: readonly string[]): number {
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index] ?? ""
+    if (argument === "--" || !argument.startsWith("-")) return index
+    const definition = CLI_OPTION_DEFINITIONS[argument.slice(2) as CliOptionName]
+    if (definition?.kind === "string") index++
+  }
+  return args.length
+}
+
+function requestsHelp(args: readonly string[]): boolean {
+  const separator = args.indexOf("--")
+  const options = separator < 0 ? args : args.slice(0, separator)
+  return options.includes("--help") || options.includes("-h")
+}
+
+function parseOptions(
+  node: CommandNode,
+  path: readonly string[],
+  args: readonly string[]
+): { readonly options: ParsedCliOptions; readonly positionals: readonly string[] } {
+  const options: Record<string, string | boolean | string[]> = {}
+  const positionals: string[] = []
+  const allowed = new Set(node.options ?? [])
+  const repeatable = new Set(node.repeatable ?? [])
+  let positionalOnly = false
+
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index]
+    if (argument === undefined) continue
+    // A script's own `--` is one of its arguments.
+    if (argument === "--" && !(node.passthrough && positionalOnly)) {
+      positionalOnly = true
+      continue
+    }
+    if (positionalOnly || !argument.startsWith("-")) {
+      positionals.push(argument)
+      if (node.passthrough) positionalOnly = true
+      continue
+    }
+    if (!argument.startsWith("--")) {
+      throw new CliUsageError(`Unknown option '${argument}'.`, helpFor(node, path))
+    }
+
+    const equalsIndex = argument.indexOf("=")
+    const name = argument.slice(2, equalsIndex < 0 ? undefined : equalsIndex) as CliOptionName
+    const definition = CLI_OPTION_DEFINITIONS[name]
+    if (!definition || !allowed.has(name)) {
+      throw new CliUsageError(
+        `Unknown option '--${name}' for '${path.join(" ")}'.`,
+        helpFor(node, path)
+      )
+    }
+    if (options[name] !== undefined && !repeatable.has(name)) {
+      throw new CliUsageError(`--${name} may only be provided once.`, helpFor(node, path))
+    }
+
+    if (definition.kind === "boolean") {
+      if (equalsIndex >= 0) {
+        throw new CliUsageError(`--${name} does not accept a value.`, helpFor(node, path))
+      }
+      options[name] = true
+      continue
+    }
+
+    const value = equalsIndex < 0 ? args[++index] : argument.slice(equalsIndex + 1)
+    if (!value || value.startsWith("--")) {
+      throw new CliUsageError(`--${name} requires a value.`, helpFor(node, path))
+    }
+    if (repeatable.has(name)) {
+      const values = options[name]
+      options[name] = Array.isArray(values) ? [...values, value] : [value]
+    } else {
+      options[name] = value
+    }
+  }
+
+  const minimum = node.minimumPositionals ?? 0
+  const maximum = node.maximumPositionals ?? 0
+  if (positionals.length < minimum || positionals.length > maximum) {
+    throw new CliUsageError(`Invalid arguments for '${path.join(" ")}'.`, helpFor(node, path))
+  }
+  for (const required of node.requiredInputs ?? []) {
+    if (!positionals[required.positional] && typeof options[required.option] !== "string") {
+      throw new CliUsageError(
+        `Missing required ${CLI_OPTION_DEFINITIONS[required.option].syntax}.`,
+        helpFor(node, path)
+      )
+    }
+  }
+  if (typeof options["api-url"] === "string" && typeof options.profile === "string") {
+    throw new CliUsageError("--api-url and --profile cannot be used together.", helpFor(node, path))
+  }
+  return { options, positionals }
+}
+
+function capitalize(value: string): string {
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`
+}
+
+function helpFor(node: CommandNode, path: readonly string[]): CliHelp {
+  const prefix = `sixb ${path.join(" ")}`
+  return {
+    path: [...path],
+    usage: node.usage,
+    summary: node.summary,
+    commands: (node.children ?? []).map((child) => ({
+      label: child.usage.startsWith(`${prefix} `)
+        ? child.usage.slice(prefix.length + 1)
+        : child.name,
+      value: child.summary,
+    })),
+    options: [
+      ...(node.options ?? []).map((name) => ({
+        label: CLI_OPTION_DEFINITIONS[name].syntax,
+        value: CLI_OPTION_DEFINITIONS[name].summary,
+      })),
+      { label: "--help", value: "Show this help" },
+    ],
+  }
+}
+
+function rootHelpItems(nodes: readonly CommandNode[]): CliHelpItem[] {
+  const items: CliHelpItem[] = []
+  for (const node of nodes) {
+    if (node.rootHelpLabel) items.push({ label: node.rootHelpLabel, value: node.summary })
+    if (!node.rootHelpLabel && node.children) items.push(...rootHelpItems(node.children))
+  }
+  return items
+}

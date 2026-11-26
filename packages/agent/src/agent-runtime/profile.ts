@@ -1,3 +1,6 @@
+/** The sandbox runtime contract verified by the agent worker's preflight checks. */
+export const AGENT_RUNTIME_PROFILE = "sixb-agent-runtime/v1" as const
+
 export const AGENT_RUNTIME_MINIMUM_VERSIONS = {
   bun: { major: 1, minor: 3 },
   node: { major: 22, minor: 0 },

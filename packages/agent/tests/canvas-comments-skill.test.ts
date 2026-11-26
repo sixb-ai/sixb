@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { renderInstanceHelp } from "@sixb/cli-core"
+import { renderInstanceHelp } from "@sixb/cli"
 import { quoteArtifactComment } from "@sixb/core/artifacts"
 import { BUILT_IN_SKILLS } from "../src/skills/built-in"
 

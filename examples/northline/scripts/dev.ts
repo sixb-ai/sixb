@@ -13,7 +13,7 @@ type NorthlineApiProbe =
 export function createRuntimeCommand(args: readonly string[]): string[] {
   return [
     process.execPath,
-    resolve(import.meta.dir, "../../../packages/cli/src/index.tsx"),
+    resolve(import.meta.dir, "../../../packages/cli/src/main.ts"),
     "dev",
     ...args,
   ]

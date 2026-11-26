@@ -1,126 +1,80 @@
-import { stat } from "node:fs/promises"
-import { resolve } from "node:path"
-import { ACTION_RUN_DRAIN_TIMEOUT_MS } from "@sixb/core/internal/actions"
-import { createSixbServer, requestTimingOptionsFromEnv, type SixbServer } from "@sixb/server"
-import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
-import type { LoadedSixbHost } from "../lib/loadSixb"
-import { builtAppOutdir, loadProductionSixb } from "../lib/production"
-import { resolveDrainTimeoutMs, runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
-import { stopSixbProviders } from "../lib/runtime"
-import { migrateStorageForRole } from "../lib/storage-migration"
-import { printStopping, renderCliError, renderStatic, roleView, startTask } from "../ui"
+import type { ApiClient, HttpMethod } from "../api-client"
+import { isHelp, parseCommandArgs, requestsHelp } from "../arguments"
+import { fail, writeJson, writeRequestResult, writeText } from "../output"
+import { GROUP_HELP } from "./metadata"
+import { readJson } from "./shared"
 
-export interface ApiOptions {
-  entry?: string
-  noMigrate?: boolean
-  port?: string
-  host?: string
-  apiPort?: string
-  apiHost?: string
-  apiPublicOrigin?: string
-  appPublicOrigin?: string
-  trustedProxies?: string
+const METHODS = new Set<HttpMethod>(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+
+/**
+ * `sixb api <METHOD> <path>`: direct request against any relative `/api/...` route through the
+ * active connection, auth, Unix socket, and grant boundary. Never accepts another origin or custom
+ * authorization headers.
+ */
+export async function apiCommand(client: ApiClient, args: readonly string[]): Promise<void> {
+  if (args.length === 0 || isHelp(args[0]) || requestsHelp(args)) {
+    return writeText(GROUP_HELP.api)
+  }
+
+  const { positionals, options } = parseCommandArgs(
+    args,
+    {
+      "--file": "string",
+      "--input": "string",
+      "--query": "strings",
+      "--json": "boolean",
+    },
+    "api",
+    2
+  )
+
+  const rawMethod = (positionals[0] ?? "").toUpperCase() as HttpMethod
+  if (!METHODS.has(rawMethod)) {
+    fail(
+      `Unsupported HTTP method '${positionals[0] ?? ""}'. Use GET, POST, PUT, PATCH, DELETE, or HEAD.`
+    )
+  }
+  const path = positionals[1] ?? ""
+  if (options["--file"] && options["--input"]) {
+    fail("--file and --input cannot be used together.")
+  }
+
+  let body: unknown
+  if (options["--file"]) {
+    body = await readJson(options["--file"])
+  } else if (options["--input"] !== undefined) {
+    try {
+      body = JSON.parse(options["--input"])
+    } catch {
+      fail("--input must be valid JSON.", "invalid_json")
+    }
+  }
+  if (body !== undefined && (rawMethod === "GET" || rawMethod === "HEAD")) {
+    fail(`${rawMethod} requests cannot include a body.`)
+  }
+
+  const query = parseQueryPairs(options["--query"])
+  const result = await client.request(rawMethod, path, {
+    ...(query ? { query } : {}),
+    ...(body === undefined ? {} : { body }),
+  })
+  if (rawMethod === "POST" || rawMethod === "PUT" || rawMethod === "PATCH") {
+    return writeRequestResult(result)
+  }
+  writeJson(result)
 }
 
-export async function runApi(options: ApiOptions = {}) {
-  process.env.NODE_ENV = "production"
-
-  const loaded = await loadProductionSixb({ entry: options.entry, role: "api" })
-  const app = startTask("api", "Preparing runtime")
-
-  let sixb: LoadedSixbHost | null = loaded.sixb
-  let server: SixbServer | null = null
-
-  try {
-    // Ahead of `server.start()`, which is what kicks off the read-only schema probe
-    // behind `/ready`. Migrating after it would leave the probe racing the change it
-    // reports on, and the first `/ready` answer would be stale by construction.
-    const migration = await migrateStorageForRole(sixb, {
-      role: "api",
-      noMigrate: options.noMigrate,
-      onStart: () => app.step("Migrating storage"),
-    })
-
-    const appOutdir = builtAppOutdir(loaded.buildOutdir)
-    const authExperienceOutdir = resolve(appOutdir, "auth")
-    const hasAuthExperience = await stat(resolve(authExperienceOutdir, "index.html"))
-      .then(() => true)
-      .catch(() => false)
-    const topology = resolveBrowserTopology({
-      role: "api",
-      host: options.host,
-      apiHost: options.apiHost,
-      port: options.port,
-      apiPort: options.apiPort,
-      apiPublicOrigin: options.apiPublicOrigin,
-      appPublicOrigin: options.appPublicOrigin,
-    })
-
-    const trustedProxies = (options.trustedProxies ?? process.env.SIXB_TRUSTED_PROXIES ?? "")
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean)
-    server = createSixbServer({
-      host: sixb,
-      port: topology.apiPort,
-      hostname: topology.apiHost,
-      quiet: true,
-      // `sixb orchestrator` owns it.
-      ontologyMaintenance: false,
-      // A lake worker owns it. Without one, changes wait where `sixb check` and the Console show.
-      ingestFlush: false,
-      browser: {
-        publicOrigin: topology.apiPublicOrigin,
-        allowedOrigins: topology.allowedBrowserOrigins,
-      },
-      ...(hasAuthExperience ? { authExperience: { outdir: authExperienceOutdir } } : {}),
-      ...(trustedProxies.length > 0 ? { trustedProxies } : {}),
-      timing: requestTimingOptionsFromEnv(),
-    })
-    await server.start()
-
-    app.stop()
-    await renderStatic(
-      roleView({
-        command: "api",
-        name: sixb.id,
-        items: [
-          { label: "api", value: apiUrl(topology) },
-          { label: "docs", value: apiDocsUrl(topology) },
-          { label: "events", value: apiEventsUrl(topology) },
-        ],
-        storage: migration.summary,
-        warnings: [
-          "This process runs no upkeep. Keep `sixb orchestrator` running, even with no schedules: it delivers events left undelivered, purges expired records, and runs cron.",
-        ],
-      })
-    )
-
-    await runUntilSignal(
-      async (signal) => {
-        app.stop()
-        printStopping("api")
-        const timeoutMs =
-          signal === "SIGTERM" ? resolveDrainTimeoutMs(ACTION_RUN_DRAIN_TIMEOUT_MS) : 0
-        await stopQuietly(() => server?.stop({ timeoutMs }) ?? Promise.resolve())
-        if (sixb) {
-          await stopSixbProviders(sixb)
-        }
-        sixb = null
-      },
-      {
-        onInterrupt: () => {
-          void stopQuietly(() => server?.stop({ timeoutMs: 0 }) ?? Promise.resolve())
-        },
-      }
-    )
-  } catch (error) {
-    app.stop()
-    await stopQuietly(() => server?.stop({ timeoutMs: 0 }) ?? Promise.resolve())
-    if (sixb) {
-      await stopSixbProviders(sixb)
+function parseQueryPairs(
+  entries: readonly string[] | undefined
+): Record<string, string> | undefined {
+  if (!entries || entries.length === 0) return undefined
+  const query: Record<string, string> = {}
+  for (const entry of entries) {
+    const separator = entry.indexOf("=")
+    if (separator <= 0) {
+      fail(`Invalid --query '${entry}'. Use key=value.`)
     }
-    await renderCliError(error)
-    process.exit(1)
+    query[entry.slice(0, separator)] = entry.slice(separator + 1)
   }
+  return query
 }

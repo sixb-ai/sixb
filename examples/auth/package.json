@@ -3,11 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun ../../packages/cli/src/index.tsx dev",
-    "desktop": "bun ../../packages/cli/src/index.tsx dev --desktop",
-    "build": "bun ../../packages/cli/src/index.tsx build",
-    "check": "bun ../../packages/cli/src/index.tsx check",
-    "typecheck": "bun ../../packages/cli/src/index.tsx typegen && tsc --noEmit --paths null"
+    "dev": "bun ../../packages/cli/src/main.ts dev",
+    "desktop": "bun ../../packages/cli/src/main.ts dev --desktop",
+    "build": "bun ../../packages/cli/src/main.ts build",
+    "check": "bun ../../packages/cli/src/main.ts check",
+    "typecheck": "bun ../../packages/cli/src/main.ts typegen && tsc --noEmit --paths null"
   },
   "dependencies": {
     "@sixb/app": "workspace:*",

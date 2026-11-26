@@ -1,4 +1,4 @@
-import { AGENT_MEMORY_ENTRY, AGENT_MEMORY_STARTER } from "@sixb/cli-core"
+import { AGENT_MEMORY_ENTRY, AGENT_MEMORY_STARTER } from "@sixb/cli"
 import type { AgentMemoryRepoView } from "@sixb/core"
 import type { AgentRunSession } from "@sixb/core/internal/agents"
 import type { AgentMemoryPromptContext } from "./agent-prompt"

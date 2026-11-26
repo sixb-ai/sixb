@@ -10,7 +10,7 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { loadSandboxCliAssets } from "@sixb/cli-core"
+import { loadCliAssets } from "@sixb/cli"
 import {
   AgentToolPublicError,
   AuthorizationError,
@@ -385,7 +385,7 @@ function documentFile(markdown: string) {
 
 /** The run's `sixb`, installed in the sandbox as a run installs it, reaching `apiBaseUrl`. */
 async function installSandboxCli(apiBaseUrl: string): Promise<Record<string, string>> {
-  const cli = await loadSandboxCliAssets()
+  const cli = await loadCliAssets()
   const bin = join(root, SANDBOX_CONTEXT_DIRECTORY, "bin")
   const lib = join(root, SANDBOX_CONTEXT_DIRECTORY, "lib")
   for (const directory of [bin, lib]) mkdirSync(directory, { recursive: true })

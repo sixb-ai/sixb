@@ -31,7 +31,8 @@ const CLI_COMMANDS = {
   "pipeline-runs": ["list", "get"],
   models: ["list", "get", "text", "image", "speech", "transcribe", "calls"],
   api: ["get", "post"],
-  memory: ["save", "pull"],
+  memory: ["get", "save", "pull"],
+  threads: ["list", "get", "messages", "runs", "approvals"],
 } as const
 
 type CliGroup = keyof typeof CLI_COMMANDS
@@ -712,8 +713,18 @@ function describeSixb(
         memorySaveMessage(intent.args)
       )
     }
+    case "memory.get":
     case "memory.pull":
       return icon("memory", m.memoryPull)
+    case "threads.messages": {
+      const seq = optionValue(intent.args, "--seq")
+      return seq ? icon("transcript", m.historyMessage, seq) : icon("transcript", m.history)
+    }
+    case "threads.list":
+    case "threads.get":
+    case "threads.runs":
+    case "threads.approvals":
+      return icon("transcript", m.history)
     default:
       return withDetail(icon("terminal", m.sixbCommand), truncateMiddle(intent.args.join(" "), 64))
   }

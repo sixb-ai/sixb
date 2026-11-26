@@ -1,0 +1,610 @@
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { Readable } from "node:stream"
+import { createInstanceApiClient } from "../src"
+import { describeCost, describePrice, findModel, models } from "../src/commands/models"
+import type { CliError } from "../src/output"
+
+let server: ReturnType<typeof Bun.serve> | undefined
+/** What the stub API received, and the routes a test adds beside the catalog. */
+let received: { method: string; path: string; body?: unknown; type?: string }[] = []
+let routes: Record<string, (request: Request) => Response | Promise<Response>> = {}
+const directories: string[] = []
+
+afterEach(async () => {
+  jest.useRealTimers()
+  server?.stop(true)
+  server = undefined
+  received = []
+  routes = {}
+  for (const directory of directories.splice(0)) await rm(directory, { recursive: true })
+})
+
+const entry = (modelId: string, extra: Record<string, unknown> = {}) => ({
+  provider: "vercel-ai-gateway",
+  modelId,
+  isDefault: false,
+  name: modelId,
+  ...extra,
+})
+
+const catalog = {
+  language: [
+    entry("anthropic/claude-sonnet-5-5", {
+      isDefault: true,
+      tier: "standard",
+      rateCard: { currency: "USD", input: "3", output: "15" },
+    }),
+    entry("google/gemini-3.1-flash-lite-image"),
+  ],
+  image: [
+    entry("bfl/flux-3-image-klein", {
+      isDefault: true,
+      description: "Fast drafts and thumbnails",
+      sizes: ["768x768", "1024x1024"],
+      rateCard: {
+        currency: "USD",
+        images: {
+          default: "0.009",
+          variants: [
+            { size: "768x768", price: "0.008" },
+            { size: "1024x1024", price: "0.009" },
+          ],
+        },
+      },
+    }),
+    entry("google/gemini-3.1-flash-lite-image", {
+      rateCard: { currency: "USD", input: "0.25", output: "1.5", images: "0.034" },
+    }),
+    entry("example/unpriced"),
+  ],
+  audio: {
+    speech: [entry("openai/tts-1", { rateCard: { currency: "USD", characters: "15" } })],
+    transcription: [
+      entry("openai/gpt-4o-transcribe", {
+        rateCard: { currency: "USD", audioInputSeconds: "0.0001" },
+      }),
+    ],
+  },
+}
+
+async function run(args: readonly string[]): Promise<unknown> {
+  server ??= Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: async (request) => {
+      const url = new URL(request.url)
+      const key = `${request.method} ${url.pathname}`
+      if (request.method === "POST" && url.pathname === "/api/files") {
+        // The part's own header, not a type Bun would infer from the file name: a Node client
+        // that labels nothing sends application/octet-stream, and the upload has no media type.
+        const raw = await request.text()
+        const type = /content-type: *([^\r\n]+)/i.exec(raw.split('name="file"')[1] ?? "")?.[1]
+        received.push({ method: request.method, path: url.pathname, type })
+        return Response.json({ blobId: "blob_upload", sizeBytes: 4, mediaType: type })
+      }
+      received.push({
+        method: request.method,
+        path: `${url.pathname}${url.search}`,
+        ...(request.method === "POST" ? { body: await request.json() } : {}),
+      })
+      const route = routes[key]
+      if (route) return route(request)
+      return Response.json(catalog)
+    },
+  })
+  const api = createInstanceApiClient({
+    baseUrl: `http://127.0.0.1:${server.port}`,
+    token: "sixb_pat_test.secret",
+  })
+  const written: string[] = []
+  const write = spyOn(process.stdout, "write").mockImplementation((chunk) => {
+    written.push(String(chunk))
+    return true
+  })
+  try {
+    await models(api, args)
+  } finally {
+    write.mockRestore()
+  }
+  return JSON.parse(written.join(""))
+}
+
+describe("models", () => {
+  test("list every kind, or one, with what each model costs", async () => {
+    expect(await run(["list", "--kind", "image"])).toEqual([
+      {
+        kind: "image",
+        model: "bfl/flux-3-image-klein",
+        provider: "vercel-ai-gateway",
+        default: true,
+        description: "Fast drafts and thumbnails",
+        price: "per image: $0.008 at 768x768, $0.009 at 1024x1024, otherwise $0.009",
+      },
+      {
+        kind: "image",
+        model: "google/gemini-3.1-flash-lite-image",
+        provider: "vercel-ai-gateway",
+        price: "$0.034 per image · $0.25 input · $1.5 output per 1M tokens",
+      },
+      {
+        kind: "image",
+        model: "example/unpriced",
+        provider: "vercel-ai-gateway",
+        price: "price unknown",
+      },
+    ])
+    // Removal proof: drop the tier from the listed row.
+    expect(await run(["list", "--kind", "language"])).toEqual([
+      {
+        kind: "language",
+        model: "anthropic/claude-sonnet-5-5",
+        provider: "vercel-ai-gateway",
+        tier: "standard",
+        default: true,
+        price: "$3 input · $15 output per 1M tokens",
+      },
+      {
+        kind: "language",
+        model: "google/gemini-3.1-flash-lite-image",
+        provider: "vercel-ai-gateway",
+        price: "price unknown",
+      },
+    ])
+    const all = (await run(["list"])) as { kind: string }[]
+    expect(all.map((model) => model.kind)).toEqual([
+      "language",
+      "language",
+      "image",
+      "image",
+      "image",
+      "speech",
+      "transcription",
+    ])
+  })
+
+  test("get one model's options and rate card", async () => {
+    expect(await run(["get", "bfl/flux-3-image-klein"])).toMatchObject({
+      kind: "image",
+      model: "bfl/flux-3-image-klein",
+      default: true,
+      sizes: ["768x768", "1024x1024"],
+      rateCard: { currency: "USD" },
+    })
+    // Gemini image models are both language and image models; --kind picks one.
+    expect(
+      await run(["get", "google/gemini-3.1-flash-lite-image", "--kind", "image"])
+    ).toMatchObject({ kind: "image", price: expect.stringContaining("$0.034 per image") })
+  })
+
+  test("say what a request must add when an id names several models", () => {
+    const entries = [
+      { kind: "language" as const, entry: entry("shared") },
+      { kind: "image" as const, entry: entry("shared") },
+      { kind: "image" as const, entry: { ...entry("twin"), provider: "a" } },
+      { kind: "image" as const, entry: { ...entry("twin"), provider: "b" } },
+    ]
+    const failure = (reference: string, kind?: "image") => {
+      try {
+        findModel(entries, reference, kind)
+      } catch (error) {
+        return (error as CliError).body.message
+      }
+      return undefined
+    }
+    expect(failure("shared")).toBe(
+      "'shared' is configured as language and image. Add --kind <kind>."
+    )
+    expect(failure("twin")).toBe("'twin' is configured by a and b. Use provider:twin.")
+    expect(findModel(entries, "b:twin", undefined).entry.provider).toBe("b")
+    // Removal proof: split the provider off before trying the whole reference; this id is lost.
+    expect(
+      findModel(
+        [{ kind: "language", entry: entry("meta/llama-3:free") }],
+        "meta/llama-3:free",
+        undefined
+      ).entry.modelId
+    ).toBe("meta/llama-3:free")
+    expect(failure("missing", "image")).toBe(
+      "No image model 'missing' is configured. Run 'sixb models list'."
+    )
+  })
+
+  test("read every kind of price", () => {
+    expect(describePrice(undefined)).toBe("price unknown")
+    expect(
+      describePrice({ images: { default: "0.034", variants: [{ size: "1K", price: "0.034" }] } })
+    ).toBe("$0.034 per image")
+    expect(describePrice({ characters: "15" })).toBe("$15 per 1M characters")
+    expect(describePrice({ audioInputSeconds: "0.0001" })).toBe("$0.0001 per second of audio")
+    expect(
+      describePrice({
+        videoOutputSeconds: {
+          variants: [
+            { resolution: "720p", audio: "silent", price: "0.1" },
+            { resolution: "720p", audio: "audio", price: "0.15" },
+          ],
+        },
+      })
+    ).toBe("per second of video: $0.1 at 720p silent, $0.15 at 720p audio")
+    expect(
+      describePrice({
+        input: { default: "1", tiers: [{ price: "1" }, { price: "2.5" }] },
+        output: "4",
+      })
+    ).toBe("$1 input · $4 output per 1M tokens")
+    expect(describePrice({ input: "0.5", output: "6", audioOutput: "6" })).toBe(
+      "$0.5 input · $6 output per 1M tokens · $6 per 1M audio tokens"
+    )
+  })
+
+  test("reject an unknown kind before asking the API", async () => {
+    const error = await run(["list", "--kind", "embedding"]).catch((caught: unknown) => caught)
+    expect((error as CliError).body.message).toBe(
+      "Unknown model kind 'embedding'. Use one of: language, image, video, speech, transcription."
+    )
+  })
+})
+
+const PNG = new Uint8Array([137, 80, 78, 71])
+const JPEG = new Uint8Array([255, 216, 255])
+const AUDIO = new TextEncoder().encode("ID3")
+const MP4 = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112])
+const call = (extra: Record<string, unknown>) => ({
+  callId: "call_1",
+  model: { provider: "vercel-ai-gateway", modelId: "bfl/flux-3-image-klein" },
+  cost: { status: "reported", money: { currency: "USD", amountNanos: "8000000" } },
+  usage: {},
+  warnings: [],
+  ...extra,
+})
+
+/** Serve call_1's files: the file at /files/<index> is `bodies[index]`. */
+function serveFiles(bodies: readonly Uint8Array<ArrayBuffer>[]) {
+  routes["GET /api/ai/model-calls/call_1/files/content"] = (request) => {
+    const index = Number(new URL(request.url).searchParams.get("path")?.split("/")[2])
+    return new Response(bodies[index])
+  }
+}
+
+/** The body of the last text generation the stub API received. */
+function lastGeneration(): unknown {
+  return received.filter((request) => request.path === "/api/models/language/generations").at(-1)
+    ?.body
+}
+
+/** Run `body` with `text` as standard input, as `echo text | sixb ...` would give it. */
+async function withStdin<T>(text: string, body: () => Promise<T>): Promise<T> {
+  const stdin = Object.getOwnPropertyDescriptor(process, "stdin")
+  Object.defineProperty(process, "stdin", { value: Readable.from([text]), configurable: true })
+  try {
+    return await body()
+  } finally {
+    if (stdin) Object.defineProperty(process, "stdin", stdin)
+  }
+}
+
+async function temporary(): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "sixb-models-cli-"))
+  directories.push(directory)
+  return directory
+}
+
+describe("models generation", () => {
+  test("image writes each file where --output says, with the extension its type has", async () => {
+    const directory = await temporary()
+    const reference = join(directory, "sketch.png")
+    await Bun.write(reference, PNG)
+    routes["POST /api/models/image/generations"] = () =>
+      Response.json(call({ files: [{ mediaType: "image/png" }, { mediaType: "image/jpeg" }] }))
+    serveFiles([PNG, JPEG])
+
+    const output = join(directory, "out", "hero.png")
+    const result = await run([
+      "image",
+      "a fox",
+      "--output",
+      output,
+      "--model",
+      "bfl/flux-3-image-klein",
+      "--size",
+      "768x768",
+      "--n",
+      "2",
+      "--image",
+      reference,
+      "--image",
+      reference,
+    ])
+
+    const hero = join(directory, "out", "hero")
+    expect(result).toEqual({
+      callId: "call_1",
+      model: "bfl/flux-3-image-klein",
+      files: [`${hero}-1.png`, `${hero}-2.jpg`],
+      cost: "$0.008",
+    })
+    expect(new Uint8Array(await readFile(`${hero}-1.png`))).toEqual(PNG)
+    expect(new Uint8Array(await readFile(`${hero}-2.jpg`))).toEqual(JPEG)
+    // Removal proof: drop the media type from uploadInput's upload; the parts go unlabeled.
+    // Both references were uploaded as images before the call, which names the resolved model.
+    expect(received.filter((request) => request.path === "/api/files")).toEqual([
+      { method: "POST", path: "/api/files", type: "image/png" },
+      { method: "POST", path: "/api/files", type: "image/png" },
+    ])
+    expect(
+      received.find((request) => request.path === "/api/models/image/generations")?.body
+    ).toEqual({
+      model: { provider: "vercel-ai-gateway", modelId: "bfl/flux-3-image-klein" },
+      prompt: "a fox",
+      n: 2,
+      size: "768x768",
+      images: [
+        { blobId: "blob_upload", sizeBytes: 4, mediaType: "image/png" },
+        { blobId: "blob_upload", sizeBytes: 4, mediaType: "image/png" },
+      ],
+    })
+  })
+
+  // Removal proof: return after the start in generateVideos; the pending job is never checked.
+  test("video starts a job, waits for it to end and downloads the clip", async () => {
+    jest.useFakeTimers()
+    const directory = await temporary()
+    const frame = join(directory, "start.png")
+    await Bun.write(frame, PNG)
+    const video = (status: string, extra: Record<string, unknown> = {}) =>
+      call({ model: { provider: "vercel-ai-gateway", modelId: "google/veo" }, status, ...extra })
+    routes["POST /api/models/video/generations"] = () =>
+      Response.json(video("pending", { files: [], cost: undefined }), { status: 202 })
+    const statuses = [video("pending"), video("completed", { files: [{ mediaType: "video/mp4" }] })]
+    routes["GET /api/models/video/generations/call_1"] = () => Response.json(statuses.shift())
+    serveFiles([MP4])
+    const progress = spyOn(process.stderr, "write").mockImplementation(() => true)
+
+    const output = join(directory, "fox.mp4")
+    const running = run([
+      "video",
+      "a fox",
+      "--output",
+      output,
+      "--duration",
+      "4",
+      "--resolution",
+      "1280x720",
+      "--no-audio",
+      "--first-frame",
+      frame,
+    ])
+    // Each check waits on a timer; the API answers through real sockets in between.
+    for (const _ of [1, 2]) {
+      for (let turn = 0; turn < 1_000 && jest.getTimerCount() === 0; turn++) {
+        await new Promise((resolve) => setImmediate(resolve))
+      }
+      jest.advanceTimersByTime(5_000)
+    }
+    const result = await running
+    const said = progress.mock.calls.map(([chunk]) => String(chunk))
+    progress.mockRestore()
+
+    expect(result).toEqual({
+      callId: "call_1",
+      model: "google/veo",
+      files: [output],
+      cost: "$0.008",
+    })
+    expect(new Uint8Array(await readFile(output))).toEqual(MP4)
+    expect(
+      received.find((request) => request.path === "/api/models/video/generations")?.body
+    ).toEqual({
+      prompt: "a fox",
+      duration: 4,
+      resolution: "1280x720",
+      audio: false,
+      firstFrame: { blobId: "blob_upload", sizeBytes: 4, mediaType: "image/png" },
+    })
+    expect(said[0]).toContain("sixb models video --call call_1 --output <path>")
+  })
+
+  test("video follows a started call, or says where it stands without waiting", async () => {
+    const statuses = [
+      call({ status: "pending", files: [] }),
+      call({ status: "completed", files: [{ mediaType: "video/mp4" }] }),
+      call({ status: "failed", files: [], error: "The prompt was refused." }),
+    ]
+    routes["GET /api/models/video/generations/call_1"] = () => Response.json(statuses.shift())
+    serveFiles([MP4])
+    const directory = await temporary()
+
+    expect(await run(["video", "--call", "call_1", "--no-wait"])).toEqual({
+      callId: "call_1",
+      model: "bfl/flux-3-image-klein",
+      status: "pending",
+    })
+    expect(await run(["video", "--call", "call_1", "--output", `${directory}/`])).toEqual({
+      callId: "call_1",
+      model: "bfl/flux-3-image-klein",
+      files: [join(directory, "call_1.mp4")],
+      cost: "$0.008",
+    })
+    const failed = await run(["video", "--call", "call_1", "--output", `${directory}/`]).catch(
+      (error: CliError) => error
+    )
+    expect(failed).toMatchObject({
+      exitCode: 3,
+      body: {
+        code: "generation_failed",
+        message: "Video generation call_1 failed: The prompt was refused.",
+      },
+    })
+  })
+
+  test("speech takes a format, and a directory output names the file by its call", async () => {
+    const directory = await temporary()
+    routes["POST /api/models/audio/speech"] = () =>
+      Response.json(call({ files: [{ mediaType: "audio/wav" }], cost: { status: "unpriceable" } }))
+    serveFiles([AUDIO])
+
+    const result = await run(["speech", "Hello.", "--output", `${directory}/`, "--format", "wav"])
+
+    expect(result).toEqual({
+      callId: "call_1",
+      model: "bfl/flux-3-image-klein",
+      files: [join(directory, "call_1.wav")],
+      cost: "unknown",
+    })
+    expect(received.find((request) => request.path === "/api/models/audio/speech")?.body).toEqual({
+      text: "Hello.",
+      mediaType: "audio/wav",
+    })
+  })
+
+  test("text and transcribe answer with the text", async () => {
+    const directory = await temporary()
+    const audio = join(directory, "note.mp3")
+    await Bun.write(audio, AUDIO)
+    routes["POST /api/models/language/generations"] = () =>
+      Response.json(call({ text: "Shipped.", finishReason: "stop" }))
+    routes["POST /api/models/audio/transcriptions"] = () =>
+      Response.json(call({ text: "Hello there." }))
+
+    expect(await run(["text", "Status?", "--max-output-tokens", "20"])).toMatchObject({
+      text: "Shipped.",
+      finishReason: "stop",
+      cost: "$0.008",
+    })
+    expect(
+      received.find((request) => request.path === "/api/models/language/generations")?.body
+    ).toEqual({ prompt: "Status?", maxOutputTokens: 20 })
+    expect(await run(["transcribe", audio])).toMatchObject({ text: "Hello there." })
+    expect(received.find((request) => request.path === "/api/files")?.type).toBe("audio/mpeg")
+  })
+
+  // Removal proof: print only the text, as transcribe did; the words a video is cut by are lost.
+  test("transcribe prints the words and segments the model timed", async () => {
+    const directory = await temporary()
+    const audio = join(directory, "talk.m4a")
+    await Bun.write(audio, AUDIO)
+    const words = [
+      { text: "Hello", startMs: 120, endMs: 480 },
+      { text: "there.", startMs: 520, endMs: 900 },
+    ]
+    const segments = [{ text: "Hello there.", startMs: 120, endMs: 900 }]
+    routes["POST /api/models/audio/transcriptions"] = () =>
+      Response.json(call({ text: "Hello there.", language: "en", words, segments }))
+
+    expect(await run(["transcribe", audio])).toMatchObject({
+      text: "Hello there.",
+      language: "en",
+      words,
+      segments,
+    })
+  })
+
+  test("text takes a tier for --model, and the server picks the tier's model", async () => {
+    // Removal proof: look every --model up in the catalog; 'light' names no model and fails.
+    routes["POST /api/models/language/generations"] = () => Response.json(call({ text: "Fine." }))
+
+    await run(["text", "Status?", "--model", "light"])
+    expect(lastGeneration()).toEqual({ model: "light", prompt: "Status?" })
+    // The project's catalog decides what a tier it lacks answers with, so the CLI never reads it.
+    expect(received.some((request) => request.path === "/api/models")).toBe(false)
+
+    await run(["text", "Status?", "--model", "anthropic/claude-sonnet-5-5"])
+    expect(lastGeneration()).toEqual({
+      model: { provider: "vercel-ai-gateway", modelId: "anthropic/claude-sonnet-5-5" },
+      prompt: "Status?",
+    })
+  })
+
+  test("text reads a long prompt from a file or standard input", async () => {
+    // Removal proof: drop --file from models text; the option is unknown.
+    const directory = await temporary()
+    const notes = join(directory, "notes.md")
+    const missing = join(directory, "missing.md")
+    await Bun.write(notes, "# Q3\nRevenue rose 4%.\n")
+    routes["POST /api/models/language/generations"] = () => Response.json(call({ text: "Fine." }))
+    const prompt = () => (lastGeneration() as { prompt?: string } | undefined)?.prompt
+
+    await run(["text", "--file", notes])
+    expect(prompt()).toBe("# Q3\nRevenue rose 4%.\n")
+
+    await withStdin("Summarize:\nRevenue rose 4%.", () => run(["text", "--file", "-"]))
+    expect(prompt()).toBe("Summarize:\nRevenue rose 4%.")
+
+    const failure = (args: readonly string[]) =>
+      run(args).then(
+        () => undefined,
+        (error: CliError) => error.body.message
+      )
+    expect(await failure(["text", "Status?", "--file", notes])).toBe(
+      "models text takes its prompt as an argument or from --file, not both."
+    )
+    expect(await failure(["text"])).toBe(
+      'models text requires a prompt: "<prompt>", or --file <path|-> to read it.'
+    )
+    expect(await failure(["text", "--file", missing])).toBe(
+      `Prompt file '${missing}' does not exist.`
+    )
+    expect(await withStdin(" \n", () => failure(["text", "--file", "-"]))).toBe(
+      "The prompt is empty."
+    )
+  })
+
+  test("calls files shows a call's files, or downloads them again", async () => {
+    const directory = await temporary()
+    const files = [{ blobId: "blob_1", mediaType: "image/png", sizeBytes: 4 }]
+    routes["GET /api/ai/model-calls/call_1/files"] = () =>
+      Response.json({ callId: "call_1", files, recordedAt: "2026-10-22T12:00:00.000Z" })
+    serveFiles([PNG])
+
+    expect(await run(["calls", "files", "call_1"])).toMatchObject({ callId: "call_1", files })
+    expect(await run(["calls", "files", "call_1", "--output", join(directory, "again")])).toEqual({
+      callId: "call_1",
+      files: [join(directory, "again.png")],
+    })
+  })
+
+  test("refuses a request it can tell is wrong before calling", async () => {
+    const directory = await temporary()
+    const notes = join(directory, "notes.txt")
+    await Bun.write(notes, "x")
+    const failure = (args: readonly string[]) =>
+      run(args).then(
+        () => undefined,
+        (error: CliError) => error.body.message
+      )
+
+    expect(await failure(["image", "a fox"])).toBe(
+      "models image requires --output <path>: a file, or a directory ending in /."
+    )
+    expect(await failure(["image", "a fox", "--output", "x.png", "--image", notes])).toBe(
+      `'${notes}' is not an image file. Use .png, .jpg, .jpeg, .webp, .gif.`
+    )
+    expect(await failure(["video", "a fox"])).toBe(
+      "models video requires --output <path>: a file, or a directory ending in /."
+    )
+    expect(await failure(["video", "a fox", "--call", "call_1", "--no-wait"])).toBe(
+      'models video takes a "<prompt>" to start a video, or --call <call-id> to follow one.'
+    )
+    expect(await failure(["video", "a fox", "--no-wait", "--resolution", "720p"])).toBe(
+      "--resolution must be a frame size, such as 1280x720."
+    )
+    expect(await failure(["speech", "Hi.", "--output", "x.mp3", "--format", "midi"])).toBe(
+      "--format must be mp3, wav, ogg, aac, or flac."
+    )
+
+    // The gateway makes Opus inside Ogg: `ogg` asks for it, and audio/opus is never served.
+    expect(await failure(["speech", "Hi.", "--output", "x.ogg", "--format", "opus"])).toBe(
+      "--format must be mp3, wav, ogg, aac, or flac."
+    )
+    expect(received.filter((request) => request.method === "POST")).toEqual([])
+  })
+
+  test("reads a cost in dollars without rounding", () => {
+    expect(describeCost({ status: "rated", money: { amountNanos: "96000" } })).toBe("$0.000096")
+    expect(describeCost({ status: "reported", money: { amountNanos: "1250000000" } })).toBe("$1.25")
+    expect(describeCost({ status: "unpriceable" })).toBe("unknown")
+  })
+})

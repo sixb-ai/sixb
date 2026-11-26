@@ -63,7 +63,7 @@ const KEPT_FROM_QUOTE_CHARS = 120
 /** How much of each user message a summary quotes. */
 const USER_MESSAGE_QUOTE_CHARS = 300
 
-const HISTORY_POINTER = "`sixb history` prints the earlier conversation."
+const HISTORY_POINTER = "`sixb threads messages` prints the earlier conversation."
 
 /** What the message that carries a summary adds to it: its opening sentence and tags. */
 const SUMMARY_HEADER_TOKENS = 64
@@ -1029,7 +1029,9 @@ function cutPart(
   seq: number | undefined
 ): AgentMessagePart {
   const note =
-    seq === undefined ? "[Cut short.]" : `[Cut short: \`sixb history ${seq}\` prints it whole.]`
+    seq === undefined
+      ? "[Cut short.]"
+      : `[Cut short: \`sixb threads messages --seq ${seq}\` prints it whole.]`
   const cut = (value: string) =>
     utf8Bytes(value) <= maxBytes ? value : `${upToLastLine(value, maxBytes)}\n${note}`
 

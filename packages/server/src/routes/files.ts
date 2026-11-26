@@ -14,7 +14,7 @@ import { createFileUploadId, createUploadExpiresAt } from "@sixb/core/internal/s
 import { type FileUploadSession, FileUploadSessionError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
-import { requestActor, requireRequestSixb } from "../auth/scope"
+import { requestActor, requestAuthState, requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
@@ -134,12 +134,17 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
             return unconfiguredStorageResponse(set, "File upload session storage")
           }
           const parsed = CreateFileUploadBodySchema.parse(body)
+          const authState = requestAuthState(context)
           const principal = requestActor(requireRequestSixb(context))
           const uploadId = createFileUploadId()
           const expiresAt = createUploadExpiresAt()
           const expectedDigest = parsed.digest as BlobDigest | undefined
+          // Agent sandboxes can reach the API for certain, and blob storage only if their
+          // network allows it: default run-token uploads to server-routed staged uploads.
+          const forceServerStrategy =
+            parsed.strategy === "server" || authState.agentExecution !== undefined
           const providerUpload =
-            parsed.strategy !== "server" &&
+            !forceServerStrategy &&
             supportsDirectUpload(host.blobStorage) &&
             expectedDigest !== undefined &&
             parsed.sizeBytes !== undefined

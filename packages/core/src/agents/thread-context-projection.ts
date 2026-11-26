@@ -11,8 +11,8 @@ export interface ProjectAgentThreadModelContextInput {
   /** Complete retained tail, ordered by ascending per-thread sequence. */
   readonly messages: readonly AgentMessageRecord[]
   /**
-   * Whether the run reading the thread can print its stored messages with `sixb history`, as a
-   * conversation's turn can, for its summary to say so. A child's run cannot. True when left out.
+   * Whether the run reading the thread can print its stored messages with `sixb threads messages`,
+   * as a conversation's turn can, for its summary to say so. A child's run cannot. True when left out.
    */
   readonly historyReadable?: boolean
 }
@@ -80,7 +80,7 @@ export function isAgentThreadSummaryText(text: string): boolean {
 function serializeThreadSummary(summary: string, historyReadable: boolean): string {
   return [
     historyReadable
-      ? `${SUMMARY_INTRO} Its messages are still stored: \`sixb history\` prints them.`
+      ? `${SUMMARY_INTRO} Its messages are still stored: \`sixb threads messages\` prints them.`
       : SUMMARY_INTRO,
     "",
     "<sixb_thread_summary>",

@@ -1,0 +1,67 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["bun"],
+    "composite": true,
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "tsBuildInfoFile": "./.tsbuild/tsconfig.build.tsbuildinfo"
+  },
+  "include": ["src/**/*"],
+  "references": [
+    {
+      "path": "../create-sixb/tsconfig.build.json"
+    },
+    {
+      "path": "../agent-worker/tsconfig.build.json"
+    },
+    {
+      "path": "../app/tsconfig.build.json"
+    },
+    {
+      "path": "../client/tsconfig.build.json"
+    },
+    {
+      "path": "../core/tsconfig.build.json"
+    },
+    {
+      "path": "../cli/tsconfig.build.json"
+    },
+    {
+      "path": "../lake-worker/tsconfig.build.json"
+    },
+    {
+      "path": "../orchestrator/tsconfig.build.json"
+    },
+    {
+      "path": "../pipeline-worker/tsconfig.build.json"
+    },
+    {
+      "path": "../projection-worker/tsconfig.build.json"
+    },
+    {
+      "path": "../render-worker/tsconfig.build.json"
+    },
+    {
+      "path": "../rules-worker/tsconfig.build.json"
+    },
+    {
+      "path": "../server/tsconfig.build.json"
+    },
+    {
+      "path": "../sync-worker/tsconfig.build.json"
+    },
+    {
+      "path": "../workflow-worker/tsconfig.build.json"
+    },
+    {
+      "path": "../agent/tsconfig.build.json"
+    },
+    {
+      "path": "../../sandboxes/local/tsconfig.build.json"
+    }
+  ]
+}

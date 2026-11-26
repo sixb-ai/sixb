@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { readConfig, resolveConfigPath, resolveProfile, updateConfig } from "../src/lib/profiles"
+import { readConfig, resolveConfigPath, resolveProfile, updateConfig } from "../src/profiles"
 
 const tempDirectories: string[] = []
 
@@ -121,6 +121,20 @@ describe("Sixb profiles", () => {
     ).toMatchObject({
       apiUrl: "https://env.example.com",
       token: "environment-token",
+      source: "environment",
+    })
+
+    expect(
+      await resolveProfile({
+        env: {
+          XDG_CONFIG_HOME: root,
+          SIXB_API_URL: "unix:/tmp/sixb-forwarder.sock",
+          SIXB_RUN_ID: "agt_run_1",
+        },
+      })
+    ).toEqual({
+      apiUrl: "unix:/tmp/sixb-forwarder.sock",
+      runId: "agt_run_1",
       source: "environment",
     })
   })

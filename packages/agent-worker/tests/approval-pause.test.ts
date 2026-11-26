@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
-import { AGENT_RUNTIME_PROFILE } from "@sixb/cli-core"
 import {
   type AgentApprovalCall,
   agent,
@@ -109,13 +108,14 @@ class GatewaySandbox implements Sandbox {
     if (command === "bash" && script.includes("SIXB_BASH_ENV_READY")) {
       return ok("node\t22.0.0\tsixb CLI 1\n")
     }
-    if (command === "bash" && script === "sixb status") {
+    if (command === "bash" && (script === "sixb status" || script === "sixb status --json")) {
       return ok(
         JSON.stringify({
           ok: true,
-          profile: AGENT_RUNTIME_PROFILE,
+          connected: true,
+          apiUrl: "http://localhost",
           cli: { version: "1" },
-          javascript: { name: "node", version: "22.0.0" },
+          runtime: { name: "node", version: "22.0.0" },
           project: { id: projectId },
         })
       )

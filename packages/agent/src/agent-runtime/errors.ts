@@ -1,5 +1,8 @@
-import { AGENT_RUNTIME_PROFILE } from "@sixb/cli-core"
-import type { AgentRuntimeFailureReason, AgentRuntimeProfileCheck } from "./profile"
+import {
+  AGENT_RUNTIME_PROFILE,
+  type AgentRuntimeFailureReason,
+  type AgentRuntimeProfileCheck,
+} from "./profile"
 
 /** A provisioned sandbox does not satisfy the worker's versioned agent-runtime contract. */
 export class AgentRuntimeProfileError extends Error {

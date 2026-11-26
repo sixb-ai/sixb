@@ -1,11 +1,12 @@
 {
   "name": "@sixb/cli",
   "version": "0.2.10",
-  "description": "Command-line interface for Sixb projects",
+  "description": "Unified command-line interface for Sixb instances and projects",
   "keywords": [
     "sixb",
+    "cli",
     "bun",
-    "cli"
+    "node"
   ],
   "homepage": "https://sixb.ai",
   "bugs": {
@@ -19,46 +20,29 @@
   "author": "Sixb contributors",
   "type": "module",
   "bin": {
-    "sixb": "./src/index.tsx"
+    "sixb": "./src/bin/sixb"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
+    "generate:cli": "bun ./scripts/generate-cli.ts",
+    "check:cli": "bun ./scripts/generate-cli.ts --check",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "test:e2e": "bun test ./tests/build.e2e.ts && bun test ./tests/prod-roles.e2e.ts && bun test ./tests/worker-group.e2e.ts && bun test ./tests/ingest-roles.e2e.ts && bun test ./tests/dev-reload.e2e.ts && bun test ./tests/pipeline-markings.e2e.ts && bun test ./tests/run-recovery.e2e.ts && bun test ./tests/run-recovery-infra.e2e.ts && bun test ./tests/run-recovery-dev.e2e.ts && bun test ./tests/connect-signed-out.e2e.ts && bun test ./tests/desktop-runner.e2e.ts",
+    "test:e2e": "bun --filter @sixb/project-cli test:e2e",
     "prepack": "bun run build"
   },
-  "dependencies": {
-    "@opentui/core": "0.6.6",
-    "@opentui/react": "0.6.6",
-    "@sixb/agent": "workspace:*",
-    "@sixb/agent-worker": "workspace:*",
-    "@sixb/app": "workspace:^",
-    "@sixb/client": "workspace:^",
-    "@sixb/core": "workspace:*",
-    "@sixb/cli-core": "workspace:^",
-    "@sixb/lake-worker": "workspace:*",
-    "@sixb/orchestrator": "workspace:*",
-    "@sixb/pipeline-worker": "workspace:*",
-    "@sixb/projection-worker": "workspace:*",
-    "@sixb/render-worker": "workspace:*",
-    "@sixb/rules-worker": "workspace:*",
-    "@sixb/sandboxes-local": "workspace:^",
-    "@sixb/server": "workspace:*",
-    "@sixb/sync-worker": "workspace:*",
-    "@sixb/workflow-worker": "workspace:*",
-    "create-sixb": "workspace:^",
-    "react": "^19.2.0"
-  },
   "devDependencies": {
-    "@sixb/deploy-ssh": "workspace:*",
-    "@sixb/desktop": "workspace:*",
-    "@sixb/ducklake": "workspace:*",
-    "@sixb/pg": "workspace:*",
-    "@sixb/queues-bullmq": "workspace:*",
-    "@sixb/sqlite": "workspace:*",
     "@types/bun": "latest",
-    "@types/react": "^19.0.0",
     "typescript": "^5.7.0"
   },
   "license": "MIT",

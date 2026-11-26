@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import { runInstanceCli } from "@sixb/cli-core"
+import { runInstanceCli } from "@sixb/cli"
 import { parseArtifactQuery } from "../../core/src/artifacts/queries"
 import {
   ObjectQueryFacetsRequestSchema,
@@ -18,7 +18,7 @@ async function cli(...args: string[]): Promise<string> {
     return true
   })
   try {
-    await runInstanceCli({ args, mode: { kind: "local", baseUrl: "" } })
+    await runInstanceCli({ args, connection: { baseUrl: "" } })
   } finally {
     write.mockRestore()
   }

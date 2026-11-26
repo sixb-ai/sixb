@@ -1,14 +1,10 @@
-import {
-  AGENT_RUNTIME_PROFILE,
-  EXIT_API,
-  INSTANCE_CLI_VERSION,
-  type SandboxStatusReport,
-} from "@sixb/cli-core"
+import { EXIT_API, INSTANCE_CLI_VERSION, type StatusReport } from "@sixb/cli"
 import type { CommandResult, Sandbox } from "@sixb/core"
 import { loginShell } from "../login-shell"
 import { AgentRuntimeProfileError } from "./errors"
 import {
   AGENT_RUNTIME_MINIMUM_VERSIONS,
+  AGENT_RUNTIME_PROFILE,
   type AgentJavascriptRuntime,
   type AgentRuntimeFailureReason,
   type AgentRuntimeProfileCheck,
@@ -111,7 +107,7 @@ async function probeGateway(input: AssertAgentRuntimeProfileInput): Promise<Comm
     const timeoutMs = retry === 0 ? PREFLIGHT_TIMEOUT_MS : deadline - Date.now()
     const outcome = await runProbe(
       input.sandbox,
-      "sixb status",
+      "sixb status --json",
       input.env,
       "gateway-connectivity",
       timeoutMs
@@ -198,7 +194,7 @@ function assertStatusReport(
   projectId: string,
   localRuntime: { readonly name: AgentJavascriptRuntime; readonly version: string }
 ): void {
-  let report: SandboxStatusReport
+  let report: StatusReport
   try {
     const value: unknown = JSON.parse(stdout)
     report = parseStatusReport(value)
@@ -207,8 +203,8 @@ function assertStatusReport(
   }
   if (
     report.cli.version !== INSTANCE_CLI_VERSION ||
-    report.javascript.name !== localRuntime.name ||
-    normalizeVersion(report.javascript.version) !== normalizeVersion(localRuntime.version)
+    report.runtime.name !== localRuntime.name ||
+    normalizeVersion(report.runtime.version) !== normalizeVersion(localRuntime.version)
   ) {
     throw profileError(sandbox, "cli-execution", "invalid-output")
   }
@@ -217,19 +213,20 @@ function assertStatusReport(
   }
 }
 
-function parseStatusReport(value: unknown): SandboxStatusReport {
+function parseStatusReport(value: unknown): StatusReport {
   const report = record(value)
   const cli = record(report.cli)
-  const javascript = record(report.javascript)
+  const runtime = record(report.runtime)
   const project = record(report.project)
   if (
     report.ok !== true ||
-    report.profile !== AGENT_RUNTIME_PROFILE ||
+    report.connected !== true ||
+    typeof report.apiUrl !== "string" ||
     typeof cli.version !== "string" ||
     cli.version.length === 0 ||
-    (javascript.name !== "bun" && javascript.name !== "node") ||
-    typeof javascript.version !== "string" ||
-    javascript.version.length === 0 ||
+    (runtime.name !== "bun" && runtime.name !== "node") ||
+    typeof runtime.version !== "string" ||
+    runtime.version.length === 0 ||
     typeof project.id !== "string" ||
     project.id.length === 0
   ) {
@@ -237,9 +234,10 @@ function parseStatusReport(value: unknown): SandboxStatusReport {
   }
   return {
     ok: true,
-    profile: report.profile,
+    connected: true,
+    apiUrl: report.apiUrl,
     cli: { version: cli.version },
-    javascript: { name: javascript.name, version: javascript.version },
+    runtime: { name: runtime.name, version: runtime.version },
     project: { id: project.id },
   }
 }

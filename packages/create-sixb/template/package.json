@@ -12,10 +12,11 @@
   "dependencies": {
     "@sixb/app": "^0.2.0",
     "@sixb/blob-local": "^0.2.0",
-    "@sixb/cli": "^0.2.7",
+    "@sixb/cli": "^0.2.10",
     "@sixb/client": "^0.2.7",
     "@sixb/core": "^0.2.7",
     "@sixb/ducklake": "^0.2.0",
+    "@sixb/project-cli": "^0.2.10",
     "@sixb/sqlite": "^0.2.0",
     "@sixb/ui": "^0.2.0",
     "@tailwindcss/cli": "^4.2.2",

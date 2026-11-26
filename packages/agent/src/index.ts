@@ -1,5 +1,6 @@
 export { waitForAbort } from "./abort"
 export type { AgentWorkspacePromptContext } from "./agent-prompt"
+export { AGENT_RUNTIME_PROFILE } from "./agent-runtime/profile"
 export { createAskParentTool } from "./ask-tool"
 export type { BackgroundCommandStatus } from "./background-commands"
 export {

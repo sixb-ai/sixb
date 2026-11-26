@@ -38,7 +38,7 @@ describe("workspace dependency policy", () => {
 
   test("keeps core-internal companions and the CLI runtime exact", () => {
     const server = stub("packages/server", "@sixb/server")
-    const cli = stub("packages/cli", "@sixb/cli")
+    const cli = stub("packages/project-cli", "@sixb/project-cli")
 
     expect(expectedWorkspaceDependency(server, "@sixb/core")).toEqual({
       field: "peerDependencies",

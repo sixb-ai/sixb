@@ -30,6 +30,13 @@ import {
   SYSTEM_PRINCIPAL,
   userRef,
 } from "@sixb/core"
+import {
+  type BlobStorage,
+  type BlobUploadSession,
+  type CreateBlobUploadInput,
+  computeBlobDigest,
+  type DirectUploadBlobStorage,
+} from "@sixb/core/blob-storage/server"
 import { createInheritedAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
 import { createAgentRunExecutionToken, createAgentRunToken } from "@sixb/core/internal/agents"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
@@ -54,7 +61,7 @@ import { createTestBrowserPolicy } from "./helpers"
 
 const PROJECT_ID = "agent-run-token-tests"
 const NOW = new Date("2026-06-28T12:00:00.000Z")
-const SANDBOX_CLI_ARTIFACT = resolve(import.meta.dir, "../../cli-core/src/generated/sixb.mjs")
+const SANDBOX_CLI_ARTIFACT = resolve(import.meta.dir, "../../cli/src/generated/sixb.mjs")
 
 function fileRefJson(fileRef: FileRef): Record<string, string | number> {
   return Object.fromEntries(
@@ -301,6 +308,50 @@ describe("run tokens", () => {
     await expect(workflow.json()).resolves.toEqual({
       error: "Child agents cannot start a workflow run.",
     })
+  })
+
+  // Guard proof: drop `authState.agentExecution !== undefined` in `packages/server/src/routes/files.ts`;
+  // the run-token request then gets `strategy: "direct-put"` instead of `"server"`.
+  test("defaults staged file uploads to server strategy for run tokens", async () => {
+    class DirectOnlyTestBlobStorage extends InMemoryBlobStorage implements DirectUploadBlobStorage {
+      readonly supportsDirectUpload = true as const
+
+      async createUpload(input: CreateBlobUploadInput): Promise<BlobUploadSession> {
+        return {
+          strategy: "direct-put",
+          uploadId: input.uploadId,
+          stagingKey: `staging/${input.uploadId}`,
+          method: "PUT",
+          url: "https://storage.invalid/put",
+          headers: {},
+          expiresAt: input.expiresAt,
+        }
+      }
+
+      async signUploadPart(): Promise<never> {
+        throw new Error("not used")
+      }
+
+      async completeUpload(): Promise<FileRef> {
+        throw new Error("not used")
+      }
+
+      async abortUpload() {}
+    }
+
+    const { app, apiBaseUrl } = await createRunTokenRuntime({
+      blobStorage: new DirectOnlyTestBlobStorage(),
+    })
+    const digest = computeBlobDigest(new TextEncoder().encode("abc"))
+    const created = await app.fetch(
+      new Request(`${apiBaseUrl}/api/files/uploads`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fileName: "large.bin", sizeBytes: 3, digest }),
+      })
+    )
+    expect(created.status).toBe(201)
+    await expect(created.json()).resolves.toMatchObject({ strategy: "server" })
   })
 
   test("exposes files, links, action history, and authorized workflow runs", async () => {
@@ -2264,8 +2315,20 @@ async function runSandboxCli(
 ): Promise<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }> {
   // This path-level dependency is intentional: it verifies the exact artifact copied into agent
   // sandboxes without making @sixb/cli-core a runtime dependency of @sixb/server.
+  const {
+    SIXB_API_URL: _apiUrl,
+    SIXB_API_BASE_URL: _apiBaseUrl,
+    SIXB_API_TOKEN: _apiToken,
+    SIXB_TOKEN: _token,
+    SIXB_RUN_ID: _runId,
+    SIXB_THREAD_ID: _threadId,
+    SIXB_MEMORY_DIR: _memoryDir,
+    SIXB_CONTEXT_DIR: _contextDir,
+    SIXB_RUN_CONTEXT: _runContext,
+    ...cleanEnv
+  } = Bun.env
   const child = Bun.spawn([process.execPath, SANDBOX_CLI_ARTIFACT, ...args], {
-    env: { ...Bun.env, ...env, SIXB_API_BASE_URL: baseUrl },
+    env: { ...cleanEnv, ...env, SIXB_API_URL: baseUrl },
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -2295,6 +2358,7 @@ async function createRunTokenRuntime(
     readonly models?: ModelCatalogInput
     /** The turn's frozen approval mode; omitted, the turn predates approval modes. */
     readonly approvalMode?: AgentApprovalMode
+    readonly blobStorage?: BlobStorage
   } = {}
 ): Promise<{
   /** The API as the run's commands call it: with the run token, unless a request names its own. */
