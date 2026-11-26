@@ -15,6 +15,7 @@ export { stableJsonStringify } from "../json"
 export type { DatasetRow } from "../lake-storage/types"
 export type {
   EffectiveChangeCounts,
+  OntologyObjectRef,
   PinnedDatasetVersion,
   ProjectionEntityRef,
   ProjectionExecution,
@@ -939,6 +940,12 @@ export type {
   ShareSessionStorageErrorCode,
 } from "./share-sessions"
 export { InMemoryShareSessionStorage, ShareSessionStorageError } from "./share-sessions"
+export type {
+  SnapshotRange,
+  SnapshotReadOptions,
+  SnapshotReadStorage,
+  SnapshotReadView,
+} from "./snapshots"
 export type {
   FinishSyncRunInput,
   ListLatestSyncConnectionRunsInput,
