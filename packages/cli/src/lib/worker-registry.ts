@@ -1,4 +1,5 @@
 import { AgentWorker } from "@sixb/agent-worker"
+import { BranchWorker } from "@sixb/branch-worker"
 import { getDatasetIngestRuntime, getLakeRetentionRuntime } from "@sixb/core/internal/runtime"
 import type { Worker } from "@sixb/core/internal/workers"
 import { LakeWorker } from "@sixb/lake-worker"
@@ -7,6 +8,7 @@ import { ProjectionWorker } from "@sixb/projection-worker"
 import { RenderWorker } from "@sixb/render-worker"
 import { SyncWorker } from "@sixb/sync-worker"
 import { WorkflowWorker } from "@sixb/workflow-worker"
+import { branchAllowedTargets, branchDevEnv } from "./branch-dev-env"
 import { SixbCliError } from "./errors"
 import type { LoadedSixbHost } from "./loadSixb"
 import { configuredOrigin } from "./public-origin"
@@ -19,6 +21,7 @@ export const WORKER_TYPES = [
   "workflow",
   "lake",
   "render",
+  "branches",
 ] as const
 
 export type WorkerType = (typeof WORKER_TYPES)[number]
@@ -48,12 +51,17 @@ interface WorkerFactory {
    */
   readonly unmetRequirement?: (
     options: WorkerCreationOptions,
-    agentApiRequired: boolean
+    agentApiRequired: boolean,
+    /** The loaded project, when the check runs after it loads. */
+    sixb: LoadedSixbHost | undefined
   ) => string | null
 }
 
 const AGENT_ORIGIN_REQUIRED =
   "requires --api-public-origin or SIXB_API_PUBLIC_ORIGIN (agent workers call the API)"
+
+const BRANCHES_ORIGIN_REQUIRED =
+  "requires --api-public-origin or SIXB_API_PUBLIC_ORIGIN (branches read production's lake from its API)"
 
 const RENDER_ORIGIN_REQUIRED =
   "requires --api-public-origin or SIXB_API_PUBLIC_ORIGIN (render sandboxes fetch their files from the API)"
@@ -103,6 +111,20 @@ const workerFactories: Record<WorkerType, WorkerFactory> = {
     unmetRequirement: (options) =>
       apiPublicOrigin(options.agentApiBaseUrl) ? null : RENDER_ORIGIN_REQUIRED,
   },
+  // Never selected automatically: production names it to run its git branches next to itself.
+  branches: {
+    create: (sixb, options) =>
+      new BranchWorker(sixb, {
+        concurrency: options.workerConcurrency?.branches,
+        apiPublicOrigin: apiPublicOrigin(options.agentApiBaseUrl) ?? undefined,
+        devEnv: branchDevEnv(sixb.projectRoot),
+        allow: branchAllowedTargets(),
+      }),
+    unmetRequirement: (options, _agentApiRequired, sixb) => {
+      if (!apiPublicOrigin(options.agentApiBaseUrl)) return BRANCHES_ORIGIN_REQUIRED
+      return sixb ? BranchWorker.unmetRequirement(sixb) : null
+    },
+  },
 }
 
 export function createWorkerForType(
@@ -148,10 +170,11 @@ function removedActionWorker(): Error {
 export function unmetWorkerRequirement(
   workerType: string,
   options: WorkerCreationOptions,
-  agentApiRequired: boolean
+  agentApiRequired: boolean,
+  sixb?: LoadedSixbHost
 ): string | null {
   return isWorkerType(workerType)
-    ? (workerFactories[workerType].unmetRequirement?.(options, agentApiRequired) ?? null)
+    ? (workerFactories[workerType].unmetRequirement?.(options, agentApiRequired, sixb) ?? null)
     : null
 }
 
@@ -164,6 +187,8 @@ export interface WorkerGroupInputs {
    * remedy only: an auto-selected type can also be dropped by naming the rest.
    */
   readonly autoSelected: boolean
+  /** The loaded project, which some workers need more of than options. */
+  readonly sixb?: LoadedSixbHost
 }
 
 /**
@@ -176,7 +201,7 @@ export function assertWorkerInputs(input: WorkerGroupInputs): void {
   const unmet = input.workerTypes
     .map((workerType) => ({
       workerType,
-      reason: unmetWorkerRequirement(workerType, input.options, input.agentApiRequired),
+      reason: unmetWorkerRequirement(workerType, input.options, input.agentApiRequired, input.sixb),
     }))
     .filter((entry): entry is { workerType: string; reason: string } => entry.reason !== null)
 

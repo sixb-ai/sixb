@@ -3,6 +3,7 @@ import { SixbErrorReporter } from "./reporter"
 import {
   type ReportActionPhaseFailureInput,
   type ReportArtifactLiveWriteFailureInput,
+  type ReportBranchFailureInput,
   type ReportDatasetIngestFlushFailureInput,
   type ReportDatasetIngestRejectionInput,
   type ReportEventDeliveryFailureInput,
@@ -14,6 +15,7 @@ import {
   type ReportVectorIndexingFailureInput,
   reportActionPhaseFailure as reportActionPhaseFailureWith,
   reportArtifactLiveWriteFailure as reportArtifactLiveWriteFailureWith,
+  reportBranchFailure as reportBranchFailureWith,
   reportDatasetIngestFlushFailure as reportDatasetIngestFlushFailureWith,
   reportDatasetIngestRejection as reportDatasetIngestRejectionWith,
   reportEventDeliveryFailure as reportEventDeliveryFailureWith,
@@ -62,6 +64,7 @@ export function shareSixbErrorReporter(source: object, target: object): void {
 export type {
   ReportActionPhaseFailureInput,
   ReportArtifactLiveWriteFailureInput,
+  ReportBranchFailureInput,
   ReportDatasetIngestFlushFailureInput,
   ReportDatasetIngestRejectionInput,
   ReportEventDeliveryFailureInput,
@@ -147,6 +150,14 @@ export function reportLakeRetentionFailure(
   input: ReportLakeRetentionFailureInput
 ): void {
   reportLakeRetentionFailureWith(resolveSixbErrorReporter(host), error, input)
+}
+
+export function reportBranchFailure(
+  host: object,
+  error: unknown,
+  input: ReportBranchFailureInput
+): void {
+  reportBranchFailureWith(resolveSixbErrorReporter(host), error, input)
 }
 
 export function reportDatasetIngestFlushFailure(

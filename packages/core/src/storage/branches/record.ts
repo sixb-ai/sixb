@@ -63,6 +63,7 @@ export function parseBranchRow(row: {
     data: parseData(value.data),
     refreshRequestedAt: nullableDate(value.refreshRequestedAt),
     remoteCommit: nullableString(value.remoteCommit),
+    remoteError: nullableString(value.remoteError),
     notices: parseNotices(value.notices),
     owner: nullableString(value.owner),
     leaseExpiresAt: nullableDate(value.leaseExpiresAt),

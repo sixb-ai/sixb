@@ -229,6 +229,16 @@ export interface SixbLakeRetentionFailedContext
 }
 
 /**
+ * A git branch production runs failed: its checkout, its copy or its runtime. It stays failed,
+ * and says why in the Console, until someone opens it again.
+ */
+export interface SixbBranchFailedContext extends SixbFailureContext<"branch.failed"> {
+  readonly failure: SixbFailure<"internal.unexpected">
+  /** The git branch. */
+  readonly branch: string
+}
+
+/**
  * A dataset's ingested changes have waited too long: its flushes failed this many times in a row,
  * or none ran at all. The changes stay in the inbox, and flushes go on trying.
  */
@@ -272,6 +282,7 @@ export type SixbErrorContext =
   | SixbArtifactLiveWriteFailedContext
   | SixbVectorIndexingFailedContext
   | SixbLakeRetentionFailedContext
+  | SixbBranchFailedContext
   | SixbDatasetIngestFlushFailedContext
   | SixbDatasetIngestRejectedContext
   | SixbActionPhaseFailedContext

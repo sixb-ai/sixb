@@ -24,6 +24,7 @@ const WORKER_TYPES = {
   workflow: true,
   lake: true,
   render: true,
+  branches: true,
 } as const satisfies Record<DeployWorkerType, true>
 
 /** Every service, in the order a deployment lists them. */

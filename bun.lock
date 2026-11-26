@@ -801,6 +801,22 @@
         "react-router-dom": "^7.0.0",
       },
     },
+    "packages/branch-worker": {
+      "name": "@sixb/branch-worker",
+      "version": "0.2.10",
+      "devDependencies": {
+        "@sixb/broker-redis": "workspace:*",
+        "@sixb/cli": "workspace:*",
+        "@sixb/core": "workspace:*",
+        "@sixb/pg": "workspace:*",
+        "@sixb/sandboxes-local": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
+      },
+    },
     "packages/cli": {
       "name": "@sixb/cli",
       "version": "0.2.10",
@@ -813,6 +829,7 @@
         "@sixb/agent": "workspace:*",
         "@sixb/agent-worker": "workspace:*",
         "@sixb/app": "workspace:^",
+        "@sixb/branch-worker": "workspace:*",
         "@sixb/cli-core": "workspace:^",
         "@sixb/client": "workspace:^",
         "@sixb/core": "workspace:*",
@@ -1915,6 +1932,8 @@
     "@sixb/blob-local": ["@sixb/blob-local@workspace:storage/blob-local"],
 
     "@sixb/blob-s3": ["@sixb/blob-s3@workspace:storage/blob-s3"],
+
+    "@sixb/branch-worker": ["@sixb/branch-worker@workspace:packages/branch-worker"],
 
     "@sixb/broker-nats": ["@sixb/broker-nats@workspace:broker/nats"],
 

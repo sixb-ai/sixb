@@ -34,6 +34,7 @@ export {
   SandboxNotRunningError,
   SandboxRequestRefusedError,
   SandboxStateUnavailableError,
+  SandboxStillRunningError,
   SandboxTimeoutError,
 } from "./errors"
 export type { ExecOptions } from "./exec"

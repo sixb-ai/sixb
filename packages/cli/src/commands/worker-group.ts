@@ -96,6 +96,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
       workerTypes,
       options: { agentApiBaseUrl: options.apiPublicOrigin },
       autoSelected: requestedTypes.length === 0,
+      sixb,
     })
 
     const migration = await migrateStorageForRole(sixb, {

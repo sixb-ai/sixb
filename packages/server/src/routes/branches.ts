@@ -7,6 +7,7 @@ import {
   authorizeBranchCredential,
   branchCredentialSlice,
   copyForBranch,
+  takeBranchCopySlot,
 } from "@sixb/core/internal/branches"
 import { dropLakeSlice, issueLakeSliceToken } from "@sixb/core/internal/lake-slices"
 import { resolveBranchMode } from "@sixb/core/internal/runtime"
@@ -95,19 +96,17 @@ async function copyResponse(
     return { error: named }
   }
 
-  // A copy holds a consistent read open in production: a few at a time, one per person. Counted
-  // in this process: each server process of a project keeps its own count.
-  const running = copiesRunning.get(host.id) ?? new Set<string>()
-  if (running.size >= MAX_COPIES_PER_PROJECT || running.has(person.principal.id)) {
+  // A copy holds a consistent read open in production: a few at a time, one per person.
+  const slot = takeBranchCopySlot(host.id, person.principal.id)
+  if ("refused" in slot) {
     set.status = 429
     return {
-      error: running.has(person.principal.id)
-        ? "[SixbServer] Your copy to a branch is still running. Try again once it ends."
-        : `[SixbServer] ${running.size} copies to branches are running for this project. Try again in a minute.`,
+      error:
+        slot.refused === "person"
+          ? "[SixbServer] Your copy to a branch is still running. Try again once it ends."
+          : `[SixbServer] ${slot.running} copies to branches are running for this project. Try again in a minute.`,
     }
   }
-  running.add(person.principal.id)
-  copiesRunning.set(host.id, running)
 
   // A copy can go quiet for far longer than Bun's 10 s idle timeout, while production cuts a
   // large lake or reads through a selective view condition. Lifted only now, for a person who may
@@ -119,8 +118,7 @@ async function copyResponse(
   const finish = async () => {
     if (finished) return
     finished = true
-    running.delete(person.principal.id)
-    if (running.size === 0 && copiesRunning.get(host.id) === running) copiesRunning.delete(host.id)
+    slot.release()
     if (directory) await rm(directory, { recursive: true, force: true })
   }
 
@@ -233,10 +231,6 @@ async function receivedResponse(
   context.set.status = 204
   return null
 }
-
-const MAX_COPIES_PER_PROJECT = 2
-/** The people copying to a branch, per project. */
-const copiesRunning = new Map<string, Set<string>>()
 
 /** Null when `branch` names a git branch as a branch's `SIXB_BRANCH` would, else why not. */
 function branchName(branch: unknown): string | null {

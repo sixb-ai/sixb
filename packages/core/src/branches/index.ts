@@ -4,6 +4,7 @@
  */
 
 export { type CopyForBranchInput, copyForBranch } from "./copy"
+export { takeBranchCopySlot } from "./copy-slots"
 export {
   authorizeBranchCredential,
   BRANCH_CREDENTIAL_PREFIX,
@@ -28,6 +29,12 @@ export {
   prepareBranchData,
 } from "./data"
 export {
+  assertMayManageBranches,
+  type BranchesRuntime,
+  type BranchView,
+  toBranchView,
+} from "./execution"
+export {
   BRANCH_COPIES_DIRECTORY,
   BRANCH_DATABASE_SCHEMA_ENV,
   BRANCH_DATABASE_URL_ENV,
@@ -49,8 +56,12 @@ export {
 } from "./runtime"
 export {
   assertGitBranchName,
+  BRANCH_BUN_COMMAND,
+  BRANCH_BUN_VERSION,
+  BRANCH_CHECKOUT_MARK,
   BRANCH_DEPENDENCY_FILES,
   BRANCH_INSTALL_COMMAND,
+  type BranchCheckoutStep,
   branchCheckout,
   type ProjectSource,
   sourceGitUrl,

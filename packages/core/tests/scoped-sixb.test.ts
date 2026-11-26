@@ -1383,6 +1383,7 @@ describe("bound Sixb surface", () => {
         "aiUsage",
         "artifacts",
         "blobs",
+        "branches",
         "branch",
         "connector",
         "datasets",

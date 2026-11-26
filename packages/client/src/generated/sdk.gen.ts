@@ -93,6 +93,9 @@ import type {
   DeleteArtifactStateValueData,
   DeleteArtifactStateValueErrors,
   DeleteArtifactStateValueResponses,
+  DeleteBranchData,
+  DeleteBranchErrors,
+  DeleteBranchResponses,
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountErrors,
   DisableAuthServiceAccountResponses,
@@ -466,6 +469,9 @@ import type {
   ListAuthSessionsData,
   ListAuthSessionsErrors,
   ListAuthSessionsResponses,
+  ListBranchesData,
+  ListBranchesErrors,
+  ListBranchesResponses,
   ListConnectorAccountsData,
   ListConnectorAccountsResponses,
   ListConnectorConnectionSyncRunsData,
@@ -555,6 +561,9 @@ import type {
   MoveAgentThreadToComputerData,
   MoveAgentThreadToComputerErrors,
   MoveAgentThreadToComputerResponses,
+  OpenBranchData,
+  OpenBranchErrors,
+  OpenBranchResponses,
   PostAgentThreadMessageData,
   PostAgentThreadMessageErrors,
   PostAgentThreadMessageResponses,
@@ -579,6 +588,9 @@ import type {
   RefreshAuthSessionData,
   RefreshAuthSessionErrors,
   RefreshAuthSessionResponses,
+  RefreshBranchData,
+  RefreshBranchErrors,
+  RefreshBranchResponses,
   ReleaseAgentComputerSessionData,
   ReleaseAgentComputerSessionErrors,
   ReleaseAgentComputerSessionResponses,
@@ -669,6 +681,9 @@ import type {
   StopAgentBackgroundCommandData,
   StopAgentBackgroundCommandErrors,
   StopAgentBackgroundCommandResponses,
+  StopBranchData,
+  StopBranchErrors,
+  StopBranchResponses,
   SubmitWorkflowInterventionData,
   SubmitWorkflowInterventionErrors,
   SubmitWorkflowInterventionResponses,
@@ -2158,6 +2173,90 @@ export const runSchedule = <ThrowOnError extends boolean = false>(
     ],
     url: "/api/schedules/{scheduleId}/runs",
     ...options,
+  })
+
+/**
+ * Delete a branch: its sandbox, its schema and its role
+ */
+export const deleteBranch = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteBranchData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<DeleteBranchResponses, DeleteBranchErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/branches",
+    ...options,
+  })
+
+/**
+ * List the branches that run next to production
+ */
+export const listBranches = <ThrowOnError extends boolean = false>(
+  options?: Options<ListBranchesData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListBranchesResponses, ListBranchesErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/branches",
+    ...options,
+  })
+
+/**
+ * Open a git branch next to production, on a copy of what you read
+ */
+export const openBranch = <ThrowOnError extends boolean = false>(
+  options: Options<OpenBranchData, ThrowOnError>
+) =>
+  (options.client ?? client).post<OpenBranchResponses, OpenBranchErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/branches",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Take a new copy of production for a branch, discarding what it wrote
+ */
+export const refreshBranch = <ThrowOnError extends boolean = false>(
+  options: Options<RefreshBranchData, ThrowOnError>
+) =>
+  (options.client ?? client).post<RefreshBranchResponses, RefreshBranchErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/branches/refresh",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Stop a branch's runtime; its copy stays
+ */
+export const stopBranch = <ThrowOnError extends boolean = false>(
+  options: Options<StopBranchData, ThrowOnError>
+) =>
+  (options.client ?? client).post<StopBranchResponses, StopBranchErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/branches/stop",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**

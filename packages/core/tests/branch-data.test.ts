@@ -113,6 +113,7 @@ function row(): Omit<BranchRecord, "updatedAt" | "revision"> {
     data: null,
     refreshRequestedAt: null,
     remoteCommit: null,
+    remoteError: null,
     notices: [],
     owner: null,
     leaseExpiresAt: null,

@@ -58,6 +58,7 @@ export function runBranchStorageContractSuite<TStorage extends BranchStorage>(
           refreshRequestedAt: new Date("2026-11-24T12:02:00.000Z"),
           port: 20_000,
           remoteCommit: "b".repeat(40),
+          remoteError: "git ls-remote failed: could not read Username",
           // Guard check: drop a code from `NOTICES` in `storage/branches/record.ts`: its notice
           // is then lost on the way back.
           notices: [
@@ -135,6 +136,7 @@ function branch(name: string): Omit<BranchRecord, "updatedAt" | "revision"> {
     data: null,
     refreshRequestedAt: null,
     remoteCommit: null,
+    remoteError: null,
     notices: [],
     owner: null,
     leaseExpiresAt: null,

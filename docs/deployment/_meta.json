@@ -1,6 +1,7 @@
 [
   "overview.md",
   "servers.md",
+  "branches.md",
   "host-requirements.md",
   "environment-variables.md",
   "github-actions.md"

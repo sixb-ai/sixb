@@ -47,6 +47,30 @@ describe("assertWorkerInputs", () => {
     ).not.toThrow()
   })
 
+  // A branch worker on storage that cannot host branches once migrated, then failed to construct.
+  // Guard check: drop the host check from the `branches` requirement (`worker-registry.ts`).
+  test("refuses a branch worker before anything runs when the project cannot host branches", () => {
+    const sixb = new SixbHost({
+      id: "registry",
+      ontology: [],
+      storage: new InMemoryStorage(),
+      broker: new InMemoryBroker(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+    })
+
+    expect(() =>
+      assertWorkerInputs({
+        agentApiRequired: false,
+        workerTypes: ["branches"],
+        options: { agentApiBaseUrl: "http://localhost:3002" },
+        autoSelected: false,
+        sixb,
+      })
+    ).toThrow("@sixb/pg")
+  })
+
   test("passes when the requirement is met by the environment instead of the flag", () => {
     process.env.SIXB_API_PUBLIC_ORIGIN = "http://localhost:3002"
 

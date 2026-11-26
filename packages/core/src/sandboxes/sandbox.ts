@@ -262,6 +262,12 @@ export interface SandboxFactory<in out TParams extends ParamsConfig = ParamsConf
    * agent's sandboxes need it: the run's token for the Sixb API is one of the credentials.
    */
   readonly supportsRequestCredentials?: boolean
+  /**
+   * Request credentials reach guest commands only through the forwarder at
+   * {@link Sandbox.credentialedUrl}, never on their own requests: a plain `git clone https://…`
+   * carries none. A hosted branch of a private repository refuses such a provider.
+   */
+  readonly forwardsRequestCredentials?: boolean
   /** Common host-side environment recipe. Never a discovered Agent definition. */
   readonly configuration?: SandboxConfig<TParams>
   /** Create an ephemeral sandbox unless persistence is requested. Existing names must fail,
@@ -275,10 +281,23 @@ export interface SandboxFactory<in out TParams extends ParamsConfig = ParamsConf
    * Present only when named persistent creation and resume are supported.
    * Resume an existing, stopped sandbox. Missing/expired state throws SandboxStateUnavailableError;
    * it must never create an empty replacement. Transport/auth/setup errors must not be classified
-   * as missing state. An already running sandbox must be rejected.
+   * as missing state. An already running sandbox must be rejected with SandboxStillRunningError.
    * Returns a handle bound to the resumed session, with no automatic resume on use.
    * Runtime options must be provided again; no creation settings or persistence option are accepted.
    * Never clone or replay setup on resume.
    */
   resume?(name: string, options?: ResumeSandboxOptions): Promise<Sandbox>
+  /**
+   * Optional, with `resume`. Deletes the named sandbox and its saved state, running or stopped,
+   * without a session: it needs no credentials and resumes nothing. A name already gone resolves.
+   * Any other failure rejects, so a caller keeps the name and tries again: a sandbox it forgot
+   * would keep its files, and its name, for good.
+   */
+  destroy?(name: string): Promise<void>
+  /**
+   * Optional, with `resume`. Stops the named sandbox's running session as its own handle's
+   * `stop()` would, saving its state, for a caller that lost that handle (its process died). A
+   * sandbox not running, or a name gone, resolves; any other failure rejects.
+   */
+  stop?(name: string): Promise<void>
 }

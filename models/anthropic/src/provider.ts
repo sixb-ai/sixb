@@ -25,6 +25,7 @@ import {
   type ModelReasoningLevel,
   modelReasoningSupportIssue,
   rateModelCall,
+  registerModelOrigin,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import {
@@ -106,6 +107,7 @@ export function createAnthropic(options: AnthropicOptions = {}): AnthropicProvid
   assertNonnegativeInteger(options.maxRetries, "maxRetries")
   assertPositiveIntegerOption(options.catalogTtlMs, "catalogTtlMs")
   assertPositiveIntegerOption(options.maxRetryDelayMs, "maxRetryDelayMs")
+  registerModelOrigin(PROVIDER_ID, baseUrl)
   const transport: AnthropicTransport = {
     ...options,
     apiKey: options.apiKey ?? (() => process.env.ANTHROPIC_API_KEY),

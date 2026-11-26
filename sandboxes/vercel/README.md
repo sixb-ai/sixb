@@ -68,9 +68,13 @@ await resumed.stop()
 
 - Names are scoped to the configured Vercel project. The caller must namespace and serialize their
   complete lifecycle; concurrent resume calls are not an atomic acquisition or a lease.
-- Creation never overwrites an existing name. Resume rejects running/non-persistent sandboxes.
-  Missing state throws `SandboxStateUnavailableError` from `@sixb/core/sandboxes`; the SDK's
-  destructive `getOrCreate()` fallback is deliberately not used.
+- Creation never overwrites an existing name. Resume rejects a running sandbox with
+  `SandboxStillRunningError` and a non-persistent one with `SandboxError`. Missing state throws
+  `SandboxStateUnavailableError` from `@sixb/core/sandboxes`; the SDK's destructive
+  `getOrCreate()` fallback is deliberately not used.
+- `factory.destroy(name)` deletes a named sandbox and its snapshots, running or stopped, with the
+  factory's API credentials alone: it resumes nothing, so it needs no source credentials. A name
+  already gone resolves; any other failure rejects.
 - Commands, file writes, network updates and stop target the acquired SDK `Session`, not an
   automatically-resuming named handle. They cannot migrate to a later VM after a timeout.
 - Run env is supplied per command, not stored as named VM defaults. VM creation defaults to
@@ -126,7 +130,8 @@ by agents need Bash, standard file utilities, CA certificates, and Bun 1.3+ or N
 
 The stock runtime has neither `gh` nor `bun`, which agents working in a repository usually need.
 Boot the [Sixb agent image](../agent-image/README.md#use-with-a-sandbox-provider) for those
-workspaces.
+workspaces. A [hosted branch](../../docs/deployment/branches.md) installs the Bun it needs from the
+npm registry when the image has none, or one older than 1.4.2.
 
 For additional tools, prefer one of these setup strategies:
 

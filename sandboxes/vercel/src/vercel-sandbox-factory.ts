@@ -15,7 +15,7 @@ import {
   sandboxConfig,
   sandboxCreationEnvironment,
 } from "@sixb/core/sandboxes"
-import { Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
+import { APIError, Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
 import { toVercelNetworkPolicy, withRequestCredentials } from "./network"
 import {
   assertPersistentName,
@@ -210,6 +210,48 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
     } catch (error) {
       await stopFailedPersistentSession(client)
       throw persistentSandboxError(error, operation)
+    }
+  }
+
+  /**
+   * Deletes the named sandbox, its saved snapshots included, without resuming it: Vercel deletes
+   * a sandbox by name with the factory's API credentials, whatever its session is doing. A name
+   * Vercel no longer has is already gone; any other failure rejects.
+   */
+  async destroy(name: string): Promise<void> {
+    assertPersistentName(name)
+    const params = { ...resolveCredentials(this.defaults.credentials), name }
+
+    try {
+      const existing = await this.persistentRemote.get({ ...params, resume: false })
+      await existing.delete()
+    } catch (error) {
+      if (error instanceof APIError && error.response.status === 404) return
+      throw persistentSandboxError(error, "destroy")
+    }
+  }
+
+  /**
+   * Stops the named sandbox's running session, as its own handle would: network closed first,
+   * then a snapshot saved. For a caller whose process died holding that session, which Vercel
+   * keeps running while its deadline lasts. Not running, or gone, resolves.
+   */
+  async stop(name: string): Promise<void> {
+    assertPersistentName(name)
+    const params = { ...resolveCredentials(this.defaults.credentials), name }
+
+    try {
+      const session = (
+        await this.persistentRemote.get({ ...params, resume: false })
+      ).currentSession()
+      // One already stopping saves itself.
+      if (session.status !== "pending" && session.status !== "running") return
+
+      await session.update({ networkPolicy: "deny-all" })
+      await session.stop()
+    } catch (error) {
+      if (error instanceof APIError && error.response.status === 404) return
+      throw persistentSandboxError(error, "stop")
     }
   }
 

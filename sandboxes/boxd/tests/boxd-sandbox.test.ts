@@ -6,6 +6,7 @@ import {
   SandboxNotRunningError,
   type SandboxRequestCredential,
   SandboxStateUnavailableError,
+  SandboxStillRunningError,
 } from "@sixb/core/sandboxes"
 import { BoxdSandboxFactory } from "../src"
 import { machineSpec } from "../src/boxd-client"
@@ -393,7 +394,7 @@ describe("persistence", () => {
 
     await sandboxes.create({ persistence: { name } })
     const running = await sandboxes.resume(name).catch((caught) => caught)
-    expect(running).toBeInstanceOf(SandboxError)
+    expect(running).toBeInstanceOf(SandboxStillRunningError)
     expect(running).not.toBeInstanceOf(SandboxStateUnavailableError)
     expect(running.message).toContain("must be stopped")
   })

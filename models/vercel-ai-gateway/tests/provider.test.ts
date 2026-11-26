@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import { reportModelCalls, resolveLanguageModel } from "@sixb/core/internal/model-execution"
+import { modelOriginsOf } from "@sixb/core/internal/model-origins"
 import type {
   JsonObject,
   LanguageModelRequest,
@@ -2049,5 +2050,14 @@ test("keeps the binding's own name and description over the live catalog's", asy
 
   expect(() => gateway("openai/gpt-5.5", { name: " GPT" })).toThrow(
     "[SixbVercelGateway] name must be a nonempty trimmed string."
+  )
+})
+
+// A branch production runs reaches only where the project's providers say they call.
+// Guard check: drop `registerModelOrigin` from `createVercelGateway`.
+test("says where it calls, for a branch's sandbox to reach it", () => {
+  createVercelGateway({ baseUrl: "https://gateway.proxy.test/v1", apiKey: "key" })
+  expect(modelOriginsOf({ providerId: "vercel-ai-gateway" })).toContain(
+    "https://gateway.proxy.test"
   )
 })

@@ -10,7 +10,14 @@ export interface RecordedRequest {
 
 /** Exercise the installed SDK over a fake transport, not a fake auto-resume implementation. */
 export function fixture(setup?: readonly string[]) {
-  type Status = "running" | "stopped" | "failed"
+  type Status =
+    | "pending"
+    | "running"
+    | "stopping"
+    | "snapshotting"
+    | "stopped"
+    | "failed"
+    | "aborted"
   const requests: RecordedRequest[] = []
   let status: Status = "running"
   let generation = 1
@@ -25,6 +32,7 @@ export function fixture(setup?: readonly string[]) {
   let snapshotMissing = false
   let networkFails = false
   let networkMissing = false
+  let deleteFailure = 0
   let stopGate: Promise<void> | undefined
   let sessionCreatedAt = 1
   let sessionTimeout = 60_000
@@ -79,6 +87,7 @@ export function fixture(setup?: readonly string[]) {
       }
       if (path === `/v2/sandboxes/${encodeURIComponent(name)}`) {
         if (method === "DELETE") {
+          if (deleteFailure) return failure(deleteFailure, "delete_failed")
           exists = false
           return Response.json({ sandbox: named() })
         }
@@ -170,6 +179,9 @@ export function fixture(setup?: readonly string[]) {
     },
     loseNetworkSession: () => {
       networkMissing = true
+    },
+    failDelete: (status: number) => {
+      deleteFailure = status
     },
     gateStop: (gate: Promise<void>) => {
       stopGate = gate

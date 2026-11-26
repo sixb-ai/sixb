@@ -40,6 +40,11 @@ export interface BranchRecord {
    * runs once the remote has it, and ends once the remote no longer does.
    */
   readonly remoteCommit: string | null
+  /**
+   * Why the worker's last read of the remote failed, such as a private repository read without
+   * credentials; null once a read succeeds. Written to branches that wait for the remote.
+   */
+  readonly remoteError: string | null
   /** What its creator should know about the copy or the runtime, such as a reset copy. */
   readonly notices: readonly BranchNotice[]
   /** The worker holding the branch, until `leaseExpiresAt`. */

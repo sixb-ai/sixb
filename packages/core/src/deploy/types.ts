@@ -44,6 +44,7 @@ export type DeployWorkerType =
   | "workflow"
   | "lake"
   | "render"
+  | "branches"
 
 export interface DeployServicesConfig {
   readonly api?: boolean | DeployHttpServiceConfig

@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
+import { modelOriginsOf } from "@sixb/core/internal/model-origins"
 import type {
   JsonObject,
   LanguageModelRequest,
@@ -1872,4 +1873,11 @@ test("keeps the binding's own name and description over the live catalog's", asy
   expect(() => provider("claude-opus-5", { name: "" })).toThrow(
     "[SixbAnthropic] name must be a nonempty trimmed string."
   )
+})
+
+// A branch production runs reaches only where the project's providers say they call.
+// Guard check: drop `registerModelOrigin` from `createAnthropic`.
+test("says where it calls, for a branch's sandbox to reach it", () => {
+  createAnthropicProvider({ baseUrl: "https://anthropic.proxy.test/v1", apiKey: "key" })
+  expect(modelOriginsOf({ providerId: "anthropic" })).toContain("https://anthropic.proxy.test")
 })
