@@ -484,31 +484,40 @@ describe("who may open a section page", () => {
     }
   })
 
-  // A developer who opens the Console's Branches on a branch once read that they had no access.
-  // Red check: drop the `productionOnly` case from `NotAllowed` (`section-page.tsx`).
+  // A developer who opens the Console's Branches on a branch once read that they had no access,
+  // beside an empty sidebar. Red check: drop the `productionOnly` case from `NotAllowed`
+  // (`section-page.tsx`), or from `sectionContains` (`sections.tsx`).
   test("on a branch, a page only production has says so, with the way there", () => {
-    const view = renderApp(<ConsoleBranchesPage />, {
-      path: "/console/branches",
-      session: sessionFor(["staff"], manager),
-      data: [
-        [
-          getProjectInfoQueryKey(),
-          {
-            id: "northline",
-            locale: "en",
-            timeZone: "UTC",
-            branch: {
-              name: "feature/route-planner",
-              dataTakenAt: null,
-              productionUrl: "https://app.northline.test",
+    const view = renderApp(
+      <AppShell nav={[{ label: "Quotes", href: "/quotes" }]}>
+        <ConsoleBranchesPage />
+      </AppShell>,
+      {
+        path: "/console/branches",
+        session: sessionFor(["staff"], manager),
+        data: [
+          [
+            getProjectInfoQueryKey(),
+            {
+              id: "northline",
+              locale: "en",
+              timeZone: "UTC",
+              branch: {
+                name: "feature/route-planner",
+                dataTakenAt: null,
+                productionUrl: "https://app.northline.test",
+              },
             },
-          },
+          ],
         ],
-      ],
-    })
+      }
+    )
 
-    expect(view.getByText("Managed from production")).toBeDefined()
+    expect(view.getByText("Branches are managed from production.")).toBeDefined()
     expect(view.queryByText(/You don't have access/)).toBeNull()
+    // Its section's sidebar stays, without the page.
+    expect(view.getByRole("link", { name: /Logs/ }).getAttribute("href")).toBe("/console/logs")
+    expect(view.queryByText("Quotes")).toBeNull()
     expect(view.getByRole("link", { name: "Open in production" }).getAttribute("href")).toBe(
       "https://app.northline.test/console/branches"
     )

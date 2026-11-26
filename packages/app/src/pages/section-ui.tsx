@@ -15,7 +15,7 @@ import {
 } from "@sixb/ui/components"
 import { defineMessages, type MessageTree, type Translation, useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { ArrowLeft, Check, CircleAlert, Copy, DatabaseZap, GitFork, Lock } from "lucide-react"
+import { ArrowUpRight, Check, CircleAlert, Copy, DatabaseZap, GitFork, Lock } from "lucide-react"
 import { type ComponentType, type ReactNode, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 
@@ -34,7 +34,9 @@ export const en = {
   noAccess: (page: string) => `You don't have access to ${page}. Ask a project admin.`,
   productionOnly: {
     title: "Managed from production",
-    description: "This page isn't on a branch: you manage it from production.",
+    description: "This page is managed from production, not from a branch.",
+    /** What a page only production has says on a branch, by page, in place of the above. */
+    pages: { branches: "Branches are managed from production." } as Record<string, string>,
     open: "Open in production",
   },
   tryAgain: "Try again in a moment.",
@@ -79,7 +81,8 @@ export const fr: Translation<typeof en> = {
     `Vous n’avez pas accès à « ${page} ». Demandez à un administrateur du projet.`,
   productionOnly: {
     title: "Se gère en production",
-    description: "Cette page n’existe pas sur une branche : elle se gère depuis la production.",
+    description: "Cette page se gère depuis la production, pas depuis une branche.",
+    pages: { branches: "Les branches se gèrent depuis la production." },
     open: "Ouvrir en production",
   },
   denied:
@@ -957,19 +960,27 @@ export function NoAccessPanel({ page }: { readonly page: string }) {
  * A page only production has, opened on a branch: where it is managed, and, on a branch
  * production runs, the way there.
  */
-export function ProductionOnlyPanel({ href }: { readonly href: string | null }) {
+export function ProductionOnlyPanel({
+  page,
+  href,
+}: {
+  /** The page's id in its section, such as `branches`. */
+  readonly page: string
+  readonly href: string | null
+}) {
   const messages = useSectionUiMessages().productionOnly
   return (
     <Panel>
       <PanelEmpty
         icon={GitFork}
-        title={messages.title}
-        description={messages.description}
+        // A page that says so in its own words needs nothing more.
+        title={messages.pages[page] ?? messages.title}
+        description={messages.pages[page] ? undefined : messages.description}
         action={
           href ? (
             <Button asChild size="sm" variant="outline">
               <a href={href}>
-                <ArrowLeft />
+                <ArrowUpRight />
                 {messages.open}
               </a>
             </Button>

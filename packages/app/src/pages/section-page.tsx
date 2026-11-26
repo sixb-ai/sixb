@@ -234,7 +234,7 @@ function NotAllowed({ section, page }: { readonly section: AppSectionId; readonl
     const href = branch.productionUrl ? `${branch.productionUrl}${definition.path}` : null
     return (
       <PageFrame title={label}>
-        <ProductionOnlyPanel href={href} />
+        <ProductionOnlyPanel page={page} href={href} />
       </PageFrame>
     )
   }

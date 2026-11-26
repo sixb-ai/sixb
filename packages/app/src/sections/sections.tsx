@@ -211,10 +211,21 @@ export function useCurrentSection(): AppSection | null {
   return useSections().find((section) => sectionContains(section, pathname)) ?? null
 }
 
-/** Whether `pathname` is one of the section's pages, below one, or a page one claims. */
+/**
+ * Whether `pathname` is one of the section's pages, below one, or a page one claims. A page only
+ * production has stays in its section on a branch, out of the nav: it says where it is managed.
+ */
 function sectionContains(section: AppSection, pathname: string): boolean {
-  return section.pages.some((entry) =>
+  const listed = section.pages.some((entry) =>
     ("group" in entry ? entry.items : [entry]).some((page) => isCurrentItem(pathname, page))
+  )
+  if (listed) return true
+
+  const definition = sectionCatalog.find((candidate) => candidate.id === section.id)
+  return (
+    definition?.pages.some(
+      (page) => page.productionOnly && isCurrentItem(pathname, { href: page.path })
+    ) ?? false
   )
 }
 
