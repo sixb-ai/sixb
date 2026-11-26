@@ -115,8 +115,11 @@ function answerWith(answer: (request: Request) => Response | Promise<Response>) 
   return seen
 }
 
+/** The list as the page reads it: its branches may carry what a newer server sends. */
+type BranchList = Omit<ListBranchesResponse, "branches"> & { readonly branches: readonly Branch[] }
+
 function renderPage(
-  list: ListBranchesResponse | null,
+  list: BranchList | null,
   path = "/console/branches",
   access: { readonly branches: boolean } = { branches: true }
 ) {
@@ -665,7 +668,7 @@ describe("the branch bar", () => {
     expect(within(bar).getByText("Production data from 2 hours ago")).toBeDefined()
     // A phone's bar says it shorter.
     expect(within(bar).getByTitle("Production data from 2 hours ago").textContent).toBe(
-      "Data2 h ago"
+      "Data 2 h ago"
     )
     expect(
       within(bar)
@@ -711,9 +714,10 @@ describe("the branch bar", () => {
     expect(view.queryAllByRole("link")).toEqual([])
   })
 
-  // Folded, the tab sits at the end of the document: over the agent's and artifacts' full-screen
-  // pages, which painted over it when it came before them. Red check: return the folded bar in
-  // place rather than through `createPortal` (`branch-banner.tsx`).
+  // Folded, a wide screen's tab sits at the end of the document: over the agent's and artifacts'
+  // full-screen pages, which painted over it when it came before them. A phone's strip stays in
+  // the page's flow, which starts below it rather than under it. Red check: return the tab in
+  // place rather than through `createPortal` (`branch-banner.tsx`), or portal the strip too.
   test("folded, stays above every page, full-screen ones included", () => {
     const view = renderBanner({
       id: "northline",
@@ -723,11 +727,14 @@ describe("the branch bar", () => {
     })
     fireEvent.click(view.getByRole("button", { name: "Hide the branch bar" }))
 
-    const tab = view.getByRole("button", { name: "Show the bar of branch feature/route-planner" })
-    expect(view.container.contains(tab)).toBe(false)
-    expect(tab.parentElement === view.baseElement).toBe(true)
+    const [strip, tab] = view.getAllByRole("button", {
+      name: "Show the bar of branch feature/route-planner",
+    })
+    expect(view.container.contains(strip ?? null)).toBe(true)
+    expect(view.container.contains(tab ?? null)).toBe(false)
+    expect(tab?.parentElement?.parentElement === view.baseElement).toBe(true)
 
-    fireEvent.click(tab)
+    fireEvent.click(tab!)
   })
 
   test("folds away into a button, and stays folded for this branch", () => {
@@ -743,9 +750,10 @@ describe("the branch bar", () => {
     view.unmount()
 
     const again = renderBanner(project)
-    fireEvent.click(
-      again.getByRole("button", { name: "Show the bar of branch feature/route-planner" })
-    )
+    const [show] = again.getAllByRole("button", {
+      name: "Show the bar of branch feature/route-planner",
+    })
+    fireEvent.click(show!)
     expect(again.getByRole("complementary")).toBeDefined()
   })
 })

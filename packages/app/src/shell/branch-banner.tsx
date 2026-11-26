@@ -2,7 +2,7 @@ import { getProjectInfoOptions } from "@sixb/client/hooks"
 import { defineMessages, type MessageTree, type Translation, useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowLeft, ChevronDown, ChevronUp, Database, GitFork, RefreshCw } from "lucide-react"
+import { ArrowUpRight, ChevronDown, ChevronUp, Database, GitFork, RefreshCw } from "lucide-react"
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { useFormat } from "../pages/section-ui"
@@ -89,6 +89,7 @@ export function BranchBar({
   const format = useFormat()
   const short = useShortAge()
   const bar = useRef<HTMLElement>(null)
+  const strip = useRef<HTMLButtonElement>(null)
   const [collapsed, setCollapsed] = useState(() => readCollapsed(branch.name))
   // The age reads "2 minutes ago": say it again each minute.
   const [, tick] = useState(0)
@@ -97,11 +98,12 @@ export function BranchBar({
     return () => clearInterval(timer)
   }, [])
 
-  // Shown, it takes its height from the screen a filling layout uses, before the first paint,
-  // and follows it: the bar is taller on a phone, where its buttons are finger-sized.
+  // It takes its height from the screen a filling layout uses, before the first paint, and
+  // follows it: the bar is taller on a phone, where its buttons are finger-sized. Folded, a phone
+  // keeps a strip that takes its own; a wide screen's tab, over the page, takes none.
   useLayoutEffect(() => {
-    const element = bar.current
-    if (collapsed || !element) return
+    const element = collapsed ? strip.current : bar.current
+    if (!element) return
     const root = document.documentElement
     const measure = () => root.style.setProperty("--app-top-inset", `${element.offsetHeight}px`)
     measure()
@@ -130,23 +132,21 @@ export function BranchBar({
       ? `${production}/console/branches?${new URLSearchParams({ branch: branch.name, refresh: "1" })}`
       : null
 
-  // Folded, a hairline in the bar's color stays on top of the page, with a tab naming the branch.
-  // Both go at the end of the document: over every page, full-screen ones included, and under
-  // the dialogs opened after them. On a phone the tab takes a finger-sized touch area.
+  // Folded on a phone, a slim strip naming the branch stays above the page, which starts below it:
+  // a phone has no room the page doesn't use. On a wide screen, a hairline in the bar's color with
+  // a tab naming the branch, at the end of the document: over every page, full-screen ones
+  // included, and under the dialogs opened after them.
   if (collapsed) {
-    return createPortal(
+    const show = messages.show(branch.name)
+    return (
       <>
-        <div
-          aria-hidden
-          className={cn("pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5", BAR_COLORS)}
-        />
         <button
+          ref={strip}
           type="button"
           onClick={() => toggle(false)}
-          aria-label={messages.show(branch.name)}
-          title={branch.name}
+          aria-label={show}
           className={cn(
-            "fixed top-0 left-1/2 z-50 flex h-6 max-w-[min(16rem,70vw)] -translate-x-1/2 items-center gap-1.5 rounded-b-lg px-2.5 text-[0.6875rem] outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:h-8 max-sm:min-w-11 max-sm:after:absolute max-sm:after:inset-x-0 max-sm:after:top-0 max-sm:after:h-11 max-sm:after:content-['']",
+            "box-content flex h-7 w-full shrink-0 items-center justify-center gap-1.5 px-4 pt-[env(safe-area-inset-top,0px)] text-[0.6875rem] outline-none focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:ring-inset sm:hidden",
             BAR_COLORS
           )}
         >
@@ -154,8 +154,30 @@ export function BranchBar({
           <span className="min-w-0 truncate font-mono">{branch.name}</span>
           <ChevronDown aria-hidden className="size-3 shrink-0 opacity-70" />
         </button>
-      </>,
-      document.body
+        {createPortal(
+          <div className="max-sm:hidden">
+            <div
+              aria-hidden
+              className={cn("pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5", BAR_COLORS)}
+            />
+            <button
+              type="button"
+              onClick={() => toggle(false)}
+              aria-label={show}
+              title={branch.name}
+              className={cn(
+                "fixed top-0 left-1/2 z-50 flex h-6 max-w-[min(16rem,70vw)] -translate-x-1/2 items-center gap-1.5 rounded-b-lg px-2.5 text-[0.6875rem] outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                BAR_COLORS
+              )}
+            >
+              <GitFork aria-hidden className="size-3 shrink-0 opacity-70" />
+              <span className="min-w-0 truncate font-mono">{branch.name}</span>
+              <ChevronDown aria-hidden className="size-3 shrink-0 opacity-70" />
+            </button>
+          </div>,
+          document.body
+        )}
+      </>
     )
   }
 
@@ -164,7 +186,8 @@ export function BranchBar({
       ref={bar}
       aria-label={messages.region(branch.name)}
       className={cn(
-        "relative z-50 flex h-11 w-full shrink-0 items-center gap-2 pl-3 text-[0.75rem] sm:h-8 sm:gap-2 sm:px-4",
+        // Under an installed app's status bar it takes the safe area: pages below it don't.
+        "relative z-50 box-content flex h-11 w-full shrink-0 items-center gap-2 pt-[env(safe-area-inset-top,0px)] pl-3 text-[0.75rem] sm:h-8 sm:px-4",
         BAR_COLORS
       )}
     >
@@ -173,39 +196,43 @@ export function BranchBar({
       <span className="min-w-0 truncate font-mono font-medium" title={branch.name}>
         {branch.name}
       </span>
-      {/* A phone says the age beside an icon, and leaves it out under 360 px: the name comes first. */}
+      {/* The name comes first: a phone says the age beside an icon, from 400 px wide. */}
       {age ? (
         <>
-          <span aria-hidden className="shrink-0 opacity-40 max-[359px]:hidden">
+          <span aria-hidden className="shrink-0 opacity-40 max-[399px]:hidden">
             ·
           </span>
           <span className="hidden min-w-0 truncate opacity-75 sm:inline">{age}</span>
           <span
             title={age}
-            className="flex shrink-0 items-center gap-1 opacity-75 max-[359px]:hidden sm:hidden"
+            // Set close: at this size the system font's own tracking opens "il y a" apart.
+            className="flex shrink-0 items-center gap-1 tracking-tight whitespace-nowrap opacity-75 max-[399px]:hidden sm:hidden"
           >
             <Database aria-hidden className="size-3" />
-            <span className="sr-only">{messages.dataShort}</span>
+            <span className="sr-only">{`${messages.dataShort} `}</span>
             {short(branch.dataTakenAt as string)}
           </span>
         </>
       ) : null}
       <span className="flex-1" />
-      {refreshUrl ? (
-        <BarAction href={refreshUrl} label={messages.refreshLabel(branch.name)} newTab>
-          <RefreshCw aria-hidden className="size-3.5" />
-          <span className="hidden sm:inline">{messages.refresh}</span>
+      {/* A phone's finger-sized actions sit side by side; their icons keep them apart. */}
+      <span className="flex shrink-0 items-center sm:gap-2">
+        {refreshUrl ? (
+          <BarAction href={refreshUrl} label={messages.refreshLabel(branch.name)} newTab>
+            <RefreshCw aria-hidden className="size-3.5" />
+            <span className="hidden sm:inline">{messages.refresh}</span>
+          </BarAction>
+        ) : null}
+        {production ? (
+          <BarAction href={production} label={messages.back}>
+            <ArrowUpRight aria-hidden className="size-3.5" />
+            <span className="hidden sm:inline">{messages.back}</span>
+          </BarAction>
+        ) : null}
+        <BarAction label={messages.hide} onClick={() => toggle(true)}>
+          <ChevronUp aria-hidden className="size-3.5" />
         </BarAction>
-      ) : null}
-      {production ? (
-        <BarAction href={production} label={messages.back}>
-          <ArrowLeft aria-hidden className="size-3.5" />
-          <span className="hidden sm:inline">{messages.back}</span>
-        </BarAction>
-      ) : null}
-      <BarAction label={messages.hide} onClick={() => toggle(true)}>
-        <ChevronUp aria-hidden className="size-3.5" />
-      </BarAction>
+      </span>
     </aside>
   )
 }

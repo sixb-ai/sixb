@@ -80,8 +80,9 @@ test("the adaptive surface passes host welcome content to its conversation", () 
 })
 
 // The conversations and a conversation are pages of their own, over the app: they start below a
-// bar above it, such as a branch's, which they once covered whole. Red check: put `inset-0` back on
-// either page's root (`agent/react-router.tsx`).
+// bar above it, such as a branch's, which they once covered whole, and leave the status bar's room
+// to it. Red check: put `inset-0` back on either page's root (`agent/react-router.tsx`), or its
+// plain safe-area padding, which doubled the gap under the bar.
 test("the conversation pages start below a bar above the app", () => {
   const offset = /^<section class="fixed inset-x-0 top-\[var\(--app-top-inset,0px\)\] /
   const page = (element: ReturnType<typeof createElement>, path: string) =>
@@ -93,8 +94,14 @@ test("the conversation pages start below a bar above the app", () => {
       )
     )
 
-  expect(page(createElement(AgentThreadsPage), "/threads")).toMatch(offset)
-  expect(page(createElement(AgentChatPage), "/threads/thr_1")).toMatch(offset)
+  const safeArea = "pt-[max(0px,calc(env(safe-area-inset-top,0px)-var(--app-top-inset,0px)))]"
+  for (const html of [
+    page(createElement(AgentThreadsPage), "/threads"),
+    page(createElement(AgentChatPage), "/threads/thr_1"),
+  ]) {
+    expect(html).toMatch(offset)
+    expect(html).toContain(safeArea)
+  }
 })
 
 // On a phone the dock fills the screen: it starts below a bar above the app, such as a branch's,

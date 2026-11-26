@@ -111,6 +111,12 @@ html[data-keyboard] {
     border-top: env(safe-area-inset-top, 0px) solid transparent;
   }
 
+  /* Below a bar above the app, which takes the status bar's room itself, the sidebar and the page
+     beside it take only what the bar leaves. Sheets rise over the bar and keep the whole room. */
+  :is([data-slot="sidebar-inner"], [data-slot="sidebar-inset"]) {
+    border-top-width: max(0px, calc(env(safe-area-inset-top, 0px) - var(--app-top-inset, 0px)));
+  }
+
   /* A phone on its side has the camera at one end: the sidebar's content clears the left, as its
      background runs under it, and the page clears the right. */
   :is([data-slot="sidebar-inner"], [data-slot="sidebar"][data-mobile]) {
