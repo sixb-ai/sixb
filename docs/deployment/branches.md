@@ -34,6 +34,9 @@ SIXB_BRANCH_ALLOW=https://redis.dev.shop.example \
 |---|---|
 | `@sixb/pg` for production, PostgreSQL 16+ | Each branch gets a database on production's instance, with a role limited to it |
 | A role that may `CREATEROLE` and `CREATEDB` | Production creates and drops each branch's role and database; managed admin users such as `doadmin` have both |
+| Production's database closed to `PUBLIC` | `REVOKE CONNECT ON DATABASE <production's> FROM PUBLIC` (grant it back to production's user): a branch's role could connect to it otherwise, so production refuses to host branches until then |
+| `max_prepared_transactions = 0` | PostgreSQL's default. A prepared transaction outlives its session, and no limit production sets on a branch could end it |
+| A lock table that fits the ontology | A branch's copy takes about 120 locks plus 20 per object type, within a quarter of the lock table (`max_locks_per_transaction` × connections): raise `max_locks_per_transaction` for a large ontology. Production says so before the worker starts |
 | `@sixb/sandboxes-vercel` or `@sixb/sandboxes-smolvm` | The branch serves from it. `@sixb/sandboxes-local` runs it on production's own host, so production refuses it |
 | The sandbox factory's `auth` for a private repository | Production reads the repository's branches and the branch clones with it: `githubApp(...)`, or `githubOAuth(...)`, which reads and clones as the branch's creator, so its creator connects GitHub first. Without it, the branch says production cannot read the repository. smolvm cannot clone with it, so production refuses that pair |
 | Bun 1.4.2+ in the sandbox | A branch installs and runs with Bun: boot the sandbox from the [Sixb agent image](https://github.com/sixb-ai/sixb/tree/main/sandboxes/agent-image#use-with-a-sandbox-provider), which has it. Otherwise, as on Vercel's stock runtime (Node only), the branch installs Bun 1.4.4 from the npm registry first, checked against the registry's sha512 |
@@ -83,9 +86,9 @@ capped at 1 GiB when production's database user may set `temp_file_limit` (a sup
 granted `SET` on it); managed PostgreSQL often keeps that to its own superuser, and the branch then
 says it runs uncapped. Production cancels its statements past 15 minutes, ends its transactions past 30 minutes
 and its sessions idle in a transaction past 60 seconds, so a branch never holds vacuum back for
-long. Production stops a branch whose database grows past 20 GiB, or whose code holds more
-database locks than it needs, holds up production's sessions, or connects to another database,
-and says so on the branch. A stopped branch can no longer log in. PostgreSQL lets every role
-connect to the cluster's other databases unless they revoke `CONNECT` from `PUBLIC`: revoke it, or
-limit branch roles (`sixb_branch_…`) in `pg_hba.conf` (large objects a branch creates there also
-keep its role from being dropped).
+long. Production stops a branch whose database grows past 20 GiB or twice production's own,
+whichever is larger, or whose code holds more database locks than it needs, holds up production's
+sessions, or connects to another database, and says so on the branch. A stopped branch can no
+longer log in. PostgreSQL lets every role connect to the cluster's other databases unless they
+revoke `CONNECT` from `PUBLIC`: revoke it on those too, or limit branch roles (`sixb_branch_…`) in
+`pg_hba.conf` (large objects a branch creates there also keep its role from being dropped).

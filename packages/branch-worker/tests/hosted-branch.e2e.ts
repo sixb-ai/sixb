@@ -141,6 +141,10 @@ beforeAll(async () => {
   await git(work, "push", "--quiet", "origin", NAME)
 
   admin = new Bun.SQL(process.env.DATABASE_URL!)
+  // Production hosts branches only on a database closed to PUBLIC: a branch's role could
+  // connect to it otherwise.
+  await admin`REVOKE CONNECT ON DATABASE postgres FROM PUBLIC`
+  await admin`GRANT CONNECT ON DATABASE postgres TO postgres`
   storage = new PostgresStorage({
     connectionString: process.env.DATABASE_URL,
     schemaName: "shop_prod",
