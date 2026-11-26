@@ -474,10 +474,13 @@ describe("a held branch", () => {
   // A delete asked while the worker stopped an idle branch was written over by the worker's
   // retry: the branch came back stopped, its copy kept. Guard check: write `changes` whatever
   // `askedSince` says in `write` (`held-branch.ts`).
+  // Guard check for the heartbeat case: let `renewLease` move `decidedOn` too.
   test.each([
-    ["delete", "deleted"],
-    ["open", "running"],
-  ] as const)("keeps the %s asked while it stops the branch", async (asked, wanted) => {
+    ["delete", "deleted", false],
+    ["open", "running", false],
+    ["delete", "deleted", true],
+    ["open", "running", true],
+  ] as const)("keeps the %s asked while it stops the branch, wanted %s, heartbeat between: %s", async (asked, wanted, heartbeat) => {
     const { lab, host, bo } = await setup()
     const held = await hold(host)
     await ready(host)
@@ -492,6 +495,11 @@ describe("a held branch", () => {
       (kills) => kills === 1
     )
     await bo.branches[asked](NAME)
+    if (heartbeat) {
+      // The lease's renewal reads the row the request moved on, before the stop writes.
+      jest.advanceTimersByTime(20_000)
+      await flush()
+    }
     release()
     await settled(held.life)
 

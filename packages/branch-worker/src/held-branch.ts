@@ -129,6 +129,12 @@ export class HeldBranch {
   private readonly branches: BranchStorage
   /** Ends what the hold does: the worker is stopping or draining, or the hold lost the branch. */
   private readonly controller = new AbortController()
+  /**
+   * The row as this hold last read or wrote it: what it decides on. The heartbeat keeps
+   * `branch` fresh for its revision, and never moves this, so a delete it brings is still news
+   * to `write`.
+   */
+  private decidedOn: BranchRecord
   /** Whether the hold ended because another worker may hold the branch now. */
   private lost = false
   /** Why production closed the branch: its runtime can log in no more, so it stops. */
@@ -172,6 +178,7 @@ export class HeldBranch {
     private readonly stopping: AbortSignal
   ) {
     this.branches = host.storage.hostedBranches as BranchStorage
+    this.decidedOn = branch
     this.leaseUntil = branch.leaseExpiresAt?.getTime() ?? 0
     if (stopping.aborted) this.controller.abort()
     stopping.addEventListener("abort", () => this.controller.abort(), { once: true })
@@ -932,6 +939,7 @@ export class HeldBranch {
     if (!branch || branch.owner !== this.settings.owner) throw new LostBranchError()
 
     this.branch = branch
+    this.decidedOn = branch
     return branch
   }
 
@@ -941,7 +949,7 @@ export class HeldBranch {
    * it writes what it found and leaves `wanted` to them.
    */
   private async write(changes: BranchChanges): Promise<void> {
-    const decidedOn = this.branch
+    const decidedOn = this.decidedOn
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const written = await this.branches.update(
@@ -955,6 +963,7 @@ export class HeldBranch {
       )
       if (written) {
         this.branch = written
+        this.decidedOn = written
         return
       }
       await this.read()
