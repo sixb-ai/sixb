@@ -355,7 +355,7 @@ function deniedMessage(
     case "agentMemory.manage":
       return `[Sixb] Principal '${principalId}' is not allowed to manage the project's Agent memory.`
     case "source.manage":
-      return `[Sixb] Principal '${principalId}' is not allowed to manage the project's source, which copying production's data to a branch and running a schedule now take.`
+      return `[Sixb] Principal '${principalId}' is not allowed to manage the project's source.`
     case "connector.manage":
       return `[Sixb] Principal '${principalId}' is not allowed to manage connector '${request.connectorId}'.`
     case "object.query": {

@@ -64,9 +64,9 @@ sixb schedules run hourly-invoices
 | From code | `sixb.schedules.run("hourly-invoices")` |
 | API | `POST /api/schedules/:scheduleId/runs` |
 
-What it starts runs as on the schedule's clock, not as you: a sync of personal accounts reads
-everyone's, and a workflow starts with no requester. That is why it takes managing the project's
-source, not only the run grants.
+It starts the same runs as the schedule's clock would, not runs as you: a sync of personal accounts
+reads every member's account, and a workflow starts with no requester. So it takes managing the
+project's source, besides the run grants.
 
 An event schedule, or one attached to nothing, is refused. On a branch, so is a schedule that starts
 a sync: syncs do not run there.

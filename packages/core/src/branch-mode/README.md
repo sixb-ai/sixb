@@ -92,4 +92,3 @@ it is in production.
 | `githubOAuth`'s `fallback`, on a run no person requested | What the fallback grants, such as `githubApp` below |
 | `githubApp` | A token for that one repository, from the App key the branch's environment holds, with the source's `access`. `"write"` can push to any branch, and merge or delete branches through the API |
 | A project's own `SandboxSourceAuth` | Whatever it grants. Only a token it asks for through `connectionToken` is refused |
-
