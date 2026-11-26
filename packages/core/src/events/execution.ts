@@ -9,7 +9,11 @@ import {
 } from "../execution/authorized-object-reader"
 import type { EventSources } from "../execution/object-reader-clearance"
 import { redactDomainEvent } from "../objects/clearance-redaction"
-import type { PropertyClearance } from "../objects/property-clearance"
+import {
+  declaredProperties,
+  type PropertyClearance,
+  readableUnder,
+} from "../objects/property-clearance"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type {
   EventsAppendInput,
@@ -94,8 +98,11 @@ export function createEventsRuntime(
               (link !== undefined && event.payload.shareGrantId === link))
         )
       }
-      case "unrestricted":
-        return events
+      case "unrestricted": {
+        // Every marking is cleared, but a key the code no longer declares is still left out.
+        const declared = declaredProperties(runtime.ontology)
+        return events.map((event) => redactDomainEvent(event, declared))
+      }
       case "principal": {
         const granted = await visibleByGrants(authority.context, events)
         const shown = await withoutHiddenSyncRuns(granted, access)
@@ -133,8 +140,8 @@ export function createEventsRuntime(
     const shown = await visibleUnderConditions(reader, readable, conditions, clearanceFor, history)
 
     return shown.map((event) => {
-      const redacting = clearanceFor(event)
-      const redacted = redacting ? redactDomainEvent(event, redacting) : event
+      const readable = readableUnder(runtime.ontology, clearanceFor(event))
+      const redacted = redactDomainEvent(event, readable)
       return withoutHiddenPriorState(event, redacted, conditions)
     })
   }

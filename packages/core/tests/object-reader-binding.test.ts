@@ -778,9 +778,19 @@ describe("AuthorizedObjectReader", () => {
       value: { admin: true },
       enumerable: true,
     })
+    // Rows return only declared properties, so the type declares the key, as an id may.
+    const WithPrototypeKey = defineObjectType({
+      id: Proposal.id,
+      name: "Proposal",
+      properties: [
+        ...Proposal.properties,
+        prop("__proto__", { type: "map", keySchema: "string", valueSchema: "boolean" }),
+      ],
+      links: Proposal.links,
+    })
     const reader = createAuthorizedObjectReader({
       scope: principalScope("detach-values", [Proposal.id]),
-      ontology,
+      ontology: new OntologyRegistry({ sources: [WithPrototypeKey, LineItem, Secret] }),
       objectStorage: backend.storage,
     })
 

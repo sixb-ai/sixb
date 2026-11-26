@@ -17,7 +17,7 @@ import { createAuthorizedObjectReader } from "../src/execution/authorized-object
 import { createDelegatedRequestScope, createTestingScope } from "../src/execution/scopes"
 import { redactDomainEvent } from "../src/objects/clearance-redaction"
 import { resolvePropertyClearance } from "../src/objects/property-clearance"
-import type { OntologyRegistry } from "../src/ontology"
+import { OntologyRegistry } from "../src/ontology"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -332,7 +332,18 @@ describe("markings on writes and events", () => {
   test("redacted events share one frozen redactions record and copy only own keys", async () => {
     const host = createHost()
     const { trusted } = await seed(host)
-    const clearance = resolvePropertyClearance(host.definitions.ontology, new Set())
+    // Invoice declares `__proto__` here, as an id may: only a declared key is kept.
+    const InvoiceWithPrototypeKey = defineObjectType({
+      id: Invoice.id,
+      name: "Invoice",
+      properties: [
+        ...Invoice.properties,
+        prop("__proto__", { type: "map", keySchema: "string", valueSchema: "double" }),
+      ],
+      links: Invoice.links,
+    })
+    const ontology = new OntologyRegistry({ sources: [Customer, InvoiceWithPrototypeKey] })
+    const clearance = resolvePropertyClearance(ontology, new Set())
     const stored = (await trusted.events.read()).find(
       (event) => event.type === "object.created" && event.payload.primaryId === "inv-1"
     )
@@ -340,7 +351,8 @@ describe("markings on writes and events", () => {
       throw new Error("expected a clearance and the created invoice event")
     }
 
-    // A parsed `__proto__` key is an own property: it must stay one, not become the prototype.
+    // A parsed `__proto__` key is an own property: it must stay one through the copy that leaves
+    // out the marked `amount`, not become the copy's prototype.
     const properties: typeof stored.payload.properties = JSON.parse(
       '{"id":"inv-1","__proto__":{"amount":1},"amount":120}'
     )
@@ -384,6 +396,20 @@ describe("markings on other read paths", () => {
         ],
       })
     ).toEqual([false, true])
+
+    // A property the type does not declare is no one's to read, with or without clearance.
+    // Reproduce: check only the reader's markings in `canReadObjectProperty`, and both read it.
+    const trusted = createAuthorizedObjectReader({
+      scope: createTestingScope({ projectId }),
+      ontology: host.definitions.ontology as OntologyRegistry,
+      objectStorage: host.storage.objects,
+    })
+    for (const any of [reader, trusted]) {
+      expect(await any.canReadObjectProperty({ ...item, propertyId: "gate" })).toBe(false)
+      expect(
+        await any.canReadObjectPropertiesBatch({ items: [{ ...item, propertyId: "gate" }] })
+      ).toEqual([false])
+    }
   })
 
   test("shared access carries no clearance", async () => {

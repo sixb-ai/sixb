@@ -8,6 +8,7 @@ import {
   type DatasetRow,
   defineDataset,
   defineGroup,
+  defineMarking,
   defineObjectType,
   defineProjection,
   defineRole,
@@ -414,4 +415,40 @@ test("a type the person reads through a condition travels as created objects", a
     })
   )
   expect(branch.text).not.toContain("renamed by hand")
+})
+
+// Reproduce: in snapshots/export.ts `exportObjectEdits`, send each edit's value as stored: the
+// code d-7 was given before the property was dropped leaves production with it.
+test("an edit travels without the properties its type no longer declares", async () => {
+  const prod = await production()
+
+  // Devices had a code, marked for a clearance the fleet lacks. The code dropped it since.
+  const secret = defineMarking("branch-secret")
+  const DeviceBefore = defineObjectType({
+    id: Device.id,
+    name: "Device",
+    properties: [...Device.properties, prop("code", "string", { markings: [secret] })],
+    links: Device.links,
+  })
+  const before = new SixbHost({
+    id: "branch-projection",
+    ontology: [Site, DeviceBefore],
+    markings: [secret],
+    broker: new InMemoryBroker(),
+    queues: new InMemoryQueues(),
+    blobStorage: new InMemoryBlobStorage(),
+    lakeStorage: prod.lake,
+    storage: prod.storage,
+  })
+  await createTestSixb(before)
+    .objects(DeviceBefore)
+    .upsert({ properties: { id: "d-7", code: "stale-code-7" } })
+
+  const branch = await branchOf(prod)
+
+  expect(branch.report.types).toContainEqual(
+    expect.objectContaining({ objectTypeId: Device.id, reprojectable: true })
+  )
+  expect(branch.text).toContain("renamed by hand")
+  expect(branch.text).not.toContain("stale-code-7")
 })
