@@ -523,7 +523,8 @@ function BranchRow({
   const onTheWay = ON_THE_WAY.has(status)
   const running = branch.wanted === "running" && status !== "attention"
   const pill = <Pill tone={statusTones[status]}>{messages.status[status]}</Pill>
-  // Production closed it for what its database held: starting it again would close it again.
+  // Production closed it for what its data grew to: starting it again would close it again. A
+  // branch closed for anything else keeps its data, and Start gives it a new login.
   const closedForDatabase =
     status === "stopped" && branch.notices.some((notice) => notice.code === "database-limit")
   // Each status has one thing to do, which the row's button does: Open a ready branch, Start a

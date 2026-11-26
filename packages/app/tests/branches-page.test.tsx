@@ -417,18 +417,52 @@ describe("Console › Branches", () => {
     expect(view.getAllByText("sixb worker branches")).toHaveLength(1)
   })
 
-  // Production closed the branch for what its database held: starting it again would close it
+  // Production closed the branch for what its data grew to: starting it again would close it
   // again, so its one action is a refresh. Red check: drop `closedForDatabase` from `BranchRow`.
-  test("offers a refresh on a branch production stopped for its database", async () => {
+  test("offers a refresh on a branch production stopped for its data", async () => {
     const { view } = renderPage({
       branches: [
         branch({
           wanted: "stopped",
           state: "stopped",
-          // A crowded closure, as production words it: the Console says it in its own words.
+          // As production words it: the Console says it in its own words.
           notices: [
             {
               code: "database-limit",
+              message:
+                "This branch stopped: its data grew past 20 GB on production's database, its limit. Refresh it from production to start again from a new copy.",
+            },
+          ],
+        }),
+      ],
+      unavailable: null,
+      now: NOW,
+    })
+
+    expect(
+      view.getByText(
+        "Production stopped this branch: its data grew past its limit. Refresh it to start over from a new copy."
+      )
+    ).toBeDefined()
+    expect(view.queryByRole("button", { name: "Start" })).toBeNull()
+    fireEvent.click(view.getByRole("button", { name: "Refresh…" }))
+    expect(within(await view.findByRole("alertdialog")).getByRole("heading").textContent).toBe(
+      "Refresh feature/route-planner from production?"
+    )
+  })
+
+  // Closed for its locks, or for reaching another database, it keeps its data: a refresh would
+  // throw away what it wrote, so Start comes first and Refresh waits in the menu. Red check: test
+  // `notice.code.startsWith("database-")` in `closedForDatabase` (`BranchRow`).
+  test("offers Start on a branch production stopped for anything but its data", async () => {
+    const { view } = renderPage({
+      branches: [
+        branch({
+          wanted: "stopped",
+          state: "stopped",
+          notices: [
+            {
+              code: "database-closed",
               message:
                 "This branch stopped: branches together held more database locks than production's database can spare, and this one held the most (900). Start it again to keep going.",
             },
@@ -441,14 +475,20 @@ describe("Console › Branches", () => {
 
     expect(
       view.getByText(
-        "Production stopped this branch: its data grew past its limit, or it held up production's database. Refresh it to start over from a new copy."
+        "Production stopped this branch: it held up production's database, or its code reached a database it may not use. What it wrote is kept: start it to keep going."
       )
     ).toBeDefined()
-    expect(view.queryByRole("button", { name: "Start" })).toBeNull()
-    fireEvent.click(view.getByRole("button", { name: "Refresh…" }))
-    expect(within(await view.findByRole("alertdialog")).getByRole("heading").textContent).toBe(
-      "Refresh feature/route-planner from production?"
-    )
+    expect(view.getByRole("button", { name: "Start" })).toBeDefined()
+    expect(view.queryByRole("button", { name: "Refresh…" })).toBeNull()
+
+    await act(async () => {
+      fireEvent.pointerDown(view.getByRole("button", { name: "More for feature/route-planner" }), {
+        button: 0,
+        ctrlKey: false,
+        pointerType: "mouse",
+      })
+    })
+    expect(view.getByRole("menuitem", { name: "Refresh from production…" })).toBeDefined()
   })
 
   // Removal proof: drop the toast from the status effect, and a branch turns ready unseen.
