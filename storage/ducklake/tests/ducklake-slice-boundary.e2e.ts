@@ -27,6 +27,11 @@ const stores = defineDataset("boundary.stores", {
   schema: [col("id", "string"), col("city", "string")],
   partitionBy: ["city"],
 })
+const customers = defineDataset("boundary.customers", {
+  schema: [col("email", "string"), col("revision", "int64"), col("name", "string")],
+  primaryKey: "email",
+  sequenceBy: "revision",
+})
 
 /**
  * A test on a production lake of its own, closed once its body settles: a body that outlives its
@@ -326,6 +331,58 @@ describe("a slice's boundary", () => {
     }
   )
 
+  // Red check: in DuckLakeForks.sliceTables, drop `withoutTombstones` from the source-ordering
+  // table: the slice's catalog and the files it serves name every erased customer.
+  lakeTest(
+    "its source ordering holds no key the version deleted, and still orders a branch's merges",
+    async (lake) => {
+      await lake.production.createDataset(customers)
+      await lake.merge(
+        customers,
+        Array.from({ length: 40 }, (_, index) => change.upsert(customer(index, 1)))
+      )
+
+      // Twelve erasures in one merge write their tombstones to a file; the last one is inlined.
+      const erased = [...Array.from({ length: 12 }, (_, index) => email(index)), email(39)]
+      await lake.merge(
+        customers,
+        erased.slice(0, 12).map((key) => change.delete({ email: key }, { sequence: 2 }))
+      )
+      await lake.merge(customers, [change.delete({ email: email(39) }, { sequence: 2 })])
+
+      const { versions, slicePath, files } = await lake.slice([customers.id])
+      const leaving = [await lake.catalogText(slicePath)]
+      for (const path of files) leaving.push(await lake.rawText(path))
+
+      for (const key of erased) expect(leaving.join("\n")).not.toContain(key)
+      expect(leaving.join("\n")).toContain(email(20))
+
+      // The branch's merges are ordered against the keys it holds: an older revision is ignored.
+      const branch = lake.openBranch(slicePath, await lake.serve(files))
+      try {
+        const merge = await branch.beginMerge({ dataset: customers })
+        await merge.writeChanges([
+          change.upsert({ ...customer(20, 0), name: "Stale" }),
+          change.upsert({ ...customer(21, 3), name: "Renamed" }),
+        ])
+        await merge.commit()
+
+        const rows = await collectRows(branch.readRows({ datasetId: customers.id }))
+        expect(rows).toHaveLength(40 - erased.length)
+        expect(rows.find((row) => row.email === email(20))?.name).toBe("Customer 20")
+        expect(rows.find((row) => row.email === email(21))?.name).toBe("Renamed")
+      } finally {
+        await branch.close()
+      }
+
+      const production = await collectRows(
+        lake.production.readRows(versions[0] as DatasetVersionRef)
+      )
+      expect(production).toHaveLength(40 - erased.length)
+    },
+    SLOW_TEST_MS
+  )
+
   lakeTest("partition values of any text reach their file", async (lake) => {
     await lake.write(stores, [
       { id: "s-1", city: "São Paulo / Centro 50%" },
@@ -345,6 +402,14 @@ describe("a slice's boundary", () => {
 
 function person(index: number, salary: number) {
   return { id: `p-${index}`, name: `Person ${index}`, salary }
+}
+
+function email(index: number) {
+  return `customer-${index}@example.com`
+}
+
+function customer(index: number, revision: number) {
+  return { email: email(index), revision, name: `Customer ${index}` }
 }
 
 /** A production lake for one test, with what the test does to it. */
@@ -447,6 +512,30 @@ async function productionLake() {
     }
   }
 
+  /** Every row of a served file, as text. */
+  async function rawText(path: string): Promise<string> {
+    const file = await production.forks.openFile(path)
+    if (!file) throw new Error(`No file at '${path}'`)
+    const local = join(rootDir, `raw-${Math.random()}.parquet`)
+    await Bun.write(local, new Response(file.read()))
+
+    return withDuckDb(async (query) => JSON.stringify(await query(`SELECT * FROM '${local}'`)))
+  }
+
+  /** Every row of every table of a slice's catalog, as text. */
+  async function catalogText(slicePath: string): Promise<string> {
+    return withDuckDb(async (query) => {
+      await query(`ATTACH '${slicePath}' AS slice (READ_ONLY)`)
+      const tables = await query(
+        "SELECT table_name FROM duckdb_tables() WHERE database_name = 'slice'"
+      )
+      const rows = []
+      for (const { table_name } of tables)
+        rows.push(await query(`SELECT * FROM slice."${table_name}"`))
+      return JSON.stringify(rows)
+    })
+  }
+
   function openBranch(slicePath: string, url: string): DuckLakeStorage {
     const directory = join(rootDir, `branch-${Math.random()}`)
     return new DuckLakeStorage({
@@ -494,6 +583,8 @@ async function productionLake() {
     merge,
     slice,
     rawRows,
+    rawText,
+    catalogText,
     openBranch,
     serve,
     async close() {
@@ -506,6 +597,23 @@ async function productionLake() {
 }
 
 type ProductionLake = Awaited<ReturnType<typeof productionLake>>
+
+/** Runs `run` on a DuckDB of its own, in memory. */
+async function withDuckDb<T>(
+  run: (query: (sql: string) => Promise<Record<string, unknown>[]>) => Promise<T>
+): Promise<T> {
+  const instance = await DuckDBInstance.create(":memory:")
+  const connection = await instance.connect()
+  try {
+    return await run(
+      async (sql) =>
+        (await connection.runAndReadAll(sql)).getRowObjectsJson() as Record<string, unknown>[]
+    )
+  } finally {
+    connection.closeSync()
+    instance.closeSync()
+  }
+}
 
 async function sorted(rows: AsyncIterable<Record<string, unknown>> | Record<string, unknown>[]) {
   const lines: string[] = []

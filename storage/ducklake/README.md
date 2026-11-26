@@ -755,8 +755,12 @@ files   ◄── GET/HEAD, ranges, token ──      loopback proxy ── disk
 branch can read whole with its token. They hold no row those versions do not return. A data file
 part of whose rows a version deleted (in a delete file or in the catalog), or that compaction
 merged with rows written after the version (`partial_max` above it), is served as a copy without
-them, never as itself. The loopback proxy's password only keeps other local processes off
-the branch's token; it is not the boundary.
+them, never as itself. A `sequenceBy` dataset's source-ordering table goes without its tombstones,
+the keys of deleted rows: inlined ones are left out, and a file that may hold one (its stats do
+not count `content` as never null) is served as a copy without them, named apart from the copies
+cut before slices left them out. The branch's sequenced merges order against the live keys. The
+loopback proxy's password only keeps other local processes off the branch's token; it is not the
+boundary.
 
 `lakeStorage.forks` implements core's `LakeForks`. Every call runs on a DuckDB connection of its
 own (`withDedicatedConnection`), which holds a read and the attachment but not the attachment

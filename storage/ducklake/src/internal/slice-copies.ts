@@ -30,6 +30,8 @@ export interface CopyInput {
   readonly recordCount: bigint
   /** The copy's name, which says what it holds. */
   readonly name: string
+  /** A condition the copy's rows meet too, such as a source-ordering table's live keys. */
+  readonly where?: string
 }
 
 /**
@@ -65,6 +67,7 @@ export async function writeCopy(
     } else {
       rows = `filename = ${quoteSqlString(input.location)}`
     }
+    if (input.where !== undefined) rows = `(${rows}) AND ${input.where}`
 
     // A local copy appears whole or not at all; an object store commits an upload whole.
     const target = location.includes("://")

@@ -116,7 +116,8 @@ export class DuckLakeForks implements LakeForks {
 
   /**
    * The tables the versions hold, each at its version's snapshot: a dataset's own table and the
-   * table it keeps source ordering in. Each version must exist and be at or before the point.
+   * table it keeps source ordering in, without its tombstones. Each version must exist and be at
+   * or before the point.
    */
   private async sliceTables(
     runtime: DuckDbQueryRuntime,
@@ -158,6 +159,7 @@ export class DuckLakeForks implements LakeForks {
           ...shared,
           tableId: table.sequenceTableId,
           tableName: encodeDatasetSequenceTableName(datasetId),
+          withoutTombstones: true,
         })
       }
     }

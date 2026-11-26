@@ -33,6 +33,20 @@ export interface SliceTable {
   readonly datasetId: string
   /** The version's producer, as its reader sees it. */
   readonly producer?: DatasetProducer
+  /**
+   * Set on a dataset's source-ordering table. A row of it without `content` is a tombstone: the
+   * key of a row deleted from the dataset, which its version no longer returns. The slice keeps
+   * the live keys only, which a branch's sequenced merges still order against.
+   */
+  readonly withoutTombstones?: true
+}
+
+/** The rows of a source-ordering table that are not tombstones. */
+const LIVE_KEYS = `${quoteIdentifier("content")} IS NOT NULL`
+
+/** The condition a table's rows meet in the slice, besides being live at its snapshot. */
+function keptRows(table: SliceTable): string | undefined {
+  return table.withoutTombstones ? LIVE_KEYS : undefined
 }
 
 export interface WriteCatalogSliceInput {
@@ -52,7 +66,10 @@ interface SliceFile {
   readonly location: string
   /** The path the route serves it under: in the data path, or a copy without deleted rows. */
   readonly path: string
-  /** Set when some of its rows are deleted at the snapshot: the copy that leaves them out. */
+  /**
+   * Set when the slice holds part of its rows: some are deleted at the snapshot, written after it,
+   * or tombstones. The copy that leaves them out.
+   */
   readonly copy?: string
   readonly rowIdStart: bigint | null
   readonly recordCount: bigint
@@ -108,6 +125,8 @@ const INLINED_TABLE = /^ducklake_inlined_(data_\d+_\d+|data_tables|delete_\d+)$/
  *   can no longer return.
  * - Inlined rows are decoded through DuckLake: a PostgreSQL catalog stores them encoded, and the
  *   slice stores them as a DuckDB catalog does.
+ * - A source-ordering table keeps no tombstone (`withoutTombstones`): a file holding one is served
+ *   as a copy without it, and inlined ones are left out.
  * - Snapshots: those of the versions, with their commit metadata as their reader sees it, and the
  *   point's own, with no change of its own.
  * - Nothing else: no other table, view, macro, file scheduled for deletion, or commit.
@@ -357,6 +376,7 @@ async function copyFiles(
     const table = input.tables.find((candidate) => candidate.tableId === file.tableId)
     if (!table || file.copy === undefined) continue
 
+    const kept = keptRows(table)
     const copy = await writeCopy(options, runtime, files, {
       table,
       location: file.location,
@@ -364,6 +384,7 @@ async function copyFiles(
       recordCount: file.recordCount,
       dataFileId: file.dataFileId,
       name: file.copy,
+      ...(kept === undefined ? {} : { where: kept }),
     })
     await runtime.run(`
       INSERT INTO ${into("ducklake_data_file")} BY NAME
@@ -391,6 +412,7 @@ async function copyFiles(
  * Inlined rows live at each table's snapshot. They are read back through DuckLake by row id,
  * which prunes every file by its row-id range, so decoding them reads no data file. Inlined
  * deletes are not copied: the files they delete from are served as copies without those rows.
+ * Tombstones are left out once decoded: a PostgreSQL catalog stores `content` encoded.
  */
 async function copyInlinedRows(
   options: DuckLakeStorageOptions,
@@ -421,6 +443,7 @@ async function copyInlinedRows(
     const rowIds = (await runtime.query(liveRows)).map((live) => getBigIntLike(live, "row_id"))
     const relation = `${qualifiedTableName(options, table.tableName)} AT (VERSION => ${table.snapshotId})`
     const quoted = columns.map((column) => quoteIdentifier(column))
+    const kept = keptRows(table)
 
     await runtime.run(`
       CREATE TABLE ${into(name)} AS
@@ -433,6 +456,7 @@ async function copyInlinedRows(
       JOIN (
         SELECT rowid AS sixb_row_id, ${quoted.join(", ")} FROM ${relation}
         WHERE rowid IN (${rowIds.length === 0 ? "NULL" : rowIds.join(", ")})
+          ${kept === undefined ? "" : `AND ${kept}`}
       ) decoded ON decoded.sixb_row_id = live.row_id
     `)
     await runtime.run(
@@ -443,10 +467,12 @@ async function copyInlinedRows(
 
 /**
  * The data files each table reads at its snapshot, and whether any of their rows are deleted
- * there, by a delete file or in the catalog, or whether it holds rows of later commits (a file
- * compaction merged). A copy is named by the table's uuid, the file and the snapshot: what a file
- * holds at a snapshot never changes, whatever compaction does to it later, so every slice of that
- * version shares it, and a lake created again never reuses a name.
+ * there, by a delete file or in the catalog, whether it holds rows of later commits (a file
+ * compaction merged), or tombstones the slice leaves out. A copy is named by the table's uuid, the
+ * file and the snapshot: what a file holds at a snapshot never changes, whatever compaction does
+ * to it later, so every slice of that version shares it, and a lake created again never reuses a
+ * name. A copy without tombstones has a name of its own: one cut before slices left them out
+ * holds them, and is never reused for one that must not.
  */
 async function liveFiles(
   options: DuckLakeStorageOptions,
@@ -490,8 +516,11 @@ async function liveFiles(
     }
   }
 
+  const tombstoned = await filesWithTombstones(meta, runtime, tables)
+
   return rows.map((row) => {
     const tableId = getBigIntLike(row, "table_id")
+    const table = tables.find((candidate) => candidate.tableId === tableId)
     const dataFileId = getBigIntLike(row, "data_file_id")
     const location = getString(row, "location")
     if (!location.startsWith(dataPath)) {
@@ -508,8 +537,8 @@ async function liveFiles(
       row.partial_max !== undefined &&
       getBigIntLike(row, "partial_max") > cut
     const copy =
-      deleted.has(dataFileId.toString()) || partial
-        ? `${getString(row, "table_uuid")}-${dataFileId}-${cut}.parquet`
+      deleted.has(dataFileId.toString()) || partial || tombstoned.has(dataFileId.toString())
+        ? `${getString(row, "table_uuid")}-${dataFileId}-${cut}${table?.withoutTombstones ? "-live-keys" : ""}.parquet`
         : undefined
     return {
       tableId,
@@ -527,6 +556,32 @@ async function liveFiles(
 }
 
 /**
+ * The files of source-ordering tables that may hold a tombstone at their snapshot: every one
+ * whose stats do not count `content` as never null.
+ */
+async function filesWithTombstones(
+  meta: (table: string) => string,
+  runtime: DuckDbQueryRuntime,
+  tables: readonly SliceTable[]
+): Promise<ReadonlySet<string>> {
+  const ordering = tables.filter((table) => table.withoutTombstones)
+  if (ordering.length === 0) return new Set()
+
+  const rows = await runtime.query(
+    liveAt(ordering).select("f.data_file_id", meta("ducklake_data_file"), "f", {
+      joins: `
+        LEFT JOIN ${meta("ducklake_column")} c
+          ON c.table_id = f.table_id AND c.column_name = 'content' AND c.end_snapshot IS NULL
+        LEFT JOIN ${meta("ducklake_file_column_stats")} stats
+          ON stats.data_file_id = f.data_file_id AND stats.column_id = c.column_id
+      `,
+      where: "coalesce(stats.null_count, 1) > 0",
+    })
+  )
+  return new Set(rows.map((row) => getBigIntLike(row, "data_file_id").toString()))
+}
+
+/**
  * Counts each table's rows in the slice against production's version, in the cut's transaction.
  * The slice holds no deletes, so its files' record counts and its inlined rows are its rows.
  */
@@ -541,8 +596,9 @@ async function assertRowCounts(
   )
 
   for (const table of tables) {
+    const kept = keptRows(table)
     const [expected] = await runtime.query(
-      `SELECT count(*) AS rows FROM ${qualifiedTableName(options, table.tableName)} AT (VERSION => ${table.snapshotId})`
+      `SELECT count(*) AS rows FROM ${qualifiedTableName(options, table.tableName)} AT (VERSION => ${table.snapshotId}) ${kept === undefined ? "" : `WHERE ${kept}`}`
     )
     const [files] = await runtime.query(
       `SELECT coalesce(sum(record_count), 0) AS rows FROM ${into("ducklake_data_file")} WHERE table_id = ${table.tableId}`
@@ -683,6 +739,8 @@ interface LiveAt {
 interface LiveSelectOptions {
   readonly key?: string
   readonly joins?: string
+  /** A condition the rows meet too. */
+  readonly where?: string
 }
 
 function liveAt(tables: readonly SliceTable[]): LiveAt {
@@ -694,7 +752,7 @@ function liveAt(tables: readonly SliceTable[]): LiveAt {
     columns: string,
     table: string,
     alias: string,
-    { key = "table_id", joins = "" }: LiveSelectOptions = {}
+    { key = "table_id", joins = "", where }: LiveSelectOptions = {}
   ) => `
     SELECT ${columns}
     FROM ${table} ${alias}
@@ -703,6 +761,7 @@ function liveAt(tables: readonly SliceTable[]): LiveAt {
     WHERE ${alias}.${key} IN (${ids})
       AND ${alias}.begin_snapshot <= sixb_cut.cut_snapshot
       AND (${alias}.end_snapshot IS NULL OR ${alias}.end_snapshot > sixb_cut.cut_snapshot)
+      ${where === undefined ? "" : `AND ${where}`}
   `
 
   return {
