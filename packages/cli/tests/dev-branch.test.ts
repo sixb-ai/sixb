@@ -67,6 +67,64 @@ test("counts what the API accepts from a signed-in browser as use, and nothing e
   expect((await status()).requests).toBe(1)
 })
 
+// After a refresh, a tab left open keeps reconnecting its socket with a session the new copy does
+// not know: the branch refuses it, and it keeps nothing up. Red check: count a socket as the front
+// upgrades it, not once the API accepts it, in `dev-branch.ts`.
+test("counts a socket as use once the API accepts it", async () => {
+  const api = Bun.serve<undefined>({
+    port: 0,
+    fetch: (request, server) => {
+      if (request.headers.get("cookie") === "sixb_session_app=expired") {
+        return new Response("Unauthorized", { status: 401 })
+      }
+      return server.upgrade(request, { data: undefined }) ? undefined : new Response("no")
+    },
+    websocket: {
+      open: (ws) => {
+        ws.send("open")
+      },
+      message: () => undefined,
+    },
+  })
+  stops.push(async () => api.stop(true))
+  const front = startBranchFront({
+    branch: "feature/invoices",
+    key: KEY,
+    host: "127.0.0.1",
+    port: 0,
+    apiPort: api.port!,
+    appPort: api.port!,
+    root: process.cwd(),
+  })
+  stops.push(() => front.stop())
+  front.reporter.message({ type: "ready", watchesApp: false, app: null }, undefined)
+
+  const requests = async () => {
+    const response = await fetch(`http://127.0.0.1:${front.port}${BRANCH_STATUS_PATH}`, {
+      headers: { [BRANCH_KEY_HEADER]: KEY },
+    })
+    return ((await response.json()) as { requests: number }).requests
+  }
+  const connect = (cookie: string) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${front.port}/ws/events`, {
+      headers: { cookie },
+    } as never)
+    return new Promise<"open" | "closed">((resolve) => {
+      socket.addEventListener("message", () => {
+        resolve("open")
+        socket.close()
+      })
+      socket.addEventListener("close", () => resolve("closed"))
+    })
+  }
+
+  expect(await connect("sixb_session_app=expired")).toBe("closed")
+  expect(await requests()).toBe(0)
+
+  expect(await connect("sixb_session_app=ada")).toBe("open")
+  expect(await requests()).toBe(1)
+})
+
 // People reach a branch on its own origin now, signed in by its own sessions; its status and the
 // handover's preparation stay production's. Guard check: let every path through without the key
 // in `fetch` (`dev-branch.ts`), or forward the key everywhere.

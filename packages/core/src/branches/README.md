@@ -109,7 +109,7 @@ sets `env`, which its provider would give every sandbox, a branch's too.
 
 The front, on the branch's port, never loads project code. It answers with the generation's state,
 the commit, the project file a startup error points at, the copy it loaded, and its use: the API
-requests it accepted from a signed-in browser, and its sockets, never a crawler, a refused session
+requests and the sockets it accepted from a signed-in browser, never a crawler, a refused session
 or the "starting" page. Its status (`/__sixb/branch`) and the handover's prepare need the branch's
 key, which only production holds, and only the handover receives it; the rest is people's traffic,
 which the branch's own sessions guard. Until the runtime answers, a request without the key gets a

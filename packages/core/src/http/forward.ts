@@ -124,7 +124,9 @@ export interface ForwardedSocket {
 export function forwardWebSocket(
   client: ForwardedSocketClient,
   target: string,
-  handshake: ForwardedHandshake = { headers: {}, protocols: [] }
+  handshake: ForwardedHandshake = { headers: {}, protocols: [] },
+  /** Called once the target accepts the socket, never when it refuses it. */
+  opened?: () => void
 ): ForwardedSocket {
   const upstream = new WebSocket(target, {
     headers: { ...handshake.headers },
@@ -135,6 +137,7 @@ export function forwardWebSocket(
   let closed = false
 
   upstream.addEventListener("open", () => {
+    opened?.()
     for (const data of pending.splice(0)) upstream.send(data)
   })
   upstream.addEventListener("message", (event) => {

@@ -25,6 +25,7 @@ interface SocketData {
   readonly target: string
   /** The browser's cookies and origin, which the API checks as it checks any request. */
   readonly handshake: ForwardedHandshake
+  readonly signedIn: boolean
   upstream?: ForwardedSocket
 }
 
@@ -97,10 +98,9 @@ export function startBranchFront(input: {
       const signedIn = request.headers.has("cookie") || request.headers.has("authorization")
       if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
         const handshake = forwardedHandshake(request, (name) => name !== BRANCH_KEY_HEADER)
-        if (!server.upgrade(request, { data: { path, target, handshake } })) {
+        if (!server.upgrade(request, { data: { path, target, handshake, signedIn } })) {
           return new Response("WebSocket upgrade failed", { status: 400 })
         }
-        if (signedIn) used()
         return undefined
       }
       try {
@@ -118,10 +118,15 @@ export function startBranchFront(input: {
     },
     websocket: {
       open(ws: ServerWebSocket<SocketData>) {
+        // A socket is use once the branch accepts it: a stale tab's refused reconnects keep
+        // nothing up.
         ws.data.upstream = forwardWebSocket(
           ws,
           `ws://${ws.data.target}${ws.data.path}`,
-          ws.data.handshake
+          ws.data.handshake,
+          () => {
+            if (ws.data.signedIn) used()
+          }
         )
       },
       message(ws: ServerWebSocket<SocketData>, message) {
