@@ -48,7 +48,7 @@ to do instead (`refusals.ts`). Nothing turned off is a silent no-op. The HTTP AP
 
 | On a branch | Where | Why |
 |---|---|---|
-| Every connector client refused: static clients, OAuth connection clients, their tokens and token refreshes | `ConnectorService` (`connectors/service.ts`) | Every client is made there, whoever asks: an action's writeback or effects, a sync, a workflow step, a webhook handler, an agent tool, a sandbox's source token. One place refuses them all |
+| Every connector client refused: static clients, OAuth connection clients, their tokens and token refreshes | `ConnectorService` (`connectors/service.ts`) | Every client is made there, whoever asks: an action's writeback or effects, a sync, a workflow step, a webhook handler, an agent tool, a sandbox's source token from a connection. One place refuses them all. A source auth that calls its provider itself makes no client here (below) |
 | Connecting, reauthorizing, disconnecting and revoking OAuth connections refused; listing stays | `refuseConnectionChanges` in `connectors/service.ts` | Connections belong to production |
 | An action with a writeback fails before its writeback runs, recorded as a failed writeback | `runWritebackPhase` (`actions/run/writeback.ts`) | The writeback writes outside Sixb, and the edits depend on its reply |
 | Action effects skipped, recorded as `skipped` on the run | `runActionEffects` (`actions/run/effects.ts`) | Effects notify people; a branch sends nothing |
@@ -59,7 +59,7 @@ to do instead (`refusals.ts`). Nothing turned off is a silent no-op. The HTTP AP
 | Directory checks off, and refused when called | `SixbHost.directoryPasses`, `AuthRuntime.checkDirectory` | They suspend people |
 | No invitation and no sign-in link emailed | `withoutEmails` in `auth/runtime.ts` | A branch's members are production's people |
 | The projections pass recovers nothing when the branch's lake is no fork of production's | `recoveryPasses` (`maintenance/passes/recovery-passes.ts`) | That lake cannot tell the branch's versions from the ones the copy was derived from: a first pass would re-derive every projection and re-create every object. A forked lake tells them apart itself (`LakeFork.ownsVersion`). The live `dataset.version.committed` path still projects what the branch commits |
-| Agent turns and agent steps on | Nothing to gate | A model call writes nothing to production. Their actions, connectors and sandbox tokens hit the gates above; their web tools do not (below) |
+| Agent turns and agent steps on | Nothing to gate | A model call writes nothing to production. Their actions and connectors hit the gates above; their sandbox's source access and their web tools do not (below) |
 
 ## Keeping to itself
 
@@ -78,3 +78,18 @@ to do instead (`refusals.ts`). Nothing turned off is a silent no-op. The HTTP AP
   must never be production credentials: that rule, not a gate, covers it.
 - The Agent's `web_search` and `web_fetch` reach the web ungated on a branch. They read, through
   the AI Gateway, but a fetched URL can still carry what the Agent puts in it.
+
+## A sandbox's source access
+
+A sandbox factory's `auth` grants its source on a branch as in production, except what comes from
+a connection. That is on purpose: an agent on a branch pushes its work like any other. Keeping a
+push off the default branch is the project's job, with GitHub's branch protection or rulesets, as
+it is in production.
+
+| Source auth | What a branch's sandbox gets |
+|---|---|
+| `githubOAuth`, from a person's or the project's connection | Nothing: the connection's token comes from `ConnectorService`, which refuses it, so the run fails before the sandbox has source access |
+| `githubOAuth`'s `fallback`, on a run no person requested | What the fallback grants, such as `githubApp` below |
+| `githubApp` | A token for that one repository, from the App key the branch's environment holds, with the source's `access`. `"write"` can push to any branch, and merge or delete branches through the API |
+| A project's own `SandboxSourceAuth` | Whatever it grants. Only a token it asks for through `connectionToken` is refused |
+

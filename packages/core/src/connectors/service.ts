@@ -32,8 +32,10 @@ type StaticConnectorConnectionState = {
  * Process-owned facade for static clients and persistent connector connections.
  *
  * Every connector client is made here, whoever asks: an action's writeback or effects, a sync, a
- * workflow step, a webhook handler, an agent tool, a sandbox's token. That makes it the one place
- * a branch refuses them all.
+ * workflow step, a webhook handler, an agent tool, a sandbox's source token from a connection.
+ * That makes it the one place a branch refuses them all. A sandbox source auth that calls its
+ * provider itself, such as `githubApp`, makes none here: on a branch it grants what it grants in
+ * production (`branch-mode/README.md`, "A sandbox's source access").
  */
 export class ConnectorService {
   private readonly definitionsById: ReadonlyMap<string, ConnectorDefinition>
