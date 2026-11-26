@@ -71,8 +71,10 @@ export async function runDev(options: DevOptions = {}) {
     process.env[BRANCH_RUNTIME_ENV] = await checkoutOf(root)
 
     // Each child inherits this environment: the branch's code gets none of the sign-in that took
-    // the copy, only the branch's own credential.
-    for (const name of PRODUCTION_SIGN_IN_ENV) delete process.env[name]
+    // the copy, only the branch's own credential. Blank, not deleted: each child is a new Bun
+    // process, which loads `.env*` again and would fill a missing variable from `.env.local`, but
+    // never one that is set. `resolveProfile` reads a blank one as unset.
+    for (const name of PRODUCTION_SIGN_IN_ENV) process.env[name] = ""
   }
   await runDevSupervisor(options)
 }

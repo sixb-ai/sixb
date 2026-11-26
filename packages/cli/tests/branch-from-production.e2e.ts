@@ -439,8 +439,8 @@ export const sixb = await createSixb({
     defineRole("readers", { grantedTo: [readers], grants: [can.view(Ticket)] }),
   ],
 })
-// What the branch's code is given of the developer's production sign-in.
-const signIn = ["SIXB_API_URL", "SIXB_API_TOKEN", "SIXB_TOKEN", "SIXB_PROFILE"].filter((name) => process.env[name] !== undefined)
+// What the branch's code is given of the developer's production sign-in: a blank value is none.
+const signIn = ["SIXB_API_URL", "SIXB_API_TOKEN", "SIXB_TOKEN", "SIXB_PROFILE"].filter((name) => process.env[name])
 await Bun.write(import.meta.dir + "/.sixb/sign-in-seen.json", JSON.stringify(signIn))
 await Bun.write(import.meta.dir + "/.sixb/runtime-seen.txt", process.env.SIXB_BRANCH_RUNTIME ?? "")
 `
@@ -479,6 +479,8 @@ await Bun.write(import.meta.dir + "/.sixb/runtime-seen.txt", process.env.SIXB_BR
     const port = freePort()
     const apiPort = freePort()
     let output = ""
+    // As a developer's shell starts it: under `bun test`'s NODE_ENV=test, Bun loads no `.env.local`.
+    const { NODE_ENV: _test, ...shell } = process.env
     const proc = Bun.spawn(
       [
         process.execPath,
@@ -496,7 +498,7 @@ await Bun.write(import.meta.dir + "/.sixb/runtime-seen.txt", process.env.SIXB_BR
         cwd: root,
         // The developer's CLI sign-in in production, and a home of its own: no other profile.
         env: {
-          ...process.env,
+          ...shell,
           HOME: root,
           SIXB_API_URL: production.url,
           SIXB_API_TOKEN: token,
@@ -552,7 +554,8 @@ await Bun.write(import.meta.dir + "/.sixb/runtime-seen.txt", process.env.SIXB_BR
   // Red checks: in commands/dev-runner.ts, start the project's own host instead of the branch's:
   // the API serves the laptop's empty storage. In commands/dev.ts, leave `refresh` out of
   // `fetchBranchCopy`: --refresh reuses the copy, as it once did before this test found it; drop
-  // the loop over `PRODUCTION_SIGN_IN_ENV`: the branch's code reads the developer's token; drop
+  // the loop over `PRODUCTION_SIGN_IN_ENV`, or delete the variables instead of blanking them: the
+  // branch's code reads the developer's token, from `.env.local` for the latter; drop
   // `BRANCH_RUNTIME_ENV`: the branch runs as no checkout in particular. In
   // lib/branch-from-production.ts, empty the branch's whole directory in `loadCopy` again: the
   // template's SQLite namespace in it goes, and the second run has no copy.
@@ -560,6 +563,17 @@ await Bun.write(import.meta.dir + "/.sixb/runtime-seen.txt", process.env.SIXB_BR
     const root = await checkout()
     const alice = (await signedIn("usr_alice")).authorization
     const token = (await alice()).slice("Bearer ".length)
+    // Where the generated header says a project's values go: the developer keeps their sign-in.
+    await writeFile(
+      join(root, ".env.local"),
+      [
+        `SIXB_API_URL=${production.url}`,
+        `SIXB_API_TOKEN=${token}`,
+        `SIXB_TOKEN=${token}`,
+        "SIXB_PROFILE=production",
+        "",
+      ].join("\n")
+    )
     try {
       const first = await dev(root, token)
       // The supervisor's startup deadline waits for the load, and says so (`dev-supervisor.test.ts`).
