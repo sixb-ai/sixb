@@ -79,10 +79,17 @@ export function DatasetVersionInputs({
   )
 }
 
-/** A version id short enough for a list, as the version picker shows it. */
+/**
+ * A version id short enough for a list, as the version picker shows it. A branch's own DuckLake
+ * versions read `branch:<n>`, the n-th commit on the branch, which a cut would drop.
+ */
 export function shortVersionId(versionId: string): string {
-  return versionId.slice(0, 12)
+  return versionId.startsWith(BRANCH_VERSION_PREFIX)
+    ? versionId.slice("ducklake:".length)
+    : versionId.slice(0, 12)
 }
+
+const BRANCH_VERSION_PREFIX = "ducklake:branch:"
 
 function ProducerIcon({ icon: Icon }: { readonly icon: ComponentType<{ className?: string }> }) {
   // Centered on the name's first line.

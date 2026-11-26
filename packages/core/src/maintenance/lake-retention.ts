@@ -94,7 +94,7 @@ export function resolveLakeMaintenanceSettings(
 interface LakeRetentionInput {
   readonly projectId: string
   readonly options: LakeMaintenanceOptions | undefined
-  readonly lakeStorage: Pick<LakeStorage, "maintenance" | "forks">
+  readonly lakeStorage: Pick<LakeStorage, "maintenance" | "forks" | "fork">
   readonly storage: Pick<
     Storage,
     | "lakeRetentionRuns"

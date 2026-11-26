@@ -36,6 +36,7 @@ import {
 } from "./accounts"
 import { useSyncLiveUpdates } from "./live-updates"
 import { useDataMessages } from "./messages"
+import { shortVersionId } from "./producer"
 import { SchemaPanel } from "./schema"
 import { ConnectorIcon, ScheduleMeta } from "./shared"
 import { SyncButton } from "./sync-button"
@@ -309,7 +310,7 @@ export function ConsoleSyncPage() {
                           to={`${datasetHref}?version=${encodeURIComponent(run.output.versionId)}`}
                           className="font-mono text-xs hover:text-foreground hover:underline"
                         >
-                          {run.output.versionId.slice(0, 12)}
+                          {shortVersionId(run.output.versionId)}
                         </Link>
                       </>
                     ) : null}

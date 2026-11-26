@@ -41,7 +41,10 @@ const archiveProjection = defineProjection("invoice-archive-projection", Invoice
 
 const INTERVAL_MS = 30_000
 
-function createScene(projections = [invoiceProjection]) {
+function createScene(
+  projections = [invoiceProjection],
+  fork?: { ownsVersion(id: string): boolean }
+) {
   const storage = new InMemoryStorage()
   const lakeStorage = new InMemoryLakeStorage()
   const queues = new InMemoryQueues()
@@ -78,6 +81,7 @@ function createScene(projections = [invoiceProjection]) {
         },
       }),
       lakeStorage: {
+        fork,
         listVersions: (datasetId, limit) => lakeStorage.listVersions(datasetId, limit),
         getVersion: (datasetId, versionId) => lakeStorage.getVersion(datasetId, versionId),
         getLatestVersion(datasetId) {
@@ -195,6 +199,27 @@ describe("ProjectionDispatchReconciler", () => {
       { versionId: version.versionId, status: "queued" },
     ])
     expect(reconciliation.lookups).toEqual([])
+  })
+
+  // Red check: drop the `fork.ownsVersion` check in ProjectionRecovery.dispatch.
+  test("on a branch's lake, projects only the versions the branch wrote", async () => {
+    const owned = new Set<string>()
+    const reconciliation = createScene([invoiceProjection], {
+      ownsVersion: (versionId) => owned.has(versionId),
+    })
+    const production = await reconciliation.commit("invoice-1")
+
+    await reconciliation.createPass().run(signal)
+    expect(await reconciliation.runVersions()).toEqual([])
+
+    const branch = await reconciliation.commit("invoice-2")
+    owned.add(branch.versionId)
+    await reconciliation.createPass().run(signal)
+
+    expect(production.versionId).not.toBe(branch.versionId)
+    expect(await reconciliation.runVersions()).toEqual([
+      { versionId: branch.versionId, status: "queued" },
+    ])
   })
 
   test("a restart admits the latest commit made while no orchestrator ran", async () => {

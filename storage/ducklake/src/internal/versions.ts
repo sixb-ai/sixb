@@ -36,21 +36,51 @@ export interface SixbCommitMetadata {
   readonly lineageChanged?: boolean
 }
 
+/**
+ * Where a branch's snapshots start. A slice ends with a snapshot of this id, so every commit on the
+ * branch gets one above it: production's ids stay below, as no lake reaches 2^40 commits.
+ */
+export const BRANCH_SNAPSHOT_BASE = 2n ** 40n
+
+const BRANCH_VERSION_PREFIX = "ducklake:branch:"
+
+/** A number without leading zeros. */
+const CANONICAL_NUMBER = /^(0|[1-9]\d*)$/
+
+/**
+ * The snapshot a version id names. A branch's own versions read `ducklake:branch:<n>`, the n-th
+ * commit after the slice: such an id is never taken for one of production's, which are
+ * `ducklake:<snapshot>` below BRANCH_SNAPSHOT_BASE. Each snapshot has one id: `ducklake:branch:01`
+ * and `ducklake:<2^40 + 1>` name none.
+ */
 export function parseVersionId(versionId: string): string {
-  if (!versionId.startsWith("ducklake:")) {
-    throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`)
+  const invalid = () =>
+    new LakeStorageError(`[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`)
+
+  if (versionId.startsWith(BRANCH_VERSION_PREFIX)) {
+    const commit = versionId.slice(BRANCH_VERSION_PREFIX.length)
+    if (!CANONICAL_NUMBER.test(commit)) throw invalid()
+    return (BRANCH_SNAPSHOT_BASE + BigInt(commit)).toString()
   }
 
+  if (!versionId.startsWith("ducklake:")) throw invalid()
+
   const snapshotId = versionId.slice("ducklake:".length)
-  if (!/^\d+$/.test(snapshotId)) {
-    throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`)
-  }
+  if (!/^\d+$/.test(snapshotId) || BigInt(snapshotId) >= BRANCH_SNAPSHOT_BASE) throw invalid()
 
   return snapshotId
 }
 
 export function toVersionId(snapshotId: string): string {
-  return `ducklake:${snapshotId}`
+  const snapshot = BigInt(snapshotId)
+  return snapshot >= BRANCH_SNAPSHOT_BASE
+    ? `${BRANCH_VERSION_PREFIX}${snapshot - BRANCH_SNAPSHOT_BASE}`
+    : `ducklake:${snapshotId}`
+}
+
+/** Whether a version id names one of a branch's own versions. */
+export function isBranchVersionId(versionId: string): boolean {
+  return versionId.startsWith(BRANCH_VERSION_PREFIX)
 }
 
 export function parseCommitMetadata(value: unknown): SixbCommitMetadata | undefined {

@@ -31,6 +31,7 @@ import {
 } from "./names"
 import { buildDuckLakeMetadataQuery, duckLakeMetadataTableName, quoteSqlString } from "./sql"
 import {
+  BRANCH_SNAPSHOT_BASE,
   changesTouchTables,
   maintainsTable,
   parseCommitMetadata,
@@ -939,13 +940,21 @@ export class DuckLakeSnapshotReader {
       }
     }
 
-    // Snapshot ids are consecutive, so a missing one was expired: it may have held a version.
+    // Snapshot ids are consecutive, so a missing one was expired: it may have held a version. A
+    // branch's slice keeps production's history only as one version per dataset, then the
+    // branch's own snapshots from BRANCH_SNAPSHOT_BASE: no snapshot between a kept version and the
+    // branch's changed its table in this catalog, so those are counted, and the version itself.
+    const from = BigInt(fromSnapshotId)
+    const to = BigInt(toSnapshotId)
+    const forked = this.options.productionFiles !== undefined && from < BRANCH_SNAPSHOT_BASE
+    const counted = forked ? (to >= BRANCH_SNAPSHOT_BASE ? BRANCH_SNAPSHOT_BASE : to + 1n) : from
     const [count] = await runtime.query(`
       SELECT count(*) AS snapshot_count
       FROM ${duckLakeMetadataTableName(this.options, "ducklake_snapshot")}
-      WHERE snapshot_id >= ${fromSnapshotId} AND snapshot_id <= ${toSnapshotId}
+      WHERE (snapshot_id >= ${counted} AND snapshot_id <= ${toSnapshotId})
+        ${forked ? `OR snapshot_id = ${fromSnapshotId}` : ""}
     `)
-    const expected = BigInt(toSnapshotId) - BigInt(fromSnapshotId) + 1n
+    const expected = to - counted + 1n + (forked ? 1n : 0n)
     const complete =
       !alteredOutsideSixb &&
       count !== undefined &&

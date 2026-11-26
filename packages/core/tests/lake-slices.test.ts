@@ -222,6 +222,54 @@ describe("lake slices", () => {
     expect(String(refused)).toContain(invoices.id)
   })
 
+  test("hold a pinned version instead of the latest, such as the one a projection applied", async () => {
+    const { host, accountant, lakeStorage, trusted } = await seed()
+    const applied = await lakeStorage.getLatestVersion(orders.id)
+    await trusted.datasets.ingest(orders, { changes: [change.upsert({ id: "ord-2", total: 4 })] })
+    const latest = await lakeStorage.getLatestVersion(orders.id)
+
+    const slice = await writeLakeSlice(host, accountant, {
+      point: "point-1",
+      path: "/tmp/slice",
+      branch: "order-reminders",
+      pinned: [{ datasetId: orders.id, versionId: `${applied?.versionId}` }],
+    })
+
+    expect(applied?.versionId).not.toBe(latest?.versionId)
+    expect(slice.versions).toContainEqual({
+      datasetId: orders.id,
+      versionId: `${applied?.versionId}`,
+    })
+  })
+
+  // Red check: in writeLakeSlice, build `pinned` as a plain Map (the last pin wins), or skip a
+  // pinned dataset whose version is gone as an unpinned one without a version.
+  test("refuse two pins of one dataset, or a pinned version that no longer exists", async () => {
+    const { host, accountant, lakeStorage, trusted } = await seed()
+    const applied = await lakeStorage.getLatestVersion(orders.id)
+    await trusted.datasets.ingest(orders, { changes: [change.upsert({ id: "ord-2", total: 4 })] })
+    const latest = await lakeStorage.getLatestVersion(orders.id)
+    const cut = (pinned: { datasetId: string; versionId: string }[]) =>
+      writeLakeSlice(host, accountant, {
+        point: "point-1",
+        path: "/tmp/slice",
+        branch: "order-reminders",
+        pinned,
+      }).catch((error) => error)
+
+    const twice = await cut([
+      { datasetId: orders.id, versionId: `${applied?.versionId}` },
+      { datasetId: orders.id, versionId: `${latest?.versionId}` },
+    ])
+    const gone = await cut([{ datasetId: orders.id, versionId: "memory:999" }])
+
+    expect(String(twice)).toContain(`pins '${orders.id}' at both`)
+    expect(String(gone)).toContain("which no longer exists")
+    expect(
+      await host.storage.lakeSlices?.listLive({ projectId: host.id, liveAfter: new Date(0) })
+    ).toEqual([])
+  })
+
   test("only a person's own request cuts a slice or reads with it", async () => {
     const { host, trusted } = await seed()
 

@@ -23,6 +23,7 @@ export { LakeConcurrencyError, LakeStorageError, LakeValueRefusedError } from ".
 export type {
   LakeFile,
   LakeFileRange,
+  LakeFork,
   LakeForks,
   LakeSliceVersion,
   LakeVersionsAtInput,

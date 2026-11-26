@@ -5,6 +5,7 @@ import type {
   DatasetCatalogState,
   DatasetChanges,
   DatasetVersion,
+  LakeFork,
   LakeForks,
   LakeMaintenance,
   LakeMergeSession,
@@ -27,6 +28,7 @@ import { DuckLakeSqlExecutor } from "./internal/ducklake-sql-executor"
 import { DuckLakeWriteCoordinator } from "./internal/ducklake-write-coordinator"
 import { ProductionFilesProxy } from "./internal/production-files-proxy"
 import { assertDuckDbHoldsChanges } from "./internal/value-limits"
+import { isBranchVersionId } from "./internal/versions"
 import type { DuckLakeStorageOptions } from "./types"
 
 /**
@@ -42,6 +44,7 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
   readonly sql: DuckLakeSqlExecutor
   readonly maintenance: LakeMaintenance
   readonly forks: LakeForks
+  readonly fork: LakeFork | undefined
 
   private readonly connections: DuckLakeConnectionManager
   private readonly datasets: DuckLakeDatasetCatalog
@@ -77,7 +80,7 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
       this.datasets,
       this.snapshotReader
     )
-    this.maintenance = this.productionFiles ? branchMaintenance(maintenance) : maintenance
+    this.maintenance = maintenance
     this.rows = new DuckLakeRowReader(normalizedOptions, this.connections, this.snapshotReader)
     this.changes = new DuckLakeChangeReader(
       normalizedOptions,
@@ -89,17 +92,13 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
       this.connections,
       this.datasets,
       this.snapshotReader,
-      // A branch's tables hold production's files: compacting them would rewrite production's rows
-      // into the branch, and schedule production's files for deletion. Writes on a branch come
-      // with their own maintenance.
-      (dataset) => {
-        if (!this.productionFiles) this.compaction.afterCommit(dataset)
-      }
+      (dataset) => this.compaction.afterCommit(dataset)
     )
     this.compaction = new DuckLakeCompaction(normalizedOptions, this.connections, (run) =>
       this.writes.withCommitRuntime(run)
     )
     this.forks = new DuckLakeForks(normalizedOptions, this.connections, this.snapshotReader)
+    this.fork = this.productionFiles ? { ownsVersion: isBranchVersionId } : undefined
     this.sql = new DuckLakeSqlExecutor(
       normalizedOptions,
       this.connections,
@@ -184,18 +183,6 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
     await this.compaction.close()
     await this.connections.close()
     await this.productionFiles?.close()
-  }
-}
-
-/** Retention runs in production, which owns the files: a branch's lake refuses it, saying so. */
-function branchMaintenance(maintenance: LakeMaintenance): LakeMaintenance {
-  return {
-    applyRetention: async () => {
-      throw new LakeStorageError(
-        "[SixbDuckLake] This lake is a branch's slice of production's: its files are production's, and retention runs in production. Turn lakeMaintenance off on the branch."
-      )
-    },
-    describeStorage: (datasetIds) => maintenance.describeStorage(datasetIds),
   }
 }
 

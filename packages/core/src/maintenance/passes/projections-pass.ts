@@ -11,7 +11,10 @@ export interface ProjectionsPassInput {
   readonly dispatcher: ProjectionRunDispatchPort
   readonly descriptors: readonly ProjectionDispatchDescriptor[]
   readonly feed: LakeChangeFeed
-  readonly lakeStorage: Pick<LakeStorage, "getLatestVersion" | "getVersion" | "listVersions">
+  readonly lakeStorage: Pick<
+    LakeStorage,
+    "getLatestVersion" | "getVersion" | "listVersions" | "fork"
+  >
 }
 
 /**
@@ -157,6 +160,12 @@ class ProjectionRecovery {
     signal: AbortSignal
   ): Promise<void> {
     signal.throwIfAborted()
+
+    // On a branch, production's versions are what its objects were copied from: only the ones
+    // the branch writes project. Its first pass re-derives nothing from production's data.
+    const fork = this.input.lakeStorage.fork
+    if (fork && !fork.ownsVersion(version.versionId)) return
+
     await this.input.dispatcher.dispatch({
       projectionId: descriptor.projectionId,
       datasetVersion: {
