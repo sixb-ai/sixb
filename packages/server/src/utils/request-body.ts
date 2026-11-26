@@ -75,6 +75,21 @@ function matchesSegments(segments: readonly string[], pattern: string): boolean 
 
 const requestBodyCaps = new WeakMap<Request, { lifted: boolean }>()
 
+/** The request Bun handed in, by the one the server's routes see in its place. */
+const servedRequests = new WeakMap<Request, Request>()
+
+export function setServedRequest(request: Request, incoming: Request): void {
+  servedRequests.set(request, incoming)
+}
+
+/**
+ * The request Bun handed in for `request`: Bun's `server.timeout` acts only on that one, and the
+ * capped request a route sees is another object. `request` itself when no server served it.
+ */
+export function servedRequestOf(request: Request): Request {
+  return servedRequests.get(request) ?? request
+}
+
 /**
  * Returns `request` with its body capped at `DEFAULT_REQUEST_BODY_LIMIT_BYTES`. Reading past the
  * cap fails with `RequestBodyTooLargeError`, which Elysia surfaces as a parse error.

@@ -14,11 +14,13 @@ import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
+import { servedRequestOf } from "../utils/request-body"
 
 interface BranchRouteContext {
   readonly request: Request
   readonly body?: unknown
   readonly set: { status?: number | string }
+  readonly server?: { timeout(request: Request, seconds: number): void } | null
 }
 
 /**
@@ -60,7 +62,7 @@ export function registerBranchRoutes(app: Elysia, host: SixbHostView) {
 
 async function copyResponse(
   host: SixbHostView,
-  { request, body: payload, set }: BranchRouteContext
+  { request, body: payload, set, server }: BranchRouteContext
 ) {
   const session = await host.auth.getSession(request, { credentialSource: "any" })
   if (!session.authenticated) {
@@ -106,6 +108,11 @@ async function copyResponse(
   }
   running.add(person.principal.id)
   copiesRunning.set(host.id, running)
+
+  // A copy can go quiet for far longer than Bun's 10 s idle timeout, while production cuts a
+  // large lake or reads through a selective view condition. Lifted only now, for a person who may
+  // copy and holds a place: a request that reached nothing here keeps its timeout.
+  server?.timeout(servedRequestOf(request), 0)
 
   let directory: string | undefined
   let finished = false
@@ -159,7 +166,10 @@ async function copyResponse(
     },
   })
 
-  return new Response(body, { headers: { "content-type": "application/octet-stream" } })
+  // The lifted timeout stays on the socket: it serves no request after this one.
+  return new Response(body, {
+    headers: { "content-type": "application/octet-stream", connection: "close" },
+  })
 }
 
 /** The slice of the branch credential a request carries, or null: these routes take no other. */

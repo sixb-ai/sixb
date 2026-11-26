@@ -78,6 +78,7 @@ import {
   declaredBodyTooLarge,
   limitRequestBody,
   RequestBodyTooLargeError,
+  setServedRequest,
 } from "./utils/request-body"
 import {
   markRequestAuthorized,
@@ -764,15 +765,11 @@ function startApiServer(
       const tooLarge = declaredBodyTooLarge(incoming)
       if (tooLarge) return Response.json({ error: tooLarge.message }, { status: 413 })
 
-      // A branch's copy can go quiet for far longer than Bun's 10 s idle timeout, while production
-      // cuts a large lake or reads through a selective view condition. Only the request Bun
-      // handed in can lift it: the capped one below is another object.
-      if (isBranchCopy(incoming)) server.timeout(incoming, 0)
-
       const socketAddress = server.requestIP(incoming)?.address
       // Elysia parses a body before the auth guard runs, so cap it here, as it streams. The capped
       // request replaces this one before any state is keyed to it.
       const request = limitRequestBody(incoming)
+      setServedRequest(request, incoming)
       if (socketAddress) {
         const forwardedFor = request.headers.get("x-forwarded-for")
         setRequestClientAddress(request, options.resolveClientAddress(socketAddress, forwardedFor))
@@ -796,10 +793,6 @@ function startApiServer(
       openSockets.clear()
     },
   }
-}
-
-function isBranchCopy(request: Request): boolean {
-  return request.method === "POST" && new URL(request.url).pathname === "/api/branches/copy"
 }
 
 function getElysiaWsHandler(app: SixbApp, openSockets: Set<ServerWebSocket<unknown>>) {
