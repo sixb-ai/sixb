@@ -1,4 +1,4 @@
-import { describe, expect, jest, test } from "bun:test"
+import { describe, expect, jest, spyOn, test } from "bun:test"
 import type { LanguageModel } from "@sixb/core"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { registerModelOrigin } from "@sixb/core/internal/model-origins"
@@ -7,6 +7,7 @@ import {
   SandboxStateUnavailableError,
   SandboxStillRunningError,
 } from "@sixb/core/sandboxes"
+import * as copyModule from "../src/copy"
 import { BRANCH_IDLE_MS, BRANCH_TICK_MS } from "../src/held-branch"
 import { BRANCH_RUNTIME_PORTS } from "../src/ports"
 import {
@@ -289,6 +290,44 @@ describe("a held branch", () => {
     await until(row(host), (current) => current === null)
     await settled(held.life)
     expect(await kept("slice_second")).toBeNull()
+  })
+
+  // A copy delivered and never loaded once kept its slice, and production's files, 14 days after
+  // its branch stopped. Guard check: drop `releaseUnloaded` from `close` (`held-branch.ts`).
+  test("lets production drop the slice of a copy it delivered and never loaded, once it stops", async () => {
+    const { lab, host, bo, storage } = await setup()
+    await storage.lakeSlices.create({
+      id: "slice_delivered",
+      projectId,
+      userId: "usr_bo",
+      branch: NAME,
+      point: "point",
+      versions: [],
+      files: [],
+      createdAt: new Date(),
+      credentialHash: "slice_delivered",
+      receivedAt: new Date(),
+    })
+    // The copy reads production's lake through that slice, as a copy of a forked lake does.
+    const deliver = copyModule.copyIntoSandbox
+    const copy = spyOn(copyModule, "copyIntoSandbox")
+    copy.mockImplementation(async (...args) => {
+      const delivered = await deliver(...args)
+      return delivered ? { ...delivered, lakeSliceId: "slice_delivered" } : null
+    })
+    onCleanup(() => copy.mockRestore())
+    // The runtime never gets through its load.
+    lab.importGate = new Promise<void>(() => {})
+
+    const held = await hold(host)
+    await until(
+      async () => lab.loading,
+      (loading) => loading
+    )
+    await bo.branches.stop(NAME)
+    await settled(held.life)
+
+    expect(await storage.lakeSlices.get({ projectId, id: "slice_delivered" })).toBeNull()
   })
 
   // Guard check: drop the pull from `tick`.

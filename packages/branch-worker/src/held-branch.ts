@@ -821,6 +821,7 @@ export class HeldBranch {
   /** Stops the runtime and saves the sandbox, then lets the branch go. */
   private async close(changes: BranchChanges): Promise<void> {
     await this.stopRuntime()
+    await this.releaseUnloaded()
     await this.credentials?.revoke().catch(() => {})
     const sandbox = this.sandbox
     this.sandbox = undefined
@@ -861,12 +862,31 @@ export class HeldBranch {
   }
 
   /**
+   * Lets production drop the slice of a copy this hold delivered and the runtime never loaded:
+   * the row does not name it, so no later hold could. The next open takes a new copy anyway.
+   */
+  private async releaseUnloaded(): Promise<void> {
+    const slice = this.deliveredSlice
+    if (!slice || this.branch.data?.lakeSliceId === slice) return
+
+    this.deliveredSlice = null
+    this.delivered = null
+    await dropLakeSlice(this.host, slice).catch((error: unknown) => {
+      console.error(
+        `[SixbBranchWorker] Could not release the lake slice of branch '${this.branch.name}''s unloaded copy.`,
+        error
+      )
+    })
+  }
+
+  /**
    * Drops this worker's hold without touching the sandbox's saved state. A hold that lost the
    * branch to another worker stops only its own runtime: a provider that resumes sandboxes by
    * name gave that worker the same sandbox, which is no longer this hold's to stop.
    */
   private async release(options: { readonly lost?: boolean } = {}): Promise<void> {
     await this.stopRuntime()
+    await this.releaseUnloaded()
     await this.credentials?.revoke().catch(() => {})
     if (options.lost && this.host.sandboxes?.resume) return
     await this.sandbox?.stop().catch(() => {})
