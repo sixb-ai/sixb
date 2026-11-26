@@ -44,9 +44,12 @@ Refused or off on a branch, each with an error that says so:
 - connector calls, OAuth connections, action writebacks and effects, syncs;
 - inbound webhooks, invitation and sign-in emails;
 - cron schedules (run one on the branch with `sixb schedules run <id> --api-url <the branch's API>`,
-  as `sixb dev` prints it) and directory checks.
+  as `sixb dev` prints it; one that starts a sync is refused) and directory checks.
 
 Not refused: your project's own `fetch` calls and the agent's web tools still reach the internet.
+A sandbox's [repository access](../sandboxes/overview.md#repository-authentication) works as in
+production, except from a connection: with `githubApp` and `access: "write"`, the agent on a branch
+can push to the repository, so protect its default branch with branch protection or rulesets.
 
 ## What reaches production
 
