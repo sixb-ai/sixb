@@ -16,6 +16,12 @@ export interface MigrationCoverage<TChange extends TypeShapeChange> {
   readonly missing: readonly TypeShapeChange[]
   /** Changes the pending steps resolve. */
   readonly covered: readonly TChange[]
+  /**
+   * What the value steps resolve, from the shape the renames leave: the convert of a renamed
+   * property resolves no change of `stored`, where it was another property. Under their stored
+   * keys, the data holds them or not, as the covered ones.
+   */
+  readonly valueChanges: readonly TypeShapeChange[]
   /** The pending steps, in the order they run. */
   readonly steps: readonly PlannedStep[]
   /** The pending steps that resolve a covered change. */
@@ -55,6 +61,27 @@ export function coverChanges<TChange extends TypeShapeChange>(input: {
   const covered = changes.filter((change) => !missing.some((left) => sameConcern(left, change)))
   const takenIds = new Set(migrations.map((migration) => migration.id))
 
+  // The shape the renames leave, which the value steps start from.
+  let keyed = stored
+  for (const planned of plan.steps) {
+    const kind = stepKindOf(planned.step)
+    if (kind.phase === 0) keyed = kind.apply(planned.step, keyed, code)
+  }
+  const valued = new Set(
+    plan.steps.flatMap((planned) =>
+      stepKindOf(planned.step).stagesValues && "propertyId" in planned.step
+        ? [planned.step.propertyId]
+        : []
+    )
+  )
+  const valueChanges = diffTypeShapes(keyed, code).filter(
+    (change) =>
+      change.effect !== "compatible" &&
+      "propertyId" in change &&
+      valued.has(change.propertyId) &&
+      !covered.some((held) => sameConcern(held, change))
+  )
+
   return {
     conflicts: plan.conflicts.map((conflict) => ({
       change: changeOf(changes, conflict.steps[1].step),
@@ -62,11 +89,12 @@ export function coverChanges<TChange extends TypeShapeChange>(input: {
     })),
     missing,
     covered,
+    valueChanges,
     steps: plan.steps,
     stepsFor: (change) => coveringSteps(plan, change),
     storedKey: plan.storedKey,
     remedy(change) {
-      if (covered.some((held) => held === change)) {
+      if (covered.some((held) => held === change) || valueChanges.includes(change)) {
         const migrationIds = coveringSteps(plan, change).map((planned) => planned.migrationId)
         return [pendingMigrationLine([...new Set(migrationIds)])]
       }

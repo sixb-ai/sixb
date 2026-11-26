@@ -2,7 +2,7 @@ import type { JsonValue } from "../../json"
 import { coverChanges, type MigrationCoverage } from "../../migrations/coverage"
 import { CONFLICT_REMEDY } from "../../migrations/messages"
 import { concerningMigrations, type PlannedStep } from "../../migrations/pending"
-import { runRenames } from "../../migrations/run"
+import { runRenames, runValueProperties } from "../../migrations/run"
 import { stepKindOf } from "../../migrations/steps"
 import type { MigrationDefinition } from "../../migrations/types"
 import type { OntologyDefinitionCatalog } from "../../ontology/registry"
@@ -74,8 +74,8 @@ export interface TypeShapeTypeCheck {
     | { readonly kind: "keep" }
   /**
    * The pending migration steps a deploy applies before recording, by migration and position in
-   * its chain: those whose changes data holds, in the order they run. A change data holds that a
-   * step this build can't apply resolves is a finding instead.
+   * its chain: those whose changes data holds, in the order they run. On a storage provider that
+   * can't apply them, a covered change data holds is a finding instead.
    */
   readonly run: readonly { readonly migrationId: string; readonly index: number }[]
   /**
@@ -240,6 +240,7 @@ async function withUniqueDuplicates(
     keepObjectTypeIds: unfit,
     rebuild: madeUnique(types),
     renames: runRenames({ types }, migrations),
+    valued: runValueProperties({ types }, migrations),
   })
 
   return types.map((type) => {
@@ -551,6 +552,7 @@ async function migrationFindings(
     migrations,
     settled,
     appliesMigrations: input.storage.ontology.migrations !== undefined,
+    appliesValues: input.storage.ontology.migrations?.values !== undefined,
   })
   if (classes.conflicts.length > 0) return { findings: [...classes.conflicts], run: [] }
 
@@ -591,10 +593,7 @@ interface TypeChangeClasses {
   readonly missing: readonly ProbedChange[]
   /** Changes pending steps cover and storage applies: they run when data holds them. */
   readonly runnable: readonly ProbedChange[]
-  /**
-   * Changes pending steps cover with a step this build or storage can't apply: a finding when
-   * data holds them.
-   */
+  /** Changes pending steps cover with a step storage can't apply: a finding when data holds them. */
   readonly blocked: readonly ProbedChange[]
   readonly coverage: MigrationCoverage<ProbedChange>
 }
@@ -612,6 +611,8 @@ function classifyTypeChanges(input: {
   readonly settled: ReadonlySet<string>
   /** Whether the storage provider applies migrations: without it, no covered change runs. */
   readonly appliesMigrations: boolean
+  /** Whether it also stages the values of fills and converts (`migrations.values`). */
+  readonly appliesValues: boolean
 }): TypeChangeClasses {
   const { objectTypeId, from, code, ontology, migrations, settled } = input
   const coverage = coverChanges({
@@ -633,16 +634,18 @@ function classifyTypeChanges(input: {
   }))
 
   // A covered change runs when storage applies every step that resolves it: none without
-  // migrations, and none of a kind this build doesn't apply yet.
+  // migrations, and no fill or convert without the staging they need (`migrations.values`).
   const applies = (change: ProbedChange) =>
     input.appliesMigrations &&
-    coverage.stepsFor(change).every((planned) => stepKindOf(planned.step).storeStep)
+    (input.appliesValues ||
+      coverage.stepsFor(change).every((planned) => !stepKindOf(planned.step).stagesValues))
+  const covered = [...coverage.covered, ...coverage.valueChanges.filter(needsData)]
 
   return {
     conflicts,
     missing: coverage.missing.filter(needsData),
-    runnable: coverage.covered.filter(applies),
-    blocked: coverage.covered.filter((change) => !applies(change)),
+    runnable: covered.filter(applies),
+    blocked: covered.filter((change) => !applies(change)),
     coverage,
   }
 }

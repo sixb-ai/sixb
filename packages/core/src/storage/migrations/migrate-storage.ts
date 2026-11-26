@@ -1,4 +1,9 @@
-import { applyOntologyMigrations, resumeOntologyMigration, runRenames } from "../../migrations/run"
+import {
+  applyOntologyMigrations,
+  resumeOntologyMigration,
+  runRenames,
+  runValueProperties,
+} from "../../migrations/run"
 import {
   isQueryPreparationCapableStorage,
   type ObjectQueryPreparationResult,
@@ -145,10 +150,11 @@ export async function applyTypeShapes(
   // Everything that can fail runs before the run starts, while the old release can still start
   // again: a preparation left by a failed deploy would be stale under the old release's writes,
   // and trusted by the next deploy. A rename's values are read under its old id, unless the run
-  // moves them as they are. A step that computes values plans them here too, before the run,
-  // which then applies what it planned.
+  // moves them as they are. A fill or a convert is planned by `applyOntologyMigrations` before it
+  // starts the run: its properties' unique keys are checked there, as the plan stages them.
   const renames = runRenames(shapes, migrations)
-  await checkUniqueProperties({ ...options, storage, keepObjectTypeIds, rebuild, renames })
+  const valued = runValueProperties(shapes, migrations)
+  await checkUniqueProperties({ ...options, storage, keepObjectTypeIds, rebuild, renames, valued })
 
   // A run records the code's shapes as it finishes: a crash before the preparation below leaves
   // them recorded, and the next deploy would trust what a failed one built. Values the recorded
@@ -165,6 +171,7 @@ export async function applyTypeShapes(
     ontology: options.ontology,
     migrations,
     check: shapes,
+    ...(options.projections ? { projections: options.projections } : {}),
     ...(options.onMigrationRunStarted ? { onStarted: options.onMigrationRunStarted } : {}),
   })
 

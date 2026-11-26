@@ -95,6 +95,7 @@ export async function runDbMigrate(options: DbMigrateOptions = {}) {
         projectId: sixb.id,
         ontology: sixb.definitions.ontology,
         migrations: sixb.definitions.migrations.list(),
+        projections: sixb.definitions.projections,
         security: sixb.definitions.security,
         ontologyShapes: "deploy",
         onMigrationRunStarted: (runId) => markMigrationRunStarted(runId),

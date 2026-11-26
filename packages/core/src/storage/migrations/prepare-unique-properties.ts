@@ -142,6 +142,11 @@ export interface UniqueDryRunInput {
   readonly keepObjectTypeIds?: ReadonlySet<string>
   readonly rebuild?: readonly UniquePropertyRef[]
   readonly renames?: readonly PendingUniqueRename[]
+  /**
+   * Properties a fill or a convert of the run gives values to: the run's plan checks the keys it
+   * stages instead, since the stored values are not the ones the run leaves.
+   */
+  readonly valued?: readonly { readonly objectTypeId: string; readonly propertyId: string }[]
 }
 
 /** Two objects sharing a value of a property the code makes unique. */
@@ -160,8 +165,15 @@ export async function findUniqueDuplicates(
 ): Promise<readonly UniqueDuplicate[]> {
   const { storage, projectId } = input
   const rebuild = new Set((input.rebuild ?? []).map(propertyKey))
+  const valued = (property: DeclaredUniqueProperty) =>
+    input.valued?.some(
+      (candidate) =>
+        candidate.objectTypeId === property.objectTypeId &&
+        candidate.propertyId === property.propertyId
+    ) ?? false
   const declared = declaredUniqueProperties(input.ontology).filter(
-    (property) => !(input.keepObjectTypeIds?.has(property.objectTypeId) ?? false)
+    (property) =>
+      !(input.keepObjectTypeIds?.has(property.objectTypeId) ?? false) && !valued(property)
   )
   const prepared = await storage.ontology.uniqueValues.listPrepared({ projectId })
   const duplicates: UniqueDuplicate[] = []

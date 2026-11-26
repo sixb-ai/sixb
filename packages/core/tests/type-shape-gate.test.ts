@@ -1057,4 +1057,41 @@ describe("unique values and a deploy that fails", () => {
     expect(String(redeployed)).toContain("'J-1' and 'J-2' share a value")
     expect(await storedJob(storage)).toEqual(recorded)
   })
+
+  // Revert check: in `applyTypeShapes`, drop the `clearUniqueProperties` before the run: the fill
+  // then checks `J-3`'s value only against the values the failed deploy built, misses `J-2`'s,
+  // and the duplicate is found after the run wrote it.
+  test("checks a fill of a property it makes unique against every object, not a failed deploy's values", async () => {
+    const storage = new InMemoryStorage()
+    await deploy(storage, before)
+    await commit(storage, before, [upsert("Job", "J-1", { note: "a" })])
+
+    // A deploy of `after` that fails once it built `note`'s values; then the old release writes.
+    await prepareUniqueProperties({ storage, projectId: PROJECT, ontology: after })
+    await commit(storage, before, [upsert("Job", "J-2", { note: "b" }), upsert("Job", "J-3", {})])
+    const recorded = await storedJob(storage)
+
+    const Job = defineObjectType({
+      id: "Job",
+      name: "Job",
+      properties: [
+        prop("ref", "string", { primary: true, required: true }),
+        prop("note", "string", { required: true, unique: true }),
+      ],
+    })
+    const required = new OntologyRegistry({
+      sources: [...before.listObjectTypes().filter((type) => type.id !== "Job"), Job],
+    })
+    const migration = defineMigration("job-note", Job).fillProperty("note", () => "b")
+
+    const redeployed = await migrateStorage(storage, {
+      projectId: PROJECT,
+      ontology: required,
+      migrations: [migration],
+      ontologyShapes: "deploy",
+    }).catch((error: unknown) => error)
+    expect(String(redeployed)).toContain("Migration 'job-note' cannot apply")
+    expect(String(redeployed)).toContain("Nothing was written.")
+    expect(await storedJob(storage)).toEqual(recorded)
+  })
 })

@@ -61,4 +61,9 @@ export const convertProperty: StepKind<ConvertProperty> = {
       call: `convertProperty(${quoted(change.propertyId)}, ({ value }) => …)`,
     }
   },
+
+  storeStep(step, context) {
+    const unique = context.valueUnique.get(step.propertyId)
+    return { kind: "convertProperty", propertyId: step.propertyId, ...(unique ? { unique } : {}) }
+  },
 }

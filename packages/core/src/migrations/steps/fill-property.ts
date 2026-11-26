@@ -47,4 +47,9 @@ export const fillProperty: StepKind<FillProperty> = {
 
     return { verb: "fill", call: `fillProperty(${quoted(change.propertyId)}, ({ object }) => …)` }
   },
+
+  storeStep(step, context) {
+    const unique = context.valueUnique.get(step.propertyId)
+    return { kind: "fillProperty", propertyId: step.propertyId, ...(unique ? { unique } : {}) }
+  },
 }

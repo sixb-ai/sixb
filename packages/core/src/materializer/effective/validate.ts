@@ -7,6 +7,7 @@ import type {
   TelemetryPointWrite,
 } from "../../materialization/model"
 import type { OntologyRegistry } from "../../ontology"
+import type { OntologyDefinitionCatalog } from "../../ontology/registry"
 import {
   assertKnownProperties,
   normalizeLinkProperties,
@@ -40,7 +41,7 @@ export function validateLinkRef(ontology: OntologyRegistry, ref: OntologyLinkRef
 }
 
 export function validateObjectAuthorityProperties(
-  ontology: OntologyRegistry,
+  ontology: OntologyDefinitionCatalog,
   ref: OntologyObjectRef,
   properties: Readonly<Record<string, JsonValue>>
 ): Readonly<Record<string, JsonValue>> {
@@ -102,7 +103,7 @@ export function validateObjectPatchPropertyIds(
 }
 
 export function validateEffectiveObject(
-  ontology: OntologyRegistry,
+  ontology: OntologyDefinitionCatalog,
   ref: OntologyObjectRef,
   properties: Readonly<Record<string, JsonValue>>,
   /** What a branch's copy left out of the object, which a missing value is then explained by. */

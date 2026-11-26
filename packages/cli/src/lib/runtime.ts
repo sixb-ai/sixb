@@ -112,6 +112,7 @@ export async function migrateRuntimeStorage(sixb: LoadedSixbHost): Promise<void>
     projectId: sixb.id,
     ontology: sixb.definitions.ontology,
     migrations: sixb.definitions.migrations.list(),
+    projections: sixb.definitions.projections,
     security: sixb.definitions.security,
     ontologyShapes: "dev",
   })

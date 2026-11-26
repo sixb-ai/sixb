@@ -68,27 +68,22 @@ or one property changed twice.
 ## Running one
 
 `sixb check --migrate` (the deploy step) and `sixb db migrate` run the pending migrations before
-the new code serves. `removeProperty`, `renameProperty` and `removeLink` run in this release; a
-change a fill or a convert covers still stops the deploy while objects hold it:
-
-```text
-✗ Job: 'hours' is now required, and 2,140 objects lack it: created without it or cleared by an edit.
-  Migration 'job-hours' is pending; this build can't apply it yet.
-```
-
-A run goes in this order:
+the new code serves. A run goes in this order:
 
 1. **Pause.** A deploy that runs one stops the live release first (`sixb db migrate --check` exits
    `3`), so the old code doesn't write the keys being removed.
 2. **Checks.** Everything that can fail runs before anything is written: the stored objects again,
    markings, the lake with `--lake`, and duplicates of properties the new code makes unique. A
    failure leaves storage as it was, and the old release starts again.
-3. **Apply.** From the first batch, the deploy only goes forward
+3. **Plan.** Each fill and convert function runs once per object, and its results are checked as
+   an action's edit would be, then set aside. If any object fails, the deploy stops with every
+   failure listed, and nothing is written.
+4. **Apply.** From the first batch, the deploy only goes forward
    ([During a deploy](../deployment/object-type-changes.md#during-a-deploy)). Each batch rewrites
    only the objects, edits, source rows, links, unique values, file references and vectors that
    hold a removed or renamed key, in one transaction, and saves where the next one starts. On
    PostgreSQL, ranges of a type's objects and its source rows run side by side.
-4. **Record.** The type's new shape is recorded, and the migration doesn't run again on that
+5. **Record.** The type's new shape is recorded, and the migration doesn't run again on that
    database.
 
 A migration changes the shape, not the business: rewritten objects get a new version, but no
@@ -111,6 +106,46 @@ Everything that holds the old key moves to the new one, without being rebuilt:
   included) and the links a projection asserted.
 - Lineage still names the edit that set a renamed value. When other edits share its instant, it
   names that instant instead of the commit.
+
+## What a fill and a convert write
+
+```ts
+// `hours` was optional text; it is now a required number.
+export const jobHours = defineMigration("job-hours", Job)
+  .convertProperty("hours", ({ value }) => Number(value))
+  .fillProperty("hours", ({ object }) => (object.status === "done" ? 8 : 0))
+```
+
+They give values to what people and actions wrote, never to what a projection feeds:
+
+| | Writes | Never writes |
+| --- | --- | --- |
+| `convertProperty` | Each edit's value, losing edits included, keeping its edit time | Source rows |
+| `fillProperty` | A value for an object an action created that has none, or whose edit cleared it, timed at the run's start | An edit over a property a projection feeds, in the stored rows or in the new code |
+
+- `fn` gets `{ primaryId, object }`, and `value` for a convert. `object` is the object after the
+  run's earlier steps. Return `null` to clear a value; `undefined` fails the object.
+- A convert sees every edit value of the property, also those the new schema already accepts. A
+  value a fill gave in the same run isn't converted again.
+- A property a rename moves in the same migration is converted or filled under its new id.
+- An object whose edit cleared the property over a projection's value can't be filled: the
+  deploy names it. Reset that edit, or keep the property optional.
+- A failing function, a value the new schema refuses, a file reference, or two objects taking one
+  unique value fails the deploy, naming each object:
+
+  ```text
+  [Sixb] Migration 'job-hours' cannot apply: 2 objects fail.
+    Job 'J-12': convertProperty('hours') failed: 'four' isn't a number
+    Job 'J-40': Missing required property 'Job.hours'.
+  ```
+
+- Each function runs once: a run that stops resumes from the values it set aside.
+- Unique values follow the new values. When their kind changes (text to integer), they are built
+  again after the run.
+- Objects whose vector source changed are queued for indexing again.
+- A converted property a projection also feeds keeps the projection's values in the old schema
+  until the projection runs again, and writes to those objects fail until then. The run names
+  those projections: run them right after the deploy.
 
 ## When a run stops
 

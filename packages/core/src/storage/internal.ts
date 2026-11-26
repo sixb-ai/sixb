@@ -76,6 +76,7 @@ export {
 } from "./migrations/type-shapes"
 export {
   addMigrationCounts,
+  afterUniqueValues,
   type CompiledMigrationSteps,
   compileMigrationSteps,
   migrationBatchConflict,

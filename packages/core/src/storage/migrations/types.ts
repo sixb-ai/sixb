@@ -1,5 +1,6 @@
 import type { MigrationDefinition } from "../../migrations/types"
 import type { OntologyDefinitionCatalog } from "../../ontology/registry"
+import type { ProjectionDefinitionCatalog } from "../../projections/registry"
 import type { SecurityDefinitionCatalog } from "../../security/registry"
 import type { ObjectQueryPreparationResult } from "../objects/query-preparation"
 import type { Storage } from "../types"
@@ -146,6 +147,8 @@ export interface StorageMigrationOptions {
   readonly ontologyShapes?: TypeShapeMode
   /** The project's migrations: a change their pending steps cover isn't missing one. */
   readonly migrations?: readonly MigrationDefinition[]
+  /** The project's projections: a run names those feeding a property it converted. */
+  readonly projections?: Pick<ProjectionDefinitionCatalog, "listObjects">
   /**
    * Called once an ontology migration run is past its point of no return: right after it started,
    * or before an open one resumes. From then on the previous release must not start again.

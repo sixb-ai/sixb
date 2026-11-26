@@ -54,17 +54,16 @@ export interface StepKind<S extends OntologyMigrationStep> {
   /** The call `sixb check` writes for a change this kind of step resolves, or `null`. */
   suggest(change: TypeShapeChange): StepSuggestion | null
 
-  /**
-   * The step as storage applies it, for a kind this build applies. A change data holds runs when
-   * every step that resolves it has one; otherwise the deploy says it can't apply it yet.
-   */
-  storeStep?(step: S, context: StoreStepContext): OntologyMigrationStoreStep
+  /** The step as storage applies it. */
+  storeStep(step: S, context: StoreStepContext): OntologyMigrationStoreStep
 }
 
 /** What storage needs to know of the stored data to apply a step, read when the run is planned. */
 export interface StoreStepContext {
   /** The renamed-from ids of the type whose unique values move to the new id. */
   readonly uniqueMoves: ReadonlySet<string>
+  /** The unique properties value steps give values to, and how their stored values follow. */
+  readonly valueUnique: ReadonlyMap<string, "update" | "rebuild">
 }
 
 /**

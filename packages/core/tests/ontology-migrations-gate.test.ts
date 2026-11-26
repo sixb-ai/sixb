@@ -26,9 +26,9 @@ import { prepareUniqueProperties } from "../src/storage/migrations/prepare-uniqu
 import type { OntologyMigrationStorage } from "../src/storage/ontology/migrations"
 
 // The deploy's gate with the project's migrations: a change their pending steps cover isn't
-// missing one, one they don't says what to write, a covered removal or rename runs, and a covered
-// change of a kind this build can't apply yet still stops on data. The pending algorithm alone is in
-// `ontology-migrations-pending`, what a run writes in the shared migration suite.
+// missing one, one they don't says what to write, and a covered change data holds runs. The pending
+// algorithm alone is in `ontology-migrations-pending`, what a run writes in the shared migration
+// suite.
 
 const PROJECT = "migrations-gate"
 
@@ -123,6 +123,22 @@ function create(
     ref: { objectTypeId, primaryId: ref },
     properties: { ref, ...properties },
   }
+}
+
+/** `storage`, as a provider that applies migrations but stages no values. */
+function withoutValueStaging(storage: Storage): Storage {
+  const migrations = storage.ontology.migrations!
+  const without = Object.create(migrations, { values: { value: undefined } })
+  const ontology = new Proxy(storage.ontology, {
+    get: (target, key) => (key === "migrations" ? without : Reflect.get(target, key)),
+  })
+  return new Proxy(storage, {
+    get(target, key) {
+      if (key === "ontology") return ontology
+      const value = Reflect.get(target, key)
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
 }
 
 /** A store on v1, with `jobs` created by actions. */
@@ -319,7 +335,7 @@ describe("a change pending migrations cover", () => {
     expect((await storedJob(storage))?.shape.properties).not.toHaveProperty("gate")
   })
 
-  test("names every migration whose steps cover it", async () => {
+  test("runs a fill and a convert of one property together", async () => {
     const optionalText = release([prop("hours", "string")])
     const storage = await deployed([create("J-1"), create("J-2", { hours: "3" })], optionalText)
 
@@ -332,15 +348,69 @@ describe("a change pending migrations cover", () => {
       ),
     ]
 
-    expect(await messageOf(deploy(storage, requiredDouble, migrations))).toBe(
-      [
-        "[Sixb] The stored objects don't fit this code:",
-        "  ✗ Job: 'hours' is now required, and 1 object lacks it: created without it or cleared by an edit.",
-        "    Migration 'job-hours-fill' is pending; this build can't apply it yet.",
-        "  ✗ Job: 'hours' changed from string to double, and 1 object holds edits it no longer accepts.",
-        "    Migration 'job-hours-convert' is pending; this build can't apply it yet.",
-      ].join("\n")
+    await deploy(storage, requiredDouble, migrations)
+    for (const [primaryId, hours] of [
+      ["J-1", 0],
+      ["J-2", 3],
+    ] as const) {
+      const job = await storage.objects.getByPrimaryId({
+        projectId: PROJECT,
+        objectTypeId: "Job",
+        primaryId,
+      })
+      expect(job?.properties.hours).toBe(hours)
+    }
+  })
+
+  // Removal proof: in the gate, leave a pending value step that doesn't run out of `settles`;
+  // the first convert then re-arms on the second narrowing, beside the second one, and the pair
+  // is refused.
+  test("settles a convert no data needed, so a later narrowing doesn't run it again", async () => {
+    const status = (...values: string[]) =>
+      prop("status", { type: "enum", valueType: "string", values })
+    const storage = await deployed(
+      [create("J-1", { status: "open" })],
+      release([status("open", "closed", "archived")])
     )
+
+    // Narrowed once: no job is archived, so nothing runs, and the migration settles.
+    const once = release([status("open", "closed")])
+    const archive = defineMigration("job-status", once.Job).convertProperty(
+      "status",
+      () => "closed"
+    )
+    const first = await deploy(storage, once, [archive])
+    expect(first.shapes?.types.flatMap((type) => type.run)).toEqual([])
+    await commit(storage, once.ontology, [create("J-2", { status: "closed" })])
+
+    // Narrowed again: only the second convert runs, on the data it was written for.
+    const twice = release([status("open")])
+    const close = defineMigration("job-status-2", twice.Job).convertProperty("status", () => "open")
+    const result = await deploy(storage, twice, [archive, close])
+
+    const ran = result.shapes?.types.flatMap((type) => type.run.map((step) => step.migrationId))
+    expect(ran).toEqual(["job-status-2"])
+    const job = await storage.objects.getByPrimaryId({
+      projectId: PROJECT,
+      objectTypeId: "Job",
+      primaryId: "J-2",
+    })
+    expect(job?.properties.status).toBe("open")
+  })
+
+  // Removal proof: in the gate, let every step run on a provider with `migrations`; the deploy then
+  // goes past its point of no return and fails, as the plan finds no staging to write to.
+  test("refuses a fill data needs on a provider without the staging value steps need", async () => {
+    const optionalText = release([prop("hours", "string")])
+    const storage = withoutValueStaging(await deployed([create("J-1")], optionalText))
+
+    const required = release([prop("hours", "string", { required: true })])
+    const fill = defineMigration("job-hours", required.Job).fillProperty("hours", () => "0")
+
+    expect(await messageOf(deploy(storage, required, [fill]))).toContain(
+      "Migration 'job-hours' is pending; this storage provider can't apply it."
+    )
+    expect(await storage.ontology.migrations?.getOpenRun({ projectId: PROJECT })).toBeNull()
   })
 
   // The first deploy's baseline holds only the keys data holds: a legacy key can be renamed.
