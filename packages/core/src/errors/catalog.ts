@@ -69,6 +69,13 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "AI usage limit could not be evaluated.",
     retryable: true,
   },
+  // A branch refuses what would reach outside it or act on production. The message says what, and
+  // what to do instead: see `branch-mode/README.md`.
+  "branch.refused": {
+    publicMessage: "This is refused on a branch.",
+    retryable: false,
+    explanationIsMessage: true,
+  },
   "connector.adapter_invalid": {
     publicMessage: "Connector adapter returned an invalid result.",
     retryable: false,

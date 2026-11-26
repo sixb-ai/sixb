@@ -213,6 +213,7 @@ import {
   revokeAuthSession,
   revokeConnectorConnection,
   revokeSharedAccessGrant,
+  runSchedule,
   saveAgentMemory,
   searchObjects,
   selectConnectorConnectionRunAccount,
@@ -829,6 +830,9 @@ import type {
   RevokeSharedAccessGrantData,
   RevokeSharedAccessGrantError,
   RevokeSharedAccessGrantResponse,
+  RunScheduleData,
+  RunScheduleError,
+  RunScheduleResponse,
   SaveAgentMemoryData,
   SaveAgentMemoryError,
   SaveAgentMemoryResponse,
@@ -3256,6 +3260,29 @@ export const requestPipelineRunMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await requestPipelineRun({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Run a cron schedule now
+ */
+export const runScheduleMutation = (
+  options?: Partial<Options<RunScheduleData>>
+): UseMutationOptions<RunScheduleResponse, RunScheduleError, Options<RunScheduleData>> => {
+  const mutationOptions: UseMutationOptions<
+    RunScheduleResponse,
+    RunScheduleError,
+    Options<RunScheduleData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await runSchedule({
         ...options,
         ...fnOptions,
         throwOnError: true,

@@ -1,3 +1,4 @@
+import { branchRefusals } from "../../branch-mode/refusals"
 import type { JsonValue } from "../../json"
 import { assertJsonValue, cloneJsonValue } from "../../json"
 import type { ActionReadRecorder } from "../read-facade"
@@ -35,6 +36,10 @@ export async function runWritebackPhase(
 
   let result: JsonValue
   try {
+    // A branch reaches no outside system, and the writeback is the Action's call to one. Its edits
+    // depend on the reply, so the run fails here, recorded as a failed writeback, before it runs.
+    if (input.runtime.branch) throw branchRefusals.writeback(input.runtime.branch, input.action.id)
+
     // Reads are side-effect-free, so the writeback phase can safely enrich its external payload
     // before the edit batch exists. Object, link-scope, and returned query/list rows share the
     // edits phase's recorder and are fenced by the same CAS. Query membership and telemetry

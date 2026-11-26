@@ -192,6 +192,7 @@ export function createHarness(options: HarnessOptions = {}) {
   const ready = seedConnectorActors(storage, "project", now)
   const protector = createConnectorCredentialProtectorFromKey(encryptionKey)
   const service = new ConnectorService("project", [connector], {
+    branch: null,
     storage,
     credentialProtector: protector,
     now: options.systemRuntimeClock ? () => new Date() : () => new Date(now),
@@ -213,9 +214,12 @@ export function createHarness(options: HarnessOptions = {}) {
     service,
     /** A second service instance over the same storage, protector and clock. */
     peer(
-      peerOptions: Omit<ConnectorServiceOptions, "storage" | "credentialProtector" | "now"> = {}
+      peerOptions: Partial<
+        Omit<ConnectorServiceOptions, "storage" | "credentialProtector" | "now">
+      > = {}
     ) {
       return new ConnectorService("project", [connector], {
+        branch: null,
         storage,
         credentialProtector: protector,
         now: () => new Date(now),

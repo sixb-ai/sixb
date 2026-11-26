@@ -100,7 +100,7 @@ function fixture(projection = meetingsProjection) {
       datasetVersion: { datasetId, versionId, createdAt: version.createdAt.toISOString() },
     }
     if (identity.projectionKind !== "object") throw new Error("Expected an object projection")
-    const id = createProjectionRunId(host.id, identity)
+    const id = createProjectionRunId(host.id, identity, null)
     await queueTestProjectionRun(storage, {
       projectId: host.id,
       id,
@@ -119,6 +119,7 @@ function fixture(projection = meetingsProjection) {
       ontology: host.definitions.ontology,
       lakeStorage: lake,
       projectionRunsStorage: storage.projectionRuns,
+      branch: null,
       ...(users ? { users } : {}),
       datasets: host.definitions.datasets,
       projections: host.definitions.projections,

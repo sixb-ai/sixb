@@ -1,3 +1,5 @@
+import type { SixbBranch } from "../branch-mode"
+import { branchRefusals } from "../branch-mode/refusals"
 import type { SandboxOAuthConnector } from "../sandboxes/auth"
 import type { ConnectorConnectionRecord } from "../storage"
 import type { ConnectorConnectionProcess } from "./connections/contracts"
@@ -16,14 +18,25 @@ import type {
 } from "./types"
 import { isOAuthConnectorDefinition } from "./types"
 
-export type ConnectorServiceOptions = ConnectorConnectionServiceOptions
+export interface ConnectorServiceOptions extends ConnectorConnectionServiceOptions {
+  /** On a branch, every client and every connection change is refused: see `branch-mode/README.md`. */
+  readonly branch: SixbBranch | null
+}
 
 type StaticConnectorConnectionState = {
   readonly controller: AbortController
   readonly clientPromise: Promise<unknown>
 }
 
-/** Process-owned facade for static clients and persistent connector connections. */
+/**
+ * Process-owned facade for static clients and persistent connector connections.
+ *
+ * Every connector client is made here, whoever asks: an action's writeback or effects, a sync, a
+ * workflow step, a webhook handler, an agent tool, a sandbox's source token from a connection.
+ * That makes it the one place a branch refuses them all. A sandbox source auth that calls its
+ * provider itself, such as `githubApp`, makes none here: on a branch it grants what it grants in
+ * production (`branch-mode/README.md`, "A sandbox's source access").
+ */
 export class ConnectorService {
   private readonly definitionsById: ReadonlyMap<string, ConnectorDefinition>
   private readonly staticConnectionStates = new Map<
@@ -31,15 +44,22 @@ export class ConnectorService {
     StaticConnectorConnectionState
   >()
   private readonly connections?: ConnectorConnectionService
+  private readonly branch: SixbBranch | null
+  private readonly lifecycle?: ConnectorConnectionProcess
 
   constructor(
     private readonly projectId: string,
     definitions: readonly ConnectorDefinition[],
-    options: ConnectorServiceOptions = {}
+    options: ConnectorServiceOptions
   ) {
     this.definitionsById = new Map(definitions.map((definition) => [definition.id, definition]))
+    this.branch = options.branch
+
     if (definitions.some(isOAuthConnectorDefinition)) {
       this.connections = new ConnectorConnectionService(projectId, definitions, options)
+      this.lifecycle = this.branch
+        ? refuseConnectionChanges(this.connections, this.branch)
+        : this.connections
     }
   }
 
@@ -47,6 +67,7 @@ export class ConnectorService {
     definition: ConnectorDefinition<string, TAdapter>
   ): Promise<ConnectorClient<TAdapter>> {
     this.assertRegistered(definition)
+    this.refuseOnBranch(definition)
 
     let state = this.staticConnectionStates.get(definition)
     if (!state) {
@@ -72,10 +93,12 @@ export class ConnectorService {
     }
   }
 
-  connectConnection<TAdapter extends OAuthConnectorAdapter>(
+  async connectConnection<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
     selector: ConnectorConnectionSelector
   ): Promise<ConnectorClient<TAdapter>> {
+    this.refuseOnBranch(definition)
+
     return this.requireConnections().connectConnection(definition, selector)
   }
 
@@ -84,6 +107,8 @@ export class ConnectorService {
     selector: ConnectorConnectionSelector
   ): ConnectorTokenSource {
     const definition = connector as unknown as ConnectorDefinition
+    this.refuseOnBranch(definition)
+
     if (!isOAuthConnectorDefinition(definition)) {
       throw createConnectorCodedError(
         "connector.configuration_invalid",
@@ -111,23 +136,29 @@ export class ConnectorService {
     await this.connections?.revokeUserConnections(userId)
   }
 
-  assertExecutionConnectionUsable<TAdapter extends OAuthConnectorAdapter>(
+  /** Refreshes the grant's token when due, which reaches the provider: refused on a branch. */
+  async assertExecutionConnectionUsable<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
     connection: ConnectorConnectionRecord
   ): Promise<void> {
+    this.refuseOnBranch(definition)
+
     return this.requireConnections().assertExecutionConnectionUsable(definition, connection)
   }
 
-  connectExecutionConnection<TAdapter extends OAuthConnectorAdapter>(
+  async connectExecutionConnection<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
     connection: ConnectorConnectionRecord,
     signal?: AbortSignal
   ): Promise<ConnectorClient<TAdapter>> {
+    this.refuseOnBranch(definition)
+
     return this.requireConnections().connectExecutionConnection(definition, connection, signal)
   }
 
+  /** The OAuth lifecycle the API serves. On a branch it lists, and refuses every change. */
   get connectionProcess(): ConnectorConnectionProcess | undefined {
-    return this.connections
+    return this.lifecycle
   }
 
   async close(): Promise<void> {
@@ -137,6 +168,10 @@ export class ConnectorService {
     for (const [definition, state] of activeConnections) {
       await this.disconnectStaticState(definition, state)
     }
+  }
+
+  private refuseOnBranch(definition: Pick<ConnectorDefinition, "id">): void {
+    if (this.branch) throw branchRefusals.connector(this.branch, definition.id)
   }
 
   private assertRegistered(definition: ConnectorDefinition): void {
@@ -173,5 +208,39 @@ export class ConnectorService {
     if (typeof definition.adapter.disconnect === "function") {
       await definition.adapter.disconnect(client as never)
     }
+  }
+}
+
+/**
+ * The lifecycle with every change refused: connecting, choosing an account, reauthorizing,
+ * disconnecting and revoking all reach the provider or production's connections. What lists and
+ * reads stays, so the console shows the branch has none.
+ */
+function refuseConnectionChanges(
+  process: ConnectorConnectionProcess,
+  branch: SixbBranch
+): ConnectorConnectionProcess {
+  const refuse = async (connectorId?: string): Promise<never> => {
+    throw branchRefusals.connection(branch, connectorId)
+  }
+
+  return {
+    // An OAuth callback names its run by state alone.
+    callbackProcess: { completeConnectionRun: () => refuse() },
+    listConnections: (context, connectorId) => process.listConnections(context, connectorId),
+    listPendingConnectionRuns: (context, connectorId) =>
+      process.listPendingConnectionRuns(context, connectorId),
+    getConnectionRun: (context, connectorId, runId) =>
+      process.getConnectionRun(context, connectorId, runId),
+    startConnectionRun: (_context, connectorId) => refuse(connectorId),
+    addConnection: (_context, connectorId) => refuse(connectorId),
+    selectConnectionRunAccount: (_context, connectorId) => refuse(connectorId),
+    startReauthorization: (_context, connectorId) => refuse(connectorId),
+    revokeConnection: (_context, connectorId) => refuse(connectorId),
+    startAuthorization: (_context, connectorId) => refuse(connectorId),
+    completeAuthorization: (_context, connectorId) => refuse(connectorId),
+    selectAccount: (_context, connectorId) => refuse(connectorId),
+    disconnect: (_context, connectorId) => refuse(connectorId),
+    revokeAuthorization: (_context, connectorId) => refuse(connectorId),
   }
 }

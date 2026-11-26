@@ -1,3 +1,4 @@
+import type { SixbBranch } from "../branch-mode"
 import { PendingTasks } from "../pending-tasks"
 import { normalizeReportedError } from "./normalize"
 import type { SixbErrorContext, SixbErrorHandler } from "./types"
@@ -12,10 +13,16 @@ export interface ErrorReporter {
 export class SixbErrorReporter implements ErrorReporter {
   private readonly pending = new PendingTasks()
 
-  constructor(private readonly handler?: SixbErrorHandler) {}
+  constructor(
+    private readonly handler?: SixbErrorHandler,
+    private readonly branch: SixbBranch | null = null
+  ) {}
 
-  report(error: unknown, context: SixbErrorContext): void {
+  report(error: unknown, reported: SixbErrorContext): void {
     const normalizedError = normalizeReportedError(error)
+    // A branch's failures say so: its `onError` may be the same as another branch's, or plain dev's.
+    const context = this.branch ? { ...reported, branch: this.branch.name } : reported
+
     if (!this.handler) {
       reportToConsole(normalizedError, context)
       return

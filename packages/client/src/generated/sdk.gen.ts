@@ -626,6 +626,9 @@ import type {
   RevokeSharedAccessGrantData,
   RevokeSharedAccessGrantErrors,
   RevokeSharedAccessGrantResponses,
+  RunScheduleData,
+  RunScheduleErrors,
+  RunScheduleResponses,
   SaveAgentMemoryData,
   SaveAgentMemoryErrors,
   SaveAgentMemoryResponses,
@@ -2122,6 +2125,21 @@ export const requestPipelineRun = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/pipelines/{pipelineId}/runs",
+    ...options,
+  })
+
+/**
+ * Run a cron schedule now
+ */
+export const runSchedule = <ThrowOnError extends boolean = false>(
+  options: Options<RunScheduleData, ThrowOnError>
+) =>
+  (options.client ?? client).post<RunScheduleResponses, RunScheduleErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/schedules/{scheduleId}/runs",
     ...options,
   })
 

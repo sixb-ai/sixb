@@ -92,6 +92,7 @@ describe("access token auth boundary", () => {
       // Reading syncs and pipelines takes a token; running one still takes a signed-in session.
       ["POST", "/api/syncs/catalog/runs"],
       ["POST", "/api/pipelines/catalog/runs"],
+      ["POST", "/api/schedules/nightly/runs"],
       ["GET", "/api/datasets/orders/versions/v_1"],
       ["GET", "/api/auth/session"],
       ["GET", "/api/auth/membership-options"],

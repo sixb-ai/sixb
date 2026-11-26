@@ -273,7 +273,7 @@ async function devicePublisher(storage: PostgresStorage) {
       projectionRevision: dispatch.projectionRevision,
       ownershipHash: dispatch.ownershipHash,
     }
-    const id = createProjectionRunId(host.id, identity)
+    const id = createProjectionRunId(host.id, identity, null)
     const claim = await startTestProjectionRun(storage, {
       projectId: host.id,
       id,

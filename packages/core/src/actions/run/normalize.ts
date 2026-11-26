@@ -83,7 +83,10 @@ export function translateActionPhaseError(
           { cause: error, details }
         )
   }
-  if (isSixbError(error) && error.code === "internal.unexpected") {
+  if (
+    isSixbError(error) &&
+    (error.code === "internal.unexpected" || error.code === "branch.refused")
+  ) {
     return error
   }
   if (error instanceof ActionValidationError) {

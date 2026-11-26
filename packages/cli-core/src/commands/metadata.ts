@@ -399,6 +399,13 @@ List options:
 
 Lists the pipelines you may run, each with its latest run. \`sixb pipeline-runs\` shows the
 history and each run's steps.`,
+  schedules: `Usage:
+  sixb schedules run <schedule-id>
+
+Runs a cron schedule now, as its next occurrence would: the syncs, pipelines and workflows it starts
+run as on any occurrence, not as you. It takes managing the project's source and the right to run
+each of them. On a branch, where no cron schedule runs on its own clock, this is how one runs; one
+that starts a sync is refused there.`,
   "pipeline-runs": `Usage:
   sixb pipeline-runs list [options]
   sixb pipeline-runs get <run-id>

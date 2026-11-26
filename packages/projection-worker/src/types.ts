@@ -1,6 +1,7 @@
 import type {
   LakeStorage,
   OntologyDefinitionCatalog,
+  SixbBranch,
   SixbDefinitions,
   SixbFailure,
 } from "@sixb/core"
@@ -17,6 +18,8 @@ import type {
 
 export interface ProjectionWorkerContext {
   readonly projectId: string
+  /** The branch the worker runs on, which names its runs: see `createProjectionRunId`. */
+  readonly branch: SixbBranch | null
   readonly ontology: OntologyDefinitionCatalog
   readonly lakeStorage: LakeStorage
   readonly projectionRunsStorage: ProjectionRunStorage

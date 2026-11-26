@@ -1,3 +1,4 @@
+import type { SixbBranch } from "../../branch-mode"
 import type { LakeStorage } from "../../lake-storage"
 import type { MaintenancePass } from "../loop"
 import { type IngestPassInput, ingestPass } from "./ingest-pass"
@@ -11,6 +12,14 @@ type WithoutShared<T> = Omit<T, "projectId" | "feed" | "lakeStorage">
 
 export interface RecoveryPassesInput {
   readonly projectId: string
+  /**
+   * On a branch whose lake is no fork of production's, the projections pass recovers nothing: the
+   * lake cannot tell the branch's versions from the ones its objects were copied from, so a first
+   * pass would re-derive every projection and re-create every object the copy holds. A forked lake
+   * tells them apart itself (`LakeFork.ownsVersion`). Either way, the live
+   * `dataset.version.committed` path still projects what the branch commits.
+   */
+  readonly branch: SixbBranch | null
   readonly lakeStorage: Pick<LakeStorage, "listLatestVersionsSince"> &
     ProjectionsPassInput["lakeStorage"] &
     TriggersPassInput["lakeStorage"]
@@ -30,8 +39,10 @@ export function recoveryPasses(input: RecoveryPassesInput): readonly Maintenance
   const { projectId, lakeStorage } = input
   const feed = new LakeChangeFeed({ lakeStorage, projectId, freshForMs: RECOVERY_INTERVAL_MS })
 
+  const projections = input.branch && !lakeStorage.fork ? undefined : input.projections
+
   return [
-    input.projections && projectionsPass({ ...input.projections, projectId, lakeStorage, feed }),
+    projections && projectionsPass({ ...projections, projectId, lakeStorage, feed }),
     input.triggers && triggersPass({ ...input.triggers, projectId, lakeStorage, feed }),
     input.ingest && ingestPass({ ...input.ingest, projectId }),
     input.runs && runsPass({ ...input.runs, projectId }),

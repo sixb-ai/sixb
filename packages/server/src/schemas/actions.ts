@@ -155,6 +155,11 @@ const ActionRunEffectsRecordSchema = z.discriminatedUnion("status", [
     completedAt: z.string(),
     error: ActionRunEffectsFailureSchema,
   }),
+  // On a branch, which sends nothing.
+  z.object({
+    status: z.literal("skipped"),
+    completedAt: z.string(),
+  }),
 ])
 
 export const ActionRunDetailSchema = ActionRunSummarySchema.extend({

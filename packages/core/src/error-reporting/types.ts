@@ -84,6 +84,8 @@ interface SixbFailureContext<TType extends string> {
    */
   readonly notificationId: string
   readonly projectId: string
+  /** The branch the failure happened on, such as `"feature/invoices"`. Absent in production. */
+  readonly branch?: string
   readonly occurredAt: string
 }
 

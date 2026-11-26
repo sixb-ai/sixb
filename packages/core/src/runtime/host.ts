@@ -23,6 +23,13 @@ import {
   type SixbAuthConfig,
 } from "../auth"
 import type { BlobStorage } from "../blob-storage"
+import {
+  branchTransportId,
+  namespaceBroker,
+  namespaceQueues,
+  resolveHostBranch,
+  type SixbBranch,
+} from "../branch-mode"
 import type { Broker } from "../broker"
 import { canonicalTimeZone } from "../calendar"
 import {
@@ -107,6 +114,7 @@ import {
 } from "../sandboxes/configuration"
 import { SandboxError } from "../sandboxes/errors"
 import type { ScheduleDefinition } from "../schedules"
+import { isSyncRun, runsStartedBy } from "../schedules/execution"
 import type {
   GroupDefinition,
   MarkingDefinition,
@@ -201,6 +209,11 @@ export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsCon
 // return `SixbHost` that returns `new SixbHost(options)`.
 export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly projectId: string
+  /**
+   * The branch this runtime runs as, set by the host (`sixb dev --from production`), or `null`.
+   * On a branch, core refuses what would reach outside it: see `branch-mode/README.md`.
+   */
+  readonly branch: SixbBranch | null
   /** Canonical BCP 47 language of the project. */
   readonly locale: string
   /** Canonical IANA time zone of the project. */
@@ -238,12 +251,16 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly auth: AuthRuntime
 
   constructor(options: SixbHostOptions<TParams>) {
-    const errorReporter = attachSixbErrorReporter(this, options.onError)
+    // The host says whether this process runs as a branch, as it says NODE_ENV, before core loads
+    // (see `resolveHostBranch`). First thing, so every provider and report below already knows.
+    this.branch = resolveHostBranch(options)
+    const errorReporter = attachSixbErrorReporter(this, options.onError, this.branch)
     this.errorReporter = errorReporter
     this.projectId = options.id ?? "default"
     this.locale = resolveProjectLocale(options.locale)
     this.timeZone = resolveProjectTimeZone(options.timeZone)
-    this.broker = options.broker
+    const transportId = this.branch && branchTransportId(this.projectId, this.branch)
+    this.broker = transportId ? namespaceBroker(options.broker, transportId) : options.broker
     this.eventService = createDomainEventService({
       projectId: this.projectId,
       broker: this.broker,
@@ -261,7 +278,9 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     this.storageReadiness = new StorageReadiness(this.storage)
     this.lakeStorage = options.lakeStorage
     this.blobStorage = options.blobStorage
-    this.queues = options.queues
+    this.queues = transportId
+      ? namespaceQueues(options.queues, this.projectId, transportId)
+      : options.queues
     this.sandboxes = options.sandboxes
     this.projectRoot = resolve(options.projectRoot ?? process.cwd())
 
@@ -305,6 +324,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       security: definitions.security,
       config: options.auth,
       events: this.eventService,
+      branch: this.branch,
       onUserSuspended: (userId) => this.connectorService.revokeUserConnections(userId),
     })
     validateAuthStrategySecurityReferences(this.auth.getStrategy(), definitions.security)
@@ -318,6 +338,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       storage: this.storage,
       credentialProtector,
       events: this.eventService,
+      branch: this.branch,
     })
     if (this.connectorService.connectionProcess) {
       registerConnectorConnectionCallbackProcess(
@@ -378,6 +399,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       embeddingModels: definitions.models?.embedding,
       rerankingModels: definitions.models?.reranking,
       projectId: this.projectId,
+      branch: this.branch,
       broker: this.broker,
       ontology: definitions.ontology,
       actionRegistry: definitions.actions,
@@ -532,12 +554,18 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   /**
    * Run the project's upkeep on one loop: ontology maintenance, cron schedules, lake retention, the
    * auth strategy's directory check, and `passes`. The orchestrator is what hosts it.
+   *
+   * A branch runs no cron schedule and no directory check: nothing on it starts on its own clock
+   * or suspends people. `sixb schedules run <id>` runs one now. Its lake's retention runs, on the
+   * branch's own versions and files: it never deletes production's.
    */
   startMaintenance(passes: readonly MaintenancePass[]): OntologyMaintenanceHandle {
+    if (this.branch) announceBranchMaintenance(this.branch, this.definitions)
+
     const loop = new MaintenanceLoop({
       passes: [
         ontologyPass(this.ontologyMaintenance),
-        this.cron,
+        ...(this.branch ? [] : [this.cron]),
         ...this.lakeRetentionPasses(),
         ...this.directoryPasses(),
         ...passes,
@@ -552,7 +580,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
 
   private directoryPasses(): readonly MaintenancePass[] {
     const intervalMs = this.auth.directoryIntervalMs
-    if (intervalMs === undefined) return []
+    if (intervalMs === undefined || this.branch) return []
 
     return [
       directoryPass({ intervalMs, checkDirectory: (signal) => this.auth.checkDirectory(signal) }),
@@ -648,6 +676,25 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
  */
 export type SixbHostView = Omit<SixbHost, "withScope"> & {
   withScope(scope: ExecutionScope): object
+}
+
+/**
+ * A branch starts no cron schedule on its own clock. Say so once, with how to run one, rather than
+ * leave a schedule that never fires to be found by surprise. One that starts a sync is left out:
+ * syncs do not run on a branch, so running it now is refused.
+ */
+function announceBranchMaintenance(branch: SixbBranch, definitions: SixbDefinitions): void {
+  const runnable = definitions.schedules
+    .list()
+    .filter((schedule) => schedule.trigger.type === "cron")
+    .filter((schedule) => !runsStartedBy(definitions, schedule.id).some(isSyncRun))
+  if (runnable.length === 0) return
+
+  console.info(
+    `[Sixb] Branch "${branch.name}": cron schedules do not run on their own clock on a branch ` +
+      `(${runnable.map((schedule) => `'${schedule.id}'`).join(", ")}). Run one now with ` +
+      "`sixb schedules run <id> --api-url <this branch's API>`; event schedules run as in production."
+  )
 }
 
 function resolveProjectLocale(locale: unknown): string {

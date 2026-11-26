@@ -151,7 +151,7 @@ function fixture(
       datasetVersion: { datasetId, versionId, createdAt: version.createdAt.toISOString() },
     }
     if (identity.projectionKind === "telemetry") throw new Error("Unexpected telemetry projection")
-    const id = createProjectionRunId(host.id, identity)
+    const id = createProjectionRunId(host.id, identity, null)
     let run = await storage.projectionRuns.getById({ projectId: host.id, id })
     if (!run) {
       const target = projectionTargetOf(definition)
@@ -172,6 +172,7 @@ function fixture(
       ontology: host.definitions.ontology,
       lakeStorage: lake,
       projectionRunsStorage: storage.projectionRuns,
+      branch: null,
       syncRuns: storage.syncRuns,
       datasets: host.definitions.datasets,
       projections: host.definitions.projections,

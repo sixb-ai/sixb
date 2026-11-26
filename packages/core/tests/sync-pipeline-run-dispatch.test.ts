@@ -41,6 +41,7 @@ describe("Sync and Pipeline durable dispatch", () => {
     const storage = new InMemoryStorage()
     const queues = new InMemoryQueues()
     const dependencies = {
+      branch: null,
       id: "test",
       storage,
       queues,
@@ -228,6 +229,7 @@ describe("Sync and Pipeline durable dispatch", () => {
     const enqueue = queues.syncRuns.enqueue.bind(queues.syncRuns)
     queues.syncRuns.enqueue = () => Promise.reject(new Error("queue unavailable"))
     const dispatcher = new SyncRunDispatcher({
+      branch: null,
       id: "project-1",
       definitions: { syncs: createDefinitionCatalog(new Map([[sync.id, sync]])) },
       storage,
@@ -343,6 +345,7 @@ function createAutomaticTarget(kind: "pipeline" | "sync"): AutomaticTarget {
   const storage = new InMemoryStorage()
   const queues = new InMemoryQueues()
   const dependencies = {
+    branch: null,
     id: projectId,
     storage,
     queues,
@@ -586,6 +589,7 @@ describe("automatic Sync dispatch", () => {
 
     function dispatcherFor(storage: InMemoryStorage, definition: typeof sync | typeof mergingSync) {
       return new SyncRunDispatcher({
+        branch: null,
         id: projectId,
         storage,
         queues: new InMemoryQueues(),
@@ -702,6 +706,7 @@ describe("automatic dispatch of a Sync on an OAuth connector", () => {
   function createDispatcher(connectionIds: readonly string[]) {
     const storage = new InMemoryStorage()
     const dependencies = {
+      branch: null,
       id: projectId,
       storage,
       queues: new InMemoryQueues(),

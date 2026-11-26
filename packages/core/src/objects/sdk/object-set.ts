@@ -79,6 +79,7 @@ export function createObjectSet<TObjectType extends ObjectTypeWithPropertyTokens
   const resolvedCtx: ObjectSetContext = {
     embeddingModels: params.embeddingModels,
     projectId,
+    branch: params.branch,
     broker,
     ontology,
     actionRegistry,

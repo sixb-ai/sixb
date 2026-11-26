@@ -8,12 +8,13 @@ import { createTestRuntimeDeps } from "./test-runtime-deps"
 describe("connector connection startup validation", () => {
   test("requires connection storage and explicit protection for durable providers", () => {
     const harness = createHarness()
-    expect(() => new ConnectorService("project", [harness.connector])).toThrow(
+    expect(() => new ConnectorService("project", [harness.connector], { branch: null })).toThrow(
       "storage.connectorConnections"
     )
     expect(
       () =>
         new ConnectorService("project", [harness.connector], {
+          branch: null,
           storage: new InMemoryStorage(),
         })
     ).not.toThrow()
@@ -23,7 +24,11 @@ describe("connector connection startup validation", () => {
       value: "durable",
     })
     expect(
-      () => new ConnectorService("project", [harness.connector], { storage: durableStorage })
+      () =>
+        new ConnectorService("project", [harness.connector], {
+          branch: null,
+          storage: durableStorage,
+        })
     ).toThrow("connectorConnections.encryptionKey")
   })
 

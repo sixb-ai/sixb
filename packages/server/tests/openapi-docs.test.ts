@@ -154,6 +154,7 @@ describe("OpenAPI docs", () => {
       ["post", "/api/auth/members/{userId}/reactivate"],
       ["post", "/api/syncs/{syncId}/runs"],
       ["post", "/api/pipelines/{pipelineId}/runs"],
+      ["post", "/api/schedules/{scheduleId}/runs"],
       ["post", "/api/workflow-interventions/{interventionId}/submit"],
       ["post", "/api/workflow-interventions/{interventionId}/cancel"],
       ["post", "/api/agent-threads"],

@@ -234,6 +234,7 @@ const shippedMigrationIds = [
   "112-agent-message-artifact-context",
   "113-snapshot-load-executions",
   "114-lake-slices",
+  "115-skipped-action-effects",
 ]
 
 afterEach(async () => {

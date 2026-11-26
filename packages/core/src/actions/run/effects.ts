@@ -38,11 +38,11 @@ export async function runActionEffects(input: RunActionEffectsInput): Promise<vo
   const deadline = input.startDeadline()
 
   try {
-    const outcome = await callEffects(
-      input,
-      deadline.signal,
-      logSession.withContext({ phase: "effects" })
-    )
+    const logger = logSession.withContext({ phase: "effects" })
+    const outcome = runtime.branch
+      ? skipEffects(input)
+      : await callEffects(input, deadline.signal, logger)
+
     try {
       await runtime.actionRunsStorage.recordEffects(outcome)
     } catch (error) {
@@ -54,6 +54,20 @@ export async function runActionEffects(input: RunActionEffectsInput): Promise<vo
   } finally {
     deadline.dispose()
     await logSession.flush()
+  }
+}
+
+/**
+ * Effects notify people and systems, and a branch sends nothing: the run records them as skipped,
+ * so it reads as in production but for what it sent. The run's logs are the project's: the
+ * framework writes nothing there.
+ */
+function skipEffects(input: RunActionEffectsInput): RecordActionEffectsInput {
+  return {
+    id: input.state.run.id,
+    projectId: input.runtime.id,
+    status: "skipped",
+    completedAt: new Date(),
   }
 }
 

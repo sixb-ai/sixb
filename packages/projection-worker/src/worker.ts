@@ -1,4 +1,4 @@
-import type { LakeStorage, Queues, SixbDefinitions, Storage } from "@sixb/core"
+import type { LakeStorage, Queues, SixbBranch, SixbDefinitions, Storage } from "@sixb/core"
 import { MaterializationCancellationError } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import {
@@ -212,6 +212,7 @@ function buildProjectionContext(
 ): ProjectionWorkerContext {
   const context: ProjectionWorkerContext = {
     projectId: host.id,
+    branch: host.branch,
     ontology: host.definitions.ontology,
     lakeStorage: host.lakeStorage,
     projectionRunsStorage,
@@ -227,6 +228,7 @@ function buildProjectionContext(
 }
 
 export interface ProjectionWorkerHost extends PrimitiveExecutionHost {
+  readonly branch: SixbBranch | null
   readonly storage: Storage
   readonly lakeStorage: LakeStorage
   readonly queues: Queues

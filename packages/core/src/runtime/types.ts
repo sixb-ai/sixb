@@ -8,6 +8,7 @@
 import type { ActionDefinitionCatalog, ActionParamsConfig, InferActionParams } from "../actions"
 import type { AuthorizationContext } from "../authorization"
 import type { OpenedFileRef } from "../blob-storage"
+import type { SixbBranch } from "../branch-mode"
 import type { Broker } from "../broker"
 import type { DomainEventLog } from "../events"
 import type { ObjectEventHistory } from "../events/service"
@@ -61,6 +62,8 @@ export interface SixbHostContext {
   readonly embeddingModels?: EmbeddingModelCatalog
   readonly rerankingModels?: RerankingModelCatalog
   readonly projectId: string
+  /** The branch the host runs as, or `null`: see `branch-mode/README.md`. */
+  readonly branch: SixbBranch | null
   readonly broker: Broker
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionDefinitionCatalog

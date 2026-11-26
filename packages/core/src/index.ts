@@ -1029,6 +1029,7 @@ export type { VideoExportProgress } from "./artifacts/video/export"
 export type { ArtifactWarning } from "./artifacts/warnings"
 export type { CreateFileDownloadUrlOptions, FileDownloadUrl } from "./blob-storage/download-urls"
 export type { BlobsRuntime } from "./blob-storage/execution"
+export type { SixbBranch } from "./branch-mode"
 export type { ConnectorRuntime } from "./connectors/execution"
 export type {
   DatasetIngestInput,
@@ -1171,7 +1172,7 @@ export {
   SyncValidationError,
 } from "./runtime"
 export type { ScriptContext } from "./runtime/script"
-export type { SchedulesRuntime } from "./schedules/execution"
+export type { ScheduleRunResult, SchedulesRuntime } from "./schedules/execution"
 export type {
   ActionRunFailure,
   ActionRunFailureCode,

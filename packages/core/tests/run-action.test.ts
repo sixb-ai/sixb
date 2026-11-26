@@ -104,6 +104,7 @@ async function createContext(
   })
   return {
     id: host.id,
+    branch: null,
     errorReporterHost: host,
     storage: host.storage,
     actionRunsStorage: host.storage.actionRuns!,
@@ -329,9 +330,13 @@ describe("runAction", () => {
       })
     const { host, sixb } = createSixb([failWriteback])
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    const reporter = attachSixbErrorReporter(host, (error, context) => {
-      reports.push({ error, context })
-    })
+    const reporter = attachSixbErrorReporter(
+      host,
+      (error, context) => {
+        reports.push({ error, context })
+      },
+      null
+    )
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1", status: "old" })
     await prepareActionRun(host, {
       id: "act_fail",
@@ -779,7 +784,7 @@ describe("runAction", () => {
         objects(Device).byId(subject.primaryId).update({ status: "retired" })
       })
     const { host, sixb } = createSixb([retire])
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
     await prepareActionRun(host, {
       id: "act_retire",
@@ -880,9 +885,13 @@ describe("runAction", () => {
       )
     const { host, sixb } = createSixb([waitForCancel])
     let reportCount = 0
-    const reporter = attachSixbErrorReporter(sixb, () => {
-      reportCount += 1
-    })
+    const reporter = attachSixbErrorReporter(
+      sixb,
+      () => {
+        reportCount += 1
+      },
+      null
+    )
     await prepareActionRun(host, {
       id: "act_cancelled",
       actionId: "waitForCancel",
@@ -1121,9 +1130,13 @@ describe("runAction deadline and boundary", () => {
       })
     const { host, sixb } = createSixb([slowWriteback])
     const reports: SixbErrorContext[] = []
-    const reporter = attachSixbErrorReporter(host, (_error, context) => {
-      reports.push(context)
-    })
+    const reporter = attachSixbErrorReporter(
+      host,
+      (_error, context) => {
+        reports.push(context)
+      },
+      null
+    )
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1", status: "old" })
     await prepareActionRun(host, {
       id: "act_slow",
@@ -1311,7 +1324,7 @@ describe("runAction deadline and boundary", () => {
         return stuck()
       })
     const { host, sixb } = createSixb([stuckValidation, stuckEdits])
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
 
     for (const [actionId, phase] of [
       ["stuckValidation", "validation"],
@@ -1347,7 +1360,7 @@ describe("runAction deadline and boundary", () => {
         return new Promise<never>(() => {})
       })
     const { host, sixb } = createSixb([stuckEffects])
-    attachSixbErrorReporter(host, () => {})
+    attachSixbErrorReporter(host, () => {}, null)
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
     await prepareActionRun(host, {
       id: "act_stuck_effects",

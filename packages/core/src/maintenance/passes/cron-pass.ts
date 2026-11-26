@@ -208,10 +208,36 @@ class CronOccurrences {
   }
 }
 
+/**
+ * Appends `schedule.triggered` for a cron schedule now, outside its clock, so what it starts runs
+ * as on any occurrence. Its key is its own, so it never takes the place of a real occurrence that
+ * falls on the same second.
+ */
+export async function triggerScheduleNow(
+  events: Pick<DomainEventLog, "append">,
+  schedule: CronScheduleDefinition,
+  now: Date = new Date()
+): Promise<{ scheduleId: string; occurrenceKey: string; triggeredAt: string }> {
+  const at = now.toISOString()
+  const occurrenceKey = `${schedule.id}:now:${at}`
+
+  await events.append({
+    events: [
+      {
+        type: "schedule.triggered",
+        idempotencyKey: occurrenceKey,
+        payload: { scheduleId: schedule.id, occurrenceAt: at, triggeredAt: at, occurrenceKey },
+      },
+    ],
+  })
+
+  return { scheduleId: schedule.id, occurrenceKey, triggeredAt: at }
+}
+
 function dueAt(next: NextOccurrence): Date {
   return next.retryAt ?? next.at
 }
 
-function isCronSchedule(schedule: ScheduleDefinition): schedule is CronScheduleDefinition {
+export function isCronSchedule(schedule: ScheduleDefinition): schedule is CronScheduleDefinition {
   return schedule.trigger.type === "cron"
 }

@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { type AuthorizationContext, resolveAuthorizationContext } from "../authorization"
+import type { SixbBranch } from "../branch-mode"
+import { branchRefusals } from "../branch-mode/refusals"
 import type { DomainEventLog } from "../events/service"
 import type { EventDraft } from "../events/types"
 import {
@@ -157,6 +159,8 @@ export interface AuthRuntimeOptions {
    * is logged; it never undoes the suspension.
    */
   readonly onUserSuspended?: (userId: string) => Promise<void>
+  /** On a branch, nothing is emailed and the directory is never checked: see `branch-mode/README.md`. */
+  readonly branch: SixbBranch | null
 }
 
 export class AuthRuntime {
@@ -168,14 +172,22 @@ export class AuthRuntime {
   private readonly events: DomainEventLog
   private readonly onUserSuspended?: (userId: string) => Promise<void>
   private readonly directorySchedule?: DirectorySchedule
+  private readonly branch: SixbBranch | null
+  /** The configured strategy, or on a branch the same one with every email refused. */
+  private readonly strategy: AuthStrategy | null
 
   constructor(options: AuthRuntimeOptions) {
     this.projectId = options.projectId
+    this.branch = options.branch
     this.storage = options.storage
     this.security = options.security
     this.events = options.events
     this.onUserSuspended = options.onUserSuspended
     this.config = resolveAuthConfig(options.config)
+    this.strategy =
+      this.branch && this.config.strategy
+        ? withoutEmails(this.config.strategy, this.branch)
+        : this.config.strategy
     const directory = this.config.strategy?.directory
     if (directory && this.isEnabled()) this.directorySchedule = directorySchedule(directory)
     this.sessionCache =
@@ -195,7 +207,7 @@ export class AuthRuntime {
   }
 
   getStrategy(): AuthStrategy | null {
-    return this.config.strategy
+    return this.strategy
   }
 
   createSessionDeadlines(now: Date): {
@@ -1286,6 +1298,8 @@ export class AuthRuntime {
    * Throws, once every other member is updated, when any could not be.
    */
   async checkDirectory(signal: AbortSignal): Promise<void> {
+    if (this.branch) throw branchRefusals.directory(this.branch)
+
     const strategy = this.config.strategy
     const directory = strategy?.directory
     if (!strategy || !directory || !this.directorySchedule) return
@@ -2010,4 +2024,30 @@ function membershipCapabilities(scope: MembershipPolicyScope): MembershipCapabil
  */
 function groupIdsOf(groups: readonly GroupReference[]): readonly string[] {
   return groups.map((group) => (typeof group === "string" ? group : group.id))
+}
+
+/**
+ * A branch's members are production's people, so a branch emails none of them: an invitation or a
+ * sign-in link is refused before the strategy sends it. Everything else is the strategy's own.
+ */
+function withoutEmails(strategy: AuthStrategy, branch: SixbBranch): AuthStrategy {
+  const refused: Readonly<Record<PropertyKey, unknown>> = {
+    deliverInvitation: async (): Promise<never> => {
+      throw branchRefusals.email(branch, "invitation")
+    },
+    requestMagicLink: async (): Promise<never> => {
+      throw branchRefusals.email(branch, "sign-in link")
+    },
+  }
+
+  return new Proxy(strategy, {
+    get(target, property) {
+      if (Object.hasOwn(refused, property) && typeof Reflect.get(target, property) === "function") {
+        return refused[property]
+      }
+
+      const value: unknown = Reflect.get(target, property, target)
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
 }

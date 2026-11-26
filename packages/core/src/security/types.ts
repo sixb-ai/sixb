@@ -179,6 +179,11 @@ export interface ProjectReference {
   readonly users: { readonly kind: "users" }
   /** Every model in the project's catalog, for `can.run(project.models)`. */
   readonly models: { readonly kind: "models" }
+  /**
+   * The project's source: its code, and the branches that run it on a copy of production's data.
+   * `can.manage(project.source)` takes a copy of what its holder reads to a branch.
+   */
+  readonly source: { readonly kind: "source" }
 }
 
 /**
@@ -191,11 +196,12 @@ export interface ObserveGrant {
   readonly target: ObserveGrantTarget
 }
 
-export type ManageGrantTarget = "connector" | "aiUsage" | "agentMemory"
+export type ManageGrantTarget = "connector" | "aiUsage" | "agentMemory" | "source"
 
 /**
- * Manage the selected connectors, the project's AI usage-limit policies, or the project's shared
- * Agent memory. AI usage and memory are one surface each, so their grants select nothing.
+ * Manage the selected connectors, the project's AI usage-limit policies, the project's shared
+ * Agent memory, or its source and branches. Every one but connectors is one surface, so their
+ * grants select nothing.
  */
 export type ManageGrant<TTarget extends ManageGrantTarget = ManageGrantTarget> =
   TTarget extends "connector"

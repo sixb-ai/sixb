@@ -43,6 +43,7 @@ To send failures to a monitoring service, configure [onError](../logging/overvie
 | `agent.step_limit_reached` | No | A sub-agent or a workflow agent step made as many model calls as its `maxSteps` allows before answering. | Narrow its task, or raise `maxSteps`. |
 | `ai.usage_limit_exceeded` | No | An applicable AI usage limit has no capacity for another model call. | Wait until `details.resetAt`, or raise or disable the applicable limit policy. |
 | `ai.usage_limit_unavailable` | Yes | Sixb could not evaluate an applicable AI usage limit safely. | Restore complete accounting or the limit storage provider, then retry. |
+| `branch.refused` | No | A branch refused something that would reach outside it or act on production, such as a connector, a writeback, a sync or a webhook. `message` says what, and what to do instead. | Test that part in production, once merged. |
 | `connector.adapter_invalid` | No | A connector adapter returned data that violates its Sixb contract. | Fix or upgrade the adapter before retrying. |
 | `connector.authorization_invalid` | No | An OAuth connection run or authorization transition is no longer valid. | Start a new connector connection run. |
 | `connector.authorization_required` | No | The connection cannot provide credentials in its current state. | Reauthorize the connector and select an account when requested. |

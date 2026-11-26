@@ -73,6 +73,7 @@ describe("AuthorizedObjectReader runtime binding", () => {
     }
     const runtime: SixbRuntimeContext = {
       projectId,
+      branch: null,
       runtimeAuthorization: scope.authorization,
       objectReader: createAuthorizedObjectReader({
         scope,
@@ -109,7 +110,12 @@ describe("AuthorizedObjectReader runtime binding", () => {
         listTelemetry: trap,
       }),
       createRulesRuntime(runtime, source),
-      createSchedulesRuntime(runtime, source),
+      createSchedulesRuntime(runtime, {
+        schedules: source,
+        syncs: source,
+        pipelines: source,
+        workflows: source,
+      }),
     ]
     for (const catalog of catalogs) {
       expect(catalog.list()).toEqual([])

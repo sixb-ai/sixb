@@ -298,6 +298,7 @@ function createRuntime(
   const runtime = {
     host,
     projectId: host.id,
+    branch: null,
     ontology: host.definitions.ontology,
     lakeStorage: host.lakeStorage,
     projectionRunsStorage: requireProjectionRunsStorage(host),
@@ -389,7 +390,7 @@ async function queueProjectionJob(input: {
       createdAt: version?.createdAt.toISOString() ?? "1970-01-01T00:00:00.000Z",
     },
   }
-  const id = createProjectionRunId(runtime.projectId, identity)
+  const id = createProjectionRunId(runtime.projectId, identity, null)
   canonicalRunIds.set(input.job.id, id)
   const existing = await runtime.projectionRunsStorage.getById({
     projectId: runtime.projectId,
@@ -753,7 +754,7 @@ describe("runProjectionJob", () => {
       ownershipHash: descriptor.ownershipHash,
     }
     const job: ProjectionJob = {
-      id: createProjectionRunId(sixb.id, identity),
+      id: createProjectionRunId(sixb.id, identity, null),
       ...identity,
     }
     const runtime = createRuntime(sixb)
@@ -810,7 +811,7 @@ describe("runProjectionJob", () => {
       projectionRevision: descriptor.projectionRevision,
       ownershipHash: descriptor.ownershipHash,
     }
-    const expectedRunId = createProjectionRunId(sixb.id, identity)
+    const expectedRunId = createProjectionRunId(sixb.id, identity, null)
     const error = await runCanonicalProjectionJob({
       runtime: createRuntime(sixb),
       job: { id: "not-the-canonical-run-id", ...identity },
@@ -864,7 +865,7 @@ describe("runProjectionJob", () => {
       projectionRevision: "revision-before-deploy",
       ownershipHash: descriptor.ownershipHash,
     }
-    const runId = createProjectionRunId(sixb.id, identity)
+    const runId = createProjectionRunId(sixb.id, identity, null)
     const run = await queueTestProjectionRun(deps.storage, {
       id: runId,
       projectId: sixb.id,

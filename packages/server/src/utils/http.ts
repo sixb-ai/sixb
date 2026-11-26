@@ -16,6 +16,7 @@ import { RequestBodyTooLargeError } from "./request-body"
 /** Explicit transport policy for coded failures that are safe to surface as non-500 responses. */
 const HTTP_STATUS_BY_ERROR_CODE: Partial<Record<SixbErrorCode, number>> = {
   "action.run_in_progress": 409,
+  "branch.refused": 409,
   "connector.adapter_invalid": 502,
   "connector.authorization_invalid": 400,
   "connector.authorization_required": 409,

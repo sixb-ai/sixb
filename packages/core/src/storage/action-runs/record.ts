@@ -87,9 +87,9 @@ export function resolveActionRunEffects(
   }
   const completedAt = requireDate(input.completedAt ?? new Date(), `${label} effects`)
   const effects: ActionRunEffectsRecord =
-    input.status === "succeeded"
-      ? { status: "succeeded", completedAt }
-      : { status: "failed", completedAt, error: parseActionRunFailure(input.error, "effects") }
+    input.status === "failed"
+      ? { status: "failed", completedAt, error: parseActionRunFailure(input.error, "effects") }
+      : { status: input.status, completedAt }
 
   if (existing.effects) {
     if (actionRunPhaseRecordsEqual(existing.effects, effects))

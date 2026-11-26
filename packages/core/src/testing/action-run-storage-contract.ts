@@ -236,6 +236,31 @@ export function runActionRunStorageContractSuite<TStorage extends ActionRunStora
       })
     })
 
+    // A branch skips effects. Guard check: drop 'skipped' from a provider's effects mapping or from
+    // its `effects_status` check, and this fails for that provider.
+    test("records effects that a branch skipped", async () => {
+      await withStorage(async (storage) => {
+        await recordTestActionRun(storage, run("act_skipped"))
+        const completedAt = new Date("2026-04-29T10:00:05.000Z")
+
+        const recorded = await storage.actionRuns.recordEffects({
+          id: "act_skipped",
+          projectId,
+          status: "skipped",
+          completedAt,
+        })
+
+        expect(recorded).toMatchObject({
+          status: "succeeded",
+          phase: "effects",
+          effects: { status: "skipped", completedAt },
+        })
+        await expect(storage.actionRuns.getById({ projectId, id: "act_skipped" })).resolves.toEqual(
+          recorded
+        )
+      })
+    })
+
     test("records effects only on a succeeded run in its commit phase", async () => {
       await withStorage(async (storage) => {
         await recordTestActionRun(storage, run("act_no_edits", { phase: "writeback" }))

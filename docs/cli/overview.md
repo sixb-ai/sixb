@@ -261,6 +261,7 @@ sixb objects get-by Customer email ada@example.com
 | `models` | List the project's models with their prices, and call them: text, images, speech, transcription. |
 | `datasets` | Read datasets, their versions and rows, for example `sixb datasets rows orders --limit 10`. Columns your clearances don't cover are left out. |
 | `syncs`, `sync-runs`, `pipelines`, `pipeline-runs` | See the syncs and pipelines you may run and their run history. Starting a run still happens in the app. |
+| `schedules` | Run a cron schedule now: `sixb schedules run <id>`. |
 
 These commands return JSON. Use scoped help for the operation you need, such as `sixb objects --help`.
 

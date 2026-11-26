@@ -14,6 +14,7 @@ import {
   type LakeStorage,
   type ProjectionDefinition,
   prop,
+  type SixbBranch,
   type SixbErrorContext,
   type SixbErrorHandler,
   SixbHost,
@@ -22,6 +23,7 @@ import {
   ProjectionRunDispatcher,
   type ProjectionRunDispatcherDependencies,
 } from "@sixb/core/internal/projections"
+import { putOnBranch } from "@sixb/core/internal/runtime"
 import type { ProjectionRunStorage } from "@sixb/core/storage"
 import { ProjectionWorker } from "../src"
 
@@ -54,17 +56,20 @@ function createSixb(
     datasets?: readonly DatasetDefinition[]
     projections?: readonly ProjectionDefinition[]
     onError?: SixbErrorHandler
+    branch?: SixbBranch
   },
   deps = createDeps()
 ) {
-  return new SixbHost({
+  const hostOptions = {
     id: "projection-worker-tests",
     ontology: [Room],
     ...deps,
     datasets: options.datasets ?? [],
     projections: options.projections ?? [],
     onError: options.onError,
-  })
+  }
+
+  return new SixbHost(options.branch ? putOnBranch(hostOptions, options.branch) : hostOptions)
 }
 
 function requireProjectionRunsStorage(input: {
@@ -168,6 +173,34 @@ describe("ProjectionWorker", () => {
         workerId: "observer",
       })
       expect(claimed).toHaveLength(0)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Guard check: stop passing the branch to `assertProjectionJobId` in `runProjectionJob`, or to
+  // the context in `buildProjectionContext`: the worker no longer recognizes the branch's run id.
+  test("on a branch, runs a projection under the branch's own run id", async () => {
+    const sixb = createSixb({
+      datasets: [roomsDataset],
+      projections: [roomProjection],
+      branch: { name: "feature/rooms", dataFrom: "production" },
+    })
+
+    const version = await commitDatasetVersion(sixb.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen" },
+    ])
+    const { runId } = await dispatchProjectionRun(sixb, roomProjection.id, version)
+
+    const worker = new ProjectionWorker(sixb)
+    await worker.start()
+
+    try {
+      const run = await waitFor(
+        () => requireProjectionRunsStorage(sixb).getById({ projectId: sixb.id, id: runId }),
+        (value) => value?.status === "succeeded" || value?.status === "failed"
+      )
+      expect(run?.status).toBe("succeeded")
     } finally {
       await worker.stop()
     }

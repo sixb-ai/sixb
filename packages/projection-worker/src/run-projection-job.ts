@@ -44,7 +44,7 @@ import type {
 
 export async function runProjectionJob(input: RunProjectionJobInput): Promise<ProjectionJobResult> {
   const signal = input.signal ?? new AbortController().signal
-  assertProjectionJobId(input.runtime.projectId, input.job)
+  assertProjectionJobId(input.runtime.projectId, input.job, input.runtime.branch)
   const terminal = await findMatchingTerminalRun(input)
   if (terminal) return terminalResult(terminal)
 

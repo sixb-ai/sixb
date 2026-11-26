@@ -301,9 +301,9 @@ function toActionRunEffectsRecord(row: DatabaseRow): ActionRunEffectsRecord | un
   }
 
   const completedAt = new Date(row.effects_completed_at ?? row.finished_at)
-  if (row.effects_status === "succeeded") {
+  if (row.effects_status === "succeeded" || row.effects_status === "skipped") {
     return {
-      status: "succeeded",
+      status: row.effects_status,
       completedAt,
     }
   }

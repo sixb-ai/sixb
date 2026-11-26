@@ -274,10 +274,11 @@ export function assertGrantDefinition(
     value.capability === "manage" &&
     value.target !== "connector" &&
     value.target !== "aiUsage" &&
-    value.target !== "agentMemory"
+    value.target !== "agentMemory" &&
+    value.target !== "source"
   ) {
     throw createError(
-      `[Sixb] ${field} manage grant target must be 'connector', 'aiUsage', or 'agentMemory'.`
+      `[Sixb] ${field} manage grant target must be 'connector', 'aiUsage', 'agentMemory', or 'source'.`
     )
   }
 

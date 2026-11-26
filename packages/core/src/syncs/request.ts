@@ -1,4 +1,5 @@
 import { assertAuthorized } from "../authorization"
+import { branchRefusals } from "../branch-mode/refusals"
 import { isOAuthConnectorDefinition } from "../connectors"
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import {
@@ -72,6 +73,8 @@ export async function requestSyncRun(
     authorization: runtime.runtimeAuthorization,
   })
   assertAuthorized(runtime, { kind: "sync.run", syncId: sync.id })
+  if (runtime.branch) throw branchRefusals.sync(runtime.branch, sync.id)
+
   if (!runtime.storage.syncRuns) {
     throw new SyncValidationError("[Sixb] Sync run storage is not configured.")
   }

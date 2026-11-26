@@ -9,6 +9,7 @@ import { objects } from "./objects"
 import { ontology } from "./ontology"
 import { project } from "./project"
 import { runs } from "./runs"
+import { schedules } from "./schedules"
 import { telemetry } from "./telemetry"
 import { users } from "./users"
 import { workflows } from "./workflows"
@@ -31,6 +32,7 @@ export const INSTANCE_COMMANDS = [
   "sync-runs",
   "pipelines",
   "pipeline-runs",
+  "schedules",
 ] as const
 
 export type InstanceCommand = (typeof INSTANCE_COMMANDS)[number]
@@ -79,6 +81,8 @@ export async function dispatch(
       return runnables(api, "pipelines", args)
     case "pipeline-runs":
       return runs(api, "pipeline", args)
+    case "schedules":
+      return schedules(api, args)
     default:
       fail(`Unknown command '${command}'. Run 'sixb --help'.`)
   }
