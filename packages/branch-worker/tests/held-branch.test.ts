@@ -1,5 +1,6 @@
 import { describe, expect, jest, spyOn, test } from "bun:test"
 import type { LanguageModel } from "@sixb/core"
+import { BRANCH_KEY_HEADER } from "@sixb/core/internal/branches"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { registerModelOrigin } from "@sixb/core/internal/model-origins"
 import {
@@ -144,6 +145,34 @@ describe("a held branch", () => {
     expect(reported).toEqual([
       { type: "branch.failed", branch: NAME, message: expect.stringContaining("never answered") },
     ])
+  })
+
+  // The branch's code answers the worker's status read: a redirect once had production's worker
+  // carry the branch's key to any address on its network. Guard check: drop `redirect: "error"`
+  // from `report` (`held-branch.ts`).
+  test("follows no redirect of its runtime's front", async () => {
+    const reached: string[] = []
+    const inside = Bun.serve({
+      port: 0,
+      fetch(request) {
+        reached.push(request.headers.get(BRANCH_KEY_HEADER) ?? "")
+        return Response.json({ branch: NAME, generation: 1, state: "ready", requests: 0 })
+      },
+    })
+    onCleanup(() => inside.stop(true))
+    const { lab, host } = await setup()
+    lab.redirect = `http://127.0.0.1:${inside.port}/admin`
+
+    const held = await hold(host)
+    await until(
+      async () => lab.started.length,
+      (count) => count === 1
+    )
+    await pass(BRANCH_TICK_MS * 3)
+    await held.stop()
+
+    expect(reached).toEqual([])
+    expect((await row(host)())?.state).not.toBe("ready")
   })
 
   // Guard check: spread a host value into the runtime's env, or leave `devValues` out of

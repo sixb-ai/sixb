@@ -729,8 +729,11 @@ export class HeldBranch {
     const { url, branch } = this
     if (!url) return
 
+    // The branch's code answers here: a redirect would have production's worker carry the key
+    // anywhere on its network.
     const status = await fetch(new URL(BRANCH_STATUS_PATH, url), {
       headers: { [BRANCH_KEY_HEADER]: branch.key },
+      redirect: "error",
       signal: AbortSignal.timeout(5_000),
     })
       .then(async (response) => parseBranchRuntimeStatus(await response.json()))

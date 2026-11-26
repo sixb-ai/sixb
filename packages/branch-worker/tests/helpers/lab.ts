@@ -88,6 +88,8 @@ export interface Lab {
   requests: number
   /** False for a front that does not answer, as a runtime that never came up. */
   answering: boolean
+  /** Where a front sends its status read instead of answering: branch code that redirects. */
+  redirect: string | null
   state: "starting" | "ready" | "failed"
   /** What the provider says of every sandbox. */
   sandboxStatus: SandboxStatus
@@ -329,6 +331,7 @@ export async function setup(
     loaded: null,
     requests: 0,
     answering: true,
+    redirect: null,
     state: "ready",
     sandboxStatus: "running",
     stopped: [],
@@ -364,6 +367,7 @@ export async function setup(
       if (request.headers.get(BRANCH_KEY_HEADER) === null) {
         return new Response(null, { status: 401 })
       }
+      if (lab.redirect) return Response.redirect(lab.redirect, 307)
       if (new URL(request.url).pathname !== BRANCH_STATUS_PATH || !lab.answering) {
         return new Response(null, { status: 404 })
       }
