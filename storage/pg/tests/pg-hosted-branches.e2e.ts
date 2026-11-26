@@ -439,6 +439,30 @@ describe("a hosted branch's database", () => {
     expect((await role(admin, name))?.login).toBe(false)
   })
 
+  // A copy waits on a lane that has nothing to do while the others copy and index: at volume,
+  // longer than the role's idle limit, which ended the lane's session and failed the load.
+  // Guard check: drop the heartbeat from `PgSnapshotLoad.run`.
+  test("loads a copy whose lanes wait inside their transactions longer than the idle limit", async () => {
+    const { storage, admin } = await production()
+    await hosted(storage, "feature-a", { idleInTransactionMillis: 1_000 })
+    const branch = await (await runtime(storage, "feature-a", 4)).createBranchNamespace("copy")
+    const name = await storage.hostedBranchRole("feature-a")
+
+    const loaded = await loadWaiting(branch, async () => {
+      // Twice the limit, by the server's clock, with production holding the role to it.
+      await until(async () => {
+        await storage.enforceHostedBranchLimits("feature-a", { idleInTransactionMillis: 1_000 })
+        const rows = await admin`
+          SELECT 1 FROM pg_stat_activity
+          WHERE usename = ${name} AND now() - xact_start > interval '2 s'
+        `
+        return rows.length >= 2
+      }, 10_000)
+    })
+
+    expect(loaded).toBe("loaded")
+  }, 15_000)
+
   // Guard check: drop the `REVOKE … FROM PUBLIC` from `create`: anyone may then connect.
   test("lets its role reach its own database and nothing of production's, and no one else in", async () => {
     const { storage, admin, schemaName } = await production()
@@ -649,6 +673,68 @@ function migrationLock(schemaName: string): readonly [number, number] {
     .update(`storage:migration:${schemaName}:${postgresStorageMigrations.adapterId}`)
     .digest()
   return [hash.readInt32BE(0), hash.readInt32BE(4)]
+}
+
+/** Loads two objects, then waits on `hold` before the load ends: its other lanes sit idle. */
+async function loadWaiting(
+  branch: Awaited<ReturnType<PostgresStorage["createBranchNamespace"]>>,
+  hold: () => Promise<void>
+): Promise<string> {
+  const id = "snapshot_idle"
+  const at = "2026-01-01T00:00:00.000Z"
+  const operation = { type: "ontology.loadSnapshot", snapshotId: id } as const
+  await branch.executions.create({
+    id: `exec_${id}`,
+    projectId: "shop",
+    executor: { type: "kernel", operation },
+    source: { type: "http", requestId: id },
+    correlationId: id,
+    authorizationRef: { type: "kernel", operation },
+  })
+
+  const load = branch.loadSnapshot(
+    {
+      projectId: "shop",
+      commit: {
+        projectId: "shop",
+        id,
+        idempotencyKey: id,
+        requestHash: id,
+        executionId: `exec_${id}`,
+        origin: { kind: "runtime", requestId: id },
+        ontologyRevision: "revision",
+        committedAt: at,
+        intent: { kind: "edit", mode: "atomic", operationCount: 0 },
+        result: {
+          kind: "edit",
+          commitId: id,
+          created: true,
+          eventCount: 0,
+          committedAt: at,
+          outcomes: [],
+          changes: { objects: [], links: [] },
+        },
+      },
+      uniqueProperties: [],
+      objectTypeIds: ["Order"],
+    },
+    async (loader) => {
+      await loader.write({
+        objects: ["ord-1", "ord-2"].map((primaryId) => ({
+          objectTypeId: "Order",
+          primaryId,
+          properties: { id: primaryId },
+          createdAt: at,
+          updatedAt: at,
+        })),
+      })
+      await hold()
+    }
+  )
+  return load.then(
+    () => "loaded",
+    (error: unknown) => String(error)
+  )
 }
 
 async function until(check: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> {
