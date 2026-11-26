@@ -68,7 +68,8 @@ What it starts runs as on the schedule's clock, not as you: a sync of personal a
 everyone's, and a workflow starts with no requester. That is why it takes managing the project's
 source, not only the run grants.
 
-An event schedule, or one attached to nothing, is refused.
+An event schedule, or one attached to nothing, is refused. On a branch, so is a schedule that starts
+a sync: syncs do not run there.
 
 ## Triggers while a run waits
 

@@ -10,7 +10,8 @@ import { handleRouteError } from "../utils/http"
 /**
  * Run a cron schedule now, as its next occurrence would. What it starts runs as the schedule, not
  * as the caller, so it takes `can.manage(project.source)` besides the run grant of every sync,
- * pipeline and workflow the schedule starts, and stays session-only as running those does.
+ * pipeline and workflow the schedule starts, and stays session-only as running those does. A
+ * branch answers 409 for one that starts a sync.
  */
 export function registerScheduleRoutes(app: Elysia, _host: SixbHostView) {
   return app.post(
@@ -40,6 +41,7 @@ export function registerScheduleRoutes(app: Elysia, _host: SixbHostView) {
         400: ErrorResponseSchema,
         403: ErrorResponseSchema,
         404: ErrorResponseSchema,
+        409: ErrorResponseSchema,
       },
       detail: {
         summary: "Run a cron schedule now",

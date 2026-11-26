@@ -52,7 +52,7 @@ to do instead (`refusals.ts`). Nothing turned off is a silent no-op. The HTTP AP
 | Connecting, reauthorizing, disconnecting and revoking OAuth connections refused; listing stays | `refuseConnectionChanges` in `connectors/service.ts` | Connections belong to production |
 | An action with a writeback fails before its writeback runs, recorded as a failed writeback | `runWritebackPhase` (`actions/run/writeback.ts`) | The writeback writes outside Sixb, and the edits depend on its reply |
 | Action effects skipped, recorded as `skipped` on the run | `runActionEffects` (`actions/run/effects.ts`) | Effects notify people; a branch sends nothing |
-| Cron schedules off, with a startup notice; `sixb schedules run <id>` (`POST /api/schedules/:scheduleId/runs`, `sixb.schedules.run`) runs one now | `SixbHost.startMaintenance` | Nothing starts on its own clock |
+| Cron schedules off, with a startup notice; `sixb schedules run <id>` (`POST /api/schedules/:scheduleId/runs`, `sixb.schedules.run`) runs one now, and refuses one that starts a sync | `SixbHost.startMaintenance`, `SchedulesRuntime.run` | Nothing starts on its own clock. A sync's dispatch would refuse it only after the run was accepted, out of the caller's sight |
 | Event schedules on | Orchestrator routes, untouched | Rule → workflow chains stay testable, inside the branch |
 | Syncs off: a trigger's dispatch and a requested run are refused | `SyncRunDispatcher.dispatch`, `requestSyncRun` | Production's data reaches the branch through the copy. The orchestrator reports a refused trigger to `onError` once and drops it |
 | Inbound webhooks refused before a run is admitted | `registerWebhookRoutes` (server) | Providers call production |

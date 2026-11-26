@@ -12,6 +12,7 @@ import {
   InMemoryStorage,
   SixbHost,
 } from "@sixb/core"
+import { putOnBranch } from "@sixb/core/internal/runtime"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -24,8 +25,8 @@ const importInvoices = defineSync("import-invoices")
   .read(() => [])
   .intoDataset(rawInvoices)
 
-function createApp() {
-  const host = new SixbHost({
+function createApp(onBranch = false) {
+  const options = {
     id: "test-project",
     ontology: [],
     broker: new InMemoryBroker(),
@@ -37,7 +38,10 @@ function createApp() {
     datasets: [rawInvoices],
     syncs: [importInvoices],
     schedules: [nightly],
-  })
+  }
+  const host = new SixbHost(
+    onBranch ? putOnBranch(options, { name: "feature/invoices", dataFrom: "production" }) : options
+  )
   const app = createSixbApi(
     new SixbServer({ host, quiet: true, browser: createTestBrowserPolicy() })
   )
@@ -71,6 +75,18 @@ describe("schedule routes", () => {
         occurrenceKey: run.occurrenceKey,
       },
     ])
+  })
+
+  test("answer 409 on a branch for a schedule that starts a sync", async () => {
+    const { host, app } = createApp(true)
+
+    const response = await runSchedule(app, "nightly")
+
+    expect(response.status).toBe(409)
+    expect(((await response.json()) as { error: string }).error).toContain(
+      "schedule 'nightly' starts sync 'import-invoices'"
+    )
+    expect(await host.events.read({ limit: 10 })).toEqual([])
   })
 
   test("answer 404 for a schedule that does not exist", async () => {

@@ -114,6 +114,7 @@ import {
 } from "../sandboxes/configuration"
 import { SandboxError } from "../sandboxes/errors"
 import type { ScheduleDefinition } from "../schedules"
+import { isSyncRun, runsStartedBy } from "../schedules/execution"
 import type {
   GroupDefinition,
   MarkingDefinition,
@@ -559,7 +560,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
    * branch's own versions and files: it never deletes production's.
    */
   startMaintenance(passes: readonly MaintenancePass[]): OntologyMaintenanceHandle {
-    if (this.branch) announceBranchMaintenance(this.branch, this.definitions.schedules.list())
+    if (this.branch) announceBranchMaintenance(this.branch, this.definitions)
 
     const loop = new MaintenanceLoop({
       passes: [
@@ -679,18 +680,19 @@ export type SixbHostView = Omit<SixbHost, "withScope"> & {
 
 /**
  * A branch starts no cron schedule on its own clock. Say so once, with how to run one, rather than
- * leave a schedule that never fires to be found by surprise.
+ * leave a schedule that never fires to be found by surprise. One that starts a sync is left out:
+ * syncs do not run on a branch, so running it now is refused.
  */
-function announceBranchMaintenance(
-  branch: SixbBranch,
-  schedules: readonly ScheduleDefinition[]
-): void {
-  const cron = schedules.filter((schedule) => schedule.trigger.type === "cron")
-  if (cron.length === 0) return
+function announceBranchMaintenance(branch: SixbBranch, definitions: SixbDefinitions): void {
+  const runnable = definitions.schedules
+    .list()
+    .filter((schedule) => schedule.trigger.type === "cron")
+    .filter((schedule) => !runsStartedBy(definitions, schedule.id).some(isSyncRun))
+  if (runnable.length === 0) return
 
   console.info(
     `[Sixb] Branch "${branch.name}": cron schedules do not run on their own clock on a branch ` +
-      `(${cron.map((schedule) => `'${schedule.id}'`).join(", ")}). Run one now with ` +
+      `(${runnable.map((schedule) => `'${schedule.id}'`).join(", ")}). Run one now with ` +
       "`sixb schedules run <id> --api-url <this branch's API>`; event schedules run as in production."
   )
 }

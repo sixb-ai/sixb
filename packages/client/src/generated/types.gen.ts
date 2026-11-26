@@ -8376,6 +8376,12 @@ export type RunScheduleErrors = {
   404: {
     error: string
   }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
 }
 
 export type RunScheduleError = RunScheduleErrors[keyof RunScheduleErrors]

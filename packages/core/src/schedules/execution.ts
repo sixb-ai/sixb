@@ -1,4 +1,5 @@
 import { type AuthzRequest, assertAuthorized } from "../authorization"
+import { branchRefusals } from "../branch-mode/refusals"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import { isCronSchedule, triggerScheduleNow } from "../maintenance/passes/cron-pass"
 import type { DefinitionCatalog, SixbDefinitions } from "../runtime/definitions"
@@ -19,7 +20,8 @@ export interface SchedulesRuntime extends DefinitionCatalog<ScheduleDefinition> 
    * Run a cron schedule now, as its next occurrence would: what it starts runs as on any
    * occurrence, not as the caller. So it takes `can.manage(project.source)`, as changing the
    * schedule in code would, and the run grant of every sync, pipeline and workflow it starts. This
-   * is how a cron schedule runs on a branch, where none runs on its own clock.
+   * is how a cron schedule runs on a branch, where none runs on its own clock, and where one that
+   * starts a sync is refused: syncs do not run there.
    */
   run(scheduleId: string): Promise<ScheduleRunResult>
 }
@@ -81,16 +83,25 @@ export function createSchedulesRuntime(
       assertAuthorized(runtime, { kind: "source.manage" })
       for (const request of starts) assertAuthorized(runtime, request)
 
+      // Refused here rather than by the sync's dispatch, which would answer after the run was
+      // accepted, where the caller never sees it.
+      const sync = starts.find(isSyncRun)
+      if (runtime.branch && sync) {
+        throw branchRefusals.scheduledSync(runtime.branch, schedule.id, sync.syncId)
+      }
+
       return triggerScheduleNow(runtime.events, schedule)
     },
   }
 }
 
+type ScheduleStart = Extract<AuthzRequest, { kind: "sync.run" | "pipeline.run" | "workflow.run" }>
+
 /** The run grant of each sync, pipeline and workflow the schedule starts. */
-function runsStartedBy(
+export function runsStartedBy(
   definitions: Pick<SixbDefinitions, "syncs" | "pipelines" | "workflows">,
   scheduleId: string
-): readonly AuthzRequest[] {
+): readonly ScheduleStart[] {
   const startedBy = (triggers: readonly { readonly scheduleId: string }[]) =>
     triggers.some((trigger) => trigger.scheduleId === scheduleId)
 
@@ -108,4 +119,10 @@ function runsStartedBy(
       .filter((workflow) => startedBy(workflow.triggers))
       .map((workflow) => ({ kind: "workflow.run" as const, workflowId: workflow.id })),
   ]
+}
+
+export function isSyncRun(
+  start: ScheduleStart
+): start is Extract<ScheduleStart, { kind: "sync.run" }> {
+  return start.kind === "sync.run"
 }

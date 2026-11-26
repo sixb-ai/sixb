@@ -38,6 +38,14 @@ export const branchRefusals = {
         "was copied, never the source. A new or changed sync is tested in production, once merged."
     ),
 
+  scheduledSync: (branch: SixbBranch, scheduleId: string, syncId: string) =>
+    branchRefusal(
+      branch,
+      `schedule '${scheduleId}' starts sync '${syncId}', which does not run on a branch: a ` +
+        "branch reads production's data as of when it was copied, never the source. Start what " +
+        "else it runs on its own, or test the schedule in production, once merged."
+    ),
+
   webhook: (branch: SixbBranch, connectorId: string, webhookId: string) =>
     branchRefusal(
       branch,

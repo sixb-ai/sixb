@@ -7,8 +7,11 @@ import {
   defineObjectType,
   defineSchedule,
   defineSync,
+  defineWorkflow,
+  defineWorkflowStep,
   events,
   prop,
+  type ScheduleDefinition,
   type SixbErrorContext,
   SixbHost,
   type SixbHostOptions,
@@ -374,8 +377,24 @@ describe("syncs on a branch", () => {
 
 describe("upkeep on a branch", () => {
   const daily = defineSchedule("daily-reminders").cron("0 8 * * *")
+  const nightlyImport = defineSchedule("nightly-import").cron("0 2 * * *")
   const onInvoice = defineSchedule("invoice-created").on(events.object(Invoice).created())
   const rawInvoices = defineDataset("raw.invoices", { schema: [col("id", "string")] })
+  const erp = defineConnector("erp", { type: "sql", connect: () => ({}) })
+  const importInvoices = defineSync("import-invoices")
+    .when(nightlyImport)
+    .from(erp)
+    .read(() => [])
+    .intoDataset(rawInvoices)
+  const sendReminders = defineWorkflow("send-reminders")
+    .input({})
+    .when(daily)
+    .then(
+      defineWorkflowStep("remind")
+        .input({})
+        .output({})
+        .run(() => ({}))
+    )
 
   function retentionLake(): { lake: InMemoryLakeStorage; applied: boolean[] } {
     const applied: boolean[] = []
@@ -418,19 +437,27 @@ describe("upkeep on a branch", () => {
     directory: { confirmAfterMs: 0, check: async () => new Map() },
   }
 
-  function upkeepHost(onBranch: boolean) {
+  function upkeepHost(onBranch: boolean, schedules: readonly ScheduleDefinition[] = []) {
     return buildHost(
       {
         id: PROJECT_ID,
         ...createTestRuntimeDeps(),
         lakeStorage: retentionLake().lake,
         ontology: [Invoice],
+        connectors: [erp],
         datasets: [rawInvoices],
-        schedules: [daily, onInvoice],
+        syncs: [importInvoices],
+        workflows: [sendReminders],
+        schedules: [daily, nightlyImport, onInvoice, ...schedules],
         auth: directory,
       },
       onBranch ? BRANCH : undefined
     )
+  }
+
+  async function scheduleTriggers(host: SixbHost) {
+    const events = await host.events.read({ limit: 10 })
+    return events.filter((event) => event.type === "schedule.triggered")
   }
 
   /** The passes a started loop runs, read from the heartbeat it writes to storage. */
@@ -449,7 +476,9 @@ describe("upkeep on a branch", () => {
 
   // Guard check: put `this.cron` back unconditionally in `startMaintenance`, return the directory
   // pass whatever the branch in `directoryPasses` (`runtime/host.ts`). Lake retention runs: on a
-  // branch's lake it never deletes production's files (`storage/ducklake` README, Branches).
+  // branch's lake it never deletes production's files (`storage/ducklake` README, Branches). The
+  // notice leaves out 'nightly-import', which starts a sync: drop the sync filter from
+  // `announceBranchMaintenance` and it names it.
   test("runs no cron schedule and no directory check", async () => {
     const notice = spyOn(console, "info").mockImplementation(() => {})
 
@@ -474,33 +503,13 @@ describe("upkeep on a branch", () => {
 
   // Who may run one now is `sixb.schedules.run`'s own test (`schedules.test.ts`).
   test("still runs a cron schedule now", async () => {
-    const erp = defineConnector("erp", { type: "sql", connect: () => ({}) })
     const idle = defineSchedule("idle").cron("0 9 * * *")
-    const importInvoices = defineSync("import-invoices")
-      .when(daily)
-      .from(erp)
-      .read(() => [])
-      .intoDataset(rawInvoices)
-    const host = buildHost(
-      {
-        id: PROJECT_ID,
-        ...createTestRuntimeDeps(),
-        ontology: [Invoice],
-        connectors: [erp],
-        datasets: [rawInvoices],
-        syncs: [importInvoices],
-        schedules: [daily, onInvoice, idle],
-      },
-      BRANCH
-    )
+    const host = upkeepHost(true, [idle])
     const sixb = createTestSixb(host)
 
     const run = await sixb.schedules.run(daily.id)
 
-    const triggered = (await host.events.read({ limit: 10 })).filter(
-      (event) => event.type === "schedule.triggered"
-    )
-    expect(triggered.map((event) => event.payload)).toEqual([
+    expect((await scheduleTriggers(host)).map((event) => event.payload)).toEqual([
       {
         scheduleId: daily.id,
         occurrenceAt: run.triggeredAt,
@@ -512,6 +521,18 @@ describe("upkeep on a branch", () => {
     await expect(sixb.schedules.run(onInvoice.id)).rejects.toThrow("runs when its event happens")
     await expect(sixb.schedules.run(idle.id)).rejects.toThrow("starts nothing")
     await expect(sixb.schedules.run("missing")).rejects.toThrow("Unknown schedule 'missing'")
+  })
+
+  // A sync's dispatch refuses it on a branch too, but only once the run was accepted, where the
+  // caller never sees it. Guard check: drop the sync check from `SchedulesRuntime.run`
+  // (`schedules/execution.ts`): the schedule fires.
+  test("refuses running now a schedule that starts a sync, before it fires", async () => {
+    const host = upkeepHost(true)
+
+    const error = await rejectionOf(createTestSixb(host).schedules.run(nightlyImport.id))
+
+    expectRefusal(error, "schedule 'nightly-import' starts sync 'import-invoices'")
+    expect(await scheduleTriggers(host)).toEqual([])
   })
 
   // Guard check: remove the branch check at the top of `AuthRuntime.checkDirectory`.
