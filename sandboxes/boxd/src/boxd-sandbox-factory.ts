@@ -12,6 +12,7 @@ import {
   type SandboxNetworkPolicy,
   type SandboxSessionOptions,
   SandboxStateUnavailableError,
+  SandboxStillRunningError,
   sandboxConfig,
   sandboxCreationEnvironment,
 } from "@sixb/core/sandboxes"
@@ -210,7 +211,7 @@ export class BoxdSandboxFactory<const TParams extends ParamsConfig = Record<neve
       )
     }
     if (machine.status !== "hibernated" && machine.status !== "stopped") {
-      throw new SandboxError(
+      throw new SandboxStillRunningError(
         "[Sandbox] boxd sandbox must be stopped before resume. Serialize its lifecycle and resolve any previous execution first."
       )
     }

@@ -25,6 +25,7 @@ export function fixture(setup?: readonly string[]) {
   let snapshotMissing = false
   let networkFails = false
   let networkMissing = false
+  let deleteFailure = 0
   let stopGate: Promise<void> | undefined
   let sessionCreatedAt = 1
   let sessionTimeout = 60_000
@@ -79,6 +80,7 @@ export function fixture(setup?: readonly string[]) {
       }
       if (path === `/v2/sandboxes/${encodeURIComponent(name)}`) {
         if (method === "DELETE") {
+          if (deleteFailure) return failure(deleteFailure, "delete_failed")
           exists = false
           return Response.json({ sandbox: named() })
         }
@@ -170,6 +172,9 @@ export function fixture(setup?: readonly string[]) {
     },
     loseNetworkSession: () => {
       networkMissing = true
+    },
+    failDelete: (status: number) => {
+      deleteFailure = status
     },
     gateStop: (gate: Promise<void>) => {
       stopGate = gate

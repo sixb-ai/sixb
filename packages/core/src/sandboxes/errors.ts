@@ -12,6 +12,14 @@ export class SandboxStateUnavailableError extends SandboxError {
 }
 
 /**
+ * Resume found the named sandbox's last session still running: nothing was resumed or changed.
+ * It resumes once that session stops, as its provider stops one nobody keeps alive.
+ */
+export class SandboxStillRunningError extends SandboxError {
+  override readonly name = "SandboxStillRunningError"
+}
+
+/**
  * The provider refused the request before anything ran: an HTTP 4xx answer, or a request its own
  * validation rejected. Unlike a transport failure, it proves the sandbox did nothing, so a caller
  * may go on as if the call was never made. Its message names why, and is safe to show to the

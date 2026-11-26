@@ -275,10 +275,17 @@ export interface SandboxFactory<in out TParams extends ParamsConfig = ParamsConf
    * Present only when named persistent creation and resume are supported.
    * Resume an existing, stopped sandbox. Missing/expired state throws SandboxStateUnavailableError;
    * it must never create an empty replacement. Transport/auth/setup errors must not be classified
-   * as missing state. An already running sandbox must be rejected.
+   * as missing state. An already running sandbox must be rejected with SandboxStillRunningError.
    * Returns a handle bound to the resumed session, with no automatic resume on use.
    * Runtime options must be provided again; no creation settings or persistence option are accepted.
    * Never clone or replay setup on resume.
    */
   resume?(name: string, options?: ResumeSandboxOptions): Promise<Sandbox>
+  /**
+   * Present with `resume`. Deletes the named sandbox and its saved state, running or stopped,
+   * without a session: it needs no credentials and resumes nothing. A name already gone resolves.
+   * Any other failure rejects, so a caller keeps the name and tries again: a sandbox it forgot
+   * would keep its files, and its name, for good.
+   */
+  destroy?(name: string): Promise<void>
 }

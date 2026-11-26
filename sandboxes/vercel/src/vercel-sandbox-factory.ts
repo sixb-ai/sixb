@@ -15,7 +15,7 @@ import {
   sandboxConfig,
   sandboxCreationEnvironment,
 } from "@sixb/core/sandboxes"
-import { Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
+import { APIError, Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
 import { toVercelNetworkPolicy, withRequestCredentials } from "./network"
 import {
   assertPersistentName,
@@ -210,6 +210,24 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
     } catch (error) {
       await stopFailedPersistentSession(client)
       throw persistentSandboxError(error, operation)
+    }
+  }
+
+  /**
+   * Deletes the named sandbox, its saved snapshots included, without resuming it: Vercel deletes
+   * a sandbox by name with the factory's API credentials, whatever its session is doing. A name
+   * Vercel no longer has is already gone; any other failure rejects.
+   */
+  async destroy(name: string): Promise<void> {
+    assertPersistentName(name)
+    const params = { ...resolveCredentials(this.defaults.credentials), name }
+
+    try {
+      const existing = await this.persistentRemote.get({ ...params, resume: false })
+      await existing.delete()
+    } catch (error) {
+      if (error instanceof APIError && error.response.status === 404) return
+      throw persistentSandboxError(error, "destroy")
     }
   }
 

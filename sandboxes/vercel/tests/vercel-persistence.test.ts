@@ -4,6 +4,7 @@ import {
   SandboxError,
   type SandboxRequestCredential,
   SandboxStateUnavailableError,
+  SandboxStillRunningError,
 } from "@sixb/core/sandboxes"
 import { APIError } from "@vercel/sandbox"
 import { persistentSandboxError } from "../src/vercel-persistence"
@@ -136,6 +137,48 @@ describe("Vercel named persistence", () => {
     )
   })
 
+  // A hosted branch deletes a stopped sandbox it holds no session for: through resume, which
+  // needs the source's credentials, Vercel refused, and the sandbox and its name stayed for good.
+  // Guard check: resume the sandbox and destroy that session in `destroy`.
+  test("destroys a saved sandbox by name without resuming it", async () => {
+    const f = fixture()
+    const sandbox = await f.factory.create({ persistence: { name: "workspace-1" } })
+    await sandbox.stop()
+
+    await f.factory.destroy("workspace-1")
+
+    expect(f.requests.some((request) => request.path.includes("resume=true"))).toBe(false)
+    expect(f.requests.filter((request) => request.method === "DELETE")).toHaveLength(1)
+    await expect(f.factory.resume("workspace-1")).rejects.toBeInstanceOf(
+      SandboxStateUnavailableError
+    )
+  })
+
+  test("destroys a sandbox whose session still runs, and a name already gone is done", async () => {
+    const f = fixture()
+    await f.factory.create({ persistence: { name: "workspace-1" } })
+
+    await f.factory.destroy("workspace-1")
+    await f.factory.destroy("workspace-1")
+
+    expect(f.requests.filter((request) => request.method === "DELETE")).toHaveLength(1)
+  })
+
+  // A caller forgets a sandbox only once it is gone. Guard check: catch every error in `destroy`.
+  test.each([
+    403, 500,
+  ])("rejects a delete Vercel answers %s to, so the caller keeps the name", async (status) => {
+    const f = fixture()
+    await f.factory.create({ persistence: { name: "workspace-1" } })
+    f.failDelete(status)
+
+    const error = await f.factory.destroy("workspace-1").catch((error: unknown) => error)
+
+    expect(error).toBeInstanceOf(SandboxError)
+    expect(String(error)).toContain("destroy failed")
+    expect(String(error)).not.toContain("provider detail")
+  })
+
   test("creates explicitly with retention, no durable run env, and a deny-all boot policy", async () => {
     const f = fixture()
     await f.factory.create({
@@ -260,7 +303,9 @@ describe("Vercel named persistence", () => {
   test("never attaches to an active or non-persistent sandbox", async () => {
     const f = fixture()
     await f.factory.create({ persistence: { name: "workspace-1" } })
-    await expect(f.factory.resume("workspace-1")).rejects.toThrow("must be stopped")
+    // A worker that lost a sandbox's session waits for it to stop rather than make another.
+    // Guard check: throw a plain `SandboxError` in `assertStoppedPersistent`.
+    await expect(f.factory.resume("workspace-1")).rejects.toBeInstanceOf(SandboxStillRunningError)
     f.setStatus("stopped")
     f.setPersistent(false)
     await expect(f.factory.resume("workspace-1")).rejects.toThrow("non-persistent")

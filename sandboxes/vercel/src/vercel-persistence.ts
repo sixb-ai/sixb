@@ -3,6 +3,7 @@ import {
   SandboxError,
   type SandboxSessionOptions,
   SandboxStateUnavailableError,
+  SandboxStillRunningError,
 } from "@sixb/core/sandboxes"
 import { APIError, type Session, Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
 import { withRequestCredentials } from "./network"
@@ -32,7 +33,7 @@ export const vercelPersistenceOperations: VercelPersistenceOperations = VercelSd
 
 export function persistentSandboxError(
   error: unknown,
-  operation: "create" | "resume" | "configure"
+  operation: "create" | "resume" | "configure" | "destroy"
 ): SandboxError {
   if (error instanceof SandboxError) return error
   if (error instanceof APIError) {
@@ -86,7 +87,7 @@ export function assertStoppedPersistent(client: VercelPersistentClient): void {
     throw new SandboxError("[Sandbox] Cannot resume a non-persistent Vercel sandbox.")
   }
   if (client.currentSession().status !== "stopped") {
-    throw new SandboxError(
+    throw new SandboxStillRunningError(
       "[Sandbox] Vercel sandbox must be stopped before resume. Serialize its lifecycle and resolve any previous execution first."
     )
   }
