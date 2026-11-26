@@ -118,8 +118,10 @@ class LostBranchError extends Error {}
  */
 export class HeldBranch {
   private readonly branches: BranchStorage
-  /** Ends what the hold does: the worker is stopping, or the hold lost the branch. */
+  /** Ends what the hold does: the worker is stopping or draining, or the hold lost the branch. */
   private readonly controller = new AbortController()
+  /** Whether the hold ended because another worker may hold the branch now. */
+  private lost = false
   private sandbox: Sandbox | undefined
   private runtime: { readonly process: SandboxProcess; exited: boolean } | undefined
   private url: string | undefined
@@ -155,12 +157,13 @@ export class HeldBranch {
     private readonly host: SixbHostView,
     private readonly settings: HeldBranchSettings,
     private branch: BranchRecord,
-    signal: AbortSignal
+    /** Aborts when the worker stops or drains: the hold puts the branch back for the next one. */
+    private readonly stopping: AbortSignal
   ) {
     this.branches = host.storage.hostedBranches as BranchStorage
     this.leaseUntil = branch.leaseExpiresAt?.getTime() ?? 0
-    if (signal.aborted) this.controller.abort()
-    signal.addEventListener("abort", () => this.controller.abort(), { once: true })
+    if (stopping.aborted) this.controller.abort()
+    stopping.addEventListener("abort", () => this.controller.abort(), { once: true })
   }
 
   private get signal(): AbortSignal {
@@ -208,10 +211,20 @@ export class HeldBranch {
 
   /** Lets the branch go after `error`, saying what became of it. */
   private async failed(error: unknown): Promise<void> {
-    if (error instanceof LostBranchError) {
+    if (error instanceof LostBranchError || this.lost) {
       await this.release({ lost: true })
       return
     }
+
+    // The worker stopped it mid-step: it goes back as any stop puts it, for the next worker.
+    if (this.stopping.aborted) {
+      await this.close({}).catch(async (closing: unknown) => {
+        console.error(`[SixbBranchWorker] Could not put branch '${this.branch.name}' back.`, closing)
+        await this.release()
+      })
+      return
+    }
+
     await this.release()
 
     // A delete that failed stays wanted: the next claim tries it again.
@@ -263,7 +276,7 @@ export class HeldBranch {
         for (let attempt = 0; attempt < 3; attempt += 1) {
           const row = await this.branches.get({ projectId: this.host.id, name: this.branch.name })
           if (!row || row.owner !== this.settings.owner) {
-            this.controller.abort()
+            this.lose()
             return
           }
 
@@ -291,10 +304,16 @@ export class HeldBranch {
         console.error(
           `[SixbBranchWorker] The lease on '${this.branch.name}' runs out unrenewed: letting the branch go.`
         )
-        this.controller.abort()
+        this.lose()
       }
     })()
     return this.renewing
+  }
+
+  /** Ends the hold: another worker may hold the branch now, so it touches nothing more. */
+  private lose(): void {
+    this.lost = true
+    this.controller.abort()
   }
 
   /** Holds the branch's role to its limits: it may SET its own timeouts away. */

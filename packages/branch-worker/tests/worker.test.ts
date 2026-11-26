@@ -148,6 +148,48 @@ describe("the branch worker", () => {
     await settled(worker.stop())
   })
 
+  // On SIGTERM the worker sat out its whole drain with every sandbox up, past the 10-30 s a
+  // platform gives it. Guard check: give `HeldBranch` the run's `signal` alone in `claim`: the
+  // drain never ends, and the test times out.
+  test("puts its branches back at once when it drains", async () => {
+    const { host, lab } = await setup()
+    const worker = new BranchWorker(host, { apiPublicOrigin: "https://api.shop.test" })
+    await worker.start()
+    await ready(host)
+
+    const drained = worker.drain()
+    await settled(drained)
+
+    expect(await drained).toBe(true)
+    expect(lab.kills).toEqual([1])
+    expect(await row(host)()).toMatchObject({ wanted: "running", state: "stopped", owner: null })
+  })
+
+  // Guard check: drop the `stopping` case from `failed` (`held-branch.ts`): the branch fails.
+  test("puts a branch back, not failed, when it drains during the branch's copy", async () => {
+    const { host, lab } = await setup()
+    let release: () => void = () => {}
+    lab.copyGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const worker = new BranchWorker(host, { apiPublicOrigin: "https://api.shop.test" })
+    await worker.start()
+    await until(row(host), (branch) => branch?.state === "copying")
+
+    const drained = worker.drain()
+    await flush()
+    release()
+    await settled(drained)
+
+    expect(await drained).toBe(true)
+    expect(await row(host)()).toMatchObject({
+      wanted: "running",
+      state: "stopped",
+      error: null,
+      owner: null,
+    })
+  })
+
   // A worker stopping mid-pass once claimed the branch its own hold had just let go, and made a
   // sandbox for it on its way out. Guard check: drop the stop check from `claim` (`worker.ts`).
   test("claims nothing once it begins stopping", async () => {

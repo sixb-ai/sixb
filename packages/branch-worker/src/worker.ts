@@ -187,7 +187,9 @@ export class BranchWorker extends Worker {
       )
       if (!claimed) continue
 
-      this.hold(branch.name, new HeldBranch(this.host, this.settings, claimed, signal).life())
+      // A drain puts the branch back at once, as a stop does: the next worker opens it.
+      const stopping = AbortSignal.any([signal, this.drainSignal])
+      this.hold(branch.name, new HeldBranch(this.host, this.settings, claimed, stopping).life())
     }
     return waiting
   }

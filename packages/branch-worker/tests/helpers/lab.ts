@@ -149,7 +149,8 @@ function fakeSandboxes(
       return lab.sandboxStatus
     },
     workingDirectory: "/work",
-    async runCommand(command, args = []) {
+    async runCommand(command, args = [], options) {
+      options?.signal?.throwIfAborted()
       const script = args[1] ?? ""
       const result = (stdout = "", exitCode = 0) => ({
         exitCode,
