@@ -41,7 +41,12 @@ interface BranchRecord {
   readonly profile: string
   /** The branch's own credential in production. */
   readonly credential?: string
-  readonly lake?: { readonly sliceId: string; readonly point: string }
+  readonly lake?: {
+    readonly sliceId: string
+    readonly point: string
+    /** Datasets the slice leaves out. */
+    readonly skipped?: BranchLoadedCopy["skippedDatasets"]
+  }
   /** What the copy held once loaded, and the types it left out: what a hosted branch reports. */
   readonly objects?: number
   readonly skipped?: readonly { readonly objectTypeId: string; readonly reason: string }[]
@@ -353,6 +358,7 @@ export async function loadedCopyOf(
     takenAt: record.takenAt,
     objects: record.objects ?? 0,
     skipped: record.skipped ?? [],
+    skippedDatasets: record.lake?.skipped ?? [],
     lakeSliceId: record.lake?.sliceId ?? null,
   })
 }
@@ -478,7 +484,11 @@ async function loadCopy(input: {
       ...(rest
         ? {
             credential: rest.lake.credential,
-            lake: { sliceId: rest.lake.sliceId, point: rest.lake.point },
+            lake: {
+              sliceId: rest.lake.sliceId,
+              point: rest.lake.point,
+              skipped: rest.lake.skipped ?? [],
+            },
           }
         : {}),
     }

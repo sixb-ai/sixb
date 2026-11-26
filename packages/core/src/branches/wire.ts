@@ -4,6 +4,8 @@
  * is written. Each part is a 1-byte kind and a 4-byte little-endian length, then its bytes.
  */
 
+import type { LakeSliceSkip } from "../datasets/lake-slices"
+
 const PART_SNAPSHOT = 1
 const PART_LAKE_CATALOG = 2
 const PART_LAKE = 3
@@ -14,6 +16,8 @@ const HEADER_BYTES = 5
 export interface BranchCopyLake {
   readonly sliceId: string
   readonly point: string
+  /** Datasets the slice leaves out: their person may not read every column. */
+  readonly skipped: readonly LakeSliceSkip[]
   readonly token: string
   readonly expiresAt: string
   /** The branch's credential: it reads production only as its person, only for the branch. */

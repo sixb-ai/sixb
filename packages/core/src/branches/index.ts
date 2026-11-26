@@ -44,6 +44,7 @@ export {
   type BranchHandoverPerson,
   branchHandoverAuth,
 } from "./handover"
+export { type BranchesUnavailable, branchesUnavailable } from "./hosting"
 export {
   assertPreviewSiteApart,
   branchPreviewOrigin,
@@ -57,6 +58,7 @@ export {
   BRANCH_KEY_ENV,
   BRANCH_KEY_HEADER,
   BRANCH_PORT_ENV,
+  BRANCH_PRODUCTION_ORIGIN_ENV,
   BRANCH_PUBLIC_ORIGIN_ENV,
   BRANCH_RUNTIME_COMMAND,
   BRANCH_STATUS_PATH,

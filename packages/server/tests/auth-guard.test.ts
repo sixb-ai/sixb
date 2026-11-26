@@ -390,6 +390,7 @@ describe("server auth guard", () => {
         serviceAccounts: false,
         usage: false,
         activity: false,
+        branches: false,
       },
       session: {
         id: "ses_1",

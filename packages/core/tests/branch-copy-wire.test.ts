@@ -5,6 +5,7 @@ const lake = {
   credential: "sixb_branch_x",
   sliceId: "slice-1",
   point: "ducklake:9",
+  skipped: [{ datasetId: "salaries", reason: "missing_clearance" as const, columns: ["amount"] }],
   token: "t",
   expiresAt: "2026-11-25T00:00:00.000Z",
 }

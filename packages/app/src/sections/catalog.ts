@@ -17,6 +17,7 @@ export type SectionAccess =
   | "serviceAccounts"
   | "usage"
   | "activity"
+  | "branches"
 
 export interface SectionPageDefinition {
   readonly id: string
@@ -31,6 +32,8 @@ export interface SectionPageDefinition {
   readonly details?: readonly { readonly path: string; readonly exportName: string }[]
   /** Paths outside the section that open from this page and keep the section around them. */
   readonly activeFor?: readonly string[]
+  /** Only in production: a branch's app leaves it out. */
+  readonly productionOnly?: boolean
 }
 
 export interface SectionDefinition {
@@ -147,6 +150,15 @@ export const sectionCatalog: readonly SectionDefinition[] = [
         path: "/console/logs",
         exportName: "ConsoleLogsPage",
         requires: ["logs"],
+      },
+      // The git branches production runs next to itself: for whoever manages the project's code.
+      {
+        id: "branches",
+        path: "/console/branches",
+        exportName: "ConsoleBranchesPage",
+        requires: ["branches"],
+        // Branches are started in production, never from another branch.
+        productionOnly: true,
       },
     ],
   },

@@ -318,7 +318,11 @@ async function openHostedBranch(
     host,
     projectRoot,
     storage: await hostedBranchStorage(projectRoot, host.branch.name),
-    hosted: { key: hosted.key, origin: hosted.publicOrigin },
+    hosted: {
+      key: hosted.key,
+      origin: hosted.publicOrigin,
+      productionOrigin: hosted.productionOrigin,
+    },
     onLoading,
   })
 }

@@ -1,6 +1,7 @@
 import {
   BRANCH_KEY_ENV,
   BRANCH_PORT_ENV,
+  BRANCH_PRODUCTION_ORIGIN_ENV,
   BRANCH_PUBLIC_ORIGIN_ENV,
 } from "@sixb/core/internal/branches"
 
@@ -11,6 +12,8 @@ export interface HostedBranchRuntime {
   readonly ports: { readonly front: number; readonly api: number; readonly app: number }
   /** Where the front is reached from outside the sandbox. */
   readonly publicOrigin: string
+  /** Production's app, when the deployment says where: the banner's Refresh opens it. */
+  readonly productionOrigin: string | null
 }
 
 /**
@@ -45,5 +48,6 @@ export function hostedBranchRuntime(): HostedBranchRuntime | null {
     key,
     ports: { front, api: front + 1, app: front + 2 },
     publicOrigin: process.env[BRANCH_PUBLIC_ORIGIN_ENV] || `http://127.0.0.1:${front}`,
+    productionOrigin: process.env[BRANCH_PRODUCTION_ORIGIN_ENV] || null,
   }
 }

@@ -15,7 +15,7 @@ import {
 } from "@sixb/ui/components"
 import { defineMessages, type MessageTree, type Translation, useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { Check, CircleAlert, Copy, DatabaseZap } from "lucide-react"
+import { ArrowUpRight, Check, CircleAlert, Copy, DatabaseZap, GitFork, Lock } from "lucide-react"
 import { type ComponentType, type ReactNode, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 
@@ -31,6 +31,14 @@ export const en = {
   unavailableTitle: "Could not load",
   deniedTitle: "No access",
   denied: "Your role does not allow this. Ask an admin if you should have it.",
+  noAccess: (page: string) => `You don't have access to ${page}. Ask a project admin.`,
+  productionOnly: {
+    title: "Managed from production",
+    description: "This page is managed from production, not from a branch.",
+    /** What a page only production has says on a branch, by page, in place of the above. */
+    pages: { branches: "Branches are managed from production." } as Record<string, string>,
+    open: "Open in production",
+  },
   tryAgain: "Try again in a moment.",
   status: {
     queued: "Queued",
@@ -69,6 +77,14 @@ export const fr: Translation<typeof en> = {
   notFound: (id: string) => `Rien ne s’appelle « ${id} ». Il a peut-être été renommé ou supprimé.`,
   unavailableTitle: "Chargement impossible",
   deniedTitle: "Accès refusé",
+  noAccess: (page: string) =>
+    `Vous n’avez pas accès à « ${page} ». Demandez à un administrateur du projet.`,
+  productionOnly: {
+    title: "Se gère en production",
+    description: "Cette page se gère depuis la production, pas depuis une branche.",
+    pages: { branches: "Les branches se gèrent depuis la production." },
+    open: "Ouvrir en production",
+  },
   denied:
     "Votre rôle ne le permet pas. Demandez à un administrateur si vous devriez y avoir accès.",
   tryAgain: "Réessayez dans un instant.",
@@ -927,5 +943,50 @@ export function Facts({
         </div>
       ))}
     </>
+  )
+}
+
+/** A page this person may not open: what it is, and who can give access. */
+export function NoAccessPanel({ page }: { readonly page: string }) {
+  const messages = useSectionUiMessages()
+  return (
+    <Panel>
+      <PanelEmpty icon={Lock} title={messages.deniedTitle} description={messages.noAccess(page)} />
+    </Panel>
+  )
+}
+
+/**
+ * A page only production has, opened on a branch: where it is managed, and, on a branch
+ * production runs, the way there.
+ */
+export function ProductionOnlyPanel({
+  page,
+  href,
+}: {
+  /** The page's id in its section, such as `branches`. */
+  readonly page: string
+  readonly href: string | null
+}) {
+  const messages = useSectionUiMessages().productionOnly
+  return (
+    <Panel>
+      <PanelEmpty
+        icon={GitFork}
+        // A page that says so in its own words needs nothing more.
+        title={messages.pages[page] ?? messages.title}
+        description={messages.pages[page] ? undefined : messages.description}
+        action={
+          href ? (
+            <Button asChild size="sm" variant="outline">
+              <a href={href}>
+                <ArrowUpRight />
+                {messages.open}
+              </a>
+            </Button>
+          ) : undefined
+        }
+      />
+    </Panel>
   )
 }

@@ -104,7 +104,7 @@ function branchApp(
         authorization: async () => "Bearer sixb_branch_x",
       },
       takenAt: "2026-11-25T08:00:00.000Z",
-      hosted: { key: KEY, origin },
+      hosted: { key: KEY, origin, productionOrigin: "https://app.shop.test" },
     },
   })
   // Some tests start it: on a port of its own, on the address they read, never 3000 beside a
@@ -539,6 +539,41 @@ describe("signing into a branch from production", () => {
     expect(await answer.json()).toMatchObject({
       error: expect.stringContaining("answered with a redirect, which production never follows"),
     })
+  })
+})
+
+describe("a branch's project info", () => {
+  // What the bar on every page of the branch's app says. Guard check: drop `branch` from
+  // `registerProjectRoutes` (`routes/project.ts`).
+  test("names the branch, its data's age and production, which the bar links back to", async () => {
+    const { app } = branchApp()
+
+    const { code } = (await (await prepare(app)).json()) as { code: string }
+    const cookie = cookiesOf(await exchange(app, code))
+    const project = await (
+      await app.fetch(new Request("http://branch.localhost/api/project", { headers: { cookie } }))
+    ).json()
+    expect(project).toMatchObject({
+      branch: {
+        name: "feature/invoices",
+        dataTakenAt: "2026-11-25T08:00:00.000Z",
+        productionUrl: "https://app.shop.test",
+      },
+    })
+  })
+
+  test("says nothing of branches in production", async () => {
+    const production = createSixbApi(
+      new SixbServer({
+        host: new SixbHost(options(new InMemoryStorage())),
+        quiet: true,
+        browser: createTestBrowserPolicy(),
+      })
+    )
+    const project = await (
+      await production.fetch(new Request("http://localhost/api/project"))
+    ).json()
+    expect(project).not.toHaveProperty("branch")
   })
 })
 

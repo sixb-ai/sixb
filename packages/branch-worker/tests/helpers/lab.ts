@@ -567,6 +567,7 @@ export async function setup(
 export const settings: HeldBranchSettings = {
   owner: "worker-test",
   apiPublicOrigin: "https://api.shop.test",
+  appPublicOrigin: "https://app.shop.test",
   devEnv: async () => ({ STRIPE_KEY: "sk_test_dev" }),
   allow: [],
 }

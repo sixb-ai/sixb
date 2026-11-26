@@ -70,7 +70,9 @@ export function AgentChatPage({
   }, [navigate, normalizedRouteBase])
 
   return (
-    <section className="fixed inset-0 z-50 flex h-(--viewport-height) min-h-0 overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)] text-foreground">
+    // Below a bar above the app, such as a branch's, which it would otherwise cover, and which
+    // takes the safe area under an installed app's status bar when it shows.
+    <section className="fixed inset-x-0 top-[var(--app-top-inset,0px)] z-50 flex h-[calc(var(--viewport-height)-var(--app-top-inset,0px))] min-h-0 overflow-hidden bg-background pt-[max(0px,calc(env(safe-area-inset-top,0px)-var(--app-top-inset,0px)))] text-foreground">
       <AgentChat
         {...props}
         ambientContext={ambientContext ?? registeredContext}
@@ -117,7 +119,7 @@ export function AgentThreadsPage() {
   const navigate = useNavigate()
 
   return (
-    <section className="fixed inset-0 z-50 flex h-(--viewport-height) min-h-0 flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)] text-foreground">
+    <section className="fixed inset-x-0 top-[var(--app-top-inset,0px)] z-50 flex h-[calc(var(--viewport-height)-var(--app-top-inset,0px))] min-h-0 flex-col overflow-hidden bg-background pt-[max(0px,calc(env(safe-area-inset-top,0px)-var(--app-top-inset,0px)))] text-foreground">
       <AgentThreads
         className="min-h-0 flex-1"
         onSelectThread={(threadId) => navigate(threadPath(threadId))}

@@ -102,6 +102,16 @@ export interface BranchData {
   readonly objects: number
   /** Object types left out of it, and why. */
   readonly skipped: readonly { readonly objectTypeId: string; readonly reason: string }[]
+  /**
+   * Datasets its lake slice leaves out: their creator may not read every column, so the branch
+   * gets none of them. Empty without a slice.
+   */
+  readonly skippedDatasets: readonly {
+    readonly datasetId: string
+    readonly reason: "missing_clearance"
+    /** The columns its creator may not read. */
+    readonly columns: readonly string[]
+  }[]
   /** The lake slice it reads production's datasets through, when production's lake has forks. */
   readonly lakeSliceId: string | null
 }

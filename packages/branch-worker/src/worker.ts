@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto"
 import type { SandboxNetworkTarget, SixbHostView } from "@sixb/core"
 import {
+  branchesUnavailable,
   branchHostingRequirement,
   closeBranchData,
-  isBranchHostingStorage,
 } from "@sixb/core/internal/branches"
 import { Worker, waitUnlessAborted } from "@sixb/core/internal/workers"
 import type { BranchRecord, BranchStorage } from "@sixb/core/storage"
@@ -32,6 +32,8 @@ export interface BranchWorkerOptions {
   readonly concurrency?: number
   /** Production's API origin, which a branch reads production's lake files from. */
   readonly apiPublicOrigin?: string
+  /** Production's app origin, which a branch's banner links back to. Without it, it links nowhere. */
+  readonly appPublicOrigin?: string
   /**
    * The project's `dev` values for each branch it starts, read with a credential for `dev` only:
    * never production's. Null, or absent, starts branches without them, which their notice says.
@@ -72,38 +74,8 @@ export class BranchWorker extends Worker {
     host: SixbHostView,
     environment: string | undefined = process.env.NODE_ENV
   ): string | null {
-    if (!host.storage.hostedBranches || !isBranchHostingStorage(host.storage)) {
-      return "needs @sixb/pg for production's storage: branches live on its instance"
-    }
-    if (!host.source) {
-      return "needs the project's repository: name it with createSixb({ source: { repository } })"
-    }
-    if (!host.sandboxes) {
-      return "needs a sandbox factory: pass one to createSixb({ sandboxes })"
-    }
-    if (!host.sandboxes.runsBranches) {
-      return "needs a sandbox provider that runs branches, serving their ports: @sixb/sandboxes-vercel or @sixb/sandboxes-smolvm"
-    }
-    if (host.sandboxDefinition?.auth && host.sandboxes.forwardsRequestCredentials) {
-      return "needs a sandbox provider whose commands carry the source's credentials themselves to clone a private repository: this one hands them to a forwarder git does not use. Use @sixb/sandboxes-vercel, or drop the sandbox factory's auth for a public repository"
-    }
-    if (host.sandboxes.resume && (!host.sandboxes.destroy || !host.sandboxes.stop)) {
-      return "needs a sandbox provider that stops and deletes a saved sandbox by name (stop, destroy), as it resumes them: a branch's sandbox goes with the branch, and a dead worker's session is stopped"
-    }
-    if (environment === "production" && host.sandboxes.sharesHost) {
-      return "needs a sandbox that keeps branches from this host's network and files in production: use @sixb/sandboxes-vercel or @sixb/sandboxes-smolvm, as @sixb/sandboxes-local runs a branch on this host itself"
-    }
-    if (
-      environment === "production" &&
-      host.sandboxes.servesOnLoopback &&
-      !host.source.previewDomain
-    ) {
-      return "needs a preview domain with this sandbox provider: it serves branches on this host's loopback, which nobody's browser reaches. Name one with createSixb({ source: { previewDomain } })"
-    }
-    if (host.sandboxRecipeEnv.length > 0) {
-      return `needs a sandbox recipe without env (it sets ${host.sandboxRecipeEnv.join(", ")}): its provider gives that env to every sandbox, a branch's too, and a branch runs only with the project's dev values`
-    }
-    return null
+    const unavailable = branchesUnavailable(host, environment)
+    return unavailable ? `needs ${unavailable.message}` : null
   }
 
   constructor(
@@ -121,6 +93,7 @@ export class BranchWorker extends Worker {
     this.settings = {
       owner: this.owner,
       apiPublicOrigin: options.apiPublicOrigin,
+      appPublicOrigin: options.appPublicOrigin,
       devEnv: options.devEnv,
       allow: options.allow ?? [],
     }

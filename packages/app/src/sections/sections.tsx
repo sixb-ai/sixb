@@ -1,3 +1,5 @@
+import { getProjectInfoOptions } from "@sixb/client/hooks"
+import { useQuery } from "@tanstack/react-query"
 import {
   Bolt,
   Box,
@@ -7,6 +9,7 @@ import {
   ChartNoAxesCombined,
   Database,
   GitBranch,
+  GitFork,
   HeartPulse,
   Layers,
   LayoutGrid,
@@ -83,6 +86,8 @@ export function resolveOpenSections(input: {
   readonly signedIn: boolean
   readonly access: Readonly<Record<SectionAccess, boolean>> | null
   readonly enabled: boolean
+  /** The app runs as a branch: pages only production has are left out. */
+  readonly onBranch?: boolean
 }): readonly OpenSection[] {
   if (!input.enabled) return []
   return sectionCatalog.flatMap((definition) => {
@@ -90,7 +95,9 @@ export function resolveOpenSections(input: {
     const allows = (requires: readonly SectionAccess[] | undefined) =>
       !input.signedIn || !requires || requires.some((need) => input.access?.[need] === true)
     if (!allows(definition.requires)) return []
-    const pages = definition.pages.filter((page) => allows(page.requires))
+    const pages = definition.pages.filter(
+      (page) => allows(page.requires) && !(input.onBranch && page.productionOnly)
+    )
     return pages.length > 0 ? [{ definition, pages }] : []
   })
 }
@@ -110,9 +117,12 @@ export function useOpenSections(): readonly OpenSection[] {
   const enabled = useContext(SectionsContext)
   const signedIn = useCurrentUser() !== null
   const access = useSessionAccess()
+  // Read from what the app loaded when it started, never fetched for this.
+  const onBranch =
+    useQuery({ ...getProjectInfoOptions(), enabled: false }).data?.branch !== undefined
   return useMemo(
-    () => resolveOpenSections({ signedIn, access, enabled }),
-    [signedIn, access, enabled]
+    () => resolveOpenSections({ signedIn, access, enabled, onBranch }),
+    [signedIn, access, enabled, onBranch]
   )
 }
 
@@ -141,6 +151,7 @@ const pageIcons: Record<string, ComponentType<{ readonly className?: string }>> 
   actions: Bolt,
   workflows: GitBranch,
   rules: ListChecks,
+  branches: GitFork,
 }
 
 /**
@@ -200,10 +211,21 @@ export function useCurrentSection(): AppSection | null {
   return useSections().find((section) => sectionContains(section, pathname)) ?? null
 }
 
-/** Whether `pathname` is one of the section's pages, below one, or a page one claims. */
+/**
+ * Whether `pathname` is one of the section's pages, below one, or a page one claims. A page only
+ * production has stays in its section on a branch, out of the nav: it says where it is managed.
+ */
 function sectionContains(section: AppSection, pathname: string): boolean {
-  return section.pages.some((entry) =>
+  const listed = section.pages.some((entry) =>
     ("group" in entry ? entry.items : [entry]).some((page) => isCurrentItem(pathname, page))
+  )
+  if (listed) return true
+
+  const definition = sectionCatalog.find((candidate) => candidate.id === section.id)
+  return (
+    definition?.pages.some(
+      (page) => page.productionOnly && isCurrentItem(pathname, { href: page.path })
+    ) ?? false
   )
 }
 

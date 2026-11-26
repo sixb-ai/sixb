@@ -11,6 +11,7 @@ export const settingsManagerSession: GetAuthSessionResponse = {
     serviceAccounts: true,
     usage: true,
     activity: true,
+    branches: false,
   },
   session: { id: "session-1", expiresAt: "2099-10-15T00:00:00.000Z" },
 }

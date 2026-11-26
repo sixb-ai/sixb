@@ -68,6 +68,7 @@ function sessionNamed(displayName: string): GetAuthSessionResponse {
       serviceAccounts: false,
       usage: false,
       activity: false,
+      branches: false,
     },
     session: { id: "session-1", expiresAt: "2026-10-15T00:00:00.000Z" },
   }

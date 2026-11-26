@@ -188,6 +188,7 @@ describe("auth member routes", () => {
       serviceAccounts: false,
       usage: false,
       activity: false,
+      branches: false,
     }
     expect(await sessionAccess(app, admin.cookie)).toEqual({ ...none, members: true })
     expect(await sessionAccess(app, groupless.cookie)).toEqual(none)
@@ -207,7 +208,7 @@ describe("auth member routes", () => {
       serviceAccounts: true,
     })
 
-    // The Console, Logs, Usage and Activity follow grants.
+    // The Console, Logs, Usage, Activity and Branches follow grants.
     const observing = createRuntime({
       membershipPolicies: [],
       roles: [
@@ -218,6 +219,7 @@ describe("auth member routes", () => {
             can.observe(project.activity),
             can.observe(project.console),
             can.observe(project.logs),
+            can.manage(project.source),
           ],
         }),
       ],
@@ -230,6 +232,7 @@ describe("auth member routes", () => {
       activity: true,
       console: true,
       logs: true,
+      branches: true,
     })
   })
 

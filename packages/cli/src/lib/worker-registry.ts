@@ -117,6 +117,7 @@ const workerFactories: Record<WorkerType, WorkerFactory> = {
       new BranchWorker(sixb, {
         concurrency: options.workerConcurrency?.branches,
         apiPublicOrigin: apiPublicOrigin(options.agentApiBaseUrl) ?? undefined,
+        appPublicOrigin: process.env.SIXB_APP_PUBLIC_ORIGIN || undefined,
         devEnv: branchDevEnv(sixb.projectRoot),
         allow: branchAllowedTargets(),
       }),

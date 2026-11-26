@@ -16,6 +16,7 @@ export { AgentToolViewsProvider } from "./agent/tool-views/registry"
 export { ArtifactPage } from "./artifacts/artifact-page"
 export { ArtifactsPage } from "./artifacts/gallery"
 export { ConsoleActionRunPage } from "./pages/console/action-run"
+export { ConsoleBranchesPage } from "./pages/console/branches/branches"
 export {
   ConsoleConnectorPage,
   ConsoleConnectorsPage,
@@ -50,4 +51,5 @@ export { SettingsUsagePage } from "./pages/settings/usage/page"
 export { SectionsProvider } from "./sections/sections"
 export { keepSharedSession } from "./shared-session"
 export { refreshOnReturn, restoreLastScreen } from "./shell/app-return"
+export { BranchBanner } from "./shell/branch-banner"
 export { PhoneFoundations } from "./shell/phone/phone-foundations"

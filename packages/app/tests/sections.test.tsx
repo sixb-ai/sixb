@@ -5,6 +5,7 @@ import {
   getAuthInvitationOptionsQueryKey,
   getAuthMembershipOptionsQueryKey,
   getAuthSessionQueryKey,
+  getProjectInfoQueryKey,
   listActionsOptions,
   listAuthInvitationsQueryKey,
   listAuthMembersQueryKey,
@@ -22,6 +23,7 @@ import type { ReactNode } from "react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { type AppSectionId, AppShell, useSections } from "../src"
 import {
+  ConsoleBranchesPage,
   ConsoleSyncPage,
   ConsoleSyncsPage,
   SectionsProvider,
@@ -77,6 +79,7 @@ const manager = {
   serviceAccounts: true,
   usage: true,
   activity: true,
+  branches: true,
 }
 const nobody = {
   console: false,
@@ -85,6 +88,7 @@ const nobody = {
   serviceAccounts: false,
   usage: false,
   activity: false,
+  branches: false,
 }
 const dataPages = ["connectors", "syncs", "datasets", "lake-health", "pipelines", "projections"]
 const allConsolePages = [
@@ -96,6 +100,7 @@ const allConsolePages = [
   "workflows",
   "rules",
   "logs",
+  "branches",
 ]
 
 function sessionFor(
@@ -250,19 +255,36 @@ describe("who sees each section", () => {
       section: "console",
       signedIn: true,
       access: { ...nobody, console: true },
-      pages: allConsolePages.filter((page) => page !== "logs"),
+      pages: allConsolePages.filter((page) => page !== "logs" && page !== "branches"),
     },
     {
       name: "Console, signed in with the grant and logs",
       section: "console",
       signedIn: true,
       access: { ...nobody, console: true, logs: true },
-      pages: allConsolePages,
+      pages: allConsolePages.filter((page) => page !== "branches"),
+    },
+    // Branches open to whoever manages the project's code: can.manage(project.source).
+    {
+      name: "Console, signed in with the grant and branches",
+      section: "console",
+      signedIn: true,
+      access: { ...nobody, console: true, branches: true },
+      pages: allConsolePages.filter((page) => page !== "logs"),
     },
   ]
 
   test.each(cases)("$name", ({ section, signedIn, access = null, pages }) => {
     expect(pagesOf({ signedIn, access, enabled: true }, section)).toEqual([...pages])
+  })
+
+  // Branches are started in production: a branch's own app leaves the page out.
+  test("a branch's app leaves out what only production has", () => {
+    const access = { ...nobody, console: true, branches: true }
+    expect(pagesOf({ signedIn: true, access, enabled: true }, "console")).toContain("branches")
+    expect(
+      pagesOf({ signedIn: true, access, enabled: true, onBranch: true }, "console")
+    ).not.toContain("branches")
   })
 
   test("shared links get no sections", () => {
@@ -437,15 +459,18 @@ describe("section navigation", () => {
 
 describe("who may open a section page", () => {
   // Regression proof: delete the `closed` redirect in SectionPage and this renders the members page.
-  test("a project page someone may not use sends its URL home", () => {
+  // Someone signed in reads which page it is and who can give access, rather than land on Home
+  // without knowing why. Removal proof: return the redirect from `NotAllowed` for everyone.
+  test("a project page someone may not use says they don't have access", () => {
     const view = renderApp(<SettingsMembersPage />, {
       path: "/settings/members",
       session: sessionFor(["staff"], nobody),
     })
-    expect(view.getByText("Home page")).toBeDefined()
+    expect(view.getByText("You don't have access to Members. Ask a project admin.")).toBeDefined()
+    expect(view.queryByText("Home page")).toBeNull()
   })
 
-  test("a Console page sends someone without the grant home, detail pages included", () => {
+  test("a Console page says so to someone without the grant, detail pages included", () => {
     for (const [page, path] of [
       [<ConsoleSyncsPage key="list" />, "/console/syncs"],
       [<ConsoleSyncPage key="detail" />, "/console/syncs/sync-orbit"],
@@ -454,9 +479,53 @@ describe("who may open a section page", () => {
         path,
         session: sessionFor(["staff"], { ...manager, console: false }),
       })
-      expect(view.getByText("Home page")).toBeDefined()
+      expect(view.getByText("You don't have access to Syncs. Ask a project admin.")).toBeDefined()
       cleanup()
     }
+  })
+
+  // A developer who opens the Console's Branches on a branch once read that they had no access,
+  // beside an empty sidebar. Red check: drop the `productionOnly` case from `NotAllowed`
+  // (`section-page.tsx`), or from `sectionContains` (`sections.tsx`).
+  test("on a branch, a page only production has says so, with the way there", () => {
+    const view = renderApp(
+      <AppShell nav={[{ label: "Quotes", href: "/quotes" }]}>
+        <ConsoleBranchesPage />
+      </AppShell>,
+      {
+        path: "/console/branches",
+        session: sessionFor(["staff"], manager),
+        data: [
+          [
+            getProjectInfoQueryKey(),
+            {
+              id: "northline",
+              locale: "en",
+              timeZone: "UTC",
+              branch: {
+                name: "feature/route-planner",
+                dataTakenAt: null,
+                productionUrl: "https://app.northline.test",
+              },
+            },
+          ],
+        ],
+      }
+    )
+
+    expect(view.getByText("Branches are managed from production.")).toBeDefined()
+    expect(view.queryByText(/You don't have access/)).toBeNull()
+    // Its section's sidebar stays, without the page.
+    expect(view.getByRole("link", { name: /Logs/ }).getAttribute("href")).toBe("/console/logs")
+    expect(view.queryByText("Quotes")).toBeNull()
+    expect(view.getByRole("link", { name: "Open in production" }).getAttribute("href")).toBe(
+      "https://app.northline.test/console/branches"
+    )
+  })
+
+  test("signed out, a page sends its URL home", () => {
+    const view = renderApp(<SettingsMembersPage />, { path: "/settings/members", session: null })
+    expect(view.getByText("Home page")).toBeDefined()
   })
 
   test("a page about yourself stays open to someone who may manage nothing", () => {

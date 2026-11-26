@@ -129,7 +129,14 @@ export function createBranchesRuntime(
     branch.wanted === "deleted" ? "is being deleted. Open it again once it is gone." : null
 
   return {
-    list: async () => (await store().list({ projectId })).map(toBranchView),
+    list: async () => {
+      // Storage that holds no branches holds none to list: the Console says what is missing.
+      if (!runtime.storage.hostedBranches) {
+        assertMayManageBranches(runtime)
+        return []
+      }
+      return (await store().list({ projectId })).map(toBranchView)
+    },
 
     get: async (name) => {
       const branch = await store().get({ projectId, name })
@@ -178,7 +185,20 @@ export function createBranchesRuntime(
       })
       if (created) return toBranchView(branch)
 
-      return want(name, () => ({ wanted: "running", openedAt: now, lastSeenAt: now }), deleting)
+      // A branch that failed and stopped, its machine lost or its git branch missing, starts over:
+      // nothing holds it, and its old failure would read as the code failing to start again.
+      return want(
+        name,
+        (current) => ({
+          wanted: "running",
+          openedAt: now,
+          lastSeenAt: now,
+          ...(current.state === "failed" && current.wanted !== "running"
+            ? { state: "stopped" as const, error: null }
+            : {}),
+        }),
+        deleting
+      )
     },
 
     refresh: (name) => {

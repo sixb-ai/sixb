@@ -106,6 +106,7 @@ function parseData(value: unknown): BranchData | null {
 
   const data = value as Record<string, unknown>
   const skipped = Array.isArray(data.skipped) ? data.skipped : []
+  const skippedDatasets = Array.isArray(data.skippedDatasets) ? data.skippedDatasets : []
   return {
     takenAt: new Date(String(data.takenAt)),
     objects: Number(data.objects),
@@ -113,6 +114,14 @@ function parseData(value: unknown): BranchData | null {
       objectTypeId: String((entry as Record<string, unknown>).objectTypeId),
       reason: String((entry as Record<string, unknown>).reason),
     })),
+    skippedDatasets: skippedDatasets.map((entry) => {
+      const skip = entry as Record<string, unknown>
+      return {
+        datasetId: String(skip.datasetId),
+        reason: "missing_clearance" as const,
+        columns: Array.isArray(skip.columns) ? skip.columns.map(String) : [],
+      }
+    }),
     lakeSliceId: nullableString(data.lakeSliceId),
   }
 }

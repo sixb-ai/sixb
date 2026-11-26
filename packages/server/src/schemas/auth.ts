@@ -312,6 +312,7 @@ export const AuthSessionResponseSchema = z.union([
       activity: z.boolean().describe("Activity: they hold can.observe(project.activity)"),
       console: z.boolean().describe("The Console: they hold can.observe(project.console)"),
       logs: z.boolean().describe("Console › Logs: they hold can.observe(project.logs)"),
+      branches: z.boolean().describe("Branches: they hold can.manage(project.source)"),
     }),
     session: z.object({
       id: z.string(),

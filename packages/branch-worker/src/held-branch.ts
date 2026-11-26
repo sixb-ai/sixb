@@ -18,6 +18,7 @@ import {
   BRANCH_KEY_ENV,
   BRANCH_KEY_HEADER,
   BRANCH_PORT_ENV,
+  BRANCH_PRODUCTION_ORIGIN_ENV,
   BRANCH_PUBLIC_ORIGIN_ENV,
   BRANCH_RUNTIME_COMMAND,
   BRANCH_STATUS_PATH,
@@ -88,6 +89,7 @@ const RESTART_BACKOFF_MS = { first: 5_000, max: 5 * 60_000 } as const
 export interface HeldBranchSettings {
   readonly owner: string
   readonly apiPublicOrigin: string | undefined
+  readonly appPublicOrigin: string | undefined
   /** The project's `dev` values, read with the deployment's dev credential; null without one. */
   readonly devEnv: (() => Promise<Readonly<Record<string, string>> | null>) | undefined
   /** What a branch's sandbox reaches beyond its defaults. */
@@ -690,6 +692,10 @@ export class HeldBranch {
     const publicOrigin: Readonly<Record<string, string>> = origin
       ? { [BRANCH_PUBLIC_ORIGIN_ENV]: origin }
       : {}
+    // Production's app, which the branch's bar links back to.
+    const production: Readonly<Record<string, string>> = this.settings.appPublicOrigin
+      ? { [BRANCH_PRODUCTION_ORIGIN_ENV]: this.settings.appPublicOrigin.replace(/\/+$/, "") }
+      : {}
 
     return {
       ...this.devValues,
@@ -700,6 +706,7 @@ export class HeldBranch {
       [BRANCH_KEY_ENV]: branch.key,
       [BRANCH_PORT_ENV]: String(branch.port),
       ...publicOrigin,
+      ...production,
       [BRANCH_DATABASE_URL_ENV]: database.url,
       [BRANCH_DATABASE_SCHEMA_ENV]: database.schemaName,
     }
@@ -817,6 +824,7 @@ export class HeldBranch {
               takenAt: new Date(status.copy.takenAt),
               objects: status.copy.objects,
               skipped: status.copy.skipped,
+              skippedDatasets: status.copy.skippedDatasets,
               lakeSliceId: status.copy.lakeSliceId,
             },
           }
