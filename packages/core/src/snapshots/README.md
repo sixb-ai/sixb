@@ -67,6 +67,11 @@ projection's source rows, comes with the next format version, which this one ref
 - `checkTypeFits` compares each type with the branch's definition. A removed type, a changed
   primary or property, or a newly required property skips the type; a removed property or link is
   left out. Everything is reported per type.
+- A required property hidden from the person keeps its type: its objects are read and linked, and
+  the report lists it (`requiredHiddenPropertyIds`). The base commit records it with who took the
+  copy, and a write on the branch that leaves it unset fails with that reason
+  (`materializer/effective/withheld.ts`). Only objects nothing wrote since the import name that
+  commit, so production never reads it.
 - `loadSnapshot` writes one base commit, the kernel operation `ontology.loadSnapshot`, with no
   outbox row: nothing reacts. Its ontology revision is the branch's. It is all or nothing.
 - Each object is created by an edit (`create` override), each link by an edge or slot override, so

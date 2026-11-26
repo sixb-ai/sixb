@@ -3,6 +3,7 @@ import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execu
 import { createKernelScope } from "../execution/scopes"
 import type { JsonValue } from "../json"
 import { sha256Canonical } from "../materialization/identity"
+import { SNAPSHOT_COMMIT_ID_PREFIX } from "../materializer/effective/withheld"
 import { vectorConfiguration } from "../objects/vectors/profile"
 import type { OntologyRegistry } from "../ontology"
 import { collectArtifactRefIds } from "../ontology/artifact-ref"
@@ -10,7 +11,7 @@ import type { ObjectType, Property } from "../ontology/types"
 import { UNIQUE_VALUE_KEY_VERSION, uniqueValueKey } from "../ontology/unique-values"
 import type { UserRef } from "../ontology/user-ref"
 import { computeOntologyRevision } from "../projections/revision"
-import type { OntologyCommitRecord } from "../storage/ontology/commits"
+import type { OntologyCommitRecord, SnapshotWithheldProperties } from "../storage/ontology/commits"
 import type {
   ExactArtifactHolderWrite,
   ExactUniqueValueClaim,
@@ -69,6 +70,11 @@ export interface ImportedSnapshotType {
   readonly vectors: number
   /** Properties the person cannot read: no object holds a value for them. */
   readonly hiddenPropertyIds: readonly string[]
+  /**
+   * The hidden properties the branch requires. The type is read and linked as any other, but a
+   * write that leaves one of them unset fails on the branch and says why.
+   */
+  readonly requiredHiddenPropertyIds: readonly string[]
   /** Properties the branch no longer defines, left out. */
   readonly droppedPropertyIds: readonly string[]
   /** Links left out because the branch removed or redefined them, or skipped their target. */
@@ -101,7 +107,7 @@ export async function importSnapshot(input: ImportSnapshotInput): Promise<Snapsh
 
     const plan = new ImportPlan(manifest, input.ontology)
     const users = await importMembers(storage, manifest.projectId, members)
-    const commit = await baseCommit(storage, manifest, input.ontology)
+    const commit = await baseCommit(storage, manifest, members, plan, input.ontology)
 
     const end = await storage.loadSnapshot(
       {
@@ -173,14 +179,17 @@ async function expectRecord<K extends SnapshotRecord["kind"]>(
 
 /**
  * The load's execution, the kernel operation `ontology.loadSnapshot`, and its commit, which lists
- * no change: its rows are what it holds.
+ * no change: its rows are what it holds. It records what the copy withheld, which a write on the
+ * branch reads to say why it fails.
  */
 async function baseCommit(
   storage: SnapshotLoadStorage,
   manifest: SnapshotManifest,
+  members: SnapshotMembers,
+  plan: ImportPlan,
   ontology: OntologyRegistry
 ): Promise<OntologyCommitRecord> {
-  const id = `snapshot_${randomUUID()}`
+  const id = `${SNAPSHOT_COMMIT_ID_PREFIX}${randomUUID()}`
   const scope = createKernelScope({
     projectId: manifest.projectId,
     operation: { type: "ontology.loadSnapshot", snapshotId: id },
@@ -205,7 +214,12 @@ async function baseCommit(
     origin: { kind: "runtime", requestId: id },
     ontologyRevision: computeOntologyRevision(ontology),
     committedAt,
-    intent: { kind: "edit", mode: "atomic", operationCount: 0 },
+    intent: {
+      kind: "edit",
+      mode: "atomic",
+      operationCount: 0,
+      ...withheldProperties(manifest, members, plan),
+    },
     result: {
       kind: "edit",
       commitId: id,
@@ -218,11 +232,26 @@ async function baseCommit(
   }
 }
 
+/** The required properties the copy holds no value for, and whom they are hidden from. */
+function withheldProperties(
+  manifest: SnapshotManifest,
+  members: SnapshotMembers,
+  plan: ImportPlan
+): { readonly withheld?: SnapshotWithheldProperties } {
+  const properties = plan.requiredHiddenPropertyIds()
+  if (Object.keys(properties).length === 0) return {}
+
+  const creator = members.users.find(([userId]) => userId === manifest.takenBy.id)
+  return { withheld: { takenBy: creator?.[1] ?? manifest.takenBy.id, properties } }
+}
+
 interface TypePlan {
   readonly manifest: SnapshotTypeManifest
   readonly objectType: ObjectType
   readonly droppedPropertyIds: ReadonlySet<string>
   readonly droppedLinkIds: ReadonlySet<string>
+  /** Hidden from the person, and required by the branch: no object holds them. */
+  readonly requiredHiddenPropertyIds: readonly string[]
   readonly telemetryPropertyIds: ReadonlySet<string>
   readonly unique: readonly {
     readonly propertyId: string
@@ -267,6 +296,10 @@ class ImportPlan {
         objectType,
         droppedPropertyIds: new Set(fit.droppedPropertyIds),
         droppedLinkIds: new Set(fit.droppedLinkIds),
+        requiredHiddenPropertyIds: objectType.properties
+          .filter((p) => p.required && p.mode !== "telemetry")
+          .map((p) => p.id)
+          .filter((propertyId) => type.hiddenPropertyIds.includes(propertyId)),
         telemetryPropertyIds: new Set(
           objectType.properties.filter((p) => p.mode === "telemetry").map((p) => p.id)
         ),
@@ -305,6 +338,16 @@ class ImportPlan {
     )
   }
 
+  /** Per type, the required properties hidden from the person, for types that have any. */
+  requiredHiddenPropertyIds(): Record<string, readonly string[]> {
+    const withheld: Record<string, readonly string[]> = {}
+    for (const plan of this.#types.values()) {
+      if (plan.requiredHiddenPropertyIds.length === 0) continue
+      withheld[plan.manifest.objectTypeId] = plan.requiredHiddenPropertyIds
+    }
+    return withheld
+  }
+
   /** Whether the branch keeps a link: its definition still fits, and its target was imported. */
   keepsLink(plan: TypePlan, linkId: string, targetTypeId: string): boolean {
     if (plan.droppedLinkIds.has(linkId) || !this.#types.has(targetTypeId)) return false
@@ -323,6 +366,7 @@ class ImportPlan {
       points: plan.counts.points,
       vectors: plan.counts.vectors,
       hiddenPropertyIds: plan.manifest.hiddenPropertyIds,
+      requiredHiddenPropertyIds: plan.requiredHiddenPropertyIds,
       droppedPropertyIds: [...plan.droppedPropertyIds],
       droppedLinks: plan.counts.droppedLinks,
       skippedVectors: [...plan.skippedVectors].map(([profile, reason]) => ({ profile, reason })),

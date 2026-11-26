@@ -21,6 +21,7 @@ export type {
   OntologyCommitStorage,
   OntologyCommitWrite,
   ProjectionOntologyCommitIntent,
+  SnapshotWithheldProperties,
   TelemetryOntologyCommitIntent,
 } from "./commits"
 export type {

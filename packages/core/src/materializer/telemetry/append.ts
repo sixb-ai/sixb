@@ -392,6 +392,7 @@ async function executeTelemetryTransaction(
   const counts = await planTelemetryAppend(
     context,
     storage.ontology.materializations,
+    storage.ontology.commits,
     session,
     command.input,
     command.identity

@@ -800,6 +800,7 @@ export type {
   ReplacementPlanStatePage,
   ReplacementPlanStatus,
   RescheduleOntologyOutboxLeaseInput,
+  SnapshotWithheldProperties,
   SourceActivationWrite,
   SourceReplacementLinkState,
   SourceReplacementObjectState,

@@ -3,6 +3,7 @@ import type { OntologyRegistry } from "../ontology"
 import type { ProjectionRegistry } from "../projections/registry"
 import { computeOntologyRevision } from "../projections/revision"
 import type { Storage } from "../storage"
+import { WithheldProperties } from "./effective/withheld"
 import { type MaterializationBatching, resolveMaterializationBatching } from "./shared/batching"
 import { createProjectionMaterializationId } from "./shared/identity"
 
@@ -29,6 +30,8 @@ export interface MaterializerContext {
   readonly maxSerializationRetries: number
   readonly onSerializationRetry?: (attempt: number, error: unknown) => void
   readonly observeCoreBuffer?: (boundary: string, rows: number) => void
+  /** What a branch's copy withheld from the objects it holds, read as writes reach them. */
+  readonly withheld: WithheldProperties
 }
 
 export function createMaterializerContext(input: {
@@ -75,6 +78,7 @@ export function createMaterializerContext(input: {
     clock: dependencies.clock ?? (() => new Date()),
     materializationId: dependencies.materializationId ?? createProjectionMaterializationId,
     maxSerializationRetries,
+    withheld: new WithheldProperties(),
     ...(dependencies.onSerializationRetry !== undefined
       ? { onSerializationRetry: dependencies.onSerializationRetry }
       : {}),

@@ -216,6 +216,11 @@ async function executeEditTransaction(
     command.input.operations,
     { checkUniqueValuesPerItem: command.input.mode === "continue" }
   )
+  await context.withheld.load(
+    storage.ontology.commits,
+    context.projectId,
+    [...workingState.objects.values()].map((object) => object.before)
+  )
   const outcomes = applyEditOperations(context, workingState, command)
   const changes = await stageEditPlan(
     context,

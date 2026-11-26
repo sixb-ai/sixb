@@ -17,6 +17,7 @@ import {
   validatePropertyValue,
   validateTelemetryUnit,
 } from "../../ontology/validation"
+import type { WithheldFromObject } from "./withheld"
 
 export function validateObjectRef(ontology: OntologyRegistry, ref: OntologyObjectRef): void {
   materializationValidation(() => {
@@ -103,7 +104,9 @@ export function validateObjectPatchPropertyIds(
 export function validateEffectiveObject(
   ontology: OntologyRegistry,
   ref: OntologyObjectRef,
-  properties: Readonly<Record<string, JsonValue>>
+  properties: Readonly<Record<string, JsonValue>>,
+  /** What a branch's copy left out of the object, which a missing value is then explained by. */
+  withheld?: WithheldFromObject
 ): void {
   materializationValidation(() => {
     const objectType = ontology.resolveObjectType(ref.objectTypeId)
@@ -114,6 +117,10 @@ export function validateEffectiveObject(
         property.required &&
         properties[property.id] === undefined
       ) {
+        if (withheld?.propertyIds.includes(property.id)) {
+          throw withheldPropertyError(objectType.id, property.id, withheld.takenBy)
+        }
+
         throw withFailureMessage(
           new Error(
             `[Sixb] Missing required property '${property.id}' for object type '${objectType.id}'`
@@ -124,6 +131,15 @@ export function validateEffectiveObject(
     }
     validateObjectProperties(objectType, properties, ontology.getValueTypesById())
   })
+}
+
+/**
+ * The copy holds no value for the property: whoever took it could not read it. Only production,
+ * or a copy taken by someone cleared for it, can give the object a valid value.
+ */
+function withheldPropertyError(objectTypeId: string, propertyId: string, takenBy: string): Error {
+  const reason = `'${objectTypeId}.${propertyId}' is required and hidden from ${takenBy}, who took this copy: edit it in production, or take the copy as someone cleared for it.`
+  return withFailureMessage(new Error(`[Sixb] ${reason}`), reason)
 }
 
 export function validateLinkAuthorityProperties(

@@ -2,7 +2,21 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { defineObjectType, type EmbeddingModel, link, OntologyRegistry, prop, ref } from "../src"
+import {
+  can,
+  defineGroup,
+  defineMarking,
+  defineObjectType,
+  defineRole,
+  type EmbeddingModel,
+  link,
+  OntologyRegistry,
+  prop,
+  ref,
+  resolveAuthorizationContext,
+  SixbHost,
+} from "../src"
+import { createTestingScope } from "../src/execution/scopes"
 import {
   branchNamespaces,
   exportSnapshot,
@@ -13,6 +27,7 @@ import {
   writeSnapshotFile,
 } from "../src/snapshots"
 import { InMemoryStorage, type Storage } from "../src/storage"
+import { createTestSixb } from "../src/testing"
 import {
   confidential,
   deploy,
@@ -23,6 +38,8 @@ import {
   Team,
   Ticket,
 } from "./helpers/snapshot-desk"
+import { groupsOf } from "./helpers/view-conditions"
+import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 function importInto(storage: Storage, chunks: readonly Uint8Array[], ontology?: OntologyRegistry) {
   return importSnapshot({
@@ -96,6 +113,103 @@ describe("what an import reports of what the person read", () => {
 })
 
 describe("importing a snapshot into a branch", () => {
+  // Reproduce: pass no `withheld` to validateEffectiveObject in edits/operations.ts and
+  // telemetry/plan.ts, and both writes fail with a bare "Missing required property 'ssn'".
+  test("a required property hidden from the person keeps its type, and a write says why", async () => {
+    const pii = defineMarking("pii")
+    const Person = defineObjectType({
+      id: "person",
+      name: "Person",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("name", "string"),
+        prop("ssn", "string", { required: true, markings: [pii] }),
+        prop("heartRate", "double", { mode: "telemetry" }),
+      ],
+    })
+    const staff = defineRole("staff", {
+      grantedTo: [defineGroup("staff")],
+      grants: [can.view(Person)],
+    })
+    const production = new SixbHost({
+      id: projectId,
+      ontology: [Person],
+      markings: [pii],
+      groups: groupsOf([staff]),
+      roles: [staff],
+      ...createTestRuntimeDeps(),
+    })
+    await production.storage.auth?.users.create({
+      projectId,
+      id: "usr_ada",
+      email: "ada@example.com",
+    })
+    await createTestSixb(production)
+      .objects(Person)
+      .upsert({ properties: { id: "p1", name: "Ada", ssn: "078-05-1120" } })
+
+    // Ada reads people, without the clearance `ssn` asks for.
+    const scope = createTestingScope({
+      projectId,
+      context: resolveAuthorizationContext({
+        principal: { type: "user", id: "usr_ada" },
+        groupIds: ["staff"],
+        roles: production.definitions.security.listResolvedRoles(),
+      }),
+    })
+    const { chunks } = await readAll(exportSnapshot(hostSnapshotSource(production), { scope }))
+
+    const storage = new InMemoryStorage()
+    const report = await importInto(storage, chunks, new OntologyRegistry({ sources: [Person] }))
+    expect(report.skipped).toEqual([])
+    expect(report.types).toEqual([
+      expect.objectContaining({
+        objectTypeId: "person",
+        objects: 1,
+        hiddenPropertyIds: ["ssn"],
+        requiredHiddenPropertyIds: ["ssn"],
+      }),
+    ])
+
+    const branch = createTestSixb(
+      new SixbHost({
+        id: projectId,
+        ontology: [Person],
+        markings: [pii],
+        ...createTestRuntimeDeps(),
+        storage,
+      })
+    )
+    expect((await branch.objects(Person).byId("p1").get())?.properties).toEqual({
+      id: "p1",
+      name: "Ada",
+    })
+
+    const reason = "'person.ssn' is required and hidden from ada@example.com, who took this copy"
+
+    // The typed API asks for `ssn`; an Action's `update` sends a write without it, as this does.
+    const rename = { id: "p1", name: "Ada L." } as { id: string; name: string; ssn: string }
+    const edit = await branch
+      .objects(Person)
+      .upsert({ properties: rename })
+      .catch((error: unknown) => error)
+    expect(String(edit)).toContain(reason)
+
+    const point = await branch
+      .objects(Person)
+      .byId("p1")
+      .telemetry(Person.p.heartRate)
+      .append({ value: 61, at: new Date(Date.UTC(2026, 0, 1)) })
+      .catch((error: unknown) => error)
+    expect(String(point)).toContain(reason)
+
+    // A write that gives the property a value is valid, as anywhere else.
+    await branch
+      .objects(Person)
+      .upsert({ properties: { id: "p1", name: "Ada L.", ssn: "000-00-0000" } })
+    expect((await branch.objects(Person).byId("p1").get())?.properties.name).toBe("Ada L.")
+  })
+
   test("each type is checked against the branch's definitions", async () => {
     const { host, optionsFor } = await deploy()
     const { chunks } = await readAll(

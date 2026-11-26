@@ -70,6 +70,19 @@ export interface EditOntologyCommitIntent {
   readonly mode: "atomic" | "continue"
   readonly operationCount: number
   readonly vectorWriteCount?: number
+  /** Set on a snapshot's base commit that left a required property out of its objects. */
+  readonly withheld?: SnapshotWithheldProperties
+}
+
+/**
+ * The required properties a branch's copy holds no value for: the person who took it could not
+ * read them. A write on the branch that leaves one unset fails, and names them.
+ */
+export interface SnapshotWithheldProperties {
+  /** Who took the copy, as the error names them: their email, or their id. */
+  readonly takenBy: string
+  /** Per object type, the required properties hidden from them. */
+  readonly properties: Readonly<Record<string, readonly string[]>>
 }
 
 export interface ProjectionOntologyCommitIntent {

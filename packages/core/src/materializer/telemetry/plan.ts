@@ -16,6 +16,7 @@ import type {
   MaterializationPlanWorkItem,
   MaterializationSession,
   MaterializationWorkRecord,
+  OntologyCommitStorage,
   OntologyMaterializationStorage,
   StoredTelemetryPoint,
 } from "../../storage/ontology"
@@ -67,6 +68,7 @@ interface TelemetryPlanContext {
 export async function planTelemetryAppend(
   context: MaterializerContext,
   storage: OntologyMaterializationStorage,
+  commits: OntologyCommitStorage,
   session: MaterializationSession,
   input: TelemetryAppend,
   identity: TimedCommitIdentity
@@ -74,6 +76,11 @@ export async function planTelemetryAppend(
   const counts = emptyTelemetryCounts()
   const planContext = { input, identity }
   const objects = await loadTelemetryObjects(context, storage, session, input.points)
+  await context.withheld.load(
+    commits,
+    context.projectId,
+    [...objects.values()].map((object) => object.effective)
+  )
   const existingPoints = await loadExistingPoints(context, storage, session, input.points)
   for (const group of telemetryObjectGroups(input.points)) {
     const storedObject = objects.get(objectRefKey(group.objectRef))
@@ -305,7 +312,10 @@ async function stageTelemetryObjectPlan(
   counts: MutableTelemetryPlanCounts
 ): Promise<void> {
   const resolved = resolveObject(context.ontology, working)
-  if (resolved) validateEffectiveObject(context.ontology, resolved.ref, resolved.properties)
+  if (resolved) {
+    const withheld = context.withheld.of(working.before)
+    validateEffectiveObject(context.ontology, resolved.ref, resolved.properties, withheld)
+  }
   const change = diffEffectiveObject({
     before: working.before,
     resolved,
