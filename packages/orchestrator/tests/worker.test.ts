@@ -1456,6 +1456,7 @@ describe("OrchestratorWorker", () => {
     expect(
       thrownBy(() =>
         createMaintenancePasses({
+          branch: null,
           projectId: PROJECT_ID,
           routes,
           dispatchers: { projections: createTestProjectionDispatcher([]) },
@@ -1479,6 +1480,7 @@ describe("OrchestratorWorker", () => {
     const lakeStorage = new InMemoryLakeStorage()
     const storage = new InMemoryStorage()
     const passes = createMaintenancePasses({
+      branch: null,
       projectId: PROJECT_ID,
       routes: compileRoutes({
         schedules: [updated],
@@ -1504,6 +1506,7 @@ describe("OrchestratorWorker", () => {
 
   test("adds no pass for a project with nothing to reconcile", () => {
     const passes = createMaintenancePasses({
+      branch: null,
       projectId: PROJECT_ID,
       routes: new Map(),
       dispatchers: {},
@@ -1511,5 +1514,37 @@ describe("OrchestratorWorker", () => {
     })
 
     expect(passes).toEqual([])
+  })
+
+  // A lake that is no fork cannot tell the branch's versions from the ones its objects were copied
+  // from. Guard check: keep `input.projections` whatever the branch in `recoveryPasses`
+  // (core `maintenance/passes/recovery-passes.ts`), and the branch dispatches the projection too.
+  test("on a branch, the projections pass re-derives nothing the copy holds", async () => {
+    const branch = { name: "feature/invoices", dataFrom: "production" as const }
+
+    const firstPass = async (onBranch: typeof branch | null, lakeStorage: InMemoryLakeStorage) => {
+      await commitInvoiceDatasetVersion(lakeStorage)
+      const dispatches: ProjectionDispatchInput[] = []
+      const passes = createMaintenancePasses({
+        projectId: PROJECT_ID,
+        branch: onBranch,
+        routes: invoiceProjectionRoutes(invoiceProjectionDescriptor()),
+        dispatchers: { projections: createTestProjectionDispatcher(dispatches) },
+        lakeStorage,
+        projectionRuns: new InMemoryStorage().projectionRuns,
+      })
+
+      await Promise.all(passes.map((pass) => pass.run(signal)))
+      return dispatches
+    }
+
+    expect(await firstPass(null, new InMemoryLakeStorage())).toHaveLength(1)
+    expect(await firstPass(branch, new InMemoryLakeStorage())).toEqual([])
+
+    // A forked lake says which versions are the branch's own: the pass runs, and its own gate
+    // decides (core `projections-pass.test.ts`).
+    const forked = new InMemoryLakeStorage()
+    Object.defineProperty(forked, "fork", { value: { ownsVersion: () => true } })
+    expect(await firstPass(branch, forked)).toHaveLength(1)
   })
 })
