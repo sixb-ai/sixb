@@ -1,5 +1,5 @@
 import { describe, expect, jest, spyOn, test } from "bun:test"
-import type { LanguageModel } from "@sixb/core"
+import { InMemoryLakeStorage, type LanguageModel } from "@sixb/core"
 import { BRANCH_KEY_HEADER } from "@sixb/core/internal/branches"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { registerModelOrigin } from "@sixb/core/internal/model-origins"
@@ -84,6 +84,25 @@ describe("a held branch", () => {
         { name: "production PostgreSQL", origin: "https://10.0.0.7:5432" },
         { name: "dev redis", origin: "https://redis.dev.shop.test" },
       ],
+    })
+  })
+
+  // A DuckLake branch installs DuckDB's extensions on first use, which every lake read once
+  // failed on: the sandbox could not reach them. Guard check: drop `duckLake` from
+  // `branchNetwork` in `open`.
+  test("reaches DuckDB's extensions when the project's lake is DuckLake", async () => {
+    const lakeStorage = Object.assign(new InMemoryLakeStorage(), {
+      standard: { id: "ducklake", version: "1.0" } as const,
+    })
+    const { lab, host } = await setup({ host: { lakeStorage } })
+    const held = await hold(host)
+    await ready(host)
+    await held.stop()
+
+    expect(lab.created[0]?.network).toMatchObject({
+      allow: expect.arrayContaining([
+        { name: "DuckDB extensions", origin: "https://extensions.duckdb.org" },
+      ]),
     })
   })
 

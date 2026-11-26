@@ -416,6 +416,7 @@ export class HeldBranch {
         apiPublicOrigin: this.settings.apiPublicOrigin,
         database: branchDatabaseAddress(host),
         models: modelOriginsOf(host.definitions.models),
+        duckLake: host.lakeStorage.standard?.id === "ducklake",
         allow: this.settings.allow,
       }),
       ...(this.credentials?.requests.length

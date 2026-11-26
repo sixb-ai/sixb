@@ -9,8 +9,18 @@ export const PACKAGE_REGISTRIES: readonly SandboxNetworkTarget[] = [
 ]
 
 /**
+ * Where DuckDB downloads its extensions, over HTTPS and with no redirect: a branch of a DuckLake
+ * project installs `ducklake` and its catalog's extensions on first use.
+ */
+export const DUCKDB_EXTENSIONS: SandboxNetworkTarget = {
+  name: "DuckDB extensions",
+  origin: "https://extensions.duckdb.org",
+}
+
+/**
  * What a branch's sandbox may reach, and nothing more: production's PostgreSQL instance, as its
  * role; production's API, for the lake's files; the git host, to pull; the package registries;
+ * DuckDB's extensions, when the project's lake is DuckLake;
  * the providers of the project's models, for its agents, workflows and embeddings; and whatever
  * the deployment adds for the branch's `dev` values. Every other address is refused
  * by the provider, private ranges, link-local and the cloud's metadata endpoint included.
@@ -25,6 +35,8 @@ export async function branchNetwork(input: {
   readonly database: { readonly host: string; readonly port: number }
   /** Where the project's models are called, as their providers said (`modelOriginsOf`). */
   readonly models?: readonly string[]
+  /** The project's lake is DuckLake, which the branch opens with DuckDB's extensions. */
+  readonly duckLake?: boolean
   readonly allow?: readonly SandboxNetworkTarget[]
 }): Promise<SandboxNetworkPolicy> {
   const allow: SandboxNetworkTarget[] = []
@@ -32,6 +44,7 @@ export async function branchNetwork(input: {
   const git = httpsOrigin(input.gitUrl)
   if (git) allow.push({ name: "git host", origin: git })
   allow.push(...PACKAGE_REGISTRIES)
+  if (input.duckLake) allow.push(DUCKDB_EXTENSIONS)
   if (input.apiPublicOrigin) allow.push({ name: "production API", origin: input.apiPublicOrigin })
 
   for (const address of await addresses(input.database.host)) {
