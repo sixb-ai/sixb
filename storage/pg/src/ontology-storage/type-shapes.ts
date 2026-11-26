@@ -5,6 +5,7 @@ import type {
   StoredTypeShape,
   TypeShape,
   TypeShapeProbeInput,
+  TypeShapeWrite,
 } from "@sixb/core/storage"
 import type postgres from "postgres"
 import type { SQLClient } from "../pg-client"
@@ -17,6 +18,7 @@ interface PgTypeShapeRow {
   readonly object_type_id: string
   readonly shape: TypeShape
   readonly previous_shape: TypeShape | null
+  readonly state: StoredTypeShape["state"]
   readonly updated_at: Date | string
 }
 
@@ -43,7 +45,7 @@ export class PgOntologyTypeShapeStorage implements OntologyTypeShapeStorage {
   async list(input: { readonly projectId: string }): Promise<readonly StoredTypeShape[]> {
     return this.runRootOperation(async (sql) => {
       const rows = await sql<PgTypeShapeRow[]>`
-        SELECT object_type_id, shape, previous_shape, updated_at FROM ontology_type_shapes
+        SELECT object_type_id, shape, previous_shape, state, updated_at FROM ontology_type_shapes
         WHERE project_id = ${input.projectId}
         ORDER BY object_type_id
       `
@@ -51,21 +53,22 @@ export class PgOntologyTypeShapeStorage implements OntologyTypeShapeStorage {
         objectTypeId: row.object_type_id,
         shape: row.shape,
         previous: row.previous_shape,
+        state: row.state,
         updatedAt: toIsoString(row.updated_at),
       }))
     })
   }
 
-  async write(input: StoredTypeShape & { readonly projectId: string }): Promise<void> {
+  async write(input: TypeShapeWrite): Promise<void> {
     await this.runRootOperation(async (sql) => {
       await sql`
         INSERT INTO ontology_type_shapes (
-          project_id, object_type_id, shape, previous_shape, updated_at
+          project_id, object_type_id, shape, previous_shape, state, updated_at
         )
         VALUES (
           ${input.projectId}, ${input.objectTypeId}, ${jsonParameter(sql, input.shape)}::jsonb,
           ${input.previous === null ? null : jsonParameter(sql, input.previous)}::jsonb,
-          ${input.updatedAt}::timestamptz
+          'current', ${input.updatedAt}::timestamptz
         )
         ON CONFLICT (project_id, object_type_id)
         DO UPDATE SET

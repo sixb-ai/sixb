@@ -43,8 +43,10 @@ need it, so:
   removals, so a fill can read a property its migration removes.
 - Two branches that migrate different properties of one type merge without conflict.
 - One fill and one convert of a property may be pending together. Two of the same kind can't.
-- A migration runs at most once per database. Delete it once every database has applied it;
-  `sixb check` says when the code has moved past one, which then does nothing.
+- Fills and converts run at most once per database. A removal or a rename runs again only if the
+  stored objects hold the old key again, say after a rollback. Delete a migration once every
+  database has applied it; `sixb check` says when the code has moved past one, which then does
+  nothing.
 
 ## What a deploy says
 
@@ -63,10 +65,56 @@ it writes the line to add:
 right: a duplicate id, a rename into itself, a value given to the primary property or to telemetry,
 or one property changed twice.
 
-This release declares migrations and knows which are pending. It doesn't run them yet: a change a
-pending migration covers still stops the deploy while objects hold it.
+## Running one
+
+`sixb check --migrate` (the deploy step) and `sixb db migrate` run the pending migrations before
+the new code serves. `removeProperty` runs in this release; a change another step covers, such as
+a rename, still stops the deploy while objects hold it:
 
 ```text
 ✗ Job: 'gate' was removed, and 2,140 objects hold it.
-  Migration 'job-gate' is pending; this build can't apply it yet.
+  Migration 'job-gate-code' is pending; this build can't apply it yet.
 ```
+
+A run goes in this order:
+
+1. **Pause.** A deploy that runs one stops the live release first (`sixb db migrate --check` exits
+   `3`), so the old code doesn't write the keys being removed.
+2. **Checks.** Everything that can fail runs before anything is written: the stored objects again,
+   markings, the lake with `--lake`, and duplicates of properties the new code makes unique. A
+   failure leaves storage as it was, and the old release starts again.
+3. **Apply.** From the first batch, the deploy only goes forward
+   ([During a deploy](../deployment/object-type-changes.md#during-a-deploy)). Each batch rewrites
+   only the objects, edits, source rows, unique values, file references and vectors that hold a
+   removed key, in one transaction, and saves where the next one starts. On PostgreSQL, ranges of
+   a type's objects and its source rows run side by side.
+4. **Record.** The type's new shape is recorded, and the migration doesn't run again on that
+   database.
+
+A migration changes the shape, not the business: rewritten objects get a new version, but no
+`object.updated` event, rule or workflow fires.
+
+## When a run stops
+
+A run that stops midway (a crash, a lost connection) says how to finish it:
+
+```text
+[Sixb] Migration run migration_… stopped after 12 more batches:
+  …
+Nothing of a batch in flight was written. Run `sixb db migrate` to resume it.
+```
+
+- `sixb db migrate`, `sixb check --migrate` and `sixb dev` resume it at the next batch, from the
+  steps it started with, whatever the code now declares.
+- Until it ends, roles refuse to start, and a deploy keeps the previous release stopped
+  ([During a deploy](../deployment/object-type-changes.md#during-a-deploy)).
+
+## What it doesn't rewrite
+
+- Events already in the outbox and workflow runs in flight keep the old keys.
+- Telemetry series: removing a telemetry property isn't supported yet.
+
+## `sixb dev`
+
+`sixb dev` runs the pending migrations on local data at startup. A change no migration covers is a
+warning: the recorded shape stays as it was, so the migration runs once you add it.

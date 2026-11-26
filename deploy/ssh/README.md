@@ -65,12 +65,18 @@ the host requirements (`src/check/`) and ships releases.
 2. **Bootstrap** (`src/bootstrap.sh`): takes `deploy/lock`, unpacks the release, installs the
    pinned Bun and the dependencies, then runs the release's own runner, which inherits the lock.
 3. **Runner** (`src/server/release.ts`): pulls `.env`, builds, runs `sixb check --migrate --lake`
-   (stopping the live release first when `sixb db migrate --check` exits 3: storage migrations
-   pending, or an object type narrowed), starts the idle slot, waits until it is healthy, moves the
-   routes, moves the singletons, checks again, then makes the slot live and stops the other one.
-   Each step that changes what serves records an undo; a failure runs them in reverse, which leaves
-   the previous release serving. The runner reaches systemd, Caddy and the supervisors through
-   `ReleaseHost`, which the tests fake.
+   (stopping the live release first when `sixb db migrate --check` exits 3, storage migrations
+   pending or an object type narrowed, or 4, an ontology migration run under way), starts the idle
+   slot, waits until it is healthy, moves the routes, moves the singletons, checks again, then makes
+   the slot live and stops the other one. Each step that changes what serves records an undo; a
+   failure runs them in reverse, which leaves the previous release serving. The runner reaches
+   systemd, Caddy and the supervisors through `ReleaseHost`, which the tests fake.
+
+   An ontology migration run only goes forward. The migrating command writes the run's id to the
+   file `SIXB_MIGRATION_RUN_MARKER` names (`.sixb/migration-run-started` in the release) once the
+   run is past its point of no return; the runner removes the file before the command and reads it
+   after, whatever the outcome. When it is there, the undo that restarts the previous release goes,
+   so a later failure leaves that release stopped until a fixed release deploys.
 
 A server from before slots runs one unit, `sixb-<name>.service`. The first slot deploy adopts it as
 the live slot, on the ports its manifest records, and retires it once the new slot serves.

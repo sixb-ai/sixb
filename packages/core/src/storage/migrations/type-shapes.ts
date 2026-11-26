@@ -1,6 +1,8 @@
 import type { JsonValue } from "../../json"
-import { coverChanges } from "../../migrations/coverage"
+import { coverChanges, type MigrationCoverage } from "../../migrations/coverage"
 import { CONFLICT_REMEDY } from "../../migrations/messages"
+import { concerningMigrations, type PlannedStep } from "../../migrations/pending"
+import { stepKindOf } from "../../migrations/steps"
 import type { MigrationDefinition } from "../../migrations/types"
 import type { OntologyDefinitionCatalog } from "../../ontology/registry"
 import {
@@ -69,6 +71,17 @@ export interface TypeShapeTypeCheck {
     | { readonly kind: "write"; readonly shape: TypeShape }
     | { readonly kind: "remove" }
     | { readonly kind: "keep" }
+  /**
+   * The pending migration steps a deploy applies before recording, by migration and position in
+   * its chain: those whose changes data holds, in the order they run. A change data holds that a
+   * step this build can't apply resolves is a finding instead.
+   */
+  readonly run: readonly { readonly migrationId: string; readonly index: number }[]
+  /**
+   * The migrations settled when the code's shape is recorded, or found already recorded: every one
+   * that concerns the type and isn't settled yet.
+   */
+  readonly settles: readonly string[]
 }
 
 export interface TypeShapeCheck {
@@ -81,6 +94,11 @@ export interface TypeShapeCheck {
   readonly narrows: boolean
   /** Types holding data that have no stored shape, which a role leaves for `sixb db migrate`. */
   readonly unrecorded: readonly string[]
+  /**
+   * Types a migration run is being applied to, past its point of no return: only `check` returns
+   * them, with nothing else; every other mode throws {@link OntologyMigrationApplyingError}.
+   */
+  readonly applying: readonly string[]
 }
 
 /** The code changes a type in a way its stored objects don't fit. */
@@ -92,6 +110,20 @@ export class TypeShapeMismatchError extends Error {
     super(mismatchMessage(check.mode === "role", findings))
     this.name = "TypeShapeMismatchError"
     this.findings = findings
+  }
+}
+
+/** A migration run is past its point of no return: only finishing it goes forward. */
+export class OntologyMigrationApplyingError extends Error {
+  readonly objectTypeIds: readonly string[]
+
+  constructor(objectTypeIds: readonly string[]) {
+    super(
+      `[Sixb] An ontology migration is being applied to ${objectTypeIds.join(", ")}. ` +
+        "Run `sixb db migrate` to finish it, then start again."
+    )
+    this.name = "OntologyMigrationApplyingError"
+    this.objectTypeIds = objectTypeIds
   }
 }
 
@@ -121,6 +153,14 @@ export async function checkTypeShapes(input: {
   const stored = await storage.ontology.typeShapes.list({ projectId })
   const storedById = new Map(stored.map((row) => [row.objectTypeId, row]))
 
+  // A run past its point of no return: nothing but finishing it may happen.
+  const applying = stored.filter((row) => row.state === "migrating").map((row) => row.objectTypeId)
+  if (applying.length > 0) {
+    if (mode !== "check") throw new OntologyMigrationApplyingError(applying)
+    return { projectId, mode, types: [], blocked: false, narrows: true, unrecorded: [], applying }
+  }
+  const settled = await settledByType(storage, projectId, migrations)
+
   const objectTypeIds = [
     ...ontology.listObjectTypes().map((objectType) => objectType.id),
     ...stored.map((row) => row.objectTypeId).filter((id) => !ontology.getObjectTypeById(id)),
@@ -138,6 +178,7 @@ export async function checkTypeShapes(input: {
       objectType: ontology.getObjectTypeById(objectTypeId),
       objectTypeId,
       stored: storedById.get(objectTypeId) ?? null,
+      settled: settled.get(objectTypeId) ?? new Set(),
     })
     if (checked === "unrecorded") unrecorded.push(objectTypeId)
     else types.push(checked)
@@ -153,7 +194,26 @@ export async function checkTypeShapes(input: {
     blocked: types.some((type) => type.findings.length > 0),
     narrows: types.some((type) => type.pausesWrites),
     unrecorded,
+    applying: [],
   }
+}
+
+/** The migrations each type has settled, read only when the project declares any. */
+async function settledByType(
+  storage: Storage,
+  projectId: string,
+  migrations: readonly MigrationDefinition[]
+): Promise<ReadonlyMap<string, ReadonlySet<string>>> {
+  const byType = new Map<string, Set<string>>()
+  if (migrations.length === 0 || !storage.ontology.migrations) return byType
+
+  for (const row of await storage.ontology.migrations.listSettled({ projectId })) {
+    const settled = byType.get(row.objectTypeId) ?? new Set<string>()
+    settled.add(row.migrationId)
+    byType.set(row.objectTypeId, settled)
+  }
+
+  return byType
 }
 
 /**
@@ -198,15 +258,24 @@ async function withUniqueDuplicates(
 export async function recordTypeShapes(storage: Storage, check: TypeShapeCheck): Promise<void> {
   const { projectId } = check
   const writes = check.types.filter((type) => type.next.kind !== "keep")
-  if (writes.length === 0) return
+  // A type whose stored shape already is the code's settles too: a shape a role recorded before
+  // it knew the migrations, or one recorded with none declared yet.
+  const settles = check.types.flatMap((type) =>
+    type.settles.map((migrationId) => ({ objectTypeId: type.objectTypeId, migrationId }))
+  )
+  if (writes.length === 0 && settles.length === 0) return
 
   await storage.transaction(async (tx) => {
     const shapes = tx.ontology.typeShapes
     await shapes.lock({ projectId })
 
-    const current = new Map(
-      (await shapes.list({ projectId })).map((row) => [row.objectTypeId, row])
-    )
+    const rows = await shapes.list({ projectId })
+    // A run started since the check: its shapes are its own until it finishes.
+    const applying = rows.filter((row) => row.state === "migrating")
+    if (applying.length > 0) {
+      throw new OntologyMigrationApplyingError(applying.map((row) => row.objectTypeId))
+    }
+    const current = new Map(rows.map((row) => [row.objectTypeId, row]))
     const updatedAt = new Date().toISOString()
 
     for (const type of writes) {
@@ -239,6 +308,11 @@ export async function recordTypeShapes(storage: Storage, check: TypeShapeCheck):
         await shapes.remove({ projectId, objectTypeId: type.objectTypeId })
       }
     }
+
+    // In the same transaction as the shapes: a migration past which a shape is recorded never runs.
+    if (settles.length > 0) {
+      await tx.ontology.migrations?.settle({ projectId, migrations: settles, settledAt: updatedAt })
+    }
   })
 }
 
@@ -251,10 +325,23 @@ async function checkType(input: {
   readonly objectType: ObjectType | null
   readonly objectTypeId: string
   readonly stored: StoredTypeShape | null
+  readonly settled: ReadonlySet<string>
 }): Promise<TypeShapeTypeCheck | "unrecorded"> {
   const { storage, projectId, ontology, mode, migrations, objectType, objectTypeId, stored } = input
+  const { settled } = input
   const code = objectType ? typeShape(objectType, ontology) : null
-  const unchanged = { objectTypeId, stored, changes: [], findings: [], pausesWrites: false }
+  const settles = code
+    ? concerningMigrations({ objectTypeId, ontology, migrations }).filter((id) => !settled.has(id))
+    : []
+  const unchanged = {
+    objectTypeId,
+    stored,
+    changes: [],
+    findings: [],
+    pausesWrites: false,
+    run: [],
+    settles,
+  }
 
   if (!stored) {
     if (!code) return { ...unchanged, next: { kind: "keep" } }
@@ -269,7 +356,9 @@ async function checkType(input: {
     if (mode === "role") return "unrecorded"
   }
 
-  if (mode === "role") return roleCheck({ objectTypeId, stored: stored!, code, ontology })
+  if (mode === "role") {
+    return roleCheck({ objectTypeId, stored: stored!, code, ontology, settles })
+  }
 
   const baseline = stored
     ? undefined
@@ -281,11 +370,14 @@ async function checkType(input: {
   const pending = narrowed.filter(needsData)
 
   const probed = { storage, projectId, objectType, objectTypeId, ontology }
-  const findings = code
-    ? await migrationFindings({ ...probed, from, code, pending, migrations })
-    : (await probeChanges({ ...probed, pending })).map(({ change, count }) =>
-        finding(objectTypeId, change, count)
-      )
+  const { findings, run } = code
+    ? await migrationFindings({ ...probed, from, code, migrations, settled })
+    : {
+        findings: (await probeChanges({ ...probed, pending })).map(({ change, count }) =>
+          finding(objectTypeId, change, count)
+        ),
+        run: [],
+      }
 
   return {
     objectTypeId,
@@ -297,6 +389,9 @@ async function checkType(input: {
     // property made unique too: it may still write a value another object holds.
     pausesWrites: narrowed.length > 0 || baseline !== undefined,
     next: nextWrite({ mode, code, baseline, stored, findings }),
+    run: findings.length > 0 ? [] : run,
+    // A shape that isn't the code's leaves its migrations to run later.
+    settles: findings.length > 0 ? [] : settles,
   }
 }
 
@@ -320,11 +415,13 @@ function roleCheck(input: {
   readonly stored: StoredTypeShape
   readonly code: TypeShape | null
   readonly ontology: OntologyDefinitionCatalog
+  /** What a shape it starts on settles, as for any mode: a role runs no migration. */
+  readonly settles: readonly string[]
 }): TypeShapeTypeCheck {
-  const { objectTypeId, stored, code } = input
+  const { objectTypeId, stored, code, settles } = input
   const recorded = withoutRemovedTargets(stored.shape, input.ontology)
   const changes = diffTypeShapes(recorded, code)
-  const kept = { objectTypeId, stored, changes, pausesWrites: false } as const
+  const kept = { objectTypeId, stored, changes, pausesWrites: false, run: [], settles } as const
   const keep = { ...kept, findings: [], next: { kind: "keep" } } as const
   if (!code) return keep
 
@@ -336,6 +433,7 @@ function roleCheck(input: {
   const refuse = (refused: readonly NarrowedChange[]): TypeShapeTypeCheck => ({
     ...keep,
     findings: refused.map((change) => unprobedFinding(objectTypeId, change)),
+    settles: [],
   })
   if (!stored.previous || !sameShape(stored.previous, code)) return refuse(narrowed)
 
@@ -421,46 +519,123 @@ interface ProbeInput {
 
 /**
  * Each change the stored objects don't fit is covered by pending migration steps, or missing one.
- * Only the changes data holds become findings, so a removal nobody ever set needs nothing.
+ * Only the changes data holds count, so a removal nobody ever set needs nothing: a missing one is
+ * a finding, a covered one runs its steps, unless storage can't apply them.
  */
 async function migrationFindings(
   input: ProbeInput & {
     readonly from: TypeShape
     readonly code: TypeShape
-    readonly pending: readonly ProbedChange[]
     readonly migrations: readonly MigrationDefinition[]
+    readonly settled: ReadonlySet<string>
   }
-): Promise<TypeShapeFinding[]> {
-  const { objectTypeId, ontology, from, code, pending, migrations } = input
+): Promise<{
+  readonly findings: TypeShapeFinding[]
+  readonly run: TypeShapeTypeCheck["run"]
+}> {
+  const { objectTypeId, ontology, from, code, migrations, settled } = input
+  const classes = classifyTypeChanges({
+    objectTypeId,
+    from,
+    code,
+    ontology,
+    migrations,
+    settled,
+    appliesMigrations: input.storage.ontology.migrations !== undefined,
+  })
+  if (classes.conflicts.length > 0) return { findings: [...classes.conflicts], run: [] }
+
+  // Every change is read under the key the data holds it by, through pending renames.
+  const { coverage } = classes
+  const storedKey = coverage.storedKey
+  const findings = (await probeChanges({ ...input, pending: classes.missing, storedKey })).map(
+    ({ change, count }) => finding(objectTypeId, change, count, coverage.remedy(change))
+  )
+
+  // A change that runs only needs to know data holds it: the run counts what it rewrites.
+  const runs = new Set<PlannedStep>()
+  const runnable = await probeChanges({
+    ...input,
+    pending: classes.runnable,
+    storedKey,
+    count: false,
+  })
+  for (const { change } of runnable) {
+    for (const planned of coverage.stepsFor(change)) runs.add(planned)
+  }
+
+  const blocked = await probeChanges({ ...input, pending: classes.blocked, storedKey })
+  for (const { change, count } of blocked) {
+    findings.push(finding(objectTypeId, change, count, coverage.remedy(change)))
+  }
+
+  const run = coverage.steps.filter((planned) => runs.has(planned))
+
+  return { findings, run: run.map(({ migrationId, index }) => ({ migrationId, index })) }
+}
+
+/** The changes of one type, sorted by what decides them: {@link classifyTypeChanges}. */
+interface TypeChangeClasses {
+  /** Pending steps that can't both run: the type is refused for them, data or not. */
+  readonly conflicts: readonly TypeShapeFinding[]
+  /** Changes no pending step covers: a finding when data holds them. */
+  readonly missing: readonly ProbedChange[]
+  /** Changes pending steps cover and storage applies: they run when data holds them. */
+  readonly runnable: readonly ProbedChange[]
+  /**
+   * Changes pending steps cover with a step this build or storage can't apply: a finding when
+   * data holds them.
+   */
+  readonly blocked: readonly ProbedChange[]
+  readonly coverage: MigrationCoverage<ProbedChange>
+}
+
+/**
+ * What the shapes alone say of a type's changes, before any data is read: each change from `from`
+ * to `code` that needs data is missing a migration, runnable or blocked.
+ */
+function classifyTypeChanges(input: {
+  readonly objectTypeId: string
+  readonly from: TypeShape
+  readonly code: TypeShape
+  readonly ontology: OntologyDefinitionCatalog
+  readonly migrations: readonly MigrationDefinition[]
+  readonly settled: ReadonlySet<string>
+  /** Whether the storage provider applies migrations: without it, no covered change runs. */
+  readonly appliesMigrations: boolean
+}): TypeChangeClasses {
+  const { objectTypeId, from, code, ontology, migrations, settled } = input
   const coverage = coverChanges({
     objectTypeId,
     stored: from,
     code,
-    changes: pending,
+    changes: diffTypeShapes(from, code).filter(needsData),
     ontology,
     migrations,
+    settled,
   })
 
-  if (coverage.conflicts.length > 0) {
-    return coverage.conflicts.map(({ change, message }) => ({
-      objectTypeId,
-      change,
-      count: null,
-      message,
-      remedy: [CONFLICT_REMEDY],
-    }))
-  }
+  const conflicts = coverage.conflicts.map(({ change, message }) => ({
+    objectTypeId,
+    change,
+    count: null,
+    message,
+    remedy: [CONFLICT_REMEDY],
+  }))
 
-  // What the steps leave is read under the keys the data holds it by; until a build runs
-  // migrations, a covered change with data still stops the deploy.
-  const missing = coverage.missing.filter(needsData)
-  const held = [
-    ...(await probeChanges({ ...input, pending: missing, storedKey: coverage.storedKey })),
-    ...(await probeChanges({ ...input, pending: coverage.covered })),
-  ]
-  return held.map(({ change, count }) =>
-    finding(objectTypeId, change, count, coverage.remedy(change))
-  )
+  // A covered change runs when storage applies every step that resolves it: none without
+  // migrations, and none of a kind this build doesn't apply yet.
+  const applies = (change: ProbedChange) =>
+    input.appliesMigrations &&
+    coverage.stepsFor(change).every((planned) => stepKindOf(planned.step).storeStep)
+
+  return {
+    conflicts,
+    missing: coverage.missing.filter(needsData),
+    runnable: coverage.covered.filter(applies),
+    blocked: coverage.covered.filter((change) => !applies(change)),
+    coverage,
+  }
 }
 
 /** What decides whether the data fits a change: a probe, or a pass over the edits' values. */
@@ -484,6 +659,8 @@ async function probeChanges(
   input: ProbeInput & {
     readonly pending: readonly ProbedChange[]
     readonly storedKey?: (propertyId: string) => string
+    /** `false` stops at the first holder, and counts it as one. */
+    readonly count?: boolean
   }
 ): Promise<{ readonly change: ProbedChange; readonly count: number }[]> {
   const { storage, projectId, objectType, objectTypeId, ontology, pending } = input
@@ -500,7 +677,7 @@ async function probeChanges(
     const count =
       read.kind === "values"
         ? await countUnfitEdits(storage, projectId, objectType!, read, ontology)
-        : await countHolders(storage, { projectId, objectTypeId, probe: read })
+        : await countHolders(storage, { projectId, objectTypeId, probe: read }, input.count)
     if (count > 0) held.push({ change, count })
   }
 
@@ -533,10 +710,15 @@ function readFor(change: ProbedChange, storedKey: (propertyId: string) => string
   }
 }
 
-/** The probe stops at the first hit; only a hit pays for the count. */
-async function countHolders(storage: Storage, probe: TypeShapeProbeInput): Promise<number> {
+/** The probe stops at the first hit; only a hit pays for the count, when one is asked for. */
+async function countHolders(
+  storage: Storage,
+  probe: TypeShapeProbeInput,
+  count = true
+): Promise<number> {
   const shapes = storage.ontology.typeShapes
-  return (await shapes.holds(probe)) ? shapes.count(probe) : 0
+  if (!(await shapes.holds(probe))) return 0
+  return count ? shapes.count(probe) : 1
 }
 
 /**

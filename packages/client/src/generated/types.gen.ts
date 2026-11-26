@@ -12577,6 +12577,14 @@ export type GetObjectLineageResponses = {
                         type: "artifacts.transcribeMedia"
                         digest: string
                       }
+                    | {
+                        type: "ontology.loadSnapshot"
+                        snapshotId: string
+                      }
+                    | {
+                        type: "ontology.migrate"
+                        runId: string
+                      }
                 }
               | {
                   type: "script"
@@ -12639,6 +12647,14 @@ export type GetObjectLineageResponses = {
                     | {
                         type: "artifacts.transcribeMedia"
                         digest: string
+                      }
+                    | {
+                        type: "ontology.loadSnapshot"
+                        snapshotId: string
+                      }
+                    | {
+                        type: "ontology.migrate"
+                        runId: string
                       }
                 }
               | {
@@ -28900,6 +28916,14 @@ export type GetObjectLinkLineageResponses = {
                         type: "artifacts.transcribeMedia"
                         digest: string
                       }
+                    | {
+                        type: "ontology.loadSnapshot"
+                        snapshotId: string
+                      }
+                    | {
+                        type: "ontology.migrate"
+                        runId: string
+                      }
                 }
               | {
                   type: "script"
@@ -28962,6 +28986,14 @@ export type GetObjectLinkLineageResponses = {
                     | {
                         type: "artifacts.transcribeMedia"
                         digest: string
+                      }
+                    | {
+                        type: "ontology.loadSnapshot"
+                        snapshotId: string
+                      }
+                    | {
+                        type: "ontology.migrate"
+                        runId: string
                       }
                 }
               | {
@@ -29310,6 +29342,14 @@ export type ListEventsResponses = {
                       type: "artifacts.transcribeMedia"
                       digest: string
                     }
+                  | {
+                      type: "ontology.loadSnapshot"
+                      snapshotId: string
+                    }
+                  | {
+                      type: "ontology.migrate"
+                      runId: string
+                    }
               }
             | {
                 type: "script"
@@ -29485,6 +29525,14 @@ export type ListEventsResponses = {
                   | {
                       type: "artifacts.transcribeMedia"
                       digest: string
+                    }
+                  | {
+                      type: "ontology.loadSnapshot"
+                      snapshotId: string
+                    }
+                  | {
+                      type: "ontology.migrate"
+                      runId: string
                     }
               }
             | {
@@ -29662,6 +29710,14 @@ export type ListEventsResponses = {
                       type: "artifacts.transcribeMedia"
                       digest: string
                     }
+                  | {
+                      type: "ontology.loadSnapshot"
+                      snapshotId: string
+                    }
+                  | {
+                      type: "ontology.migrate"
+                      runId: string
+                    }
               }
             | {
                 type: "script"
@@ -29827,6 +29883,14 @@ export type ListEventsResponses = {
                       type: "artifacts.transcribeMedia"
                       digest: string
                     }
+                  | {
+                      type: "ontology.loadSnapshot"
+                      snapshotId: string
+                    }
+                  | {
+                      type: "ontology.migrate"
+                      runId: string
+                    }
               }
             | {
                 type: "script"
@@ -29940,6 +30004,14 @@ export type ListEventsResponses = {
                   | {
                       type: "artifacts.transcribeMedia"
                       digest: string
+                    }
+                  | {
+                      type: "ontology.loadSnapshot"
+                      snapshotId: string
+                    }
+                  | {
+                      type: "ontology.migrate"
+                      runId: string
                     }
               }
             | {
@@ -30115,6 +30187,14 @@ export type ListEventsResponses = {
                       type: "artifacts.transcribeMedia"
                       digest: string
                     }
+                  | {
+                      type: "ontology.loadSnapshot"
+                      snapshotId: string
+                    }
+                  | {
+                      type: "ontology.migrate"
+                      runId: string
+                    }
               }
             | {
                 type: "script"
@@ -30288,6 +30368,14 @@ export type ListEventsResponses = {
                   | {
                       type: "artifacts.transcribeMedia"
                       digest: string
+                    }
+                  | {
+                      type: "ontology.loadSnapshot"
+                      snapshotId: string
+                    }
+                  | {
+                      type: "ontology.migrate"
+                      runId: string
                     }
               }
             | {

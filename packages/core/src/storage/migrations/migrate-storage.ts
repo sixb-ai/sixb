@@ -1,11 +1,14 @@
+import { applyOntologyMigrations, resumeOntologyMigration } from "../../migrations/run"
 import {
   isQueryPreparationCapableStorage,
   type ObjectQueryPreparationResult,
   prepareObjectQueries,
 } from "../objects/query-preparation"
+import type { OntologyMigrationRunRecord } from "../ontology/migrations"
 import type { Storage } from "../types"
 import {
   checkUniqueProperties,
+  clearUniqueProperties,
   madeUnique,
   prepareUniqueProperties,
 } from "./prepare-unique-properties"
@@ -28,11 +31,17 @@ export function isMigrationCapableStorage(storage: Storage): storage is Migratio
 }
 
 /**
- * Run schema migrations, then, given the project's ontology: check the shapes the stored objects
- * fit against the code's when `ontologyShapes` says so, prepare query indexes when the provider
- * supports it, then the stored values of unique properties and the new shapes last
- * ({@link applyTypeShapes}), so nothing that can fail runs after them. `check` stops before the
- * unique values: `sixb check --migrate` applies them once its own probes passed.
+ * Run schema migrations, then, given the project's ontology and when `ontologyShapes` says so:
+ *
+ * 1. finish a migration run a crash left open (every mode but `role`: it is past its point of no
+ *    return);
+ * 2. check the shapes the stored objects fit against the code's;
+ * 3. prepare query indexes when the provider supports it;
+ * 4. apply the migration steps the check found data for (`deploy`, `dev`), then prepare the
+ *    stored values of unique properties, and record the new shapes last ({@link applyTypeShapes}).
+ *
+ * `check` stops after the query indexes: `sixb check --migrate` calls {@link applyTypeShapes} once
+ * its own probes passed.
  */
 export async function migrateStorage(
   storage: Storage,
@@ -45,10 +54,18 @@ export async function migrateStorage(
     }
   }
 
-  // After the provider migrators, which create the table it reads. Before unique preparation:
+  // After the provider migrators, which create the tables it reads. Before unique preparation:
   // the values of a type whose data the code doesn't fit, rebuilt for the code's shape, would drop
   // what a migration has to move.
   const mode = options?.ontologyShapes
+  if (options && mode && mode !== "role") {
+    await resumeOntologyMigration({
+      storage,
+      projectId: options.projectId,
+      ...(options.onMigrationRunStarted ? { onStarted: options.onMigrationRunStarted } : {}),
+    })
+  }
+
   const shapes = options && mode ? await checkTypeShapes({ storage, ...options, mode }) : undefined
   const unfit = shapes?.types.filter((type) => type.findings.length > 0) ?? []
 
@@ -79,14 +96,22 @@ export async function migrateStorage(
 
   // `check` writes nothing of the shapes or of unique values: `applyTypeShapes` does, once the
   // caller's other checks passed. Without a shapes mode, unique values are prepared as ever.
-  if (options && shapes && mode !== "check") await applyTypeShapes(storage, options, shapes)
-  else if (options && !shapes) await prepareUniqueProperties({ ...options, storage })
+  let migration: OntologyMigrationRunRecord | null = null
+  if (options && shapes && mode !== "check") {
+    migration = await applyTypeShapes(storage, options, shapes)
+  } else if (options && !shapes) {
+    await prepareUniqueProperties({ ...options, storage })
+  }
 
   let status: StorageMigrationResult["status"] = "skipped"
   if (reports.length > 0 || queries) {
     status = "current"
   }
-  if (reports.some((report) => report.status === "migrated") || queries?.status === "prepared") {
+  if (
+    reports.some((report) => report.status === "migrated") ||
+    queries?.status === "prepared" ||
+    migration
+  ) {
     status = "migrated"
   }
 
@@ -99,23 +124,61 @@ export async function migrateStorage(
 }
 
 /**
- * What a deploy writes once every check passed, in an order where nothing written can leave the
- * old release on stale data: a dry run of the unique preparation first, so a duplicate fails
- * while nothing is written; then the unique values; then the shapes, last. The types whose data
- * the code doesn't fit keep their values, which only `dev` leaves here.
+ * What a deploy writes once every check passed, in an order where nothing written before the
+ * point of no return can leave the old release on stale data: a dry run of the unique
+ * preparation, so a duplicate fails while nothing is written; the migration run, the point of no
+ * return; the unique values, built from what the run left; and the shapes, last. The types whose
+ * data the code doesn't fit keep their values, which only `dev` leaves here.
  */
 export async function applyTypeShapes(
   storage: Storage,
   options: StorageMigrationOptions,
   shapes: TypeShapeCheck
-): Promise<void> {
+): Promise<OntologyMigrationRunRecord | null> {
   const unfit = shapes.types.filter((type) => type.findings.length > 0)
   const keepObjectTypeIds = new Set(unfit.map((type) => type.objectTypeId))
+  const migrations = options.migrations ?? []
   const rebuild = madeUnique(shapes.types)
 
-  // Not part of the status: it only reads and writes rows, and says when it builds values.
+  // Everything that can fail runs before the run starts, while the old release can still start
+  // again: a preparation left by a failed deploy would be stale under the old release's writes,
+  // and trusted by the next deploy. A step that computes values plans them here too, before the
+  // run, which then applies what it planned.
   await checkUniqueProperties({ ...options, storage, keepObjectTypeIds, rebuild })
+
+  // A run records the code's shapes as it finishes: a crash before the preparation below leaves
+  // them recorded, and the next deploy would trust what a failed one built. Values the recorded
+  // shape doesn't keep unique go before the point of no return; the old release never reads them.
+  await clearUniqueProperties({
+    storage,
+    projectId: options.projectId,
+    properties: rebuild.filter((property) => !recordedUnique(shapes, property)),
+  })
+
+  const migration = await applyOntologyMigrations({
+    storage,
+    projectId: options.projectId,
+    ontology: options.ontology,
+    migrations,
+    check: shapes,
+    ...(options.onMigrationRunStarted ? { onStarted: options.onMigrationRunStarted } : {}),
+  })
+
+  // Past the point of no return, or with no run at all: the values a run dropped are gone, and the
+  // others are built from the objects it left. Not part of the status: it only reads and writes
+  // rows, and says when it builds values.
   await prepareUniqueProperties({ ...options, storage, keepObjectTypeIds, rebuild })
 
   await recordTypeShapes(storage, shapes)
+  return migration
+}
+
+/** Whether the shape the type's stored objects fit already has the property unique. */
+function recordedUnique(
+  shapes: TypeShapeCheck,
+  property: { readonly objectTypeId: string; readonly propertyId: string }
+): boolean {
+  const type = shapes.types.find((candidate) => candidate.objectTypeId === property.objectTypeId)
+  const recorded = type?.stored?.shape ?? type?.baseline
+  return recorded?.properties[property.propertyId]?.unique === true
 }

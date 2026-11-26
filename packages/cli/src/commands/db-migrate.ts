@@ -3,7 +3,7 @@ import { checkTypeShapes } from "@sixb/core/internal/storage"
 import { loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
 import { stopSixbProviders } from "../lib/runtime"
-import { findPendingMigrations } from "../lib/storage-migration"
+import { findPendingMigrations, markMigrationRunStarted } from "../lib/storage-migration"
 import { dbMigrateCheckView, dbMigrateView, renderStatic, withTask } from "../ui"
 
 /**
@@ -12,6 +12,12 @@ import { dbMigrateCheckView, dbMigrateView, renderStatic, withTask } from "../ui
  * such as an option an older `sixb` does not know.
  */
 const MIGRATIONS_PENDING_EXIT_CODE = 3
+
+/**
+ * `--check` exits with this while an ontology migration run is past its point of no return: the
+ * live release must not start again, and only `sixb db migrate` finishes the run.
+ */
+const ONTOLOGY_MIGRATION_APPLYING_EXIT_CODE = 4
 
 export interface DbMigrateOptions {
   entry?: string
@@ -52,15 +58,29 @@ export async function runDbMigrate(options: DbMigrateOptions = {}) {
         dbMigrateCheckView({
           projectId: sixb.id,
           pending,
-          ...(shapes ? { shapes: { findings, narrows: shapes.narrows } } : {}),
+          ...(shapes
+            ? {
+                shapes: {
+                  findings,
+                  narrows: shapes.narrows,
+                  applying: shapes.applying,
+                  migrating: shapes.types
+                    .filter((type) => type.run.length > 0)
+                    .map((type) => type.objectTypeId),
+                },
+              }
+            : {}),
         })
       )
 
       // A deploy reads the code. Data the new code doesn't fit fails it before anything stops;
       // a schema change or a narrowed type needs the services stopped, so the old release
-      // doesn't write what the new shape refuses.
-      if (findings.length > 0) process.exitCode = 1
-      else if (pending.length > 0 || shapes?.narrows) {
+      // doesn't write what the new shape refuses. A run under way only goes forward.
+      if (shapes && shapes.applying.length > 0) {
+        process.exitCode = ONTOLOGY_MIGRATION_APPLYING_EXIT_CODE
+      } else if (findings.length > 0) {
+        process.exitCode = 1
+      } else if (pending.length > 0 || shapes?.narrows) {
         process.exitCode = MIGRATIONS_PENDING_EXIT_CODE
       }
     } finally {
@@ -77,6 +97,7 @@ export async function runDbMigrate(options: DbMigrateOptions = {}) {
         migrations: sixb.definitions.migrations.list(),
         security: sixb.definitions.security,
         ontologyShapes: "deploy",
+        onMigrationRunStarted: (runId) => markMigrationRunStarted(runId),
       })
     )
     await renderStatic(

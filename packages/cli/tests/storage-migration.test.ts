@@ -1,10 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import {
+  defineMigration,
+  defineObjectType,
   InMemoryStorage,
+  type MigrationDefinition,
   type MigrationReport,
   type ObjectQueryPreparationPlan,
   OntologyRegistry,
+  prop,
   type StorageMigrator,
+  stringEnum,
 } from "@sixb/core"
 import { errorRemediation } from "../src/lib/errors"
 import type { LoadedSixbHost } from "../src/lib/loadSixb"
@@ -154,6 +159,41 @@ describe("migrateStorageForRole", () => {
     expect(errorRemediation(failure)).toContain("--no-migrate")
   })
 
+  // A role that records a database's first shapes settles the migrations already in the repo, as
+  // a deploy would: an old convert must not re-arm on the next narrowing of its property. Guard
+  // removal: drop `migrations` from either role call in `storage-migration.ts`, and nothing settles.
+  test("settles the migrations of the shapes it records first", async () => {
+    const Job = defineObjectType({
+      id: "Job",
+      name: "Job",
+      properties: [
+        prop("ref", "string", { primary: true, required: true }),
+        prop("status", stringEnum(["open", "closed"])),
+      ],
+    })
+    const lower = defineMigration("job-status", Job).convertProperty("status", () => "open")
+
+    for (const noMigrate of [false, true]) {
+      const sixb = runtimeWithMigrators([migrator("Sqlite", [])], {
+        ontology: new OntologyRegistry({ sources: [Job] }),
+        migrations: [lower],
+      })
+
+      await migrateStorageForRole(sixb, { role: "api", noMigrate, env: {} })
+
+      const settled = await sixb.storage.ontology.migrations?.listSettled({
+        projectId: "migration-test",
+      })
+      expect({
+        noMigrate,
+        settled: settled?.map((row) => [row.objectTypeId, row.migrationId]),
+      }).toEqual({
+        noMigrate,
+        settled: [["Job", "job-status"]],
+      })
+    }
+  })
+
   test("passes an unrelated migration failure through untouched", async () => {
     const sixb = runtimeWithMigrators([
       {
@@ -182,13 +222,20 @@ async function captureError(run: () => Promise<unknown>): Promise<Error> {
   throw new Error("Expected the call to reject.")
 }
 
-function runtimeWithMigrators(migrators: readonly StorageMigrator[]): LoadedSixbHost {
+function runtimeWithMigrators(
+  migrators: readonly StorageMigrator[],
+  code: {
+    readonly ontology?: OntologyRegistry
+    readonly migrations?: readonly MigrationDefinition[]
+  } = {}
+): LoadedSixbHost {
   const storage = Object.assign(new InMemoryStorage(), { migrators })
+  const migrations = code.migrations ?? []
   return {
     id: "migration-test",
     definitions: {
-      ontology: new OntologyRegistry({ sources: [] }),
-      migrations: { list: () => [] },
+      ontology: code.ontology ?? new OntologyRegistry({ sources: [] }),
+      migrations: { list: () => migrations },
     },
     storage,
   } as unknown as LoadedSixbHost

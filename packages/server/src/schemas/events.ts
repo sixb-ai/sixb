@@ -89,6 +89,8 @@ export const EventExecutorSchema = z.discriminatedUnion("type", [
       z.object({ type: z.literal("ontology.recover"), recoveryId: z.string() }),
       z.object({ type: z.literal("ontology.indexVectors"), indexingId: z.string() }),
       z.object({ type: z.literal("artifacts.transcribeMedia"), digest: z.string() }),
+      z.object({ type: z.literal("ontology.loadSnapshot"), snapshotId: z.string() }),
+      z.object({ type: z.literal("ontology.migrate"), runId: z.string() }),
     ]),
   }),
   z.object({ type: z.literal("script"), runId: z.string(), path: z.string() }),

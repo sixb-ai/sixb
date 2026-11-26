@@ -64,7 +64,18 @@ export async function prepareUniqueProperties(input: {
   const undeclared = (await storage.ontology.uniqueValues.listPrepared({ projectId })).filter(
     (property) => !declaredKeys.has(propertyKey(property)) && !kept(property)
   )
-  for (const { objectTypeId, propertyId } of undeclared) {
+  await clearUniqueProperties({ storage, projectId, properties: undeclared })
+}
+
+/** Drops the values of each property, and its preparation, each in its own transaction. */
+export async function clearUniqueProperties(input: {
+  readonly storage: Storage
+  readonly projectId: string
+  readonly properties: readonly UniquePropertyRef[]
+}): Promise<void> {
+  const { storage, projectId } = input
+
+  for (const { objectTypeId, propertyId } of input.properties) {
     await withRetries({ objectTypeId, propertyId }, () =>
       storage.transaction(
         async (tx) => {

@@ -13,6 +13,7 @@ import type {
   StoredObjectEdit,
   StoredTypeShape,
   TypeShapeProbeInput,
+  TypeShapeWrite,
 } from "../type-shapes"
 import { type InMemoryOntologyState, projectEntityKey } from "./shared-state"
 
@@ -40,12 +41,11 @@ export class InMemoryOntologyTypeShapeStorage implements OntologyTypeShapeStorag
     )
   }
 
-  async write(input: StoredTypeShape & { readonly projectId: string }): Promise<void> {
+  async write(input: TypeShapeWrite): Promise<void> {
     await this.runRootOperation(() => {
-      this.state.typeShapes.set(
-        shapeKey(input.projectId, input.objectTypeId),
-        structuredClone(input)
-      )
+      const key = typeShapeKey(input.projectId, input.objectTypeId)
+      const state = this.state.typeShapes.get(key)?.state ?? "current"
+      this.state.typeShapes.set(key, { ...structuredClone(input), state })
     })
   }
 
@@ -54,7 +54,7 @@ export class InMemoryOntologyTypeShapeStorage implements OntologyTypeShapeStorag
     readonly objectTypeId: string
   }): Promise<void> {
     await this.runRootOperation(() => {
-      this.state.typeShapes.delete(shapeKey(input.projectId, input.objectTypeId))
+      this.state.typeShapes.delete(typeShapeKey(input.projectId, input.objectTypeId))
     })
   }
 
@@ -246,7 +246,7 @@ export class InMemoryOntologyTypeShapeStorage implements OntologyTypeShapeStorag
   }
 }
 
-function shapeKey(projectId: string, objectTypeId: string): string {
+export function typeShapeKey(projectId: string, objectTypeId: string): string {
   return JSON.stringify([projectId, objectTypeId])
 }
 

@@ -33,6 +33,8 @@ export type KernelOperation =
   | { readonly type: "artifacts.transcribeMedia"; readonly digest: string }
   /** Loading a snapshot into a branch as one base commit, by the snapshot's id. */
   | { readonly type: "ontology.loadSnapshot"; readonly snapshotId: string }
+  /** Applying the ontology migrations of one run, by the run's id. */
+  | { readonly type: "ontology.migrate"; readonly runId: string }
 
 /** Workload currently executing. This is provenance and never grants authority by itself. */
 export type ExecutionExecutor =

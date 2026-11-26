@@ -37183,6 +37183,34 @@
                                             },
                                             "required": ["type", "digest"],
                                             "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.loadSnapshot"]
+                                              },
+                                              "snapshotId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "snapshotId"],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.migrate"]
+                                              },
+                                              "runId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "runId"],
+                                            "additionalProperties": false
                                           }
                                         ]
                                       }
@@ -37366,6 +37394,34 @@
                                               }
                                             },
                                             "required": ["type", "digest"],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.loadSnapshot"]
+                                              },
+                                              "snapshotId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "snapshotId"],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.migrate"]
+                                              },
+                                              "runId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "runId"],
                                             "additionalProperties": false
                                           }
                                         ]
@@ -82398,6 +82454,34 @@
                                             },
                                             "required": ["type", "digest"],
                                             "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.loadSnapshot"]
+                                              },
+                                              "snapshotId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "snapshotId"],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.migrate"]
+                                              },
+                                              "runId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "runId"],
+                                            "additionalProperties": false
                                           }
                                         ]
                                       }
@@ -82581,6 +82665,34 @@
                                               }
                                             },
                                             "required": ["type", "digest"],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.loadSnapshot"]
+                                              },
+                                              "snapshotId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "snapshotId"],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.migrate"]
+                                              },
+                                              "runId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "runId"],
                                             "additionalProperties": false
                                           }
                                         ]
@@ -83611,6 +83723,34 @@
                                                 },
                                                 "required": ["type", "digest"],
                                                 "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.loadSnapshot"]
+                                                  },
+                                                  "snapshotId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "snapshotId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.migrate"]
+                                                  },
+                                                  "runId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "runId"],
+                                                "additionalProperties": false
                                               }
                                             ]
                                           }
@@ -84135,6 +84275,34 @@
                                                   }
                                                 },
                                                 "required": ["type", "digest"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.loadSnapshot"]
+                                                  },
+                                                  "snapshotId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "snapshotId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.migrate"]
+                                                  },
+                                                  "runId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "runId"],
                                                 "additionalProperties": false
                                               }
                                             ]
@@ -84661,6 +84829,34 @@
                                                 },
                                                 "required": ["type", "digest"],
                                                 "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.loadSnapshot"]
+                                                  },
+                                                  "snapshotId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "snapshotId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.migrate"]
+                                                  },
+                                                  "runId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "runId"],
+                                                "additionalProperties": false
                                               }
                                             ]
                                           }
@@ -85155,6 +85351,34 @@
                                                 },
                                                 "required": ["type", "digest"],
                                                 "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.loadSnapshot"]
+                                                  },
+                                                  "snapshotId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "snapshotId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.migrate"]
+                                                  },
+                                                  "runId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "runId"],
+                                                "additionalProperties": false
                                               }
                                             ]
                                           }
@@ -85536,6 +85760,34 @@
                                                   }
                                                 },
                                                 "required": ["type", "digest"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.loadSnapshot"]
+                                                  },
+                                                  "snapshotId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "snapshotId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.migrate"]
+                                                  },
+                                                  "runId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "runId"],
                                                 "additionalProperties": false
                                               }
                                             ]
@@ -86059,6 +86311,34 @@
                                                 },
                                                 "required": ["type", "digest"],
                                                 "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.loadSnapshot"]
+                                                  },
+                                                  "snapshotId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "snapshotId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.migrate"]
+                                                  },
+                                                  "runId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "runId"],
+                                                "additionalProperties": false
                                               }
                                             ]
                                           }
@@ -86580,6 +86860,34 @@
                                                   }
                                                 },
                                                 "required": ["type", "digest"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.loadSnapshot"]
+                                                  },
+                                                  "snapshotId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "snapshotId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.migrate"]
+                                                  },
+                                                  "runId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "runId"],
                                                 "additionalProperties": false
                                               }
                                             ]

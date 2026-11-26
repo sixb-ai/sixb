@@ -1,7 +1,7 @@
 import type { OntologyDefinitionCatalog } from "../ontology/registry"
 import { diffTypeShapes, type TypeShape, type TypeShapeChange } from "../ontology/type-shapes"
 import { missingMigrationLines, pendingMigrationLine } from "./messages"
-import { type PendingSteps, planPendingSteps } from "./pending"
+import { type PendingSteps, type PlannedStep, planPendingSteps } from "./pending"
 import { stepKindOf } from "./steps"
 import type { MigrationDefinition, OntologyMigrationStep } from "./types"
 
@@ -16,6 +16,10 @@ export interface MigrationCoverage<TChange extends TypeShapeChange> {
   readonly missing: readonly TypeShapeChange[]
   /** Changes the pending steps resolve. */
   readonly covered: readonly TChange[]
+  /** The pending steps, in the order they run. */
+  readonly steps: readonly PlannedStep[]
+  /** The pending steps that resolve a covered change. */
+  stepsFor(change: TypeShapeChange): readonly PlannedStep[]
   /** The key the stored objects hold a property of the code by, through pending renames. */
   storedKey(propertyId: string): string
   /** What to do about a change data holds: the missing line, or the migrations that cover it. */
@@ -58,10 +62,13 @@ export function coverChanges<TChange extends TypeShapeChange>(input: {
     })),
     missing,
     covered,
+    steps: plan.steps,
+    stepsFor: (change) => coveringSteps(plan, change),
     storedKey: plan.storedKey,
     remedy(change) {
       if (covered.some((held) => held === change)) {
-        return [pendingMigrationLine(coveringMigrations(plan, change))]
+        const migrationIds = coveringSteps(plan, change).map((planned) => planned.migrationId)
+        return [pendingMigrationLine([...new Set(migrationIds)])]
       }
 
       return [
@@ -98,15 +105,13 @@ function changeOf<TChange extends TypeShapeChange>(
 }
 
 /**
- * The migrations whose pending steps resolve the change: those of the kind that resolves it, or
- * else any that moves its key, as a rename into a new required property does.
+ * The pending steps that resolve the change: those of the kind that resolves it, or else any that
+ * moves its key, as a rename into a new required property does.
  */
-function coveringMigrations(plan: PendingSteps, change: TypeShapeChange): string[] {
+function coveringSteps(plan: PendingSteps, change: TypeShapeChange): readonly PlannedStep[] {
   const touching = plan.steps.filter((planned) => mentions(planned.step, change))
   const resolving = touching.filter((planned) => stepKindOf(planned.step).suggest(change))
-  const steps = resolving.length > 0 ? resolving : touching
-
-  return [...new Set(steps.map((planned) => planned.migrationId))]
+  return resolving.length > 0 ? resolving : touching
 }
 
 /** Why a step that would resolve the change can't run on the stored shape. */

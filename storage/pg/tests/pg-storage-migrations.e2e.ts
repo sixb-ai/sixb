@@ -161,6 +161,7 @@ const SHIPPED_MIGRATIONS = [
   "120-hosted-branches",
   "121-hosted-branch-namespaces",
   "122-ontology-type-shapes",
+  "123-ontology-migrate-executions",
 ]
 
 const steps = postgresStorageMigrations.steps

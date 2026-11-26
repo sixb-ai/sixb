@@ -176,6 +176,10 @@ export {
   runObjectReadScopeContractSuite,
 } from "./object-read-scope-contract"
 export {
+  type OntologyMigrationContractProvider,
+  runOntologyMigrationContractSuite,
+} from "./ontology-migration-contract"
+export {
   type OntologyStorageContractStorage,
   type OntologyStorageContractSuiteOptions,
   runOntologyStorageContractSuite,

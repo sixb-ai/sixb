@@ -5,6 +5,7 @@ const KERNEL_OPERATION_TYPES: ReadonlySet<string> = new Set<KernelOperation["typ
   "ontology.indexVectors",
   "artifacts.transcribeMedia",
   "ontology.loadSnapshot",
+  "ontology.migrate",
 ])
 
 export function isKernelOperationType(type: unknown): type is KernelOperation["type"] {
@@ -21,6 +22,8 @@ export function kernelOperationId(operation: KernelOperation): string {
       return operation.digest
     case "ontology.loadSnapshot":
       return operation.snapshotId
+    case "ontology.migrate":
+      return operation.runId
     default:
       return unknownOperation(operation)
   }
@@ -36,6 +39,8 @@ export function kernelOperationFromId(type: KernelOperation["type"], id: string)
       return { type, digest: id }
     case "ontology.loadSnapshot":
       return { type, snapshotId: id }
+    case "ontology.migrate":
+      return { type, runId: id }
     default:
       return unknownOperation(type)
   }

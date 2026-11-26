@@ -11,7 +11,7 @@ longer fit stops the deploy before anything is written, and says what holds it b
 ```
 
 A [migration](../ontology/migrations.md) says what happens to those objects. A change one covers
-isn't missing one.
+isn't missing one: the deploy runs it.
 
 ## What a deploy checks
 
@@ -47,25 +47,34 @@ shape, which the old code may not fit.
 | `sixb db migrate --check` | Means | The SSH target |
 |---|---|---|
 | `0` | Nothing to change, or only widenings | Keeps the live release serving |
-| `3` | A storage migration, a narrowing no stored object is left out of, or a first shape | Stops the live release, then migrates |
+| `3` | A storage migration, a narrowing that a migration covers or that every stored object fits, or a first shape | Stops the live release, then migrates |
+| `4` | A migration run is under way, past its point of no return | Keeps the live release stopped and finishes it |
 | `1` | Stored objects don't fit the code, two of them sharing a value it makes unique included | Fails before stopping anything |
 
-`sixb check --migrate` builds unique values and records the new shapes last, once every other check
-passed, so a deploy that fails restarts the old release on data it still fits. A property made
-unique pauses writes like any narrowing: the old release would otherwise write a value another
-object holds while the values are built, so building them is part of the deploy's pause.
+`sixb check --migrate` runs the pending migrations, builds unique values and records the new shapes
+last, once every other check passed, so a deploy that fails before them restarts the old release on
+data it still fits. A property made unique pauses writes like any narrowing: the old release would
+otherwise write a value another object holds while the values are built, so building them is part
+of the deploy's pause.
+
+Once a migration run has started, the SSH target never restarts it: the old code would write back
+what the run removed. The migrating command says so as the run starts, whatever happens to it next,
+so a later failure, or a kill, leaves the services stopped until you deploy a fix; `sixb db migrate`
+finishes a run that stopped.
 
 ## Roles and `sixb dev`
 
 - A role (`api`, `orchestrator`, workers) compares the recorded shapes with its code,
-  `--no-migrate` included. It never reads objects:
+  `--no-migrate` included. It never reads objects, nor runs migrations:
   - code that only adds or widens starts, and records the change;
-  - the previous release starts again after a deploy, a failed one included. What the deploy
-    added stays recorded, so the next deploy still checks its removal. It can't edit an object
-    holding what the newer release added: the edit fails with `Unknown property`;
-  - anything else stops it, a property made unique included: run `sixb db migrate` first.
+  - the previous release starts again after a deploy, a failed one included, unless the deploy ran
+    a migration. What the deploy added stays recorded, so the next deploy still checks its
+    removal. It can't edit an object holding what the newer release added: the edit fails with
+    `Unknown property`;
+  - anything else stops it, a property made unique included, and so does a migration run under
+    way: run `sixb db migrate` first.
 - A role that finds a type holding objects and no recorded shape starts as before and says so:
   `sixb db migrate` records it.
-- `sixb dev` warns instead of refusing, and leaves the recorded shape, and that type's unique
-  values, as they were.
+- `sixb dev` runs the migrations that cover a change, and warns about the rest instead of refusing,
+  leaving their recorded shape, and that type's unique values, as they were.
 - `sixb check` without `--migrate` prints the same result on its **Stored objects** row.
