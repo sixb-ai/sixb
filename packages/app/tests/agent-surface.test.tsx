@@ -3,7 +3,9 @@ import { getAgentOptions } from "@sixb/client/hooks"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
+import { MemoryRouter } from "react-router-dom"
 import { AgentSurface, type AgentSurfaceMode, type AgentSurfaceProps } from "../src"
+import { AgentChatPage, AgentThreadsPage } from "../src/agent/react-router"
 
 function renderSurface(
   mode?: AgentSurfaceMode,
@@ -75,4 +77,22 @@ test("the adaptive surface passes host welcome content to its conversation", () 
 
   expect(dock).toContain("<p>Northline Mechanical</p>")
   expect(dock).not.toContain(">Sixb</p>")
+})
+
+// The conversations and a conversation are pages of their own, over the app: they start below a
+// bar above it, such as a branch's, which they once covered whole. Red check: put `inset-0` back on
+// either page's root (`agent/react-router.tsx`).
+test("the conversation pages start below a bar above the app", () => {
+  const offset = /^<section class="fixed inset-x-0 top-\[var\(--app-top-inset,0px\)\] /
+  const page = (element: ReturnType<typeof createElement>, path: string) =>
+    renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient({ defaultOptions: { queries: { enabled: false } } }) },
+        createElement(MemoryRouter, { initialEntries: [path] }, element)
+      )
+    )
+
+  expect(page(createElement(AgentThreadsPage), "/threads")).toMatch(offset)
+  expect(page(createElement(AgentChatPage), "/threads/thr_1")).toMatch(offset)
 })

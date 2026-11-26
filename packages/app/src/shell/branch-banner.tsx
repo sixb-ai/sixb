@@ -2,8 +2,9 @@ import { getProjectInfoOptions } from "@sixb/client/hooks"
 import { defineMessages, type MessageTree, type Translation, useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowLeft, ChevronDown, ChevronUp, GitFork, RefreshCw } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronUp, Database, GitFork, RefreshCw } from "lucide-react"
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { useFormat } from "../pages/section-ui"
 import { useSessionAccess } from "../session"
 
@@ -12,7 +13,7 @@ const en = {
   region: (name: string) => `Branch ${name}`,
   dataFrom: (age: string) => `Production data from ${age}`,
   dataJustNow: "Production data from just now",
-  /** The bar on a phone: "Data · 2 h ago". */
+  /** The bar on a phone, read aloud before the age its icon stands beside: "Data 2 h ago". */
   dataShort: "Data",
   refresh: "Refresh…",
   refreshLabel: (name: string) => `Refresh ${name} from production`,
@@ -130,8 +131,10 @@ export function BranchBar({
       : null
 
   // Folded, a hairline in the bar's color stays on top of the page, with a tab naming the branch.
+  // Both go at the end of the document: over every page, full-screen ones included, and under
+  // the dialogs opened after them. On a phone the tab takes a finger-sized touch area.
   if (collapsed) {
-    return (
+    return createPortal(
       <>
         <div
           aria-hidden
@@ -143,7 +146,7 @@ export function BranchBar({
           aria-label={messages.show(branch.name)}
           title={branch.name}
           className={cn(
-            "fixed top-0 left-1/2 z-50 flex h-6 max-w-[min(16rem,70vw)] -translate-x-1/2 items-center gap-1.5 rounded-b-lg px-2.5 text-[0.6875rem] outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:h-8",
+            "fixed top-0 left-1/2 z-50 flex h-6 max-w-[min(16rem,70vw)] -translate-x-1/2 items-center gap-1.5 rounded-b-lg px-2.5 text-[0.6875rem] outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:h-8 max-sm:min-w-11 max-sm:after:absolute max-sm:after:inset-x-0 max-sm:after:top-0 max-sm:after:h-11 max-sm:after:content-['']",
             BAR_COLORS
           )}
         >
@@ -151,7 +154,8 @@ export function BranchBar({
           <span className="min-w-0 truncate font-mono">{branch.name}</span>
           <ChevronDown aria-hidden className="size-3 shrink-0 opacity-70" />
         </button>
-      </>
+      </>,
+      document.body
     )
   }
 
@@ -169,14 +173,20 @@ export function BranchBar({
       <span className="min-w-0 truncate font-mono font-medium" title={branch.name}>
         {branch.name}
       </span>
+      {/* A phone says the age beside an icon, and leaves it out under 360 px: the name comes first. */}
       {age ? (
         <>
-          <span aria-hidden className="shrink-0 opacity-40">
+          <span aria-hidden className="shrink-0 opacity-40 max-[359px]:hidden">
             ·
           </span>
           <span className="hidden min-w-0 truncate opacity-75 sm:inline">{age}</span>
-          <span className="shrink-0 opacity-75 sm:hidden">
-            {messages.dataShort} · {short(branch.dataTakenAt as string)}
+          <span
+            title={age}
+            className="flex shrink-0 items-center gap-1 opacity-75 max-[359px]:hidden sm:hidden"
+          >
+            <Database aria-hidden className="size-3" />
+            <span className="sr-only">{messages.dataShort}</span>
+            {short(branch.dataTakenAt as string)}
           </span>
         </>
       ) : null}

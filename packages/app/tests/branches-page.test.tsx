@@ -621,7 +621,9 @@ describe("the branch bar", () => {
     const bar = view.getByRole("complementary", { name: "Branch feature/route-planner" })
     expect(within(bar).getByText("Production data from 2 hours ago")).toBeDefined()
     // A phone's bar says it shorter.
-    expect(within(bar).getByText("Data · 2 h ago")).toBeDefined()
+    expect(within(bar).getByTitle("Production data from 2 hours ago").textContent).toBe(
+      "Data2 h ago"
+    )
     expect(
       within(bar)
         .getByRole("link", { name: "Refresh feature/route-planner from production" })
@@ -664,6 +666,25 @@ describe("the branch bar", () => {
 
     expect(view.getAllByText("feature/route-planner").length).toBeGreaterThan(0)
     expect(view.queryAllByRole("link")).toEqual([])
+  })
+
+  // Folded, the tab sits at the end of the document: over the agent's and artifacts' full-screen
+  // pages, which painted over it when it came before them. Red check: return the folded bar in
+  // place rather than through `createPortal` (`branch-banner.tsx`).
+  test("folded, stays above every page, full-screen ones included", () => {
+    const view = renderBanner({
+      id: "northline",
+      locale: "en",
+      timeZone: "UTC",
+      branch: { name: "feature/route-planner", dataTakenAt: null, productionUrl: null },
+    })
+    fireEvent.click(view.getByRole("button", { name: "Hide the branch bar" }))
+
+    const tab = view.getByRole("button", { name: "Show the bar of branch feature/route-planner" })
+    expect(view.container.contains(tab)).toBe(false)
+    expect(tab.parentElement === view.baseElement).toBe(true)
+
+    fireEvent.click(tab)
   })
 
   test("folds away into a button, and stays folded for this branch", () => {

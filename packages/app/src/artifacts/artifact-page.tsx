@@ -47,7 +47,8 @@ export function ArtifactPage() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background pt-[env(safe-area-inset-top,0px)] text-foreground">
+    // Below a bar above the app, such as a branch's, which it would otherwise cover.
+    <div className="fixed inset-x-0 top-[var(--app-top-inset,0px)] bottom-0 z-50 flex flex-col bg-background pt-[env(safe-area-inset-top,0px)] text-foreground">
       {/* A shared link's guest has no Agent to ask. */}
       <AgentDraftContext.Provider value={guest ? null : draftForAgent}>
         <Viewer

@@ -404,6 +404,9 @@ describe("the viewer", () => {
   })
 })
 
+// It starts below a bar above the app, such as a branch's, which it once covered whole: on a branch
+// nothing said "branch" while an artifact was open. Red check: put `inset-0` back on the page's
+// root (`artifact-page.tsx`).
 test("an artifact's page is the whole window, with a way back and no panel controls", () => {
   const cache = new QueryClient({ defaultOptions: { queries: { enabled: false } } })
   const html = renderToStaticMarkup(
@@ -415,7 +418,7 @@ test("an artifact's page is the whole window, with a way back and no panel contr
       </MemoryRouter>
     </QueryClientProvider>
   )
-  expect(html).toMatch(/class="fixed inset-0 /)
+  expect(html).toMatch(/class="fixed inset-x-0 top-\[var\(--app-top-inset,0px\)\] bottom-0 /)
   expect(html).toContain('aria-label="Back"')
   expect(html).not.toContain('aria-label="Close"')
   expect(html).not.toContain('aria-label="Open full page"')
