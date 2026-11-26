@@ -15,6 +15,11 @@ export const DatasetStorageHealthSchema = z.object({
   deleteFiles: z.number().int().describe("Files listing deleted rows, until compaction"),
   inlinedRows: z.number().int().describe("Rows kept in the catalog rather than in files"),
   retainedSnapshots: z.number().int().describe("Commits still in the dataset's history"),
+  branchCopyBytes: z
+    .number()
+    .int()
+    .optional()
+    .describe("Bytes of the copies branches read instead of files with rows their version drops"),
   partitionBy: z.array(z.string()),
   warnings: z.array(DatasetStorageWarningSchema),
   ingest: z

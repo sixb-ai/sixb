@@ -5,6 +5,7 @@ export type {
   DuckDbSecretOptions,
   DuckLakeCatalogOptions,
   DuckLakePostgresPoolOptions,
+  DuckLakeProductionFilesOptions,
   DuckLakeStorageOptions,
   GcsSecretOptions,
   R2SecretOptions,

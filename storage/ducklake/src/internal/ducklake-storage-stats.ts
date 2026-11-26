@@ -270,7 +270,7 @@ async function queryFiles(
  * PostgreSQL says which exist, in one query. DuckDB hides a local catalog from its table
  * listings, so there each table is probed, as DuckLake itself does: a local lookup, no round trip.
  */
-async function findInlinedDeleteTables(
+export async function findInlinedDeleteTables(
   options: DuckLakeStorageOptions,
   runtime: DuckDbQueryRuntime,
   tableIds: readonly bigint[]
@@ -315,7 +315,7 @@ async function findInlinedDeleteTables(
   return found
 }
 
-function inlinedDeleteTableName(tableId: bigint): string {
+export function inlinedDeleteTableName(tableId: bigint): string {
   return `ducklake_inlined_delete_${tableId}`
 }
 

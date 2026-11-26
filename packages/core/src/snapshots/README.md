@@ -59,8 +59,19 @@ extended stream never imports.
 
 The manifest carries each type's definition fingerprints, the properties hidden from the person,
 the vector configurations, and the projection feeding the type with the version production
-applied. `lake` is left for the lake slice of the same moment. A new record kind, such as a
+applied, and `lake.catalogVersion`, the lake point the branch's slice was cut at. A new record kind, such as a
 projection's source rows, comes with the next format version, which this one refuses.
+
+## Lake slice
+
+With `lake: { path, branch, onSlice }`, the export cuts the person's lake slice too
+(`datasets/lake-slices.ts`). The lake's point is taken inside the consistent read, right after
+S: every version an object was derived from was committed before the read began, so the point is
+at or after it, and a commit landing meanwhile is in neither. The cut runs beside the type reads;
+`onSlice` receives the slice and its first token before the `end` record. A snapshot that fails
+deletes its slice, which would otherwise hold production's files for two weeks, and so does a cut
+whose token cannot be issued. Once the stream has ended, the export is done: an import that fails
+then deletes the slice through its caller (`dropLakeSlice`).
 
 ## Import
 

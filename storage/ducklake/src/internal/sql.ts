@@ -239,6 +239,11 @@ export function requiredExtensions(options: DuckLakeStorageOptions): readonly st
     }
   }
 
+  // A branch reads production's files over HTTP.
+  if (options.productionFiles !== undefined) {
+    extensions.add("httpfs")
+  }
+
   return [...extensions]
 }
 
@@ -262,6 +267,11 @@ export function buildAttachSql(options: DuckLakeStorageOptions): string {
   }
 
   parameters.push(`CREATE_IF_NOT_EXISTS ${options.createIfNotExists ?? true}`)
+
+  // A slice records no data path of the branch's: what the branch writes goes to its own.
+  if (options.productionFiles !== undefined) {
+    parameters.push("OVERRIDE_DATA_PATH true")
+  }
 
   if (options.readOnly) {
     parameters.push("READ_ONLY")

@@ -253,6 +253,10 @@ class RecordingRuntime implements DuckDbRuntime {
     return useRuntime(new RecordingExclusiveRuntime(this))
   }
 
+  withConnection<T>(useRuntime: (runtime: DuckDbExclusiveRuntime) => Promise<T>): Promise<T> {
+    return this.withExclusive(useRuntime)
+  }
+
   close(): Promise<void> {
     this.closed = true
     return Promise.resolve()
@@ -365,6 +369,10 @@ class PausedRefreshRuntime implements DuckDbRuntime {
 
   withExclusive<T>(useRuntime: (runtime: DuckDbExclusiveRuntime) => Promise<T>): Promise<T> {
     return this.enqueue(() => useRuntime(new PausedRefreshExclusiveRuntime(this)))
+  }
+
+  withConnection<T>(useRuntime: (runtime: DuckDbExclusiveRuntime) => Promise<T>): Promise<T> {
+    return this.withExclusive(useRuntime)
   }
 
   async close(): Promise<void> {

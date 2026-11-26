@@ -7253,6 +7253,10 @@ export type GetLakeHealthResponses = {
        * Commits still in the dataset's history
        */
       retainedSnapshots: number
+      /**
+       * Bytes of the copies branches read instead of files with rows their version drops
+       */
+      branchCopyBytes?: number
       partitionBy: Array<string>
       warnings: Array<{
         code: "partitioned-small-dataset"

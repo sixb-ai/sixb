@@ -738,6 +738,108 @@ const lakeStorage = new DuckLakeStorage({
 `ATTACH`, so callers can install extra extensions, set DuckDB options, or create
 secrets manually when the typed options are not enough.
 
+## Branches
+
+A branch reads production's datasets in place: production writes a slice of its catalog, and
+the branch attaches it as its own catalog. Nothing on the branch can write a production file or
+catalog row.
+
+```txt
+production                                 branch
+──────────                                 ──────
+catalog ── slice at S, one person ──►       catalog = the slice (DuckDB file), writes local
+files   ◄── GET/HEAD, ranges, token ──      loopback proxy ── disk cache
+```
+
+**The boundary is what the file route serves**: the files the slice's record lists, which the
+branch can read whole with its token. They hold no row those versions do not return. A data file
+part of whose rows a version deleted (in a delete file or in the catalog), or that compaction
+merged with rows written after the version (`partial_max` above it), is served as a copy without
+them, never as itself. A `sequenceBy` dataset's source-ordering table goes without its tombstones,
+the keys of deleted rows: inlined ones are left out, and a file that may hold one (its stats do
+not count `content` as never null) is served as a copy without them, named apart from the copies
+cut before slices left them out. The branch's sequenced merges order against the live keys. The
+loopback proxy's password only keeps other local processes off the branch's token; it is not the
+boundary.
+
+`lakeStorage.forks` implements core's `LakeForks`. Every call runs on a DuckDB connection of its
+own (`withDedicatedConnection`), which holds a read and the attachment but not the attachment
+lock: production's reads and writes go on while a slice is cut.
+
+- **`currentPoint()`** is the catalog's newest snapshot, S. Take it after the object snapshot's
+  transaction began, so every version an object was derived from is at or before it.
+- **`writeSlice({ point, versions, path, record })`** returns the files the slice serves, and
+  hands them to `record` before it writes any copy: core stores the slice (person, branch,
+  versions, files) then, so no copy is left that no record names. It writes a new DuckDB-file
+  catalog holding exactly
+  those versions, one per dataset, in one transaction: on PostgreSQL, every catalog read of the
+  cut sees one snapshot. Each table keeps the rows live at its version's snapshot (columns, tags,
+  partitioning, files), which no longer end; later rows are left out. Snapshots kept: the
+  versions', and S without a change of its own. No other table, view, macro, delete file or file
+  scheduled for deletion is written, and no column stats: production's span values written after
+  S and values deleted since. Each table's rows are counted against production's version at the
+  end; a slice that holds others, or that fails, is deleted. A DuckLake build whose catalog has a
+  table the slice does not know, inlined families included, is refused.
+- **Commits** say what the slice's reader sees: the producer core passes (`visibleProducer`, so
+  no run, step or execution id they could not see), inputs and lineage naming only the slice's
+  datasets, an unknown lineage without its reason. Author and commit message are left empty.
+- **Inlined rows** are read back through DuckLake by row id: a PostgreSQL catalog stores them
+  encoded (strings as `bytea`, timestamps as text), the slice as a DuckDB catalog does. DuckLake
+  prunes every file by its row-id range, so this reads no data file. Inlined deletes are applied
+  by the copies, not copied.
+- **Copies** are written by production's DuckDB, once, beside the data path
+  (`<dataPath>-branch-copies/`, never under it, where DuckLake's orphan search would delete them).
+  Each one is the file read at its version, with each row's id (`_ducklake_internal_row_id`) and
+  the columns' field ids, as DuckLake's own rewrite writes it. It is named by table uuid, file
+  and snapshot, so every slice of that version shares it and a recreated lake never reuses a name
+  a branch cached. Lake retention deletes it once no live slice lists it: a slice stays live until
+  14 days after its last token expired (or after it was created, with none). `describeStorage`
+  reports the copies' size by dataset (`branchCopyBytes`). An encrypted lake is refused for now.
+- **Retention** keeps every live slice's versions, and every file one lists even once compaction
+  replaced it: such a file's deletion schedule starts again at each pass (`holdFiles`), so
+  production's merges go on and the file goes once no live slice lists it.
+- **Files** keep their ids and are named `http://sixb-production-lake.invalid/<path>`, each segment
+  percent-encoded, the path relative to the data path. `.invalid` never resolves: the catalog
+  names no production URL and holds no credential.
+- **Disk and S3.** Production streams local files and proxies S3, R2 or GCS ones with its own
+  credentials, one client, sizes cached. Redirecting to presigned URLs saved the API about 1 ms of
+  CPU per MB and no time on the branch, where bandwidth decides. Proxying also works where
+  branches cannot reach the bucket, and hands out no URL that reads a whole file.
+
+DuckLake reads a version's files through its own metadata connections, outside the cut's
+transaction: a version another process expires mid-cut fails those reads, and the cut refuses.
+
+A branch opens the slice with `productionFiles`:
+
+```ts
+new DuckLakeStorage({
+  catalog: { type: "duckdb", path: ".sixb/branch/lake.ducklake" }, // the slice
+  dataPath: ".sixb/branch/lake", // what the branch writes
+  productionFiles: {
+    url: "https://api.example.com/api/lake/slice-files/",
+    token: () => sliceToken(), // called again when production answers 401
+    cacheDirectory: ".sixb/branch/lake-cache",
+  },
+})
+```
+
+The provider then runs a loopback proxy and a DuckDB HTTP secret scoped to the `.invalid` host,
+with a password only this process knows. The proxy:
+
+- forwards GET and HEAD with the slice token, and refuses every other method (405);
+- caches what it reads on disk in 1 MiB blocks by file name, since production's files never
+  change: a block is fetched once, then read from disk across queries and restarts. Nothing
+  evicts the cache; it goes with the branch's directory, and leftovers of a stopped write go when
+  the proxy starts;
+- fetches missing blocks in runs of at most 16 MiB, each block once however many reads ask, and
+  asks for a new token once on a 401.
+
+The slice is attached with `OVERRIDE_DATA_PATH`, so the branch writes under its own `dataPath`.
+Automatic compaction is off on such a lake, which would rewrite production's files into the
+branch and schedule them for deletion, and `applyRetention` refuses: retention runs in
+production. Writes on a branch (version ids above S, retention of S in production, branch
+maintenance) come with the next change.
+
 ## Blob Storage
 
 DuckLake stores `fileRef` values as dataset row metadata only. Blob payload

@@ -290,6 +290,9 @@ function storageFacts(
   if (dataset.inlinedRows > 0) {
     facts.push(lake.inlinedRows(dataset.inlinedRows, count(dataset.inlinedRows)))
   }
+  if (dataset.branchCopyBytes) {
+    facts.push(lake.branchCopies(numbers.bytes(dataset.branchCopyBytes)))
+  }
   facts.push(lake.snapshots(dataset.retainedSnapshots, count(dataset.retainedSnapshots)))
   if (dataset.partitionBy.length > 0) {
     facts.push(lake.partitionedBy(dataset.partitionBy.join(", ")))

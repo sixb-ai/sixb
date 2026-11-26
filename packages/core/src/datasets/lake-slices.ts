@@ -291,6 +291,15 @@ export async function releaseLakeSliceFiles(host: LakeSliceHost): Promise<number
 }
 
 /**
+ * Deletes a slice and its tokens, such as one whose branch was never made: its versions and files
+ * are released by the next retention pass instead of two weeks later. Deleting a missing slice
+ * does nothing.
+ */
+export async function dropLakeSlice(host: LakeSliceHost, sliceId: string): Promise<void> {
+  await requireSlices(host).delete({ projectId: host.id, id: sliceId })
+}
+
+/**
  * The columns of a version its reader cannot read, or null when the version does not exist.
  * This is the reader's own `readRows`, so a slice never decides access otherwise than a read; it
  * reads no row, since its rows are never iterated.
