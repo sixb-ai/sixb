@@ -1383,12 +1383,11 @@ export function runSandboxCliProcessSmoke(runtime: SandboxCliProcess): void {
           "POST /api/files/uploads/upload_1/complete",
         ])
         const [created, content, completed] = api.requests
-        // A sandbox reaches the API for certain, and blob storage only if its network allows it.
+        // The server chooses the staged upload strategy (run tokens default to server-routed).
         expect(created?.body).toEqual({
           fileName: "recording.txt",
           sizeBytes,
           digest,
-          strategy: "server",
         })
         expect(content?.body).toBe(contents)
         expect(completed?.body).toEqual({ digest, sizeBytes })

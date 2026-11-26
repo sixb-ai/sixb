@@ -11,17 +11,16 @@ export async function runLocalInstanceCommand(args: readonly string[]): Promise<
   try {
     const { commandArgs, apiUrl, profile, token } = extractConnectionOptions(args)
     if (requestsHelp(commandArgs)) {
-      await runInstanceCli({ args: commandArgs, mode: { kind: "local", baseUrl: "" } })
+      await runInstanceCli({ args: commandArgs, connection: { baseUrl: "" } })
       return
     }
     const resolved = await resolveProfile({ apiUrl, profile, token })
     await runInstanceCli({
       args: commandArgs,
-      mode: {
-        kind: "local",
+      connection: {
         baseUrl: resolved.apiUrl,
         ...(resolved.token ? { token: resolved.token } : {}),
-        ...(resolved.profile ? { profile: resolved.profile } : {}),
+        ...(resolved.runId ? { runId: resolved.runId } : {}),
       },
     })
   } catch (error) {

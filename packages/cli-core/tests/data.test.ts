@@ -24,7 +24,6 @@ async function run(args: readonly string[]) {
     },
   })
   const api = createInstanceApiClient({
-    kind: "local",
     baseUrl: `http://127.0.0.1:${server.port}`,
     token: "sixb_pat_test.secret",
   })
@@ -145,9 +144,7 @@ describe("a sandbox's requests", () => {
       },
     })
     const api = createInstanceApiClient({
-      kind: "sandbox",
       baseUrl: `http://127.0.0.1:${server.port}`,
-      runContextPath: "",
       runId: "agt_run_child_1",
     })
     const stdout = spyOn(process.stdout, "write").mockImplementation(() => true)

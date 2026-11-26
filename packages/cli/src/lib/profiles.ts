@@ -44,6 +44,7 @@ export interface ResolveProfileInput extends ProfileStoreOptions {
 export interface ResolvedProfile {
   readonly apiUrl: string
   readonly token?: string
+  readonly runId?: string
   readonly profile?: string
   readonly projectId?: string
   readonly source:
@@ -115,12 +116,15 @@ export async function updateConfig(
 
 export async function resolveProfile(input: ResolveProfileInput = {}): Promise<ResolvedProfile> {
   const env = input.env ?? process.env
+  const runId = nonblank(env.SIXB_RUN_ID)
+  const withRunId = runId ? { runId } : {}
   const explicitToken = nonblank(input.token)
   const explicitApiUrl = nonblank(input.apiUrl)
   if (explicitApiUrl) {
     return {
       apiUrl: normalizeApiUrl(explicitApiUrl),
       ...(explicitToken ? { token: explicitToken, tokenSource: "--token" as const } : {}),
+      ...withRunId,
       source: "api-url-flag",
     }
   }
@@ -129,10 +133,22 @@ export async function resolveProfile(input: ResolveProfileInput = {}): Promise<R
   const explicitProfile = nonblank(input.profile)
   if (explicitProfile) {
     const stored = requireProfile(config, explicitProfile)
-    return resolvedStoredProfile(stored, explicitProfile, "profile-flag", explicitToken, input)
+    return {
+      ...(await resolvedStoredProfile(
+        stored,
+        explicitProfile,
+        "profile-flag",
+        explicitToken,
+        input
+      )),
+      ...withRunId,
+    }
   }
 
-  const environmentApiUrl = nonblank(env.SIXB_API_URL) ?? nonblank(env.SIXB_API_PUBLIC_ORIGIN)
+  const environmentApiUrl =
+    nonblank(env.SIXB_API_URL) ??
+    nonblank(env.SIXB_API_BASE_URL) ??
+    nonblank(env.SIXB_API_PUBLIC_ORIGIN)
   if (environmentApiUrl) {
     const environmentToken = resolveEnvironmentToken(env)
     return {
@@ -140,6 +156,7 @@ export async function resolveProfile(input: ResolveProfileInput = {}): Promise<R
       ...(explicitToken
         ? { token: explicitToken, tokenSource: "--token" as const }
         : environmentToken),
+      ...withRunId,
       source: "environment",
     }
   }
@@ -147,29 +164,36 @@ export async function resolveProfile(input: ResolveProfileInput = {}): Promise<R
   const environmentProfile = nonblank(env.SIXB_PROFILE)
   if (environmentProfile) {
     const stored = requireProfile(config, environmentProfile)
-    return resolvedStoredProfile(
-      stored,
-      environmentProfile,
-      "profile-environment",
-      explicitToken,
-      input
-    )
+    return {
+      ...(await resolvedStoredProfile(
+        stored,
+        environmentProfile,
+        "profile-environment",
+        explicitToken,
+        input
+      )),
+      ...withRunId,
+    }
   }
 
   if (config.currentProfile) {
     const stored = requireProfile(config, config.currentProfile)
-    return resolvedStoredProfile(
-      stored,
-      config.currentProfile,
-      "current-profile",
-      explicitToken,
-      input
-    )
+    return {
+      ...(await resolvedStoredProfile(
+        stored,
+        config.currentProfile,
+        "current-profile",
+        explicitToken,
+        input
+      )),
+      ...withRunId,
+    }
   }
 
   return {
     apiUrl: "http://localhost:3001",
     ...(explicitToken ? { token: explicitToken, tokenSource: "--token" as const } : {}),
+    ...withRunId,
     source: "default",
   }
 }

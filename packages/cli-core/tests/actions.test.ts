@@ -34,10 +34,8 @@ describe("actions request", () => {
       },
     })
     const api = createInstanceApiClient({
-      kind: "local",
       baseUrl: `http://127.0.0.1:${server.port}`,
       token: "sixb_pat_test.secret",
-      profile: "test",
     })
 
     const error = await actions(api, ["request", "slow"], 50).catch((caught: unknown) => caught)
@@ -75,10 +73,8 @@ describe("a request held for approval", () => {
       },
     })
     const api = createInstanceApiClient({
-      kind: "local",
       baseUrl: `http://127.0.0.1:${server.port}`,
       token: "sixb_pat_test.secret",
-      profile: "test",
     })
     const stdout = spyOn(process.stdout, "write").mockImplementation(() => true)
     const stderr = spyOn(process.stderr, "write").mockImplementation(() => true)

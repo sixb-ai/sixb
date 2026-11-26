@@ -172,6 +172,7 @@ export async function prepareAgentSandboxApiContext(
 
   return {
     env: {
+      SIXB_API_URL: apiBaseUrl,
       SIXB_API_BASE_URL: apiBaseUrl,
       SIXB_CONTEXT_DIR: contextDir,
       SIXB_SKILLS_DIR: skillsDir,

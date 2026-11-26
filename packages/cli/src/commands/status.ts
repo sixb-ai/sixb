@@ -13,10 +13,9 @@ export async function runStatus(options: StatusCommandOptions = {}): Promise<voi
   const resolved = await resolveProfile(options)
   try {
     const project = await createInstanceApiClient({
-      kind: "local",
       baseUrl: resolved.apiUrl,
       ...(resolved.token ? { token: resolved.token } : {}),
-      ...(resolved.profile ? { profile: resolved.profile } : {}),
+      ...(resolved.runId ? { runId: resolved.runId } : {}),
     }).get("/api/project")
     const projectId = projectIdFrom(project)
     await renderStatus({

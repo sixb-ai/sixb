@@ -42,10 +42,8 @@ function startApi() {
   })
 
   const api = createInstanceApiClient({
-    kind: "local",
     baseUrl: `http://127.0.0.1:${server.port}`,
     token: "sixb_pat_test.secret",
-    profile: "test",
   })
   return { api, requests }
 }
@@ -152,10 +150,8 @@ describe("sixb artifacts export", () => {
       },
     })
     const api = createInstanceApiClient({
-      kind: "local",
       baseUrl: `http://127.0.0.1:${server.port}`,
       token: "sixb_pat_test.secret",
-      profile: "test",
     })
     return { api, requests }
   }
@@ -236,10 +232,8 @@ describe("sixb artifacts media", () => {
       },
     })
     const api = createInstanceApiClient({
-      kind: "local",
       baseUrl: `http://127.0.0.1:${server.port}`,
       token: "sixb_pat_test.secret",
-      profile: "test",
     })
     return { api, requests }
   }

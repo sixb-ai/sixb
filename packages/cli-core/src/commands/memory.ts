@@ -11,7 +11,7 @@ import {
   agentMemoryFileHash,
 } from "../memory"
 import { CliError, EXIT_API, fail, writeJson, writeText } from "../output"
-import { createInstanceApiClient, type SandboxInstanceCliMode } from "../run"
+import { type ApiConnection, createInstanceApiClient } from "../run"
 import { asRecord, isFileError } from "./shared"
 
 const HELP = `Usage:
@@ -38,19 +38,19 @@ interface MemoryConflict {
 const THEIRS = ".theirs"
 const CONFLICT_HINT = "Merge each .theirs file into its file, delete it, then save again."
 
-export async function memory(args: readonly string[], mode: SandboxInstanceCliMode): Promise<void> {
+export async function memory(args: readonly string[], connection: ApiConnection): Promise<void> {
   const [sub, ...rest] = args
   if (!sub || isHelp(sub) || rest.some(isHelp)) return writeText(HELP)
   const local = localMemory()
-  if (sub === "save") return save(local, rest, mode)
-  if (sub === "pull") return pull(local, rest, mode)
+  if (sub === "save") return save(local, rest, connection)
+  if (sub === "pull") return pull(local, rest, connection)
   fail(`Unknown memory command '${sub}'. Run 'sixb memory --help'.`)
 }
 
 async function save(
   local: LocalMemory,
   args: readonly string[],
-  mode: SandboxInstanceCliMode
+  connection: ApiConnection
 ): Promise<void> {
   const { repo, message } = parseSaveArgs(args)
   const manifest = await local.readManifest()
@@ -83,7 +83,7 @@ async function save(
     })
   }
 
-  const api = createInstanceApiClient(mode)
+  const api = createInstanceApiClient(connection)
   let saved: Record<string, unknown>
   try {
     saved = asRecord(
@@ -124,7 +124,7 @@ async function save(
 async function pull(
   local: LocalMemory,
   args: readonly string[],
-  mode: SandboxInstanceCliMode
+  connection: ApiConnection
 ): Promise<void> {
   if (args.length > 1) fail("Invalid arguments for 'memory pull'.")
   const manifest = await local.readManifest()
@@ -133,7 +133,7 @@ async function pull(
     fail("No memory repo is installed.", "invalid_arguments", "Run 'sixb memory pull user'.")
   }
 
-  const api = createInstanceApiClient(mode)
+  const api = createInstanceApiClient(connection)
   let current = manifest
   for (const repo of repos) {
     const result = await update(local, repo, current, await fetchRepo(api, repo))

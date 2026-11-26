@@ -29,6 +29,8 @@ export interface UploadFileOptions {
   readonly logicalPath?: string
   /** Without it, the API types the file by its leading bytes, else its name. */
   readonly mediaType?: string
+  /** Force staged upload bytes through the API instead of direct blob-storage PUTs. */
+  readonly strategy?: "server"
   readonly onProgress?: (progress: UploadProgress) => void
 }
 
@@ -65,6 +67,7 @@ export async function uploadFile(
     options.onProgress?.({ stage, loadedBytes, totalBytes: sizeBytes })
   const digest = await fileDigest(source, (hashedBytes) => progress("hash", hashedBytes))
 
+  const forceServer = options.strategy === "server" || process.env.SIXB_UPLOAD_STRATEGY === "server"
   const upload = stagedUpload(
     await api.post("/api/files/uploads", {
       fileName: basename(source),
@@ -72,7 +75,7 @@ export async function uploadFile(
       sizeBytes,
       digest,
       ...(options.logicalPath ? { logicalPath: options.logicalPath } : {}),
-      ...(api.uploadsThroughApi ? { strategy: "server" } : {}),
+      ...(forceServer ? { strategy: "server" } : {}),
     })
   )
 

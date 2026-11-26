@@ -68,7 +68,6 @@ function startThread(
   })
 
   const api = createInstanceApiClient({
-    kind: "local",
     baseUrl: `http://127.0.0.1:${server.port}`,
   })
   return { api, requests }

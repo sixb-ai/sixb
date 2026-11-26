@@ -36,7 +36,7 @@ describe("instance command argument admission", () => {
     stdoutSpy.mockImplementation(() => true)
     let caught: unknown
     try {
-      await runInstanceCli({ args, mode: { kind: "local", baseUrl: "http://unused.test" } })
+      await runInstanceCli({ args, connection: { baseUrl: "http://unused.test" } })
     } catch (error) {
       caught = error
     }
@@ -51,7 +51,7 @@ describe("instance command argument admission", () => {
     await expect(
       runInstanceCli({
         args: ["objects", "query", "--file", "missing.json", "--file", "also-missing.json"],
-        mode: { kind: "local", baseUrl: "http://unused.test" },
+        connection: { baseUrl: "http://unused.test" },
       })
     ).rejects.toMatchObject({
       body: { code: "invalid_arguments", message: "--file may only be provided once." },
@@ -74,7 +74,7 @@ describe("instance command argument admission", () => {
   )("prints trailing help without effects: %j", async ({ args }) => {
     fetchSpy.mockResolvedValue(Response.json({ ok: true }))
     stdoutSpy.mockImplementation(() => true)
-    await runInstanceCli({ args, mode: { kind: "local", baseUrl: "" } })
+    await runInstanceCli({ args, connection: { baseUrl: "" } })
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(stdoutSpy).toHaveBeenCalled()
     expect(stdoutSpy.mock.calls[0]?.[0]).toContain("Usage:")
@@ -85,7 +85,7 @@ describe("instance command argument admission", () => {
     stdoutSpy.mockImplementation(() => true)
     await runInstanceCli({
       args: ["objects", "get", "Customer", "--", "--help", "--profile"],
-      mode: { kind: "local", baseUrl: "http://unused.test" },
+      connection: { baseUrl: "http://unused.test" },
     })
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     const body = fetchSpy.mock.calls[0]?.[1]?.body

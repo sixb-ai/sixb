@@ -18,7 +18,7 @@ async function cli(...args: string[]): Promise<string> {
     return true
   })
   try {
-    await runInstanceCli({ args, mode: { kind: "local", baseUrl: "" } })
+    await runInstanceCli({ args, connection: { baseUrl: "" } })
   } finally {
     write.mockRestore()
   }

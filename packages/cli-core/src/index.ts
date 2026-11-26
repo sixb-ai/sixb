@@ -22,12 +22,7 @@ export {
   reportError,
   writeJson,
 } from "./output"
-export type {
-  InstanceCliMode,
-  LocalInstanceCliMode,
-  RunInstanceCliInput,
-  SandboxInstanceCliMode,
-} from "./run"
+export type { ApiConnection, RunInstanceCliInput } from "./run"
 export { createInstanceApiClient, runInstanceCli } from "./run"
 export type { SandboxCliAssets } from "./sandbox-cli"
 export { loadSandboxCliAssets } from "./sandbox-cli"

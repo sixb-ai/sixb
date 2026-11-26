@@ -8,13 +8,13 @@ afterEach(() => {
   server = undefined
 })
 
-describe("instance CLI modes", () => {
+describe("instance CLI connections", () => {
   test("the sandbox help names the sandbox's own commands", () => {
     expect(renderInstanceHelp()).toContain("sixb context")
     expect(renderInstanceHelp()).toContain("Check the sandbox and its API access")
   })
 
-  test("local mode sends the configured bearer token", async () => {
+  test("sends the configured bearer token when provided", async () => {
     const authorizations: Array<string | null> = []
     server = Bun.serve({
       hostname: "127.0.0.1",
@@ -26,17 +26,15 @@ describe("instance CLI modes", () => {
     })
 
     const client = createInstanceApiClient({
-      kind: "local",
       baseUrl: `http://127.0.0.1:${server.port}`,
       token: "sixb_pat_test.secret",
-      profile: "test",
     })
 
     expect(await client.get("/api/project")).toEqual({ id: "local-project" })
     expect(authorizations).toEqual(["Bearer sixb_pat_test.secret"])
   })
 
-  test("sandbox mode never adds a bearer credential", async () => {
+  test("omits authorization when no token is configured", async () => {
     const authorizations: Array<string | null> = []
     server = Bun.serve({
       hostname: "127.0.0.1",
@@ -48,9 +46,7 @@ describe("instance CLI modes", () => {
     })
 
     const client = createInstanceApiClient({
-      kind: "sandbox",
       baseUrl: `http://127.0.0.1:${server.port}`,
-      runContextPath: "/run/sixb/context.json",
     })
 
     expect(await client.get("/api/project")).toEqual({ id: "sandbox-project" })

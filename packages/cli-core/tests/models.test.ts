@@ -96,10 +96,8 @@ async function run(args: readonly string[]): Promise<unknown> {
     },
   })
   const api = createInstanceApiClient({
-    kind: "local",
     baseUrl: `http://127.0.0.1:${server.port}`,
     token: "sixb_pat_test.secret",
-    profile: "test",
   })
   const written: string[] = []
   const write = spyOn(process.stdout, "write").mockImplementation((chunk) => {

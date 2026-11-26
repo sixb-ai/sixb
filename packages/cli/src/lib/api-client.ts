@@ -42,6 +42,15 @@ export function unwrapSixbApiResult<T>(result: {
 }
 
 export function normalizeApiUrl(value: string): string {
+  if (value.startsWith("unix:")) {
+    const socketPath = value.slice("unix:".length)
+    if (!socketPath) {
+      throw new Error(
+        `[SixbCLI] Invalid API URL '${value}'. Use a full http(s) URL or unix:<path>.`
+      )
+    }
+    return value
+  }
   if (!/^https?:\/\//i.test(value)) {
     throw new Error(`[SixbCLI] Invalid API URL '${value}'. Use a full http(s) URL.`)
   }

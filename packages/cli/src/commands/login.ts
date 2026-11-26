@@ -107,7 +107,6 @@ async function authorizeDevice(apiUrl: string, json: boolean): Promise<SixbSessi
 
 async function fetchProject(apiUrl: string, token?: string): Promise<string> {
   const api = createInstanceApiClient({
-    kind: "local",
     baseUrl: apiUrl,
     ...(token ? { token } : {}),
   })

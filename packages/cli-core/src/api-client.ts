@@ -23,8 +23,6 @@ const RUN_HEADER = "x-sixb-run"
 
 export class ApiClient {
   readonly baseUrl: string
-  /** Whether a file goes through the API even when blob storage would take it directly. */
-  readonly uploadsThroughApi: boolean
   private readonly socketPath: string | undefined
   private readonly authorization: string | undefined
   private readonly runId: string | undefined
@@ -40,10 +38,11 @@ export class ApiClient {
     this.baseUrl = this.socketPath === undefined ? baseUrl : "http://localhost"
     this.authorization = options.authorization
     this.runId = options.runId || undefined
-    this.uploadsThroughApi = options.uploadsThroughApi ?? false
-    this.missingBaseUrlMessage = options.missingBaseUrlMessage
-    this.unavailableMessage = options.unavailableMessage
-    this.unavailableHint = options.unavailableHint
+    this.missingBaseUrlMessage =
+      options.missingBaseUrlMessage ??
+      "No Sixb API URL is configured. Run 'sixb login <api-url>' or set SIXB_API_URL."
+    this.unavailableMessage = options.unavailableMessage ?? "The Sixb API could not be reached."
+    this.unavailableHint = options.unavailableHint ?? "Run 'sixb status' to check the connection."
   }
 
   async get(path: string, query?: Readonly<Record<string, string | undefined>>): Promise<unknown> {
@@ -201,13 +200,11 @@ export class ApiClient {
 export interface ApiClientOptions {
   readonly baseUrl: string
   readonly authorization?: string
-  /** The run whose commands send the requests, in a sandbox: `SIXB_RUN_ID`. */
+  /** Names the acting run when a child speaks through its parent's credential: `SIXB_RUN_ID`. */
   readonly runId?: string
-  /** A sandbox reaches the API for certain, and blob storage only if its network allows it. */
-  readonly uploadsThroughApi?: boolean
-  readonly missingBaseUrlMessage: string
-  readonly unavailableMessage: string
-  readonly unavailableHint: string
+  readonly missingBaseUrlMessage?: string
+  readonly unavailableMessage?: string
+  readonly unavailableHint?: string
 }
 
 function validateApiPath(path: string): void {

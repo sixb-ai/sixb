@@ -123,5 +123,19 @@ describe("Sixb profiles", () => {
       token: "environment-token",
       source: "environment",
     })
+
+    expect(
+      await resolveProfile({
+        env: {
+          XDG_CONFIG_HOME: root,
+          SIXB_API_URL: "unix:/tmp/sixb-forwarder.sock",
+          SIXB_RUN_ID: "agt_run_1",
+        },
+      })
+    ).toEqual({
+      apiUrl: "unix:/tmp/sixb-forwarder.sock",
+      runId: "agt_run_1",
+      source: "environment",
+    })
   })
 })

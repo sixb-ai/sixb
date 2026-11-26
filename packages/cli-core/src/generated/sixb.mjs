@@ -952,13 +952,14 @@ async function uploadFile(api, source, options = {}) {
   }
   const progress = (stage, loadedBytes) => options.onProgress?.({ stage, loadedBytes, totalBytes: sizeBytes });
   const digest = await fileDigest(source, (hashedBytes) => progress("hash", hashedBytes));
+  const forceServer = options.strategy === "server" || process.env.SIXB_UPLOAD_STRATEGY === "server";
   const upload = stagedUpload(await api.post("/api/files/uploads", {
     fileName: basename(source),
     ...options.mediaType ? { mediaType: options.mediaType } : {},
     sizeBytes,
     digest,
     ...options.logicalPath ? { logicalPath: options.logicalPath } : {},
-    ...api.uploadsThroughApi ? { strategy: "server" } : {}
+    ...forceServer ? { strategy: "server" } : {}
   }));
   try {
     progress("upload", 0);
@@ -2619,7 +2620,6 @@ var RUN_HEADER = "x-sixb-run";
 
 class ApiClient {
   baseUrl;
-  uploadsThroughApi;
   socketPath;
   authorization;
   runId;
@@ -2632,10 +2632,9 @@ class ApiClient {
     this.baseUrl = this.socketPath === undefined ? baseUrl : "http://localhost";
     this.authorization = options.authorization;
     this.runId = options.runId || undefined;
-    this.uploadsThroughApi = options.uploadsThroughApi ?? false;
-    this.missingBaseUrlMessage = options.missingBaseUrlMessage;
-    this.unavailableMessage = options.unavailableMessage;
-    this.unavailableHint = options.unavailableHint;
+    this.missingBaseUrlMessage = options.missingBaseUrlMessage ?? "No Sixb API URL is configured. Run 'sixb login <api-url>' or set SIXB_API_URL.";
+    this.unavailableMessage = options.unavailableMessage ?? "The Sixb API could not be reached.";
+    this.unavailableHint = options.unavailableHint ?? "Run 'sixb status' to check the connection.";
   }
   async get(path, query) {
     const url = this.url(path, query);
@@ -2817,17 +2816,13 @@ function nodeBody(response) {
 // src/run.ts
 async function runInstanceCli(input) {
   const [command, ...args] = input.args;
-  await dispatch(createInstanceApiClient(input.mode), command ?? "", args);
+  await dispatch(createInstanceApiClient(input.connection), command ?? "", args);
 }
-function createInstanceApiClient(mode) {
+function createInstanceApiClient(connection) {
   return new ApiClient({
-    baseUrl: mode.baseUrl,
-    ...mode.kind === "local" && mode.token ? { authorization: `Bearer ${mode.token}` } : {},
-    ...mode.kind === "sandbox" && mode.runId ? { runId: mode.runId } : {},
-    ...mode.kind === "sandbox" ? { uploadsThroughApi: true } : {},
-    missingBaseUrlMessage: mode.kind === "sandbox" ? "SIXB_API_BASE_URL is not set." : "The selected Sixb profile has no API URL.",
-    unavailableMessage: mode.kind === "sandbox" ? "The Sixb API could not be reached from the sandbox." : "The Sixb API could not be reached.",
-    unavailableHint: mode.kind === "sandbox" ? "Run 'sixb status' to verify the sandbox runtime and its API access." : "Run 'sixb status' to verify the current profile."
+    baseUrl: connection.baseUrl,
+    ...connection.token ? { authorization: `Bearer ${connection.token}` } : {},
+    ...connection.runId ? { runId: connection.runId } : {}
   });
 }
 
@@ -2843,18 +2838,18 @@ current contents are written next to yours as <file>.theirs: merge each into its
 it, then save again. Changes others made to other files are brought in by save and pull.`;
 var THEIRS = ".theirs";
 var CONFLICT_HINT = "Merge each .theirs file into its file, delete it, then save again.";
-async function memory(args, mode) {
+async function memory(args, connection) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub) || rest.some(isHelp))
     return writeText(HELP);
   const local = localMemory();
   if (sub === "save")
-    return save(local, rest, mode);
+    return save(local, rest, connection);
   if (sub === "pull")
-    return pull(local, rest, mode);
+    return pull(local, rest, connection);
   fail(`Unknown memory command '${sub}'. Run 'sixb memory --help'.`);
 }
-async function save(local, args, mode) {
+async function save(local, args, connection) {
   const { repo, message } = parseSaveArgs(args);
   const manifest = await local.readManifest();
   const loaded = manifest.repos[repo];
@@ -2878,7 +2873,7 @@ async function save(local, args, mode) {
       hint: "No file changed since it was loaded."
     });
   }
-  const api = createInstanceApiClient(mode);
+  const api = createInstanceApiClient(connection);
   let saved;
   try {
     saved = asRecord(await api.post(`/api/agent-memory/${repo}/revisions`, {
@@ -2914,7 +2909,7 @@ async function save(local, args, mode) {
     ...conflicts.length > 0 ? { conflicts, hint: CONFLICT_HINT } : {}
   });
 }
-async function pull(local, args, mode) {
+async function pull(local, args, connection) {
   if (args.length > 1)
     fail("Invalid arguments for 'memory pull'.");
   const manifest = await local.readManifest();
@@ -2922,7 +2917,7 @@ async function pull(local, args, mode) {
   if (repos.length === 0) {
     fail("No memory repo is installed.", "invalid_arguments", "Run 'sixb memory pull user'.");
   }
-  const api = createInstanceApiClient(mode);
+  const api = createInstanceApiClient(connection);
   let current = manifest;
   for (const repo of repos) {
     const result = await update(local, repo, current, await fetchRepo(api, repo));
@@ -3107,12 +3102,12 @@ function parseManifest(value) {
 // src/commands/system.ts
 import { readFile as readFile4 } from "node:fs/promises";
 var AGENT_RUNTIME_PROFILE = "sixb-agent-runtime/v1";
-async function status(args, mode) {
+async function status(args, connection) {
   if (isHelp(args[0]))
     return writeText("Usage: sixb status");
   if (args.some((arg) => arg !== "--json"))
     fail("status accepts no arguments but --json.");
-  const project = asRecord(await createInstanceApiClient(mode).get("/api/project"));
+  const project = asRecord(await createInstanceApiClient(connection).get("/api/project"));
   if (typeof project.id !== "string" || project.id.length === 0) {
     throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid project." }, EXIT_API);
   }
@@ -3162,24 +3157,27 @@ async function main(args) {
   if (command === "--version" || command === "version") {
     return writeText(`sixb CLI ${INSTANCE_CLI_VERSION}`);
   }
+  const connection = envConnection();
   if (command === "status")
-    return status(rest, sandboxMode());
+    return status(rest, connection);
   if (command === "context")
     return context(rest);
   if (command === "memory")
-    return memory(rest, sandboxMode());
+    return memory(rest, connection);
   if (command === "history")
-    return history(createInstanceApiClient(sandboxMode()), rest);
+    return history(createInstanceApiClient(connection), rest);
   if (!isInstanceCommand(command))
     fail(`Unknown command '${command}'. Run 'sixb --help'.`);
-  await runInstanceCli({ args, mode: sandboxMode() });
+  await runInstanceCli({ args, connection });
 }
-function sandboxMode() {
+function envConnection() {
+  const baseUrl = process.env.SIXB_API_URL || process.env.SIXB_API_BASE_URL || "";
+  const token = process.env.SIXB_API_TOKEN || process.env.SIXB_TOKEN || undefined;
+  const runId = process.env.SIXB_RUN_ID || undefined;
   return {
-    kind: "sandbox",
-    baseUrl: process.env.SIXB_API_BASE_URL ?? "",
-    runContextPath: process.env.SIXB_RUN_CONTEXT ?? "",
-    ...process.env.SIXB_RUN_ID ? { runId: process.env.SIXB_RUN_ID } : {}
+    baseUrl,
+    ...token ? { token } : {},
+    ...runId ? { runId } : {}
   };
 }
 try {
