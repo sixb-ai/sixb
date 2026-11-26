@@ -98,7 +98,11 @@ async function signOutReplaced(replaced: SixbProfile): Promise<void> {
           tokens = null
         },
       },
-      fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(10_000) }),
+      fetch: Object.assign(
+        (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+          fetch(input, { ...init, signal: AbortSignal.timeout(10_000) }),
+        { preconnect: fetch.preconnect }
+      ),
     })
   } catch (error) {
     process.stderr.write(
