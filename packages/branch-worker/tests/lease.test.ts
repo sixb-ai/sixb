@@ -1,10 +1,15 @@
-import { describe, expect, jest, test } from "bun:test"
+import { describe, expect, jest, spyOn, test } from "bun:test"
+import { mkdtemp } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { BRANCH_LEASE_MS, BRANCH_TICK_MS } from "../src/held-branch"
+import * as stagingModule from "../src/staging"
 import { BranchWorker } from "../src/worker"
 import {
   flush,
   hold,
   NAME,
+  onCleanup,
   pass,
   projectId,
   ready,
@@ -114,6 +119,47 @@ describe("the lease on a branch", () => {
     expect(lab.kills).toEqual([1])
     expect(lab.stopped).toEqual([])
     expect(lab.destroyed).toEqual([])
+    expect(await row(host)()).toMatchObject({ owner: "worker-b" })
+  })
+
+  // A worker asleep mid-copy woke to its copy's next step before its heartbeat, and dropped the
+  // schema the branch's new owner was running on. Guard check: drop the `fence` before
+  // `prepareBranchData` in `copyIntoSandbox` (`copy.ts`).
+  test("drops nothing of a branch another worker took while it was paused mid-copy", async () => {
+    const { lab, host, bo, storage } = await setup()
+    const held = await hold(host)
+    await ready(host)
+    const prepared = lab.prepared
+
+    jest.advanceTimersByTime(1_000)
+    await bo.branches.refresh(NAME)
+
+    // Asleep right after the copy began, on its way to the schema.
+    let wake: () => void = () => {}
+    const asleep = new Promise<void>((resolve) => {
+      wake = resolve
+    })
+    const staging = spyOn(stagingModule, "stagingDirectory")
+    staging.mockImplementation(async () => {
+      await asleep
+      return mkdtemp(join(tmpdir(), "sixb-branch-staging-test-"))
+    })
+    onCleanup(() => staging.mockRestore())
+    await until(
+      async () => staging.mock.calls.length,
+      (calls) => calls === 1
+    )
+
+    // Past its lease, while another worker takes the branch over.
+    jest.setSystemTime(Date.now() + BRANCH_LEASE_MS * 2)
+    await storage.hostedBranches.update(
+      { projectId, name: NAME, at: new Date() },
+      { owner: "worker-b", leaseExpiresAt: new Date(Date.now() + BRANCH_LEASE_MS) }
+    )
+    wake()
+    await settled(held.life)
+
+    expect(lab.prepared).toBe(prepared)
     expect(await row(host)()).toMatchObject({ owner: "worker-b" })
   })
 

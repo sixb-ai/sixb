@@ -50,6 +50,11 @@ export const BRANCH_IDLE_MS = 20 * 60_000
 
 /** The lease is renewed this often, apart from the ticks: a copy or a checkout can outlast it. */
 const HEARTBEAT_MS = BRANCH_LEASE_MS / 3
+/**
+ * A step that destroys what the branch has runs only while the lease holds at least this long:
+ * a worker back from a pause may find another worker running the branch.
+ */
+const FENCE_MS = 15_000
 /** The role is held to its limits this often, apart from the ticks: an import runs as the role. */
 const ENFORCE_MS = 3_000
 /** How far each push of the provider's deadline reaches, and so how often it is pushed. */
@@ -200,6 +205,7 @@ export class HeldBranch {
   async expire(): Promise<void> {
     try {
       await this.releaseSlices()
+      await this.fence()
       await dropBranchData(this.host, this.branch)
       if (this.branch.sandbox) await destroySaved(this.host, this.branch.sandbox)
       await this.write({ ...STOPPED, data: null, sandbox: null, port: null })
@@ -311,6 +317,21 @@ export class HeldBranch {
       }
     })()
     return this.renewing
+  }
+
+  /**
+   * Goes on only while this hold owns the branch, for long enough: right before each step that
+   * destroys what the branch has, its schema, its role or its sandbox. A worker paused past its
+   * lease (a machine asleep) wakes to I/O that runs before its heartbeat: renewing first tells
+   * it whether another worker took the branch meanwhile.
+   */
+  private async fence(): Promise<void> {
+    this.signal.throwIfAborted()
+    if (Date.now() + FENCE_MS < this.leaseUntil) return
+
+    await this.renewLease()
+    this.signal.throwIfAborted()
+    if (Date.now() + FENCE_MS >= this.leaseUntil) throw new LostBranchError()
   }
 
   /** Ends the hold: another worker may hold the branch now, so it touches nothing more. */
@@ -817,10 +838,12 @@ export class HeldBranch {
    */
   private async teardown(): Promise<void> {
     await this.credentials?.revoke().catch(() => {})
+    await this.fence()
     await this.sandbox?.destroy()
     this.sandbox = undefined
     if (this.branch.sandbox) await destroySaved(this.host, this.branch.sandbox)
     await this.releaseSlices()
+    await this.fence()
     await dropBranchData(this.host, this.branch)
     await this.branches.delete({ projectId: this.host.id, name: this.branch.name })
   }
@@ -901,6 +924,7 @@ export class HeldBranch {
       sandbox: this.requireSandbox(),
       projectDirectory: this.projectDirectory(),
       signal: this.signal,
+      fence: () => this.fence(),
     }
   }
 

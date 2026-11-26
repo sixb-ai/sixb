@@ -21,6 +21,8 @@ export interface BranchSandboxFiles {
   /** The project's folder in the sandbox's checkout. */
   readonly projectDirectory: string
   readonly signal: AbortSignal
+  /** Throws unless the worker still holds the branch: called before its data is dropped. */
+  readonly fence: () => Promise<void>
 }
 
 /**
@@ -48,6 +50,7 @@ export async function copyIntoSandbox(
 
   const staging = await stagingDirectory()
   try {
+    await files.fence()
     const { tempFileLimit } = await prepareBranchData(host, branch)
 
     // Whole on disk first: production's consistent read never waits on the sandbox's upload.

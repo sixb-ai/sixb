@@ -102,6 +102,8 @@ export interface Lab {
   changedFiles: string[]
   /** How many times production held the branch's role to its limits. */
   enforced: number
+  /** How many times production made the branch's schema and role anew, for a copy. */
+  prepared: number
   /** What the next drop of the branch's data throws, once. */
   dropFailure: Error | null
   /** Thrown by the next sandbox destroy, once. */
@@ -335,6 +337,7 @@ export async function setup(
     remoteHead: await repository.head(NAME),
     changedFiles: [],
     enforced: 0,
+    prepared: 0,
     dropFailure: null,
     destroyFailure: null,
     resumeFailures: [],
@@ -382,6 +385,7 @@ export async function setup(
   // login answers as PostgreSQL's would. `hosted-branch.e2e.ts` runs the real one.
   Object.assign(storage, {
     createHostedBranch: async (name: string) => {
+      lab.prepared += 1
       await storage.createBranchNamespace(name)
       return { tempFileLimit: lab.tempFileLimit }
     },
