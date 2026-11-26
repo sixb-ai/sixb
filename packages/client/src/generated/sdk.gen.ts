@@ -41,6 +41,7 @@ import type {
   CompleteFileUploadData,
   CompleteFileUploadErrors,
   CompleteFileUploadResponses,
+  CopyForBranchData,
   CountObjectsData,
   CountObjectsErrors,
   CountObjectsResponses,
@@ -1951,6 +1952,22 @@ export const getLakeHealth = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/lake/health",
+    ...options,
+  })
+
+/**
+ * Copy what you read for a branch: the snapshot, then the lake slice of the same moment
+ */
+export const copyForBranch = <ThrowOnError extends boolean = false>(
+  options?: Options<CopyForBranchData, ThrowOnError>
+) =>
+  (options?.client ?? client).post<unknown, unknown, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/branches/copy",
     ...options,
   })
 

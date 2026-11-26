@@ -204,6 +204,18 @@ export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsCon
   auth?: SixbAuthConfig
 }
 
+/** The options each host was built from, so a branch can build the same host on its own data. */
+const builtFrom = new WeakMap<object, object>()
+
+/** The options `host` was built from. Internal: only a branch's host is built again from them. */
+export function hostOptionsOf<TParams extends ParamsConfig>(
+  host: SixbHost<TParams>
+): SixbHostOptions<TParams> {
+  const options = builtFrom.get(host)
+  if (!options) throw new Error("[Sixb] This host was not built by SixbHost.")
+  return options as unknown as SixbHostOptions<TParams>
+}
+
 // Invariant by declaration, like `SixbHostOptions`: left to measurement, TypeScript probes `TParams`
 // through the whole bound SDK and overflows (TS2589) on code as ordinary as a function typed to
 // return `SixbHost` that returns `new SixbHost(options)`.
@@ -251,6 +263,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly auth: AuthRuntime
 
   constructor(options: SixbHostOptions<TParams>) {
+    builtFrom.set(this, options)
     // The host says whether this process runs as a branch, as it says NODE_ENV, before core loads
     // (see `resolveHostBranch`). First thing, so every provider and report below already knows.
     this.branch = resolveHostBranch(options)

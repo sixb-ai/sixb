@@ -12,6 +12,7 @@ import type {
   LakeWriteSession,
   LatestVersionsSince,
   ListLatestVersionsSinceInput,
+  OpenLakeBranchInput,
   ReadDatasetChangesInput,
   ReadDatasetRowsInput,
 } from "@sixb/core/lake-storage"
@@ -55,7 +56,11 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
   private readonly writes: DuckLakeWriteCoordinator
   private readonly productionFiles: ProductionFilesProxy | undefined
 
+  /** As the project configured it, to open the same lake on a branch. */
+  private readonly configured: DuckLakeStorageOptions
+
   constructor(options: DuckLakeStorageOptions) {
+    this.configured = options
     const normalizedOptions: DuckLakeStorageOptions = {
       ...options,
       alias: options.alias ?? "sixb_lake",
@@ -179,6 +184,25 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
    * `close()` is provider-specific and intentionally not part of the core
    * LakeStorage interface.
    */
+  /**
+   * This lake on a branch: the slice production cut is its catalog, a DuckDB file; the project's
+   * DuckDB settings carry over, and what the branch writes stays under `dataPath`.
+   */
+  openBranch(input: OpenLakeBranchInput): DuckLakeStorage {
+    const {
+      catalog: _catalog,
+      dataPath: _dataPath,
+      secrets: _secrets,
+      ...settings
+    } = this.configured
+    return new DuckLakeStorage({
+      ...settings,
+      catalog: { type: "duckdb", path: input.catalogPath },
+      dataPath: input.dataPath,
+      productionFiles: input.productionFiles,
+    })
+  }
+
   async close(): Promise<void> {
     await this.compaction.close()
     await this.connections.close()

@@ -53,6 +53,81 @@ function startProjectServer(
 }
 
 describe("sixb profile commands", () => {
+  // What was taken with a session, such as a branch's copy, lives until it is signed out: a
+  // login that replaced it would leave it live for good. Guard check: drop `signOutReplaced` from
+  // `runLogin` (`commands/login.ts`): the first session is never signed out.
+  test.concurrent("signs out the session a second login replaces, and logs in even when that fails", async () => {
+    const env: Record<string, string | undefined> = {
+      ...(await tempConfigEnvironment()),
+      SIXB_CLI_NO_BROWSER: "1",
+    }
+    const signedOut: string[] = []
+    let issued = 0
+    let signOutFails = false
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url)
+        const authorization = request.headers.get("authorization") ?? ""
+        if (url.pathname === "/api/auth/device-authorizations") {
+          return Response.json(
+            {
+              deviceCode: "dva_test.device-secret",
+              userCode: "BCDF-HJKM",
+              verificationUri: `${url.origin}/auth/device`,
+              verificationUriComplete: `${url.origin}/auth/device?user_code=BCDF-HJKM`,
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              interval: 1,
+            },
+            { status: 201 }
+          )
+        }
+        if (url.pathname === "/api/auth/device-authorizations/token") {
+          issued += 1
+          return Response.json({
+            status: "approved",
+            accessToken: `access-${issued}`,
+            refreshToken: `refresh-${issued}`,
+            expiresIn: 900,
+          })
+        }
+        if (url.pathname === "/api/auth/sign-out") {
+          if (signOutFails) return Response.json({ error: "Unavailable" }, { status: 503 })
+          signedOut.push(authorization)
+          return Response.json({ success: true })
+        }
+        if (!authorization.startsWith("Bearer access-")) {
+          return Response.json({ error: "Unauthorized" }, { status: 401 })
+        }
+        return Response.json({ id: "replaced-project" })
+      },
+    })
+    servers.push(server)
+    const apiUrl = `http://127.0.0.1:${server.port}`
+    const login = () =>
+      runCliToCompletion({
+        cmd: ["bun", cliEntry, "login", apiUrl, "--profile", "work", "--json"],
+        cwd: repoRoot,
+        env,
+      })
+
+    assertCliSucceeded(await login())
+    expect(signedOut).toEqual([])
+
+    assertCliSucceeded(await login())
+    expect(signedOut).toEqual(["Bearer access-1"])
+
+    signOutFails = true
+    const third = await login()
+    assertCliSucceeded(third)
+    expect(third.stderr).toContain("Could not sign out the session this login replaced")
+    const configPath = join(env.XDG_CONFIG_HOME!, "sixb", "config.json")
+    expect(JSON.parse(await readFile(configPath, "utf8")).profiles.work.session).toMatchObject({
+      accessToken: "access-3",
+    })
+  })
+
   test.concurrent("signs in through the browser, renews the session, and signs out", async () => {
     const env: Record<string, string | undefined> = {
       ...(await tempConfigEnvironment()),

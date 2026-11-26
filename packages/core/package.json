@@ -299,6 +299,12 @@
       "import": "./dist/http/index.js",
       "default": "./dist/http/index.js"
     },
+    "./internal/branches": {
+      "types": "./dist/branches/index.d.ts",
+      "bun": "./src/branches/index.ts",
+      "import": "./dist/branches/index.js",
+      "default": "./dist/branches/index.js"
+    },
     "./internal/lake-slices": {
       "types": "./dist/datasets/lake-slices.d.ts",
       "bun": "./src/datasets/lake-slices.ts",

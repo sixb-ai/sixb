@@ -22,6 +22,33 @@ export interface LakeSliceRecord {
   readonly createdAt: Date
   /** When its last token expires. Absent before its first token. */
   readonly lastTokenExpiresAt?: Date
+  /**
+   * SHA-256 of the branch's credential, which reads production only as its person, only for the
+   * branch: its objects' files and its lake. Absent for a slice cut for no branch credential.
+   */
+  readonly credentialHash?: string
+  /**
+   * The groups the copy that made the credential read with, which an access token may narrow: the
+   * credential never reads with more, whatever groups its person joins since.
+   */
+  readonly credentialGroupIds?: readonly string[]
+  /**
+   * What its person signed in with to take the copy: the credential reads nothing once that is
+   * revoked or signed out. Absent for a copy production took for its person itself, such as a
+   * hosted branch's.
+   */
+  readonly credentialMintedBy?: LakeSliceCredentialMinter
+  /**
+   * When the branch confirmed it holds its copy whole. A slice with a credential that no branch
+   * confirmed is the copy of a branch that never got it: it lives only a short grace.
+   */
+  readonly receivedAt?: Date
+}
+
+/** The session or personal access token a branch credential was taken with. */
+export interface LakeSliceCredentialMinter {
+  readonly type: "session" | "accessToken"
+  readonly id: string
 }
 
 /** One token a branch reads a slice's files with. SHA-256 only: the token is never stored. */
@@ -60,6 +87,13 @@ export interface LakeSliceStorage {
   delete(input: LakeSliceRef): Promise<void>
   /** Records a token for the slice and keeps the later of its expiry and the slice's last one. */
   createGrant(record: LakeSliceGrantRecord): Promise<void>
+  /** Records when the branch confirmed it holds its copy, keeping the first time. */
+  markReceived(input: LakeSliceRef & { readonly at: Date }): Promise<void>
+  /** The slice a branch credential belongs to, live or not: the caller decides. */
+  findByCredentialHash(input: {
+    readonly projectId: string
+    readonly credentialHash: string
+  }): Promise<LakeSliceRecord | null>
   /** Returns expired grants too; the caller decides whether one still serves. */
   findGrantByTokenHash(input: {
     readonly projectId: string

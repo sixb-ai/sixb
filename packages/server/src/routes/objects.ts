@@ -259,6 +259,8 @@ async function objectFileContentResponse(
 ) {
   const sixb = requireRequestSixb(context)
 
+  // On a branch from production, the host's blob storage reads the copied objects' files through
+  // production, as the person who copied it.
   return createContextualFileContentResponse({
     blobStorage: host.blobStorage,
     query: context.query,

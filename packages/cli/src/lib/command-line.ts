@@ -64,6 +64,16 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Also open the app in a desktop window",
     kind: "boolean",
   },
+  from: {
+    syntax: "--from <production>",
+    summary: "dev: run this git branch on a copy of what you read in production",
+    kind: "string",
+  },
+  refresh: {
+    syntax: "--refresh",
+    summary: "dev --from production: take a new copy, discarding the branch's writes",
+    kind: "boolean",
+  },
   "trusted-proxies": {
     syntax: "--trusted-proxies <ranges>",
     summary: "Proxies trusted for client addresses (default: private)",
@@ -344,6 +354,8 @@ const commandTree: readonly CommandNode[] = [
       "subagent-concurrency-per-run",
       "app-public-origin",
       "desktop",
+      "from",
+      "refresh",
     ],
     repeatable: ["concurrency"],
   }),

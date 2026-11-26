@@ -101,6 +101,7 @@ export type {
   LakeWriteSession,
   LatestVersionsSince,
   ListLatestVersionsSinceInput,
+  OpenLakeBranchInput,
   ReadDatasetChangesInput,
   ReadDatasetRowsInput,
 } from "./types"

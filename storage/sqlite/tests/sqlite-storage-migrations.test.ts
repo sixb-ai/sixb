@@ -235,6 +235,7 @@ const shippedMigrationIds = [
   "113-snapshot-load-executions",
   "114-lake-slices",
   "115-skipped-action-effects",
+  "116-lake-slice-credentials",
 ]
 
 afterEach(async () => {

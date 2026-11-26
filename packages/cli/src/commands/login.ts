@@ -1,9 +1,9 @@
 import { hostname } from "node:os"
 import { CliError, createInstanceApiClient, writeJson } from "@sixb/cli-core"
-import { type SixbSessionTokens, startSixbDeviceLogin } from "@sixb/client"
+import { type SixbSessionTokens, signOutSixbSession, startSixbDeviceLogin } from "@sixb/client"
 import { normalizeApiUrl } from "../lib/api-client"
 import { openUrl } from "../lib/open-url"
-import { assertProfileName, updateConfig } from "../lib/profiles"
+import { assertProfileName, readConfig, type SixbProfile, updateConfig } from "../lib/profiles"
 import { keyValueResultView, renderStatic, withTask } from "../ui"
 import { canRunLive } from "../ui/live/can-run-live"
 import { glyph, paint, palette, tone } from "../ui/theme"
@@ -41,6 +41,7 @@ export async function runLogin(options: LoginCommandOptions = {}): Promise<void>
 
   const profile = options.profile?.trim() || projectId
   assertProfileName(profile)
+  const replaced = (await readConfig()).profiles[profile]
   await updateConfig((config) => ({
     version: 1,
     currentProfile: profile,
@@ -54,6 +55,10 @@ export async function runLogin(options: LoginCommandOptions = {}): Promise<void>
       },
     },
   }))
+
+  // The session this login replaced would stay live in production, and so would what was taken
+  // with it, such as a branch's copy: it signs out.
+  if (replaced?.session) await signOutReplaced(replaced)
 
   const result = { profile, projectId, apiUrl, authenticated: Boolean(token ?? session) }
   if (options.json) {
@@ -74,6 +79,36 @@ export async function runLogin(options: LoginCommandOptions = {}): Promise<void>
       ],
     })
   )
+}
+
+/** Best effort: the new login holds whatever happens to the old session. */
+async function signOutReplaced(replaced: SixbProfile): Promise<void> {
+  let tokens = replaced.session ?? null
+
+  try {
+    await signOutSixbSession({
+      baseUrl: replaced.apiUrl,
+      // The profile already holds the new login: the old session lives here only.
+      store: {
+        load: () => tokens,
+        save: (renewed) => {
+          tokens = renewed
+        },
+        clear: () => {
+          tokens = null
+        },
+      },
+      fetch: Object.assign(
+        (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+          fetch(input, { ...init, signal: AbortSignal.timeout(10_000) }),
+        { preconnect: fetch.preconnect }
+      ),
+    })
+  } catch (error) {
+    process.stderr.write(
+      `[SixbCLI] Could not sign out the session this login replaced: ${error instanceof Error ? error.message : String(error)}. Revoke it from your account's sessions in the app.\n`
+    )
+  }
 }
 
 async function askForApiUrl(): Promise<string> {

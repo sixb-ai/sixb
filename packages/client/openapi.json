@@ -1944,6 +1944,10 @@
       "description": "Webhook run history"
     },
     {
+      "name": "Branches",
+      "description": "What `sixb dev --from production` takes from production"
+    },
+    {
       "name": "Datasets",
       "description": "Dataset definitions"
     },
@@ -22002,6 +22006,24 @@
             }
           }
         }
+      }
+    },
+    "/api/branches/copy": {
+      "post": {
+        "summary": "Copy what you read for a branch: the snapshot, then the lake slice of the same moment",
+        "tags": ["Branches"],
+        "operationId": "copyForBranch",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ]
       }
     },
     "/api/syncs": {

@@ -52,6 +52,53 @@ export function runLakeSliceStorageContractSuite<TStorage extends LakeSliceStora
       })
     })
 
+    test("finds a slice by its branch credential, in its project only", async () => {
+      await withStorage(async (storage) => {
+        const credential = {
+          credentialHash: "c".repeat(64),
+          credentialGroupIds: ["developers"],
+          credentialMintedBy: { type: "accessToken" as const, id: "tok_1" },
+        }
+        await storage.create({ ...slice(), ...credential })
+        await storage.create({ ...slice(), id: "slice_2" })
+
+        expect(
+          await storage.findByCredentialHash({ projectId, credentialHash: "c".repeat(64) })
+        ).toEqual({ ...slice(), ...credential })
+        expect(
+          await storage.findByCredentialHash({ projectId: "other", credentialHash: "c".repeat(64) })
+        ).toBeNull()
+        expect(
+          await storage.findByCredentialHash({ projectId, credentialHash: "d".repeat(64) })
+        ).toBeNull()
+        expect(await storage.get({ projectId, id: "slice_2" })).toEqual({
+          ...slice(),
+          id: "slice_2",
+        })
+      })
+    })
+
+    test("keeps when a branch first confirmed it received its copy", async () => {
+      await withStorage(async (storage) => {
+        await storage.create({ ...slice(), credentialHash: "c".repeat(64) })
+        const first = new Date("2026-01-01T00:05:00.000Z")
+        await storage.markReceived({ projectId, id: slice().id, at: first })
+        await storage.markReceived({
+          projectId,
+          id: slice().id,
+          at: new Date("2026-01-01T00:09:00.000Z"),
+        })
+        // Another project's slice of the same id is not this one.
+        await storage.markReceived({ projectId: "other", id: slice().id, at: new Date(0) })
+
+        expect(await storage.get({ projectId, id: slice().id })).toEqual({
+          ...slice(),
+          credentialHash: "c".repeat(64),
+          receivedAt: first,
+        })
+      })
+    })
+
     test("refuses a second slice or grant with the same id, and a grant of no slice", async () => {
       await withStorage(async (storage) => {
         await storage.create(slice())

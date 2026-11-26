@@ -7,9 +7,18 @@ import {
 } from "@sixb/app/server"
 import { createSixbServer, requestTimingOptionsFromEnv } from "@sixb/server"
 import {
+  type BranchFromProduction,
+  branchFromProduction,
+  type CopyLoadReport,
+  currentGitBranch,
+  localGitBranches,
+} from "../lib/branch-from-production"
+import {
   apiDocsUrl,
   apiEventsUrl,
   apiUrl,
+  type BrowserTopology,
+  exposedBeyondThisMachine,
   resolveBrowserTopology,
   servedUrl,
 } from "../lib/browser-topology"
@@ -45,6 +54,10 @@ export interface DevOptions {
   subagentConcurrencyPerRun?: string
   /** Also open the app in a desktop window. The supervisor does, so the window outlives restarts. */
   desktop?: boolean
+  /** `"production"`: run this git branch on a copy of what you read in production. */
+  from?: string
+  /** With `from`: take a new copy, discarding what the branch wrote to the last one. */
+  refresh?: boolean
 }
 
 export async function runDevRuntime(options: DevOptions = {}) {
@@ -69,6 +82,7 @@ export async function runDevRuntime(options: DevOptions = {}) {
 
   let customAppServer: CustomAppDevServer | null = null
   let sixb: LoadedSixbHost | null = null
+  let branchBase: LoadedSixbHost | null = null
   let runtime: Awaited<ReturnType<typeof startSixbRuntime>> | null = null
   let runtimeOwnsProviders = false
   const abort = new AbortController()
@@ -84,10 +98,10 @@ export async function runDevRuntime(options: DevOptions = {}) {
     await generateProjectTypes({ entry })
     abort.signal.throwIfAborted()
     step("Loading project")
-    const host: LoadedSixbHost = await loadSixbFromEntry(entry)
-    sixb = host
-    abort.signal.throwIfAborted()
     const projectRoot = dirname(resolve(entry))
+    const loaded: LoadedSixbHost = await loadSixbFromEntry(entry)
+    sixb = loaded
+    abort.signal.throwIfAborted()
 
     const topology = resolveBrowserTopology({
       role: "dev",
@@ -98,6 +112,18 @@ export async function runDevRuntime(options: DevOptions = {}) {
       apiPublicOrigin: options.apiPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
     })
+    const branch =
+      options.from === "production"
+        ? await openBranch(loaded, projectRoot, topology, (done, progress) =>
+            send({ type: "loading", done, progress })
+          )
+        : null
+    const host = branch?.host ?? loaded
+    if (branch) {
+      // The project's own providers serve nothing on the branch, but the runtime stops only its host's.
+      branchBase = loaded
+      sixb = host
+    }
     const customApp = await createCustomApp({
       rootDir: projectRoot,
       apiBaseUrl: topology.apiPublicOrigin,
@@ -163,7 +189,11 @@ export async function runDevRuntime(options: DevOptions = {}) {
         { type: "lake", worker: runtime.lakeWorker },
         { type: "render", worker: runtime.renderWorker },
       ].flatMap(({ type, worker }) => (worker ? [{ type, concurrency: worker.concurrency }] : [])),
-      warnings: devApp.warning ? [devApp.warning, ...runtime.warnings] : runtime.warnings,
+      warnings: [
+        ...(branch ? branchNotice(branch, apiUrl(topology)) : []),
+        ...(devApp.warning ? [devApp.warning] : []),
+        ...runtime.warnings,
+      ],
     }
     task?.stop()
     if (!reportOnly) await renderStatic(devView(view))
@@ -196,6 +226,7 @@ export async function runDevRuntime(options: DevOptions = {}) {
     await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
     await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
     if (sixb && !runtimeOwnsProviders) await stopSixbProviders(sixb)
+    if (branchBase) await stopSixbProviders(branchBase)
     process.off("SIGINT", requestShutdown)
     process.off("SIGTERM", requestShutdown)
   }
@@ -215,4 +246,46 @@ export async function startDevApp(
     if (!(error instanceof AppPackagesMissingError)) throw error
     return { server: null, warning: error.message.replace("[SixbCustomApp] ", "") }
   }
+}
+
+/**
+ * This git branch on the copy the supervisor fetched, or the one it reused, run as the person who
+ * took it. No production session here: the branch reaches production only with its own credential.
+ */
+async function openBranch(
+  host: LoadedSixbHost,
+  projectRoot: string,
+  topology: BrowserTopology,
+  onLoading: CopyLoadReport
+): Promise<BranchFromProduction> {
+  // Every request runs as that person, unauthenticated: only this machine may send them.
+  const exposed = exposedBeyondThisMachine(topology)
+  if (exposed.length > 0) {
+    throw new Error(
+      `[SixbCLI] A branch from production listens on this machine only, since every request runs as you: drop ${exposed.join(", ")} (a flag, SIXB_API_PUBLIC_ORIGIN or SIXB_APP_PUBLIC_ORIGIN).`
+    )
+  }
+
+  return branchFromProduction({
+    host,
+    projectRoot,
+    // The branch the supervisor started: a checkout since does not change it.
+    gitBranch: process.env.SIXB_BRANCH ?? (await currentGitBranch(projectRoot)),
+    gitBranches: await localGitBranches(projectRoot),
+    // The supervisor's startup deadline waits while the copy loads, and says so.
+    onLoading,
+  })
+}
+
+/** What the startup view says of a branch: where its data comes from, and what is off on it. */
+function branchNotice(branch: BranchFromProduction, apiUrl: string): string[] {
+  const age = Math.max(0, Math.round((Date.now() - Date.parse(branch.takenAt)) / 60_000))
+  const when = age < 60 ? `${age} min ago` : `${Math.round(age / 60)} h ago`
+  return [
+    `Branch: production's data as you read it, ${branch.copied ? "copied now" : `copied ${when}`} (${branch.takenAt}). --refresh takes a new copy.`,
+    "Off on this branch: connectors, action writebacks and effects, syncs, inbound webhooks, emails, cron schedules and directory checks. Your project's own fetch calls and the agent's web tools still go out.",
+    `Run a cron schedule on this branch: sixb schedules run <id> --api-url ${apiUrl}`,
+    ...(branch.lake === "in place" ? [] : [`Datasets: ${branch.lake}.`]),
+    ...branch.dropped.map((gitBranch) => `Dropped the copy of deleted git branch ${gitBranch}.`),
+  ]
 }

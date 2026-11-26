@@ -6,7 +6,12 @@ import type { LakeFile, LakeForks, LakeSliceVersion } from "../lake-storage/fork
 import type { DatasetVersionRef, LakeStorage } from "../lake-storage/types"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
 import type { SecurityDefinitionCatalog } from "../security/registry"
-import type { LakeSliceRecord, LakeSliceStorage, Storage } from "../storage"
+import type {
+  LakeSliceCredentialMinter,
+  LakeSliceRecord,
+  LakeSliceStorage,
+  Storage,
+} from "../storage"
 import type { DatasetDefinition } from "./types"
 
 /**
@@ -28,6 +33,21 @@ export const LAKE_SLICE_FILES_ROUTE_PREFIX = "/api/lake/slice-files/"
  * long as a branch may go unopened. Production keeps its versions and its files that long.
  */
 export const LAKE_SLICE_KEEP_MS = 14 * 24 * 60 * 60_000
+
+/**
+ * How long a branch's copy may go unconfirmed: long enough to stream and spool the largest copy.
+ * Past it, the slice of a copy its branch never confirmed holding is no longer live.
+ */
+export const UNRECEIVED_COPY_LIVES_MS = 60 * 60_000
+
+/** Whether a slice is a branch's copy that its branch never confirmed, and its grace is over. */
+export function isUnreceivedCopy(slice: LakeSliceRecord, now = new Date()): boolean {
+  return (
+    slice.credentialHash !== undefined &&
+    slice.receivedAt === undefined &&
+    slice.createdAt.getTime() + UNRECEIVED_COPY_LIVES_MS <= now.getTime()
+  )
+}
 
 const DEFAULT_TOKEN_EXPIRY_MS = 15 * 60_000
 const LONGEST_TOKEN_EXPIRY_MS = 24 * 60 * 60_000
@@ -70,6 +90,12 @@ export interface WriteLakeSliceOptions {
    * from it.
    */
   readonly pinned?: readonly DatasetVersionRef[]
+  /** SHA-256 of the branch's credential, recorded with the slice it reads production for. */
+  readonly credentialHash?: string
+  /** The groups the credential reads with at most: those the copy read with. */
+  readonly credentialGroupIds?: readonly string[]
+  /** What the person signed in with: the credential dies when it is revoked or signed out. */
+  readonly credentialMintedBy?: LakeSliceCredentialMinter
 }
 
 export interface IssueLakeSliceTokenInput {
@@ -183,6 +209,9 @@ export async function writeLakeSlice(
           projectId: host.id,
           userId,
           branch: input.branch,
+          ...(input.credentialHash ? { credentialHash: input.credentialHash } : {}),
+          ...(input.credentialGroupIds ? { credentialGroupIds: input.credentialGroupIds } : {}),
+          ...(input.credentialMintedBy ? { credentialMintedBy: input.credentialMintedBy } : {}),
           point: input.point,
           versions: refs,
           files: [...files],
@@ -283,17 +312,18 @@ export async function openLakeSliceFile(
 
 /**
  * The slices a branch may still open: cut, or holding a token, less than `LAKE_SLICE_KEEP_MS`
- * ago. Production's retention keeps their versions and their files.
+ * ago, less a copy no branch confirmed. Production's retention keeps their versions and files.
  */
 export async function liveLakeSlices(
   host: Pick<LakeSliceHost, "id" | "storage">
 ): Promise<readonly LakeSliceRecord[]> {
-  return (
+  const now = new Date()
+  const live =
     (await host.storage.lakeSlices?.listLive({
       projectId: host.id,
-      liveAfter: new Date(Date.now() - LAKE_SLICE_KEEP_MS),
+      liveAfter: new Date(now.getTime() - LAKE_SLICE_KEEP_MS),
     })) ?? []
-  )
+  return live.filter((slice) => !isUnreceivedCopy(slice, now))
 }
 
 /** Deletes the files production made for slices no branch may still open. Returns how many. */

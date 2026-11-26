@@ -307,6 +307,26 @@ export interface LakeStorage {
   /** Set when this lake is a branch's: which versions the branch wrote. */
   readonly fork?: LakeFork
 
+  /**
+   * The same lake, on a branch: its catalog is the slice production cut, what the branch writes
+   * goes under `dataPath`, and production's files are read through production. Optional: a lake
+   * without it gives a branch no production dataset.
+   */
+  openBranch?(input: OpenLakeBranchInput): LakeStorage
+
   /** Release external resources. Optional: a provider that owns none omits it. */
   close?(): void | Promise<void>
+}
+
+export interface OpenLakeBranchInput {
+  /** The slice's catalog, as production sent it. */
+  readonly catalogPath: string
+  /** Where the branch's own files go. */
+  readonly dataPath: string
+  /** Production's route for the slice's files, and the token that reads them. */
+  readonly productionFiles: {
+    readonly url: string
+    readonly token: () => string | Promise<string>
+    readonly cacheDirectory: string
+  }
 }

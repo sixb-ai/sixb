@@ -125,6 +125,7 @@ Run these from your project root:
 | `bun create sixb my-app` | Create a new project. |
 | `sixb init [directory]` | Initialize a project in a directory. |
 | `sixb dev` | Start the local API, app, and workers. |
+| `sixb dev --from production` | Run this git branch on a copy of what you read in production. `--refresh` takes a new copy. See [Test on production data](production-data.md). |
 | `sixb build` | Build the runtime and browser assets into `.sixb/dist`. |
 | `sixb desktop build` | Package the deployed app as a [desktop app](../apps/desktop.md) for this machine. |
 | `sixb typegen` | Generate ontology types for typed queries. |

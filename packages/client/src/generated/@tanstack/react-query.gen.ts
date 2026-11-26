@@ -21,6 +21,7 @@ import {
   captureActivity,
   clearArtifactState,
   completeFileUpload,
+  copyForBranch,
   countObjects,
   createAgentThread,
   createAiLimitPolicy,
@@ -274,6 +275,7 @@ import type {
   CompleteFileUploadData,
   CompleteFileUploadError,
   CompleteFileUploadResponse,
+  CopyForBranchData,
   CountObjectsData,
   CountObjectsError,
   CountObjectsResponse,
@@ -2907,6 +2909,25 @@ export const getLakeHealthOptions = (options?: Options<GetLakeHealthData>) =>
     },
     queryKey: getLakeHealthQueryKey(options),
   })
+
+/**
+ * Copy what you read for a branch: the snapshot, then the lake slice of the same moment
+ */
+export const copyForBranchMutation = (
+  options?: Partial<Options<CopyForBranchData>>
+): UseMutationOptions<unknown, DefaultError, Options<CopyForBranchData>> => {
+  const mutationOptions: UseMutationOptions<unknown, DefaultError, Options<CopyForBranchData>> = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await copyForBranch({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const listSyncsQueryKey = (options?: Options<ListSyncsData>) =>
   createQueryKey("listSyncs", options)

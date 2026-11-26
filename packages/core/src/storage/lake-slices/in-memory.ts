@@ -47,6 +47,25 @@ export class InMemoryLakeSliceStorage implements LakeSliceStorage {
     }
   }
 
+  async markReceived(input: LakeSliceRef & { readonly at: Date }): Promise<void> {
+    const key = rowKey(input.projectId, input.id)
+    const slice = this.slices.get(key)
+    if (slice && !slice.receivedAt)
+      this.slices.set(key, { ...slice, receivedAt: new Date(input.at) })
+  }
+
+  async findByCredentialHash(input: {
+    readonly projectId: string
+    readonly credentialHash: string
+  }): Promise<LakeSliceRecord | null> {
+    for (const slice of this.slices.values()) {
+      if (slice.projectId === input.projectId && slice.credentialHash === input.credentialHash) {
+        return structuredClone(slice)
+      }
+    }
+    return null
+  }
+
   async findGrantByTokenHash(input: {
     readonly projectId: string
     readonly tokenHash: string

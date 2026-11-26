@@ -1,5 +1,13 @@
 import { dirname, resolve } from "node:path"
+import {
+  BRANCH_DATA_FROM_ENV,
+  BRANCH_NAME_ENV,
+  BRANCH_RUNTIME_ENV,
+} from "@sixb/core/internal/runtime"
+import { checkoutOf, currentGitBranch, fetchBranchCopy } from "../lib/branch-from-production"
+import { connect } from "../lib/connection"
 import { runDevSupervisor } from "../lib/dev-supervisor"
+import { resolveProfile } from "../lib/profiles"
 import type { DevOptions } from "./dev-runner"
 import { assertDevEnv } from "./env"
 
@@ -31,6 +39,51 @@ export async function runDev(options: DevOptions = {}) {
     }
     process.exit(process.exitCode ?? 0)
   }
-  await assertDevEnv(dirname(resolve(options.entry ?? "sixb.config.ts")))
+  const root = dirname(resolve(options.entry ?? "sixb.config.ts"))
+  await assertDevEnv(root)
+
+  // Core reads the branch when it loads, in each child: say it before any child starts.
+  if (options.from !== undefined || options.refresh) {
+    if (options.from !== "production") {
+      throw new Error(
+        "[SixbCLI] `sixb dev --from` takes `production`: a branch copies its data from production. Add --refresh to take a new copy."
+      )
+    }
+    const gitBranch = await currentGitBranch(root)
+    // Signed in as the developer here, once: the processes that run the branch's code never are.
+    await fetchBranchCopy({
+      projectRoot: root,
+      gitBranch,
+      refresh: options.refresh === true,
+      profile: await profileName(),
+      connect: async () => {
+        const connection = await connect({})
+        if (!("client" in connection)) {
+          throw new Error(
+            `[SixbCLI] \`sixb dev --from production\` copies production as you: sign in with \`sixb login <production api url>\` (${connection.apiUrl || "no profile"}: ${connection.reason}).`
+          )
+        }
+        return { apiUrl: connection.apiUrl, authorization: () => connection.authorization() }
+      },
+    })
+    process.env[BRANCH_NAME_ENV] = gitBranch
+    process.env[BRANCH_DATA_FROM_ENV] = "production"
+    process.env[BRANCH_RUNTIME_ENV] = await checkoutOf(root)
+
+    // Each child inherits this environment: the branch's code gets none of the sign-in that took
+    // the copy, only the branch's own credential. Blank, not deleted: each child is a new Bun
+    // process, which loads `.env*` again and would fill a missing variable from `.env.local`, but
+    // never one that is set. `resolveProfile` reads a blank one as unset.
+    for (const name of PRODUCTION_SIGN_IN_ENV) process.env[name] = ""
+  }
   await runDevSupervisor(options)
+}
+
+/** What signs the CLI in to production from the environment, as `resolveProfile` reads it. */
+const PRODUCTION_SIGN_IN_ENV = ["SIXB_API_URL", "SIXB_API_TOKEN", "SIXB_TOKEN", "SIXB_PROFILE"]
+
+/** Who the CLI is signed in as, read without the network: a copy is reused only by them. */
+async function profileName(): Promise<string> {
+  const profile = await resolveProfile({})
+  return `${profile.profile ?? profile.tokenSource ?? "no sign-in"} at ${profile.apiUrl}`
 }

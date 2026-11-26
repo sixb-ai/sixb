@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path"
 import type { DevOptions } from "../commands/dev-runner"
 import { canRunLive } from "../ui/live/can-run-live"
 import { DESKTOP_RUNNER_ENTRY, loadDesktop } from "./desktop"
-import { DEV_UI_ENV, type DevChildMessage } from "./dev-messages"
+import { DEV_UI_ENV, type DevChildMessage, loadingLine } from "./dev-messages"
 import { watchDevSource } from "./dev-watch"
 import { errorMessage } from "./errors"
 
@@ -20,7 +20,7 @@ export interface DevReporter {
   message(message: DevChildMessage, pid: number | undefined): void
   restarting(filename: string | undefined): void
   exited(code: number | null): void
-  timedOut(): void
+  timedOut(timeout: DevTimeout): void
   error(text: string): void
   stopping(): void
   stop(): Promise<void>
@@ -33,6 +33,73 @@ export interface DevControls {
   quit(): void
 }
 
+/** How long a dev process has to be ready, besides loading a branch's copy. */
+export const DEV_STARTUP_TIMEOUT_MS = 60_000
+
+/** How long a branch's copy may load without progress before its dev process is stopped. */
+export const DEV_LOAD_STALL_MS = 5 * 60_000
+
+/** Why the supervisor stopped a dev process that did not become ready. */
+export interface DevTimeout {
+  readonly message: string
+  readonly remediation: string
+}
+
+const STARTUP_TIMED_OUT: DevTimeout = {
+  message: "Startup timed out.",
+  remediation: "Edit a source file to retry.",
+}
+
+const LOAD_STALLED: DevTimeout = {
+  message: `Loading this branch's copy made no progress for ${DEV_LOAD_STALL_MS / 60_000} minutes.`,
+  remediation:
+    "Edit a source file to retry, or run `sixb dev --from production --refresh` for a new copy.",
+}
+
+/**
+ * A dev process's startup deadline. A branch's copy loading replaces it with a stall deadline: a
+ * copy of millions of objects loads for minutes, and a process killed mid-load would load it
+ * again, and be killed again, on every start. The load moves the stall deadline each time it
+ * reads further into the copy, and, once it has read the whole copy, each time it reports that it
+ * is still at work. Once the copy is loaded, the rest of the startup has its own minute.
+ */
+export function startupDeadline(onExpired: (timeout: DevTimeout) => void): {
+  observe(message: DevChildMessage): void
+  clear(): void
+} {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let bytesRead = -1
+  const arm = (ms: number, timeout: DevTimeout) => {
+    clearTimeout(timer)
+    timer = setTimeout(() => onExpired(timeout), ms)
+  }
+
+  arm(DEV_STARTUP_TIMEOUT_MS, STARTUP_TIMED_OUT)
+
+  return {
+    observe(message) {
+      if (message.type === "ready") {
+        clearTimeout(timer)
+        return
+      }
+      if (message.type !== "loading") return
+
+      if (message.done) {
+        arm(DEV_STARTUP_TIMEOUT_MS, STARTUP_TIMED_OUT)
+        return
+      }
+
+      const { progress } = message
+      const moved = progress.bytesRead > bytesRead || progress.bytesRead >= progress.bytes
+      bytesRead = progress.bytesRead
+      if (moved) arm(DEV_LOAD_STALL_MS, LOAD_STALLED)
+    },
+    clear() {
+      clearTimeout(timer)
+    },
+  }
+}
+
 /** The lines `sixb dev` prints where no live footer can be drawn. */
 export function plainDevReporter(root: string): DevReporter {
   return {
@@ -42,6 +109,7 @@ export function plainDevReporter(root: string): DevReporter {
     },
     message(message, pid) {
       if (message.type === "ready") console.log(`[SixbDev] Ready (pid ${pid}). Watching ${root}`)
+      if (message.type === "loading") console.log(`[SixbDev] ${loadingLine(message)}`)
     },
     restarting(filename) {
       console.log(`[SixbDev] Source changed${filename ? `: ${filename}` : ""}. Restarting…`)
@@ -49,8 +117,8 @@ export function plainDevReporter(root: string): DevReporter {
     exited(code) {
       console.error(`[SixbDev] Dev process exited (${code}). Waiting for source changes.`)
     },
-    timedOut() {
-      console.error("[SixbDev] Startup timed out. Edit a source file to retry.")
+    timedOut(timeout) {
+      console.error(`[SixbDev] ${timeout.message} ${timeout.remediation}`)
     },
     error(text) {
       console.error(`[SixbDev] ${text}`)
@@ -75,7 +143,7 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
   let appWatched = false
   let started = false
   let timer: ReturnType<typeof setTimeout> | undefined
-  let startupTimer: ReturnType<typeof setTimeout> | undefined
+  let startup: ReturnType<typeof startupDeadline> | undefined
   let complete!: () => void
   const finished = new Promise<void>((resolve) => {
     complete = resolve
@@ -110,7 +178,7 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
   }
 
   async function stopChild() {
-    clearTimeout(startupTimer)
+    startup?.clear()
     const current = child
     if (!current) return
     // Give the runtime ownership of graceful shutdown. Kill the isolated process group
@@ -169,8 +237,8 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
           if (child !== current || !message || typeof message !== "object") return
           if (!("type" in message)) return
           reporter.message(message as DevChildMessage, proc.pid)
+          startup?.observe(message as DevChildMessage)
           if (message.type === "ready") {
-            clearTimeout(startupTimer)
             appWatched = "watchesApp" in message && message.watchesApp === true
             const app = servedApp(message)
             if (desktop && app && !desktopWindow) {
@@ -193,17 +261,17 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
           }
         })
         child = current
-        startupTimer = setTimeout(() => {
+        startup = startupDeadline((timeout) => {
           if (child === current) {
-            reporter.timedOut()
+            reporter.timedOut(timeout)
             terminate(current, "SIGKILL")
           }
-        }, 60_000)
+        })
         void current.exited
           .then((code) => {
             terminate(current, "SIGKILL")
             if (child !== current) return
-            clearTimeout(startupTimer)
+            startup?.clear()
             child = null
             appWatched = false
             if (!stopping && !restarting) reporter.exited(code)

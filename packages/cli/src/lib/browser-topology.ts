@@ -183,3 +183,25 @@ function parsePort(value: string | undefined, label: string): number | undefined
 function toKebabCase(value: string): string {
   return value.replaceAll("_", "-")
 }
+
+/**
+ * What a branch from production would expose beyond this machine: a bind address or a public
+ * origin, from a flag or from `SIXB_API_PUBLIC_ORIGIN` / `SIXB_APP_PUBLIC_ORIGIN`. Every request
+ * on such a branch runs as the person who copied it, so it answers this machine only.
+ */
+export function exposedBeyondThisMachine(topology: BrowserTopology): string[] {
+  return [topology.host, topology.apiHost, topology.apiPublicOrigin, topology.appPublicOrigin]
+    .filter((value): value is string => value !== null)
+    .filter((value) => !namesThisMachine(value))
+}
+
+function namesThisMachine(value: string): boolean {
+  const host = (/^[a-z]+:\/\//i.test(value) ? new URL(value).hostname : value).toLowerCase()
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "127.0.0.1" ||
+    host === "[::1]" ||
+    host === "::1"
+  )
+}

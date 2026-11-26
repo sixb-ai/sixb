@@ -960,6 +960,16 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: true,
   },
+  // `sixb dev --from production` copies what its person reads. A personal access token copies as
+  // its person, as `sixb login` does; a service account's is refused, since a branch copies what
+  // one person reads. The branch then holds only its own credential (see `branches/credential.ts`).
+  {
+    operationId: "copyForBranch",
+    method: "POST",
+    path: "/api/branches/copy",
+    accessToken: true,
+    agentApi: false,
+  },
   // How the lake stores each dataset the caller may view: counts and sizes, never rows.
   {
     operationId: "getLakeHealth",

@@ -26,12 +26,13 @@ import { OntologyRegistry } from "../ontology"
 import type { ObjectType } from "../ontology/types"
 import type { UserRef } from "../ontology/user-ref"
 import type { ProjectionDefinitionCatalog } from "../projections"
-import type { SixbHost } from "../runtime/host"
+import type { SixbHostView } from "../runtime/host"
 import { isBoundSixb } from "../runtime/sixb"
 import type { AppliedMarkings } from "../security/applied-markings"
 import { appliedSourcesKey } from "../security/applied-markings"
 import { getAppliedMarkings } from "../security/applied-markings-host"
 import type { UserRecord } from "../storage/auth"
+import type { LakeSliceCredentialMinter } from "../storage/lake-slices"
 import type { ObjectRow } from "../storage/objects/types"
 import type { ActiveOntologySource } from "../storage/ontology"
 import {
@@ -88,6 +89,12 @@ export interface SnapshotLakeOptions {
   readonly path: string
   /** The branch the slice is for. */
   readonly branch: string
+  /** SHA-256 of the branch's credential, which reads production for this slice only. */
+  readonly credentialHash?: string
+  /** The groups the credential reads with at most. */
+  readonly credentialGroupIds?: readonly string[]
+  /** What the person signed in with, which the credential dies with. */
+  readonly credentialMintedBy?: LakeSliceCredentialMinter
   /** Receives the slice and its first token, before the snapshot's end record. */
   readonly onSlice: (slice: SnapshotLakeSlice) => void | Promise<void>
 }
@@ -123,7 +130,7 @@ const DEFAULT_PAGE_SIZE = 2_000
 const MAX_PAGE_SIZE = 10_000
 const MEMBER_PAGE_SIZE = 1_000
 
-export function hostSnapshotSource(host: SixbHost): SnapshotSource {
+export function hostSnapshotSource(host: SixbHostView): SnapshotSource {
   const ontology = host.definitions.ontology
   if (!(ontology instanceof OntologyRegistry)) {
     throw new Error("[Sixb] A snapshot reads a host built from an ontology registry.")
@@ -410,6 +417,9 @@ async function cutLakeSlice(
     point,
     path: options.path,
     branch: options.branch,
+    ...(options.credentialHash ? { credentialHash: options.credentialHash } : {}),
+    ...(options.credentialGroupIds ? { credentialGroupIds: options.credentialGroupIds } : {}),
+    ...(options.credentialMintedBy ? { credentialMintedBy: options.credentialMintedBy } : {}),
     ...(pinned.length === 0 ? {} : { pinned }),
   })
 

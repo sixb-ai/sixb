@@ -7283,6 +7283,13 @@ export type GetLakeHealthResponses = {
 
 export type GetLakeHealthResponse = GetLakeHealthResponses[keyof GetLakeHealthResponses]
 
+export type CopyForBranchData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/branches/copy"
+}
+
 export type ListSyncsData = {
   body?: never
   path?: never

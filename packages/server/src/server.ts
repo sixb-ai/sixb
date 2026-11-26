@@ -1,11 +1,22 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
-import type { OntologyMaintenanceHandle, SixbHostView } from "@sixb/core"
+import {
+  type OntologyMaintenanceHandle,
+  resolveAuthorizationContext,
+  type SixbHostView,
+} from "@sixb/core"
 import { MAX_FILE_UPLOAD_BYTES } from "@sixb/core/blob-storage"
 import { ACTION_RUN_DRAIN_TIMEOUT_MS } from "@sixb/core/internal/actions"
 import { bindAgentRunRequestExecution } from "@sixb/core/internal/agent-execution"
 import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
 import { CSRF_HEADER_NAME, setRequestClientAddress } from "@sixb/core/internal/auth"
+import {
+  authorizeBranchCredential,
+  BRANCH_CREDENTIAL_PREFIX,
+  branchRuntimeOf,
+  isBranchCredentialRoute,
+  isBranchSliceRelease,
+} from "@sixb/core/internal/branches"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { findDatasetIngestRuntime, setApiPublicOrigin } from "@sixb/core/internal/runtime"
 import { checkPipelineMarkings, warmAppliedMarkings } from "@sixb/core/internal/security"
@@ -35,6 +46,7 @@ import {
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "./auth/csrf"
 import type { SixbAuthExperienceOptions } from "./auth/experience"
 import { ServerAuthGuard } from "./auth/guard"
+import { jsonAuthRequiredResponse, jsonForbiddenResponse } from "./auth/responses"
 import { type RunTokenDecision, requestRunToken, resolveRunTokenRequest } from "./auth/run-token"
 import { SESSION_ACTIVITY_HEADER_NAME } from "./auth/session-activity"
 import { createSessionRenewalCookieHeaders } from "./auth/session-cookies"
@@ -66,6 +78,7 @@ import {
   declaredBodyTooLarge,
   limitRequestBody,
   RequestBodyTooLargeError,
+  setServedRequest,
 } from "./utils/request-body"
 import {
   markRequestAuthorized,
@@ -452,6 +465,74 @@ export function createSixbApi(server: SixbServer) {
         }
       }
 
+      // A branch's credential reads production as its person, for the branch alone: the files of
+      // its objects and its lake slice. Any other route refuses it.
+      const branchCredential = bearerOf(request)
+      if (branchCredential?.startsWith(BRANCH_CREDENTIAL_PREFIX)) {
+        const denied = (response: Response) => ({
+          auth: { kind: "deny" as const, response },
+          sharedAccessCookies: null,
+          sharedSession: null,
+          sixb: null,
+        })
+        const pathname = new URL(request.url).pathname
+        if (!isBranchCredentialRoute(request.method, pathname)) {
+          return denied(
+            jsonForbiddenResponse(
+              "A branch credential reads only its objects' files and its lake slice"
+            )
+          )
+        }
+        // Releasing its slice reads nothing: the route checks the credential owns it.
+        if (isBranchSliceRelease(request.method, pathname)) {
+          return {
+            auth: { kind: "allow" as const, session: null },
+            sharedAccessCookies: null,
+            sharedSession: null,
+            sixb: null,
+          }
+        }
+        const authorized = await authorizeBranchCredential(host, branchCredential)
+        if (!authorized) return denied(jsonAuthRequiredResponse())
+        return {
+          auth: { kind: "allow" as const, session: null },
+          sharedAccessCookies: null,
+          sharedSession: null,
+          sixb: bindRequestExecution(host, {
+            request,
+            authorization: { type: "principal", context: authorized.person },
+          }),
+        }
+      }
+
+      // A branch from production runs every local request as the person who copied it: its data
+      // is theirs to read, and nobody else signs in to it.
+      const branchPerson = await branchPersonContext(host)
+      if (branchPerson) {
+        // Unauthenticated as it is, a branch answers this machine only: a page elsewhere that
+        // resolves its own name to 127.0.0.1 is refused by the name it asks for.
+        if (!isLoopbackHost(request)) {
+          return {
+            auth: {
+              kind: "deny" as const,
+              response: jsonForbiddenResponse("A branch answers this machine only"),
+            },
+            sharedAccessCookies: null,
+            sharedSession: null,
+            sixb: null,
+          }
+        }
+        return {
+          auth: { kind: "allow" as const, session: null },
+          sharedAccessCookies: null,
+          sharedSession: null,
+          sixb: bindRequestExecution(host, {
+            request,
+            authorization: { type: "principal", context: branchPerson },
+          }),
+        }
+      }
+
       const auth = await guard.resolve(request)
       if (auth.kind === "deny" || !auth.session?.authenticated) {
         return {
@@ -688,6 +769,7 @@ function startApiServer(
       // Elysia parses a body before the auth guard runs, so cap it here, as it streams. The capped
       // request replaces this one before any state is keyed to it.
       const request = limitRequestBody(incoming)
+      setServedRequest(request, incoming)
       if (socketAddress) {
         const forwardedFor = request.headers.get("x-forwarded-for")
         setRequestClientAddress(request, options.resolveClientAddress(socketAddress, forwardedFor))
@@ -843,4 +925,36 @@ async function stopElysiaHooks(app: SixbApp): Promise<void> {
   const hooks = internal.event?.stop ?? []
   internal.server = null
   await Promise.all(hooks.map((hook) => Promise.resolve(hook.fn(app))))
+}
+
+/**
+ * The person a branch from production runs as, with the groups production gave them, which the
+ * copy carried. Null off such a branch.
+ */
+async function branchPersonContext(host: SixbHostView) {
+  const runtime = branchRuntimeOf(host)
+  if (!runtime) return null
+
+  const userId = runtime.person.userId
+  const memberships =
+    (await host.storage.auth?.groupMemberships.listForUser({ projectId: host.id, userId })) ?? []
+  return resolveAuthorizationContext({
+    principal: { type: "user", id: userId },
+    groupIds: memberships.map((membership) => membership.groupId),
+    roles: host.definitions.security.listResolvedRoles(),
+  })
+}
+
+function bearerOf(request: Request): string | null {
+  const authorization = request.headers.get("authorization") ?? ""
+  return authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : null
+}
+
+/** Whether a request names this machine: localhost (and `*.localhost`), 127.0.0.1 or [::1]. */
+function isLoopbackHost(request: Request): boolean {
+  const host = (request.headers.get("host") ?? new URL(request.url).host).toLowerCase()
+  const name = host.startsWith("[") ? host.slice(0, host.indexOf("]") + 1) : host.split(":")[0]
+  return (
+    name === "localhost" || name.endsWith(".localhost") || name === "127.0.0.1" || name === "[::1]"
+  )
 }
