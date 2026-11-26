@@ -1664,11 +1664,78 @@ describe("DuckLakeStorage automatic compaction on a PostgreSQL catalog", () => {
         await merge([{ id: "a10", score: 2 }])
         await storage.close()
 
+        // The eleven rows inlined, flushed before the rewrite, and the seed file without the rows
+        // they replaced.
         storage = new DuckLakeStorage(options)
         const [settled] = await storage.maintenance.describeStorage([scores.id])
         expect(settled).toMatchObject({ deleteFiles: 0, rowCount: 100 })
-        expect(await liveFileRows(adminSql, options, scores.id)).toEqual([89])
+        expect(await liveFileRows(adminSql, options, scores.id)).toEqual([11, 89])
       } finally {
+        await storage.close()
+        await adminSql.close()
+      }
+    })
+  }, 60_000)
+
+  // Regression proof: in DuckLakeCompaction.plan, flush only past FLUSH_INLINED_ROWS. The rewrite
+  // then fails to commit with `Referenced column "status" not found` (DuckLake build ac7595b0,
+  // duckdb/ducklake#1490), the warning fires, and the seed file keeps its deletes.
+  test("rewrites a file after a column is added while older rows are inlined", async () => {
+    await withLake(async (options) => {
+      const id = `crm.pg.accounts.${randomId()}`
+      const accounts = defineDataset(id, {
+        schema: [col("id", "string"), col("score", "int64")],
+        primaryKey: "id",
+      })
+      const withStatus = defineDataset(id, {
+        schema: [
+          col("id", "string"),
+          col("score", "int64"),
+          col("status", "string", { nullable: true }),
+        ],
+        primaryKey: "id",
+      })
+      const adminSql = createAdminSql()
+      const warn = spyOn(console, "warn")
+      let storage = new DuckLakeStorage(options)
+
+      const merge = async (
+        dataset: DatasetDefinition,
+        rows: readonly Record<string, unknown>[]
+      ) => {
+        const session = await storage.beginMerge({ dataset })
+        await session.writeChanges(rows.map((row) => change.upsert(row)))
+        await session.commit({ createInitialVersion: true })
+      }
+
+      try {
+        await storage.createDataset(accounts)
+        await merge(
+          accounts,
+          Array.from({ length: 100 }, (_, i) => ({ id: `a${i}`, score: 0 }))
+        )
+
+        // One row inlined in the catalog with the schema before `status`.
+        await merge(accounts, [{ id: "inlined", score: 0 }])
+        await storage.createDataset(withStatus)
+
+        // A new provider checks its first commit: ten of the hundred seed rows replaced, a tenth
+        // of the file.
+        await storage.close()
+        storage = new DuckLakeStorage(options)
+        await merge(
+          withStatus,
+          Array.from({ length: 10 }, (_, i) => ({ id: `a${i}`, score: 1, status: "active" }))
+        )
+        await storage.close()
+
+        storage = new DuckLakeStorage(options)
+        const [settled] = await storage.maintenance.describeStorage([id])
+        expect(settled).toMatchObject({ inlinedRows: 0, rowCount: 101 })
+        expect(warn).not.toHaveBeenCalled()
+        expect(await liveFileRows(adminSql, options, id)).toEqual([1, 10, 90])
+      } finally {
+        warn.mockRestore()
         await storage.close()
         await adminSql.close()
       }
@@ -2059,7 +2126,10 @@ async function runBudgetStep<T>(step: string, run: () => Promise<T>): Promise<T>
   }
 }
 
-/** The rows each live data file of the dataset was written with, deleted ones included. */
+/**
+ * The rows each live data file of the dataset was written with, deleted ones included, fewest
+ * first.
+ */
 async function liveFileRows(
   sql: SQL,
   options: DuckLakeStorageOptions,
@@ -2074,7 +2144,7 @@ async function liveFileRows(
     JOIN ${table("ducklake_table")} t ON t.table_id = file.table_id
     WHERE file.end_snapshot IS NULL AND t.end_snapshot IS NULL
       AND t.table_name = ${quotePgLiteral(encodeDatasetTableName(datasetId))}
-    ORDER BY file.data_file_id
+    ORDER BY file.record_count
   `)
 
   return files.map((file: { readonly record_count: unknown }) => Number(file.record_count))
