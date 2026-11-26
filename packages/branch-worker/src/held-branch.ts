@@ -40,6 +40,7 @@ import type { BranchChanges, BranchNotice, BranchRecord, BranchStorage } from "@
 import { type BranchSandboxFiles, copyIntoSandbox } from "./copy"
 import { branchNetwork } from "./network"
 import { freeRuntimePort } from "./ports"
+import { authorizeSourceRead } from "./source-auth"
 
 /** How often an owner looks at its branch. */
 export const BRANCH_TICK_MS = 3_000
@@ -800,16 +801,13 @@ export class HeldBranch {
     return lines ? ` Its log ends with:\n${lines}` : ""
   }
 
-  /** Read access to the repository, from the project's source authentication, if it has one. */
+  /** Read access to the repository, as the branch's creator, from the project's source auth. */
   private async authorizeSource(): Promise<void> {
-    const auth = this.host.sandboxDefinition?.auth
-    if (!auth) return
-
-    this.credentials = await auth.authorize({
-      source: { type: "git", url: sourceGitUrl(requireSource(this.host)), access: "read" },
-      signal: this.signal,
-      requestedBy: { type: "user", id: this.branch.createdBy },
-    })
+    this.credentials =
+      (await authorizeSourceRead(this.host, {
+        signal: this.signal,
+        requestedBy: { type: "user", id: this.branch.createdBy },
+      })) ?? undefined
   }
 
   private async renewCredentials(now: number): Promise<void> {

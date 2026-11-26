@@ -27,7 +27,7 @@ import {
   readBranchCopy,
 } from "@sixb/core/internal/branches"
 import { importSnapshot } from "@sixb/core/internal/snapshots"
-import type { CreateSandboxOptions } from "@sixb/core/sandboxes"
+import type { CreateSandboxOptions, SandboxSourceAuth } from "@sixb/core/sandboxes"
 import { createTestSixb } from "@sixb/core/testing"
 import {
   BRANCH_LEASE_MS,
@@ -146,8 +146,9 @@ function fakeSandboxes(
   storage: InMemoryStorage,
   /** The branch's definitions, which its own `sixb dev` checks the copy against. */
   ontology: () => OntologyRegistry,
-  recipeEnv: Readonly<Record<string, string>> | undefined
+  recipe: { readonly env?: Readonly<Record<string, string>>; readonly auth?: SandboxSourceAuth }
 ): SandboxFactory {
+  const recipeEnv = recipe.env
   const sandbox = (id: string, name?: string): Sandbox => ({
     id,
     provider: "fake",
@@ -290,7 +291,7 @@ function fakeSandboxes(
   return {
     supportsRequestCredentials: true,
     runsBranches: true,
-    ...(recipeEnv ? { configuration: { env: recipeEnv } } : {}),
+    ...(recipe.env || recipe.auth ? { configuration: recipe } : {}),
     async create(options) {
       await lab.createGate
       const name = options?.persistence?.name
@@ -314,6 +315,8 @@ export async function setup(
   options: {
     readonly resumable?: boolean
     readonly recipeEnv?: Readonly<Record<string, string>>
+    /** The project's source authentication, as a private repository needs. */
+    readonly auth?: SandboxSourceAuth
     readonly host?: Partial<SixbHostOptions>
   } = {}
 ) {
@@ -425,7 +428,10 @@ export async function setup(
         if (!definitions.ontology) throw new Error("The host has no ontology yet.")
         return definitions.ontology
       },
-      options.recipeEnv
+      {
+        ...(options.recipeEnv ? { env: options.recipeEnv } : {}),
+        ...(options.auth ? { auth: options.auth } : {}),
+      }
     ),
     storage,
     broker: new InMemoryBroker(),

@@ -28,6 +28,8 @@ export interface BranchView {
   readonly generation: number | null
   readonly commit: string | null
   readonly error: BranchError | null
+  /** Why production could not read the repository's branches, while the branch waits for it. */
+  readonly remoteError: string | null
   /** What its creator should know, such as a copy taken again because its machine was lost. */
   readonly notices: readonly BranchNotice[]
   /** The copy it runs on: when production took it, and what it left out. */
@@ -154,6 +156,7 @@ export function createBranchesRuntime(
         data: null,
         refreshRequestedAt: null,
         remoteCommit: null,
+        remoteError: null,
         notices: [],
         owner: null,
         leaseExpiresAt: null,
@@ -199,6 +202,7 @@ export function toBranchView(branch: BranchRecord): BranchView {
     generation: branch.generation,
     commit: branch.commit,
     error: branch.error,
+    remoteError: branch.remoteError,
     notices: branch.notices,
     data: branch.data,
     refreshRequestedAt: branch.refreshRequestedAt,

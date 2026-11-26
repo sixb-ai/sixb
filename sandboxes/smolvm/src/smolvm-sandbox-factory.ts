@@ -61,6 +61,7 @@ export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<ne
 {
   /** A root forwarder in the guest adds them; commands run unprivileged. Needs Bun or Node. */
   readonly supportsRequestCredentials = true
+  readonly forwardsRequestCredentials = true
   readonly runsBranches = true
   readonly configuration: SandboxConfig<TParams>
   private cli: SmolvmCliConfig | undefined

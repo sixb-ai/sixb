@@ -264,6 +264,24 @@ describe("the branch worker", () => {
     )
   })
 
+  // smolvm hands source credentials to a forwarder in the guest, which `git clone` never uses: a
+  // private repository failed every clone. Guard check: drop the `forwardsRequestCredentials`
+  // check from `unmetRequirement`.
+  test("refuses a private repository's auth on a provider whose clone gets no credentials", async () => {
+    const auth = {
+      authorize: async () => ({ requests: [], expiresAt: new Date(), revoke: async () => {} }),
+    }
+    const { host } = await setup({ auth })
+    const forwarding = hostWith(host, {
+      sandboxes: { ...host.sandboxes!, forwardsRequestCredentials: true },
+    })
+
+    expect(BranchWorker.unmetRequirement(host, "development")).toBeNull()
+    expect(BranchWorker.unmetRequirement(forwarding, "development")).toContain(
+      "carry the source's credentials themselves"
+    )
+  })
+
   // A branch's saved sandbox goes with it, by name. Guard check: drop the `destroy` check from
   // `unmetRequirement`.
   test("refuses a provider that resumes sandboxes but cannot delete one by name", async () => {

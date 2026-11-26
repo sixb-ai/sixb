@@ -16,6 +16,8 @@ export const BranchSchema = z.object({
   generation: z.number().nullable(),
   commit: z.string().nullable(),
   error: z.object({ message: z.string(), file: z.string().optional() }).nullable(),
+  /** Why production could not read the repository's branches, while the branch waits for it. */
+  remoteError: z.string().nullable(),
   /** What its creator should know: a copy taken anew because its machine was lost, or no dev values. */
   notices: z.array(
     z.object({

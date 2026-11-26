@@ -25305,6 +25305,10 @@
                             "additionalProperties": false,
                             "nullable": true
                           },
+                          "remoteError": {
+                            "type": "string",
+                            "nullable": true
+                          },
                           "notices": {
                             "type": "array",
                             "items": {
@@ -25380,6 +25384,7 @@
                           "generation",
                           "commit",
                           "error",
+                          "remoteError",
                           "notices",
                           "data",
                           "refreshRequestedAt",
@@ -25552,6 +25557,10 @@
                       "additionalProperties": false,
                       "nullable": true
                     },
+                    "remoteError": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "notices": {
                       "type": "array",
                       "items": {
@@ -25627,6 +25636,7 @@
                     "generation",
                     "commit",
                     "error",
+                    "remoteError",
                     "notices",
                     "data",
                     "refreshRequestedAt",
@@ -25759,6 +25769,10 @@
                       "additionalProperties": false,
                       "nullable": true
                     },
+                    "remoteError": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "notices": {
                       "type": "array",
                       "items": {
@@ -25834,6 +25848,7 @@
                     "generation",
                     "commit",
                     "error",
+                    "remoteError",
                     "notices",
                     "data",
                     "refreshRequestedAt",
@@ -26003,6 +26018,10 @@
                       "additionalProperties": false,
                       "nullable": true
                     },
+                    "remoteError": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "notices": {
                       "type": "array",
                       "items": {
@@ -26078,6 +26097,7 @@
                     "generation",
                     "commit",
                     "error",
+                    "remoteError",
                     "notices",
                     "data",
                     "refreshRequestedAt",
@@ -26247,6 +26267,10 @@
                       "additionalProperties": false,
                       "nullable": true
                     },
+                    "remoteError": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "notices": {
                       "type": "array",
                       "items": {
@@ -26322,6 +26346,7 @@
                     "generation",
                     "commit",
                     "error",
+                    "remoteError",
                     "notices",
                     "data",
                     "refreshRequestedAt",

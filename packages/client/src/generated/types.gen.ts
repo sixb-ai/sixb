@@ -8453,6 +8453,7 @@ export type DeleteBranchResponses = {
       message: string
       file?: string
     } | null
+    remoteError: string | null
     notices: Array<{
       code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
       message: string
@@ -8520,6 +8521,7 @@ export type ListBranchesResponses = {
         message: string
         file?: string
       } | null
+      remoteError: string | null
       notices: Array<{
         code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
         message: string
@@ -8589,6 +8591,7 @@ export type OpenBranchResponses = {
       message: string
       file?: string
     } | null
+    remoteError: string | null
     notices: Array<{
       code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
       message: string
@@ -8657,6 +8660,7 @@ export type RefreshBranchResponses = {
       message: string
       file?: string
     } | null
+    remoteError: string | null
     notices: Array<{
       code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
       message: string
@@ -8725,6 +8729,7 @@ export type StopBranchResponses = {
       message: string
       file?: string
     } | null
+    remoteError: string | null
     notices: Array<{
       code: "data-reset" | "no-dev-env" | "machine-ended" | "temp-files-uncapped"
       message: string

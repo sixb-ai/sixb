@@ -5,6 +5,7 @@ import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { registerModelOrigin } from "@sixb/core/internal/model-origins"
 import {
   SandboxError,
+  type SandboxSourceAuthInput,
   SandboxStateUnavailableError,
   SandboxStillRunningError,
 } from "@sixb/core/sandboxes"
@@ -173,6 +174,31 @@ describe("a held branch", () => {
 
     expect(reached).toEqual([])
     expect((await row(host)())?.state).not.toBe("ready")
+  })
+
+  // A branch of a private repository clones as its creator: an OAuth source (`githubOAuth`) once
+  // got no connection to read with, and every branch failed. Guard check: drop `connectionToken`
+  // from `authorizeSourceRead` (`source-auth.ts`).
+  test("reads its repository as its creator, through the connections an OAuth source names", async () => {
+    const inputs: SandboxSourceAuthInput[] = []
+    const { host } = await setup({
+      auth: {
+        authorize: async (input) => {
+          inputs.push(input)
+          return {
+            requests: [],
+            expiresAt: new Date(Date.now() + 60 * 60_000),
+            revoke: async () => {},
+          }
+        },
+      },
+    })
+    const held = await hold(host)
+    await ready(host)
+    await held.stop()
+
+    expect(inputs[0]?.requestedBy).toEqual({ type: "user", id: "usr_bo" })
+    expect(typeof inputs[0]?.connectionToken).toBe("function")
   })
 
   // Guard check: spread a host value into the runtime's env, or leave `devValues` out of

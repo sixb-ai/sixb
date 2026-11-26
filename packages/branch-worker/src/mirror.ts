@@ -3,6 +3,7 @@ import type { SandboxRequestCredential, SixbHostView } from "@sixb/core"
 import { sourceGitUrl } from "@sixb/core/internal/branches"
 import type { SandboxSourceCredentials } from "@sixb/core/sandboxes"
 import type { BranchChanges, BranchRecord, BranchStorage } from "@sixb/core/storage"
+import { authorizeSourceRead } from "./source-auth"
 
 /** How long one `git ls-remote` may take before the check gives up until the next one. */
 const GIT_TIMEOUT_MS = 2 * 60_000
@@ -26,15 +27,26 @@ export class BranchMirror {
     private readonly branches: BranchStorage
   ) {}
 
-  /** Reads the remote's heads, and writes each branch's verdict to its row. */
+  /**
+   * Reads the remote's heads, and writes each branch's verdict to its row. A read that fails says
+   * why on the branches that wait for it, so the Console shows more than a branch waiting.
+   */
   async check(signal: AbortSignal): Promise<void> {
     const rows = await this.branches.list({ projectId: this.host.id })
     if (rows.length === 0) return
 
-    const heads = await this.remoteHeads(signal)
+    let heads: ReadonlyMap<string, string>
+    try {
+      heads = await this.remoteHeads(signal)
+    } catch (error) {
+      if (!signal.aborted) await this.tellWaiting(rows, this.remoteError(error))
+      throw error
+    }
+
     for (const row of rows) {
       if (row.wanted === "deleted") continue
-      const changes = verdict(row, heads.get(row.name) ?? null, this.url())
+      const found = verdict(row, heads.get(row.name) ?? null, this.url())
+      const changes = row.remoteError === null ? found : { ...found, remoteError: null }
       if (!changes) continue
 
       // A row its worker moved on meanwhile is checked again next time.
@@ -43,6 +55,31 @@ export class BranchMirror {
         changes
       )
     }
+  }
+
+  /** Writes why the remote could not be read on the branches that wait for its first read. */
+  private async tellWaiting(rows: readonly BranchRecord[], message: string): Promise<void> {
+    for (const row of rows) {
+      const waiting = row.wanted === "running" && row.remoteCommit === null
+      if (!waiting || row.remoteError === message) continue
+
+      // A row its worker moved on meanwhile is told at the next read.
+      await this.branches.update(
+        { projectId: this.host.id, name: row.name, revision: row.revision, at: new Date() },
+        { remoteError: message }
+      )
+    }
+  }
+
+  /** Why the read failed, in git's or the source auth's words, and what a private one needs. */
+  private remoteError(error: unknown): string {
+    const reason = (error instanceof Error ? error.message : String(error))
+      .replace(/^\[\w+\] /, "")
+      .replace(/\.$/, "")
+    const hint = this.host.sandboxDefinition?.auth
+      ? ""
+      : " A private repository needs the sandbox factory's `auth`, such as `githubApp(...)`."
+    return `Production could not read the branches of ${this.url()}: ${reason}.${hint}`
   }
 
   /** Lets the source credential go. */
@@ -65,18 +102,12 @@ export class BranchMirror {
 
   /** Read access from the project's source authentication, kept until it nears its expiry. */
   private async authorize(signal: AbortSignal): Promise<SandboxSourceCredentials | null> {
-    const auth = this.host.sandboxDefinition?.auth
-    if (!auth) return null
-
     const current = this.credentials
     if (current && current.expiresAt.getTime() - Date.now() > CREDENTIALS_MARGIN_MS) return current
 
-    this.credentials = await auth.authorize({
-      source: { type: "git", url: this.url(), access: "read" },
-      signal,
-    })
+    this.credentials = (await authorizeSourceRead(this.host, { signal })) ?? undefined
     await current?.revoke().catch(() => {})
-    return this.credentials
+    return this.credentials ?? null
   }
 
   private url(): string {

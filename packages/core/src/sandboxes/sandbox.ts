@@ -262,6 +262,12 @@ export interface SandboxFactory<in out TParams extends ParamsConfig = ParamsConf
    * agent's sandboxes need it: the run's token for the Sixb API is one of the credentials.
    */
   readonly supportsRequestCredentials?: boolean
+  /**
+   * Request credentials reach guest commands only through the forwarder at
+   * {@link Sandbox.credentialedUrl}, never on their own requests: a plain `git clone https://…`
+   * carries none. A hosted branch of a private repository refuses such a provider.
+   */
+  readonly forwardsRequestCredentials?: boolean
   /** Common host-side environment recipe. Never a discovered Agent definition. */
   readonly configuration?: SandboxConfig<TParams>
   /** Create an ephemeral sandbox unless persistence is requested. Existing names must fail,
