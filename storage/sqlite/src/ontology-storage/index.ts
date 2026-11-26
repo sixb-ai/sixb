@@ -3,6 +3,7 @@ import type { OntologyStorage } from "@sixb/core/storage"
 import { SqliteOntologyCommitStorage } from "./commits"
 import type { SqliteOntologyTransactionContext } from "./materialization-session"
 import { SqliteOntologyMaterializationStorage } from "./materializations"
+import { SqliteOntologyMigrationStorage } from "./migrations"
 import { SqliteOntologyOutboxStorage } from "./outbox"
 import { SqliteOntologyReplacementPlanStorage } from "./replacement-plans"
 import type { SqliteRootOperation } from "./shared"
@@ -22,6 +23,7 @@ export class SqliteOntologyStorage implements OntologyStorage {
   readonly outbox: SqliteOntologyOutboxStorage
   readonly uniqueValues: SqliteOntologyUniqueValueStorage
   readonly typeShapes: SqliteOntologyTypeShapeStorage
+  readonly migrations: SqliteOntologyMigrationStorage
 
   constructor(input: {
     readonly db: Database
@@ -52,6 +54,7 @@ export class SqliteOntologyStorage implements OntologyStorage {
     this.outbox = new SqliteOntologyOutboxStorage(input.db, input.runRootOperation)
     this.uniqueValues = new SqliteOntologyUniqueValueStorage(input.db, input.runRootOperation)
     this.typeShapes = new SqliteOntologyTypeShapeStorage(input.db, input.runRootOperation)
+    this.migrations = new SqliteOntologyMigrationStorage(input.db, input.runRootOperation)
   }
 
   deactivateSessions(): void {

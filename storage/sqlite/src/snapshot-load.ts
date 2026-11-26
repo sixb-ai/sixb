@@ -11,6 +11,7 @@ import type {
   SnapshotSourceWrite,
   SnapshotTypeEdits,
 } from "@sixb/core/storage"
+import { insertSqliteRuntimeCommit } from "./ontology-storage/commits"
 import { encodeSqliteVector } from "./vector-encoding"
 
 /** Tables a snapshot fills: their secondary indexes are built once, after the load. */
@@ -384,27 +385,7 @@ export class SqliteSnapshotLoad {
   #writeCommit(): void {
     const { commit, uniqueProperties, projectId } = this.#input
 
-    this.#db
-      .query(
-        `INSERT INTO ontology_commits (
-           project_id, id, idempotency_key, request_hash, execution_id,
-           origin_kind, origin_run_id, origin_batch_ordinal, origin,
-           ontology_revision, projection_revision, ownership_hash,
-           intent, result, committed_at
-         ) VALUES (?, ?, ?, ?, ?, 'runtime', NULL, NULL, ?, ?, NULL, NULL, ?, ?, ?)`
-      )
-      .run(
-        projectId,
-        commit.id,
-        commit.idempotencyKey,
-        commit.requestHash,
-        commit.executionId,
-        JSON.stringify(commit.origin),
-        commit.ontologyRevision,
-        JSON.stringify(commit.intent),
-        JSON.stringify(commit.result),
-        commit.committedAt
-      )
+    insertSqliteRuntimeCommit(this.#db, commit)
 
     this.#insert(
       "object_unique_properties (project_id, object_type_id, property_id, key_kind, key_version, prepared_at)",

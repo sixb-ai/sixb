@@ -14,7 +14,7 @@ import type {
   StoredObjectVector,
 } from "@sixb/core/storage"
 import { objectPartitionName } from "./objects/partitions"
-import { jsonParameter as json } from "./ontology-storage/shared"
+import { insertPgRuntimeCommit } from "./ontology-storage/commits"
 import type { ReservedSQL, SQLClient } from "./pg-client"
 import { runPgTransactionOn } from "./transactions"
 
@@ -649,18 +649,7 @@ async function currentSchema(sql: SQLClient): Promise<string> {
 async function writeCommit(sql: SQLClient, input: SnapshotLoadInput): Promise<void> {
   const { commit, uniqueProperties, projectId } = input
 
-  await sql`
-    INSERT INTO ontology_commits (
-      project_id, id, idempotency_key, request_hash, execution_id,
-      origin_kind, origin_run_id, origin_batch_ordinal, origin,
-      ontology_revision, intent, result, committed_at
-    ) VALUES (
-      ${projectId}, ${commit.id}, ${commit.idempotencyKey}, ${commit.requestHash},
-      ${commit.executionId}, 'runtime', NULL, NULL, ${json(sql, commit.origin)},
-      ${commit.ontologyRevision}, ${json(sql, commit.intent)}, ${json(sql, commit.result)},
-      ${commit.committedAt}
-    )
-  `
+  await insertPgRuntimeCommit(sql, commit)
 
   if (uniqueProperties.length === 0) return
   await sql`

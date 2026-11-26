@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import {
@@ -16,9 +16,10 @@ import { PostgresStorage } from "@sixb/pg"
 import { runCliToCompletion, startRoleUntilReadyThenStop } from "./shared/cli-process"
 
 // A deploy against PostgreSQL, through the real CLI: `sixb db migrate --check` decides whether the
-// SSH target stops the live release (exit 3) or fails before it stops anything (any other code),
-// `sixb check --migrate` records the new shapes last, a role refuses code the data doesn't fit,
-// and `sixb dev` warns instead.
+// SSH target stops the live release (exit 3), keeps it stopped for a migration run under way
+// (exit 4), or fails before it stops anything (any other code); `sixb check --migrate` applies the
+// pending migrations and records the new shapes last; a role refuses code the data doesn't fit, or
+// a run under way; and `sixb dev` applies what is covered and warns about the rest.
 
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cli = resolve(import.meta.dir, "..", "src", "index.tsx")
@@ -36,6 +37,8 @@ const compose = [
 const CLI_TIMEOUT_MS = 60_000
 /** Exit code of `sixb db migrate --check` when the services must stop first. */
 const STOP_FIRST = 3
+/** …and while a migration run is past its point of no return. */
+const APPLYING = 4
 
 /** A database of one's own (`SIXB_TEST_DATABASE_URL`) skips the compose file's fixed port. */
 const ownDatabase = process.env.SIXB_TEST_DATABASE_URL
@@ -123,6 +126,69 @@ async function createJob(schema: string, properties: Readonly<Record<string, str
     await createTestSixb(host)
       .objects(Job)
       .upsert({ properties: { ref: "J-12", ...properties } })
+  } finally {
+    await storage.close()
+  }
+}
+
+/** Job `J-12`'s properties, as stored. */
+async function storedJob(schema: string) {
+  const storage = new PostgresStorage({ connectionString: databaseUrl, schemaName: schema })
+  try {
+    const job = await storage.objects.getByPrimaryId({
+      projectId: "cli-type-shapes",
+      objectTypeId: "Job",
+      primaryId: "J-12",
+    })
+    return job?.properties
+  } finally {
+    await storage.close()
+  }
+}
+
+/**
+ * What a deploy killed right after the point of no return leaves: a run removing `gate`, open,
+ * and `Job`'s shape `migrating`.
+ */
+async function openRun(schema: string): Promise<void> {
+  const storage = new PostgresStorage({ connectionString: databaseUrl, schemaName: schema })
+  const projectId = "cli-type-shapes"
+  const runId = "migration_killed"
+  const operation = { type: "ontology.migrate", runId } as const
+  try {
+    await storage.executions.create({
+      id: `kernel:${runId}`,
+      projectId,
+      executor: { type: "kernel", operation },
+      requesterGroupIds: [],
+      source: { type: "http", requestId: runId },
+      correlationId: runId,
+      authorizationRef: { type: "kernel", operation },
+    })
+
+    const [stored] = await storage.ontology.typeShapes.list({ projectId })
+    const { gate: _gate, ...properties } = stored!.shape.properties
+    await storage.transaction((tx) =>
+      tx.ontology.migrations!.startRun({
+        projectId,
+        id: runId,
+        executionId: `kernel:${runId}`,
+        startedAt: "2026-04-01T00:00:00.000Z",
+        plan: {
+          ontologyRevision: "killed",
+          migrations: [{ id: "job-gate", hash: "killed" }],
+          types: [
+            {
+              objectTypeId: "Job",
+              fromShape: stored!.shape,
+              toShape: { ...stored!.shape, properties },
+              steps: [{ kind: "removeProperty", propertyId: "gate", migrationId: "job-gate" }],
+            },
+          ],
+        },
+        parts: 1,
+      })
+    )
   } finally {
     await storage.close()
   }
@@ -217,21 +283,31 @@ describe("sixb db migrate --check", () => {
 
 describe("migrations", () => {
   test(
-    "a deploy names the pending migration that covers data, and records nothing",
+    "`sixb check --migrate` applies a pending removal, then records the new shape",
     async () => {
       const schema = await deployedSchema("pending")
-      await createJob(schema, { gate: "B12" })
-      const before = await storedShape(schema)
+      await createJob(schema, { gate: "B12", hours: "3" })
 
-      const deployed = await sixb(schema, "withoutGate", ["check", "--migrate"], {
+      const check = await sixb(schema, "withoutGate", ["db", "migrate", "--check"], {
         SIXB_SHAPES_MIGRATION: "removeGate",
       })
-      expect(deployed.exitCode).toBe(1)
-      expect(deployed.stdout).toContain("✗ Job: 'gate' was removed, and 1 object holds it.")
-      expect(deployed.stdout).toContain(
-        "Migration 'job-gate' is pending; this build can't apply it yet."
-      )
-      expect(await storedShape(schema)).toEqual(before)
+      expect(check.exitCode).toBe(STOP_FIRST)
+      expect(check.stdout).toContain("Ontology migrations will run")
+
+      // Removal proof: drop `onMigrationRunStarted` from `migrationOptions` in `check.ts`; no
+      // marker is written, and the SSH target would start the previous release again.
+      const markers = await mkdtemp(join(tmpdir(), "sixb-migration-marker-"))
+      const marker = join(markers, "started")
+      const deployed = await sixb(schema, "withoutGate", ["check", "--migrate"], {
+        SIXB_SHAPES_MIGRATION: "removeGate",
+        SIXB_MIGRATION_RUN_MARKER: marker,
+      })
+      expect((await readFile(marker, "utf8")).trim()).toStartWith("migration_")
+      await rm(markers, { recursive: true, force: true })
+      expect(deployed.exitCode).toBe(0)
+      expect(deployed.stdout + deployed.stderr).toContain("The deploy only goes forward from here")
+      expect(await storedJob(schema)).toEqual({ ref: "J-12", hours: "3" })
+      expect(Object.keys((await storedShape(schema))?.properties ?? {})).not.toContain("gate")
     },
     CLI_TIMEOUT_MS * 3
   )
@@ -318,6 +394,35 @@ describe("the deploy step", () => {
       expect(await storedShape(schema)).toEqual(before)
     },
     CLI_TIMEOUT_MS * 4
+  )
+})
+
+describe("a migration run under way", () => {
+  // Removal proof: drop the `applying` exit in `runDbMigrate`; `--check` then exits 3, and the
+  // SSH target would restart the previous release after a failure.
+  test(
+    "exits 4 on `db migrate --check`, stops a role, and `check --migrate` finishes it",
+    async () => {
+      const schema = await deployedSchema("applying")
+      await createJob(schema, { gate: "B12", hours: "3" })
+      await openRun(schema)
+
+      const check = await sixb(schema, "withoutGate", ["db", "migrate", "--check"])
+      expect(check.exitCode).toBe(APPLYING)
+      expect(check.stdout).toContain("An ontology migration is being applied")
+
+      const role = await sixb(schema, "withoutGate", ["orchestrator", "--no-migrate"])
+      expect(role.exitCode).not.toBe(0)
+      expect(role.stdout + role.stderr).toContain("An ontology migration is being applied to Job.")
+
+      // The plan is the run's: the code that resumes it declares no migration at all.
+      const finished = await sixb(schema, "withoutGate", ["check", "--migrate"])
+      expect(finished.exitCode).toBe(0)
+      expect(finished.stdout + finished.stderr).toContain("Resuming migration run migration_killed")
+      expect(await storedJob(schema)).toEqual({ ref: "J-12", hours: "3" })
+      expect((await sixb(schema, "withoutGate", ["db", "migrate", "--check"])).exitCode).toBe(0)
+    },
+    CLI_TIMEOUT_MS * 5
   )
 })
 
@@ -431,6 +536,21 @@ describe("newer code than the recorded shape", () => {
 
 describe("sixb dev", () => {
   test(
+    "applies the pending migrations on local data at startup",
+    async () => {
+      const schema = await deployedSchema("devapply")
+      await createJob(schema, { gate: "B12", hours: "3" })
+
+      await devOutputUntil(schema, "source rows rewritten.", {
+        SIXB_SHAPES_MIGRATION: "removeGate",
+      })
+      expect(await storedJob(schema)).toEqual({ ref: "J-12", hours: "3" })
+      expect(Object.keys((await storedShape(schema))?.properties ?? {})).not.toContain("gate")
+    },
+    CLI_TIMEOUT_MS * 3
+  )
+
+  test(
     "warns about data the code doesn't fit, and keeps the recorded shape",
     async () => {
       const schema = await deployedSchema("dev")
@@ -446,7 +566,11 @@ describe("sixb dev", () => {
 })
 
 /** Starts `sixb dev` on the code without `gate`, and stops it once its output holds `text`. */
-async function devOutputUntil(schema: string, text: string): Promise<string> {
+async function devOutputUntil(
+  schema: string,
+  text: string,
+  env: Readonly<Record<string, string>> = {}
+): Promise<string> {
   const proc = Bun.spawn([process.execPath, cli, "dev", "--entry", entry], {
     cwd: repoRoot,
     env: {
@@ -455,6 +579,7 @@ async function devOutputUntil(schema: string, text: string): Promise<string> {
       SIXB_SHAPES_SCHEMA: schema,
       SIXB_SHAPES_RELEASE: "withoutGate",
       NO_COLOR: "1",
+      ...env,
     },
     stdin: "ignore",
     stdout: "pipe",

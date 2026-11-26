@@ -6,6 +6,7 @@ import {
   defineObjectType,
   defineProjection,
   type EmbeddingModel,
+  type ObjectTypeWithPropertyTokens,
   OntologyRegistry,
   prop,
   ref,
@@ -111,6 +112,28 @@ export const removeGate = defineMigration("job-gate", v2.Job)
   .removeProperty("gate")
   .removeProperty("contract")
 
+/**
+ * Jobs with one optional string property per name and no projection: a migration that removes or
+ * renames every one compiles into long expressions in each store's statement.
+ */
+export function wideRelease(names: readonly string[]) {
+  const Job = defineObjectType({
+    id: "MigrationWideJob",
+    name: "Wide job",
+    properties: [
+      prop("id", "string", { primary: true, required: true }),
+      ...names.map((name) => prop(name, "string", { nullable: true })),
+    ],
+  })
+  const Inspection = defineObjectType({
+    id: "MigrationWideInspection",
+    name: "Wide inspection",
+    extends: Job,
+    properties: [],
+  })
+  return { Job, Inspection, ontology: new OntologyRegistry({ sources: [Job, Inspection] }) }
+}
+
 export const JOB = v1.Job.id
 export const INSPECTION = v1.Inspection.id
 
@@ -156,7 +179,7 @@ export async function seedJobs(storage: Storage): Promise<void> {
   )
   await edits(storage, at(2)).commit([
     patch("p-1", { gate: "E1" }),
-    patch("p-2", {}, ["gate"]),
+    patch("p-2", {}, ["gate", "note"]),
     { id: "delete-p-4", kind: "object.delete", ref: jobRef("p-4") },
   ])
   await publish(
@@ -168,10 +191,16 @@ export async function seedJobs(storage: Storage): Promise<void> {
 }
 
 /** The first release's trusted client: what its actions write. */
-export function firstRelease(storage: Storage) {
+export function firstRelease(
+  storage: Storage,
+  code: {
+    readonly Job: ObjectTypeWithPropertyTokens
+    readonly Inspection: ObjectTypeWithPropertyTokens
+  } = v1
+) {
   const host = new SixbHost({
     id: PROJECT,
-    ontology: [v1.Job, v1.Inspection],
+    ontology: [code.Job, code.Inspection],
     models: { embedding: [embedding] },
     blobStorage: new InMemoryBlobStorage(),
     broker: new InMemoryBroker(),
@@ -179,7 +208,16 @@ export function firstRelease(storage: Storage) {
     queues: new InMemoryQueues(),
     storage,
   })
+  hosts.set(storage, [...(hosts.get(storage) ?? []), host])
   return createTestSixb(host)
+}
+
+const hosts = new WeakMap<Storage, SixbHost[]>()
+
+/** Stops the clients' outbox dispatch, which would otherwise outlive the storage it reads. */
+export async function closeReleases(storage: Storage): Promise<void> {
+  for (const host of hosts.get(storage) ?? []) await host.closeBroker()
+  hosts.delete(storage)
 }
 
 /**

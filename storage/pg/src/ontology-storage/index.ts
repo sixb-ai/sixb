@@ -3,6 +3,7 @@ import type { SQLClient } from "../pg-client"
 import { PgOntologyCommitStorage } from "./commits"
 import type { PgOntologyTransactionContext } from "./materialization-session"
 import { PgOntologyMaterializationStorage } from "./materializations"
+import { PgOntologyMigrationStorage } from "./migrations"
 import { PgOntologyOutboxStorage } from "./outbox"
 import { PgOntologyReplacementPlanStorage } from "./replacement-plans"
 import type { PgRootOperation } from "./shared"
@@ -22,11 +23,14 @@ export class PgOntologyStorage implements OntologyStorage {
   readonly vectors: PgOntologyVectorStorage
   readonly uniqueValues: PgOntologyUniqueValueStorage
   readonly typeShapes: PgOntologyTypeShapeStorage
+  readonly migrations: PgOntologyMigrationStorage
 
   constructor(input: {
     readonly sql: SQLClient
     readonly runRootOperation: PgRootOperation
     readonly transactionContext: PgOntologyTransactionContext | null
+    /** The pool's connections, which bound how many migration lanes run side by side. */
+    readonly poolSize: number
   }) {
     this.commits = new PgOntologyCommitStorage(input.runRootOperation)
     this.sources = new PgOntologySourceStorage(input.runRootOperation)
@@ -38,6 +42,7 @@ export class PgOntologyStorage implements OntologyStorage {
     this.outbox = new PgOntologyOutboxStorage(input.runRootOperation)
     this.uniqueValues = new PgOntologyUniqueValueStorage(input.runRootOperation)
     this.typeShapes = new PgOntologyTypeShapeStorage(input.runRootOperation)
+    this.migrations = new PgOntologyMigrationStorage(input.runRootOperation, input.poolSize)
     this.vectorIndexing = new PgVectorIndexingStorage(
       input.sql,
       input.runRootOperation,
