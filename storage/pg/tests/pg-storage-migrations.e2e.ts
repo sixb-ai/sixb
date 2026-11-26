@@ -158,6 +158,7 @@ const SHIPPED_MIGRATIONS = [
   "117-lake-slices",
   "118-skipped-action-effects",
   "119-lake-slice-credentials",
+  "120-hosted-branches",
 ]
 
 const steps = postgresStorageMigrations.steps

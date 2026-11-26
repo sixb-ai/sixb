@@ -8,6 +8,7 @@ import { type AiLimitStorage, InMemoryAiLimitStorage } from "../ai-limits"
 import { type AiUsageStorage, InMemoryAiUsageStorage } from "../ai-usage"
 import { type ArtifactStorage, InMemoryArtifactStorage } from "../artifacts"
 import { type AuthStorage, InMemoryAuthStorage } from "../auth"
+import { type BranchStorage, InMemoryBranchStorage } from "../branches"
 import {
   type ConnectorConnectionStorage,
   InMemoryConnectorConnectionStorage,
@@ -161,6 +162,7 @@ export class InMemoryStorage
   private readonly datasetIngestStorage = new InMemoryDatasetIngestStorage()
   private readonly fileDownloadGrantStorage = new InMemoryFileDownloadGrantStorage()
   private readonly lakeSliceStorage = new InMemoryLakeSliceStorage()
+  private readonly branchStorage = new InMemoryBranchStorage()
   private readonly maintenanceHeartbeatStorage = new InMemoryMaintenanceHeartbeatStorage()
   private readonly lakeRetentionRunStorage = new InMemoryLakeRetentionRunStorage()
   private readonly connectorConnectionStorage: InMemoryConnectorConnectionStorage
@@ -186,6 +188,7 @@ export class InMemoryStorage
   readonly datasetIngest: DatasetIngestStorage
   readonly fileDownloadGrants: FileDownloadGrantStorage
   readonly lakeSlices: LakeSliceStorage
+  readonly hostedBranches: BranchStorage
   readonly maintenanceHeartbeats: MaintenanceHeartbeatStorage
   readonly lakeRetentionRuns: LakeRetentionRunStorage
   readonly connectorConnections: ConnectorConnectionStorage
@@ -225,6 +228,7 @@ export class InMemoryStorage
     this.datasetIngest = createOperationScopedFacade(this.datasetIngestStorage, scope)
     this.fileDownloadGrants = createOperationScopedFacade(this.fileDownloadGrantStorage, scope)
     this.lakeSlices = createOperationScopedFacade(this.lakeSliceStorage, scope)
+    this.hostedBranches = createOperationScopedFacade(this.branchStorage, scope)
     this.maintenanceHeartbeats = createOperationScopedFacade(
       this.maintenanceHeartbeatStorage,
       scope
@@ -544,6 +548,7 @@ export class InMemoryStorage
       datasetIngest: this.datasetIngestStorage,
       fileDownloadGrants: this.fileDownloadGrantStorage,
       lakeSlices: this.lakeSliceStorage,
+      hostedBranches: this.branchStorage,
       maintenanceHeartbeats: this.maintenanceHeartbeatStorage,
       lakeRetentionRuns: this.lakeRetentionRunStorage,
       connectorConnections: this.connectorConnectionStorage,
@@ -581,6 +586,7 @@ export class InMemoryStorage
       datasetIngest: this.datasetIngestStorage.snapshot(),
       fileDownloadGrants: this.fileDownloadGrantStorage.snapshot(),
       lakeSlices: this.lakeSliceStorage.snapshot(),
+      hostedBranches: this.branchStorage.snapshot(),
       maintenanceHeartbeats: this.maintenanceHeartbeatStorage.snapshot(),
       lakeRetentionRuns: this.lakeRetentionRunStorage.snapshot(),
       connectorConnections: this.connectorConnectionStorage.snapshot(),
@@ -613,6 +619,7 @@ export class InMemoryStorage
     this.datasetIngestStorage.restore(snapshot.datasetIngest)
     this.fileDownloadGrantStorage.restore(snapshot.fileDownloadGrants)
     this.lakeSliceStorage.restore(snapshot.lakeSlices)
+    this.branchStorage.restore(snapshot.hostedBranches)
     this.maintenanceHeartbeatStorage.restore(snapshot.maintenanceHeartbeats)
     this.lakeRetentionRunStorage.restore(snapshot.lakeRetentionRuns)
     this.connectorConnectionStorage.restore(snapshot.connectorConnections)
@@ -645,6 +652,7 @@ export interface InMemoryStorageSnapshot {
   readonly datasetIngest: ReturnType<InMemoryDatasetIngestStorage["snapshot"]>
   readonly fileDownloadGrants: ReturnType<InMemoryFileDownloadGrantStorage["snapshot"]>
   readonly lakeSlices: ReturnType<InMemoryLakeSliceStorage["snapshot"]>
+  readonly hostedBranches: ReturnType<InMemoryBranchStorage["snapshot"]>
   readonly maintenanceHeartbeats: ReturnType<InMemoryMaintenanceHeartbeatStorage["snapshot"]>
   readonly lakeRetentionRuns: ReturnType<InMemoryLakeRetentionRunStorage["snapshot"]>
   readonly connectorConnections: ReturnType<InMemoryConnectorConnectionStorage["snapshot"]>

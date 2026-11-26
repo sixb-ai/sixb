@@ -58,6 +58,7 @@ export {
   storedCommentAnchor,
   turnUndoable,
 } from "./artifacts/record"
+export { applyBranchChanges, parseBranchRow, serializeBranch } from "./branches/record"
 export { parseFileDownloadGrantRow } from "./file-download-grants/record"
 export { createFileUploadId, createUploadExpiresAt } from "./file-upload-sessions/utils"
 export { parseLakeSliceGrantRow, parseLakeSliceRow } from "./lake-slices/record"

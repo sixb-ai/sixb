@@ -48,6 +48,13 @@ const LOADED_TABLES: readonly string[] = LANES.flat()
 const LANE_MAINTENANCE_WORK_MEM = "256MB"
 const LANE_MAINTENANCE_WORKERS = 2
 
+/**
+ * How often a lane with nothing to do sends a statement, so that it never sits idle in its
+ * transaction long enough for the server, or a hosted branch's production, to end it: a lane
+ * waits for the others to copy and index, minutes at volume.
+ */
+const LANE_HEARTBEAT_MS = 20_000
+
 /** A branch schema's state, kept in its comment, so a load cut short is never taken as done. */
 export interface BranchSchemaState {
   readonly sixbBranch: string
@@ -59,8 +66,10 @@ interface Lane {
   readonly tables: readonly string[]
   /** The indexes this lane dropped, to build again before it commits. */
   indexes: readonly string[]
-  /** The lane's `COPY` in flight, which the next one waits for. */
+  /** The lane's statements, one after another: each waits for the one before (`onLane`). */
   tail: Promise<void>
+  /** Its statements queued and not done. With none, the lane waits inside its transaction. */
+  queued: number
 }
 
 /** Rows waiting for one `COPY`: text lines, or rows in binary COPY format. */
@@ -118,14 +127,17 @@ export class PgSnapshotLoad {
       tables: LANES.filter((_, lane) => lane % connections.length === index).flat(),
       indexes: [],
       tail: Promise.resolve(),
+      queued: 0,
     }))
     const open: Lane[] = []
+    const every = await heartbeatMillis(first)
+    const beat = setInterval(() => keepAlive(open), every)
 
     try {
       for (const lane of lanes) {
         await lane.connection.unsafe("BEGIN")
         open.push(lane)
-        await openLane(lane)
+        await onLane(lane, () => openLane(lane))
       }
 
       const load = new PgSnapshotLoad(input, lanes)
@@ -133,12 +145,17 @@ export class PgSnapshotLoad {
       await load.#finish(open, state)
       return result
     } catch (error) {
+      clearInterval(beat)
       for (const lane of open.splice(0)) {
         await lane.tail.catch(() => undefined)
         await lane.connection.unsafe("ROLLBACK").catch(() => undefined)
       }
       await emptyAgain(first, input, state)
       throw error
+    } finally {
+      // Nothing in flight once the caller releases the connections.
+      clearInterval(beat)
+      await Promise.all(lanes.map((lane) => lane.tail.catch(() => undefined)))
     }
   }
 
@@ -283,9 +300,10 @@ export class PgSnapshotLoad {
   async #writeSource(source: NonNullable<SnapshotLoadBatch["sources"]>[number]): Promise<void> {
     const { commit, projectId } = this.#input
     const lane = this.#laneOf("ontology_sources")
-    await lane.tail
 
-    const [row] = await lane.connection<{ version_id: string }[]>`
+    const [row] = await onLane(
+      lane,
+      (sql) => sql<{ version_id: string }[]>`
       INSERT INTO ontology_sources (
         project_id, source_id, materialization_id, projection_run_id, projection_kind, protocol,
         status, execution_token, dataset_id, dataset_version_id, dataset_version_created_at,
@@ -301,6 +319,7 @@ export class PgSnapshotLoad {
       )
       RETURNING version_id
     `
+    )
     if (!row) throw new Error("[SixbPg] PostgreSQL returned no source version.")
     this.#sources.set(source.projectionId, { versionId: String(row.version_id), roots: 0 })
   }
@@ -309,11 +328,13 @@ export class PgSnapshotLoad {
   async #writeSourceRoots(roots: readonly SnapshotSourceRootWrite[]): Promise<void> {
     const projectId = this.#input.projectId
     const lane = this.#laneOf("ontology_source_roots")
-    await lane.tail
-    const ids = await lane.connection<{ id: string }[]>`
+    const ids = await onLane(
+      lane,
+      (sql) => sql<{ id: string }[]>`
       SELECT nextval(pg_get_serial_sequence('ontology_source_roots', 'id'))::text AS id
       FROM generate_series(1, ${roots.length})
     `
+    )
 
     const rootRows: (string | null)[][] = []
     const assertionRows: (string | null)[][] = []
@@ -425,8 +446,9 @@ export class PgSnapshotLoad {
     // Each source counts what the load wrote of it, as a ready version does.
     if (this.#sources.size > 0) {
       const lane = this.#laneOf("ontology_sources")
-      await lane.tail
-      await lane.connection`
+      await onLane(
+        lane,
+        (sql) => sql`
         UPDATE ontology_sources AS versions
         SET root_count = counted.roots, assertion_count = counted.assertions
         FROM (
@@ -437,20 +459,20 @@ export class PgSnapshotLoad {
         ) AS counted
         WHERE versions.version_id = counted.version_id
       `
+      )
     }
 
     await Promise.all(
       this.#lanes.map(async (lane) => {
-        await lane.tail
-        for (const definition of lane.indexes) await lane.connection.unsafe(definition)
-        await lane.connection.unsafe(`ANALYZE ${lane.tables.join(", ")}`)
+        for (const definition of lane.indexes) await onLane(lane, (sql) => sql.unsafe(definition))
+        await onLane(lane, (sql) => sql.unsafe(`ANALYZE ${lane.tables.join(", ")}`))
       })
     )
 
     while (open.length > 0) {
       const lane = open[0]!
-      if (open.length === 1) await markState(lane.connection, state)
-      await lane.connection.unsafe("COMMIT")
+      if (open.length === 1) await onLane(lane, (sql) => markState(sql, state))
+      await onLane(lane, (sql) => sql.unsafe("COMMIT"))
       open.shift()
     }
   }
@@ -510,9 +532,12 @@ export class PgSnapshotLoad {
       : pending.chunks
     const options = pending.binary ? "(FORMAT binary, FREEZE)" : "(FREEZE)"
 
+    // One COPY waits at most, so the rows waiting stay within one batch; its failure is the
+    // lane's, which the next statement on it raises.
     await lane.tail
-    lane.tail = copyIn(lane.connection, `COPY ${target} FROM STDIN ${options}`, chunks)
-    lane.tail.catch(() => undefined)
+    onLane(lane, (sql) => copyIn(sql, `COPY ${target} FROM STDIN ${options}`, chunks)).catch(
+      () => undefined
+    )
   }
 }
 
@@ -554,6 +579,38 @@ async function copyIn(
       { cause: outcome }
     )
   }
+}
+
+/** Runs `work` on the lane once its statements before are done; one that failed fails it too. */
+function onLane<T>(lane: Lane, work: (sql: ReservedSQL) => Promise<T>): Promise<T> {
+  lane.queued += 1
+  const done = lane.tail
+    .then(() => work(lane.connection))
+    .finally(() => {
+      lane.queued -= 1
+    })
+  lane.tail = done.then(() => undefined)
+  lane.tail.catch(() => undefined)
+  return done
+}
+
+/** A statement on each open lane with nothing to do, so it never looks idle in its transaction. */
+function keepAlive(open: readonly Lane[]): void {
+  for (const lane of open) {
+    if (lane.queued === 0) onLane(lane, (sql) => sql`SELECT 1`).catch(() => undefined)
+  }
+}
+
+/** Every `LANE_HEARTBEAT_MS`, or a third of the session's idle limit when that is shorter. */
+async function heartbeatMillis(sql: ReservedSQL): Promise<number> {
+  const [row] = await sql<{ limit: number }[]>`
+    SELECT setting::int AS limit FROM pg_settings
+    WHERE name = 'idle_in_transaction_session_timeout'
+  `
+  const limit = row?.limit ?? 0
+  return limit > 0
+    ? Math.max(1, Math.min(LANE_HEARTBEAT_MS, Math.floor(limit / 3)))
+    : LANE_HEARTBEAT_MS
 }
 
 /**

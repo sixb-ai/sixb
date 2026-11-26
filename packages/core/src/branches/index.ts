@@ -1,4 +1,7 @@
-/** Branches off production: the copy production sends, and the runtime a laptop runs it on. */
+/**
+ * Branches off production: the copy production sends, the runtime a branch runs it on, on a laptop
+ * or next to production, and a hosted branch's home on production's instance. See README.md.
+ */
 
 export { type CopyForBranchInput, copyForBranch } from "./copy"
 export {
@@ -8,6 +11,22 @@ export {
   isBranchCredentialRoute,
   isBranchSliceRelease,
 } from "./credential"
+export {
+  type BranchClosure,
+  type BranchEnforcement,
+  type BranchHostingStorage,
+  type BranchRoleLimits,
+  branchClosureNotice,
+  branchDatabaseAddress,
+  branchHostingRequirement,
+  branchNamespaceName,
+  closeBranchData,
+  dropBranchData,
+  enforceBranchLimits,
+  hostBranchDatabase,
+  isBranchHostingStorage,
+  prepareBranchData,
+} from "./data"
 export { type BranchRuntime, branchRuntimeOf, hostOnBranch } from "./runtime"
 export {
   type BranchCopyLake,

@@ -464,6 +464,18 @@ export type {
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage, MAX_PENDING_DEVICE_AUTHORIZATIONS } from "./auth"
 export type {
+  BranchChanges,
+  BranchData,
+  BranchError,
+  BranchNotice,
+  BranchRecord,
+  BranchRef,
+  BranchState,
+  BranchStorage,
+  BranchWanted,
+} from "./branches"
+export { InMemoryBranchStorage } from "./branches"
+export type {
   AttachConnectorConnectionRunAuthorizationInput,
   ClaimConnectorConnectionRunCallbackInput,
   ClaimConnectorConnectionRunCallbackResult,
