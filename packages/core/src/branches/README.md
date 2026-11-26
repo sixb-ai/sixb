@@ -83,8 +83,8 @@ refresh.
 The read of the remote (`mirror.ts`) writes why it failed to `remoteError` on the branches that
 wait for it, a private repository read without credentials say, and clears it once a read
 succeeds. Source credentials come from the project's sandbox `auth`, with the host's connector
-connections for an OAuth source: the creator's own for a branch's clone, the project's (or the
-source's `fallback`) for the read of every branch.
+connections for an OAuth source: the creator's own for a branch's clone, and a waiting branch's
+creator's for the read of every branch.
 
 ## The runtime
 

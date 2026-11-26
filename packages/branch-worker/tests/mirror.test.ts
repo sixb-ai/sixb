@@ -171,9 +171,10 @@ describe("the read of the remote", () => {
   })
 
   // An OAuth source reads with the connection it names, as an agent's workspace does: without the
-  // resolver, `githubOAuth` failed every read. Guard check: drop `connectionToken` from
-  // `authorizeSourceRead` (`source-auth.ts`).
-  test("hands an OAuth source the project's connections, with nobody to read as", async () => {
+  // resolver, or without a person to read as, `githubOAuth` failed every read. Guard check: drop
+  // `connectionToken` from `authorizeSourceRead` (`source-auth.ts`), or `requestedBy` from the
+  // mirror's `authorize`.
+  test("reads as a waiting branch's creator, through the connections an OAuth source names", async () => {
     const inputs: SandboxSourceAuthInput[] = []
     const { repository, check, open } = await setup({ authorized: (input) => inputs.push(input) })
     await repository.branch("feature/a")
@@ -183,7 +184,7 @@ describe("the read of the remote", () => {
 
     expect(inputs).toHaveLength(1)
     expect(typeof inputs[0]?.connectionToken).toBe("function")
-    expect(inputs[0]?.requestedBy).toBeUndefined()
+    expect(inputs[0]?.requestedBy).toEqual({ type: "user", id: "usr_ada" })
   })
 
   // Guard check: authorize on every check in `authorize`.

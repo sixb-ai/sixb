@@ -35,7 +35,7 @@ SIXB_BRANCH_ALLOW=https://redis.dev.shop.example \
 | `@sixb/pg` for production, PostgreSQL 16+ | Each branch gets a database on production's instance, with a role limited to it |
 | A role that may `CREATEROLE` and `CREATEDB` | Production creates and drops each branch's role and database; managed admin users such as `doadmin` have both |
 | `@sixb/sandboxes-vercel` or `@sixb/sandboxes-smolvm` | The branch serves from it. `@sixb/sandboxes-local` runs it on production's own host, so production refuses it |
-| The sandbox factory's `auth` for a private repository | Production reads the repository's branches and the branch clones with it: `githubApp(...)`, or `githubOAuth(...)`, which clones as the branch's creator. Without it, the branch says production cannot read the repository. smolvm cannot clone with it, so production refuses that pair |
+| The sandbox factory's `auth` for a private repository | Production reads the repository's branches and the branch clones with it: `githubApp(...)`, or `githubOAuth(...)`, which reads and clones as the branch's creator, so its creator connects GitHub first. Without it, the branch says production cannot read the repository. smolvm cannot clone with it, so production refuses that pair |
 | Bun in the sandbox, or npm | A branch installs and runs with Bun. On Vercel's stock runtime, which has only Node, it installs Bun 1.4.4 from the npm registry first |
 | A sandbox recipe without `env` | A provider gives its recipe's `env` to every sandbox, a branch's too |
 | Production's PostgreSQL reachable from the sandbox | The branch connects as its own role, with production's TLS settings. On Vercel, from Vercel's addresses |

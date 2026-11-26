@@ -21,6 +21,8 @@ const CREDENTIALS_MARGIN_MS = 5 * 60_000
  */
 export class BranchMirror {
   private credentials: SandboxSourceCredentials | undefined
+  /** Who the current credential reads as. */
+  private readsAs: string | undefined
 
   constructor(
     private readonly host: SixbHostView,
@@ -37,7 +39,7 @@ export class BranchMirror {
 
     let heads: ReadonlyMap<string, string>
     try {
-      heads = await this.remoteHeads(signal)
+      heads = await this.remoteHeads(signal, readerOf(rows))
     } catch (error) {
       if (!signal.aborted) await this.tellWaiting(rows, this.remoteError(error))
       throw error
@@ -88,8 +90,11 @@ export class BranchMirror {
     this.credentials = undefined
   }
 
-  private async remoteHeads(signal: AbortSignal): Promise<ReadonlyMap<string, string>> {
-    const env = gitCredentialEnv((await this.authorize(signal))?.requests ?? [])
+  private async remoteHeads(
+    signal: AbortSignal,
+    reader: string
+  ): Promise<ReadonlyMap<string, string>> {
+    const env = gitCredentialEnv((await this.authorize(signal, reader))?.requests ?? [])
     const result = await git(["ls-remote", "--heads", "--", this.url()], { env, signal })
 
     const heads = new Map<string, string>()
@@ -100,12 +105,25 @@ export class BranchMirror {
     return heads
   }
 
-  /** Read access from the project's source authentication, kept until it nears its expiry. */
-  private async authorize(signal: AbortSignal): Promise<SandboxSourceCredentials | null> {
+  /**
+   * Read access from the project's source authentication, as `reader`, kept until it nears its
+   * expiry. An OAuth source reading as each person (`githubOAuth`) has no project-wide reader, so
+   * the remote is read as a branch's creator, who reads it to clone their branch anyway.
+   */
+  private async authorize(
+    signal: AbortSignal,
+    reader: string
+  ): Promise<SandboxSourceCredentials | null> {
     const current = this.credentials
-    if (current && current.expiresAt.getTime() - Date.now() > CREDENTIALS_MARGIN_MS) return current
+    const fresh = current && current.expiresAt.getTime() - Date.now() > CREDENTIALS_MARGIN_MS
+    if (fresh && this.readsAs === reader) return current
 
-    this.credentials = (await authorizeSourceRead(this.host, { signal })) ?? undefined
+    this.credentials =
+      (await authorizeSourceRead(this.host, {
+        signal,
+        requestedBy: { type: "user", id: reader },
+      })) ?? undefined
+    this.readsAs = reader
     await current?.revoke().catch(() => {})
     return this.credentials ?? null
   }
@@ -114,6 +132,12 @@ export class BranchMirror {
     if (!this.host.source) throw new Error("[SixbBranchWorker] The project names no repository.")
     return sourceGitUrl(this.host.source)
   }
+}
+
+/** Whose read the remote is read with: a waiting branch's creator first, as it waits on it. */
+function readerOf(rows: readonly BranchRecord[]): string {
+  const waiting = rows.find((row) => row.wanted === "running" && row.remoteCommit === null)
+  return (waiting ?? (rows[0] as BranchRecord)).createdBy
 }
 
 /** What the remote's head says of one branch: a new commit, its end, or nothing. */
