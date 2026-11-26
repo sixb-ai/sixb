@@ -358,6 +358,33 @@ describe("a held branch", () => {
     expect(stopped?.data?.objects).toBe(1)
   })
 
+  // A delete asked while the worker stopped an idle branch was written over by the worker's
+  // retry: the branch came back stopped, its copy kept. Guard check: write `changes` whatever
+  // `askedSince` says in `write` (`held-branch.ts`).
+  test.each([
+    ["delete", "deleted"],
+    ["open", "running"],
+  ] as const)("keeps the %s asked while it stops the branch", async (asked, wanted) => {
+    const { lab, host, bo } = await setup()
+    const held = await hold(host)
+    await ready(host)
+
+    let release: () => void = () => {}
+    lab.stopGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    jest.advanceTimersByTime(BRANCH_IDLE_MS + 60_000)
+    await until(
+      async () => lab.kills.length,
+      (kills) => kills === 1
+    )
+    await bo.branches[asked](NAME)
+    release()
+    await settled(held.life)
+
+    expect(await row(host)()).toMatchObject({ wanted, state: "stopped", owner: null })
+  })
+
   // A Vercel session at its plan's maximum once failed the branch, as if its code were broken.
   // Guard check: treat `SandboxNotRunningError` as any other failure in `failed`.
   test("stops, and says so, when its provider ends its machine", async () => {

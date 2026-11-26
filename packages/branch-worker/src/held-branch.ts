@@ -10,6 +10,7 @@ import {
   type SixbHostView,
 } from "@sixb/core"
 import {
+  BRANCH_CHECKOUT_MARK,
   BRANCH_DATABASE_SCHEMA_ENV,
   BRANCH_DATABASE_URL_ENV,
   BRANCH_DEPENDENCY_FILES,
@@ -19,7 +20,6 @@ import {
   BRANCH_PORT_ENV,
   BRANCH_PUBLIC_ORIGIN_ENV,
   BRANCH_RUNTIME_COMMAND,
-  BRANCH_CHECKOUT_MARK,
   BRANCH_STATUS_PATH,
   branchCheckout,
   branchDatabaseAddress,
@@ -219,7 +219,10 @@ export class HeldBranch {
     // The worker stopped it mid-step: it goes back as any stop puts it, for the next worker.
     if (this.stopping.aborted) {
       await this.close({}).catch(async (closing: unknown) => {
-        console.error(`[SixbBranchWorker] Could not put branch '${this.branch.name}' back.`, closing)
+        console.error(
+          `[SixbBranchWorker] Could not put branch '${this.branch.name}' back.`,
+          closing
+        )
         await this.release()
       })
       return
@@ -859,8 +862,14 @@ export class HeldBranch {
     return branch
   }
 
-  /** Writes over what this worker last read, reading again when someone else moved it on. */
+  /**
+   * Writes over what this worker last read, reading again when someone else moved it on. What it
+   * wants for the branch it decided on the row it read: once someone asked for something since,
+   * it writes what it found and leaves `wanted` to them.
+   */
   private async write(changes: BranchChanges): Promise<void> {
+    const decidedOn = this.branch
+
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const written = await this.branches.update(
         {
@@ -869,7 +878,7 @@ export class HeldBranch {
           revision: this.branch.revision,
           at: new Date(),
         },
-        changes
+        askedSince(decidedOn, this.branch) ? withoutWanted(changes) : changes
       )
       if (written) {
         this.branch = written
@@ -932,6 +941,20 @@ function requireApiOrigin(settings: HeldBranchSettings): string {
     )
   }
   return settings.apiPublicOrigin.replace(/\/+$/, "")
+}
+
+/** Whether someone asked something of the branch since `before`: a delete, a stop, an open. */
+function askedSince(before: BranchRecord, now: BranchRecord): boolean {
+  return (
+    now.wanted !== before.wanted ||
+    now.openedAt.getTime() !== before.openedAt.getTime() ||
+    now.refreshRequestedAt?.getTime() !== before.refreshRequestedAt?.getTime()
+  )
+}
+
+function withoutWanted(changes: BranchChanges): BranchChanges {
+  const { wanted: _wanted, ...rest } = changes
+  return rest
 }
 
 /** The end of a command's output: where git and installers say what went wrong. */

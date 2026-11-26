@@ -93,6 +93,8 @@ export interface Lab {
   sandboxStatus: SandboxStatus
   /** The sandboxes stopped, in order. */
   stopped: string[]
+  /** Holds every sandbox stop until it settles: a provider saving a snapshot. */
+  stopGate: Promise<void> | null
   /** The commit the sandbox's checkout is at. */
   head: string
   /** What a pull in the sandbox brings, and the files it changes. */
@@ -253,6 +255,7 @@ function fakeSandboxes(
     url: () => front,
     keepAlive: async () => {},
     async stop() {
+      await lab.stopGate
       lab.stopped.push(id)
     },
     async destroy() {
@@ -327,6 +330,7 @@ export async function setup(
     state: "ready",
     sandboxStatus: "running",
     stopped: [],
+    stopGate: null,
     head: await repository.head(NAME),
     remoteHead: await repository.head(NAME),
     changedFiles: [],
