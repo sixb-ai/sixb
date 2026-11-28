@@ -1,5 +1,5 @@
 import type {
-  DefineMigrationsOptions,
+  DefineStorageMigrationsOptions,
   MigrationHistoryStore,
   MigrationPlan,
   MigrationRecord,
@@ -36,8 +36,12 @@ export function step<TContext>(
   }
 }
 
-export function defineMigrations<TContext>(
-  options: DefineMigrationsOptions<TContext>
+/**
+ * A storage provider's ordered schema migrations. Not the project's `defineMigration`, which
+ * moves stored objects when an object type changes.
+ */
+export function defineStorageMigrations<TContext>(
+  options: DefineStorageMigrationsOptions<TContext>
 ): MigrationSet<TContext> {
   const steps = [...options.steps]
   assertValidSteps(options.adapterId, steps)
@@ -48,6 +52,9 @@ export function defineMigrations<TContext>(
     steps,
   }
 }
+
+/** @deprecated Use `defineStorageMigrations`. Removed in the next release. */
+export const defineMigrations = defineStorageMigrations
 
 async function planMigrationSet<TContext>(
   params: PlanMigrationSetParams<TContext>

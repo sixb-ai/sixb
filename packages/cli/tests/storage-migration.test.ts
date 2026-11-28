@@ -186,7 +186,10 @@ function runtimeWithMigrators(migrators: readonly StorageMigrator[]): LoadedSixb
   const storage = Object.assign(new InMemoryStorage(), { migrators })
   return {
     id: "migration-test",
-    definitions: { ontology: new OntologyRegistry({ sources: [] }) },
+    definitions: {
+      ontology: new OntologyRegistry({ sources: [] }),
+      migrations: { list: () => [] },
+    },
     storage,
   } as unknown as LoadedSixbHost
 }

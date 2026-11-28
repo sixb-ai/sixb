@@ -5,8 +5,13 @@ longer fit stops the deploy before anything is written, and says what holds it b
 
 ```text
 ✗ Job: 'gate' was removed, and 2,140 objects hold it.
-  Declare it again until a migration removes it.
+  Rename or remove it in a migration:
+    defineMigration("job-gate", Job).renameProperty("gate", "<new id>")
+    defineMigration("job-gate", Job).removeProperty("gate")
 ```
+
+A [migration](../ontology/migrations.md) says what happens to those objects. A change one covers
+isn't missing one.
 
 ## What a deploy checks
 

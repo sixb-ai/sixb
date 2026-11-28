@@ -8,7 +8,7 @@ import type {
   MigrationStepOptions,
 } from "@sixb/core/storage"
 import {
-  defineMigrations,
+  defineStorageMigrations,
   describeMigrationHistory,
   runMigrationSet,
   step,
@@ -368,7 +368,7 @@ function checksum(value: string): string {
   return createHash("sha256").update(value).digest("hex")
 }
 
-export const postgresStorageMigrations = defineMigrations<PostgresMigrationContext>({
+export const postgresStorageMigrations = defineStorageMigrations<PostgresMigrationContext>({
   adapterId: POSTGRES_STORAGE_ADAPTER_ID,
   steps: [
     pgSql("001-initial-schema", initialSchemaSql),

@@ -27,6 +27,7 @@ fit together.
 | [`schedules/`](../schedules/overview.md) | Timer and event triggers for background work |
 | [`security/`](../auth/authorization.md) | Access control in `groups/`, `roles/`, and `policies/` |
 | [`shares/`](../auth/shared-access.md) | Permissions that can be granted through a share link |
+| [`migrations/`](../ontology/migrations.md) | What stored objects do when their object type changes |
 | [`app/`](../apps/overview.md) | React pages and layouts, with their own routing conventions |
 | [`skills/`](../models/tools-and-authorization.md#add-a-skill) | Agent instructions in `<name>/SKILL.md` and supporting resources |
 | [`SIXB.md`](../models/overview.md#give-it-project-instructions) | Instructions the chat agent follows in every conversation |

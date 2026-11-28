@@ -1,6 +1,7 @@
 /** Implementation exports for Sixb packages only. */
 
 export { ARTIFACT_RESTORE_POINTS } from "../artifacts/limits"
+export { inertMigrations } from "../migrations/validation"
 export { normalizeRecordActionRunInput, resolveActionRunEffects } from "./action-runs/record"
 export type { ActivitySourceState, StoredActivityEvent } from "./activity/policy"
 export {

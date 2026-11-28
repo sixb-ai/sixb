@@ -111,6 +111,7 @@ export async function migrateRuntimeStorage(sixb: LoadedSixbHost): Promise<void>
   await migrateStorage(sixb.storage, {
     projectId: sixb.id,
     ontology: sixb.definitions.ontology,
+    migrations: sixb.definitions.migrations.list(),
     security: sixb.definitions.security,
     ontologyShapes: "dev",
   })

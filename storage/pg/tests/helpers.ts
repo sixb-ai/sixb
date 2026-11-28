@@ -1,4 +1,4 @@
-import { defineMigrations } from "@sixb/core/storage"
+import { defineStorageMigrations } from "@sixb/core/storage"
 import { PostgresStorage } from "../src"
 import { createPostgresMigrator, postgresStorageMigrations, quoteIdent } from "../src/migrations"
 import { createPgClient, type SQL } from "../src/pg-client"
@@ -126,7 +126,7 @@ async function migrateDatabase(database: string, migrated: number): Promise<void
     await createPostgresMigrator({
       sql,
       schemaName: SCHEMA_NAME,
-      migrations: defineMigrations({
+      migrations: defineStorageMigrations({
         adapterId: postgresStorageMigrations.adapterId,
         steps: steps.slice(0, migrated),
       }),

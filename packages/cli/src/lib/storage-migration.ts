@@ -151,6 +151,7 @@ async function refuseUnfitShapes(sixb: LoadedSixbHost): Promise<void> {
     storage: sixb.storage,
     projectId: sixb.id,
     ontology: sixb.definitions.ontology,
+    migrations: sixb.definitions.migrations.list(),
     mode: "role",
   })
   if (check.blocked) throw new TypeShapeMismatchError(check)
@@ -164,6 +165,7 @@ async function runMigration(sixb: LoadedSixbHost, role: StorageSchemaRole) {
       projectId: sixb.id,
       ontology: sixb.definitions.ontology,
       security: sixb.definitions.security,
+      migrations: sixb.definitions.migrations.list(),
       ontologyShapes: "role",
     })
   } catch (error) {

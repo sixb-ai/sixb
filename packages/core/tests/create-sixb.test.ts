@@ -236,6 +236,14 @@ describe("createSixb", () => {
       "room-temperatures",
     ])
 
+    expect(definitions.migrations.list()).toMatchObject([
+      {
+        id: "room-legacy-floor",
+        objectTypeId: "Room",
+        steps: [{ kind: "removeProperty", propertyId: "floor" }],
+      },
+    ])
+
     // The role grants a discovered Share, so Shares must be registered before security validates.
     expect(definitions.shares.list().map((share) => share.id)).toEqual(["published-report"])
     expect(definitions.security.getRoleById("publisher")?.grants[0]).toMatchObject({
@@ -928,6 +936,11 @@ export const PublishedReport = defineShare("published-report", {
   target: Report,
   grants: ({ target }) => [can.view(target), can.apply(acknowledge).on(target)],
 })
+`,
+    "migrations/room-legacy-floor.ts": `import { defineMigration } from "${coreModuleUrl}"
+import { Room } from "../ontology/room"
+
+export const roomLegacyFloor = defineMigration("room-legacy-floor", Room).removeProperty("floor")
 `,
     "security/groups/publishers.ts": `import { defineGroup } from "${coreModuleUrl}"
 

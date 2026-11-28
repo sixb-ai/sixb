@@ -9,6 +9,7 @@ import {
 } from "../src"
 import {
   defineMigrations,
+  defineStorageMigrations,
   describeMigrationHistory,
   type MigrationHistoryStore,
   type MigrationRecord,
@@ -120,10 +121,16 @@ function appliedRow(version: number, id: string, checksum?: string): MigrationRe
   }
 }
 
+describe("defineStorageMigrations", () => {
+  test("keeps its former name for a release", () => {
+    expect(defineMigrations).toBe(defineStorageMigrations)
+  })
+})
+
 describe("runMigrationSet", () => {
   test("applies pending schema changes and records migration history", async () => {
     const harness = createMigrationHarness()
-    const migrations = defineMigrations({
+    const migrations = defineStorageMigrations({
       adapterId: "SixbFakeStorage",
       steps: [
         step<FakeStorageDb>("001-create-objects", (db) => {
@@ -166,7 +173,7 @@ describe("runMigrationSet", () => {
   test("skips already-applied migrations and only applies pending steps", async () => {
     const harness = createMigrationHarness([appliedRow(1, "001-create-objects")])
     ensureTable(harness.db, "objects", ["project_id", "object_type_id", "primary_id"])
-    const migrations = defineMigrations({
+    const migrations = defineStorageMigrations({
       adapterId: "SixbFakeStorage",
       steps: [
         step<FakeStorageDb>("001-create-objects", () => {
@@ -211,7 +218,7 @@ describe("runMigrationSet", () => {
     await expect(
       runMigrationSet({
         context: harness.db,
-        migrations: defineMigrations({
+        migrations: defineStorageMigrations({
           adapterId: "SixbFakeStorage",
           steps: [step<FakeStorageDb>("001-create-objects", () => {})],
         }),
@@ -226,7 +233,7 @@ describe("runMigrationSet", () => {
     await expect(
       runMigrationSet({
         context: harness.db,
-        migrations: defineMigrations({
+        migrations: defineStorageMigrations({
           adapterId: "SixbFakeStorage",
           steps: [],
         }),
@@ -241,7 +248,7 @@ describe("runMigrationSet", () => {
     await expect(
       runMigrationSet({
         context: harness.db,
-        migrations: defineMigrations({
+        migrations: defineStorageMigrations({
           adapterId: "SixbFakeStorage",
           steps: [step<FakeStorageDb>("001-create-objects", () => {}, { checksum: "new" })],
         }),
@@ -447,7 +454,7 @@ function statusMigrator(status: FixtureStatus): StorageMigrator {
 }
 
 describe("describeMigrationHistory", () => {
-  const migrations = defineMigrations({
+  const migrations = defineStorageMigrations({
     adapterId: "SixbFakeStorage",
     steps: [
       step<FakeStorageDb>("001-first", () => {}, { checksum: "a" }),
@@ -489,7 +496,7 @@ describe("describeMigrationHistory", () => {
     // Nothing to apply, so nothing for `sixb db migrate` to do. `uninitialized` sent an
     // operator to run a command that would have applied nothing and reported the same
     // state back — and on the `api` role it is the state that keeps /ready unready.
-    const empty = defineMigrations({ adapterId: "SixbFakeStorage", steps: [] })
+    const empty = defineStorageMigrations({ adapterId: "SixbFakeStorage", steps: [] })
 
     expect(describeMigrationHistory({ migrations: empty, rows: null })).toEqual({
       adapterId: "SixbFakeStorage",

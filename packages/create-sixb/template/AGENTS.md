@@ -51,6 +51,7 @@ pipelines/     transform datasets
 rules/         continuous evaluation over object state
 workflows/     multi-step processes (with human-in-the-loop)
 security/      groups/ roles/ markings/ policies/
+migrations/    what stored objects do when an object type changes (defineMigration)
 skills/        Agent Skills (<name>/SKILL.md) for the chat agent and AI workflow steps
 app/           custom React UI — NOT discovered (served separately)
 ```

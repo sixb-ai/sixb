@@ -39,6 +39,7 @@ export async function runDbMigrate(options: DbMigrateOptions = {}) {
                 storage: sixb.storage,
                 projectId: sixb.id,
                 ontology: sixb.definitions.ontology,
+                migrations: sixb.definitions.migrations.list(),
                 mode: "check",
                 // Read while the live release serves: only a property the code makes unique is
                 // built, in a transaction that rolls back.
@@ -73,6 +74,7 @@ export async function runDbMigrate(options: DbMigrateOptions = {}) {
       migrateStorage(sixb.storage, {
         projectId: sixb.id,
         ontology: sixb.definitions.ontology,
+        migrations: sixb.definitions.migrations.list(),
         security: sixb.definitions.security,
         ontologyShapes: "deploy",
       })

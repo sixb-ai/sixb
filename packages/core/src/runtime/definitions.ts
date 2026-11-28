@@ -2,6 +2,7 @@ import type { ActionDefinitionCatalog } from "../actions"
 import type { AgentDefinitions, AgentToolCatalog } from "../agents"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
+import type { MigrationDefinition } from "../migrations"
 import type { ModelCatalog } from "../models"
 import type { OntologyDefinitionCatalog } from "../ontology"
 import type { PipelineDefinition } from "../pipelines"
@@ -36,6 +37,8 @@ export interface SixbDefinitions {
   readonly schedules: DefinitionCatalog<ScheduleDefinition>
   readonly security: SecurityDefinitionCatalog
   readonly shares: DefinitionCatalog<ShareDefinition>
+  /** The project's ontology migrations: `sixb db migrate` decides which are pending. */
+  readonly migrations: DefinitionCatalog<MigrationDefinition>
   readonly syncs: DefinitionCatalog<SyncDefinition>
   readonly workflows: DefinitionCatalog<WorkflowDefinition>
   /** Where each discovered definition sits inside its directory, for browsing them by folder. */

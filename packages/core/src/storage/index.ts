@@ -636,6 +636,7 @@ export type {
 } from "./maintenance-heartbeats"
 export type {
   DefineMigrationsOptions,
+  DefineStorageMigrationsOptions,
   MigrationCapableStorage,
   MigrationHistoryStore,
   MigrationRecord,
@@ -658,6 +659,7 @@ export type {
 export {
   checkStorageSchema,
   defineMigrations,
+  defineStorageMigrations,
   describeMigrationHistory,
   isMigrationCapableStorage,
   migrateStorage,
