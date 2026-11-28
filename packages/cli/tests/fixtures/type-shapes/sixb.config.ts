@@ -34,6 +34,8 @@ const releases = {
     }),
     prop("hours", "string"),
   ],
+  /** Makes `hours` a required number: a convert of the text values, a fill of the missing. */
+  hourly: [prop("gate", "string"), prop("hours", "double", { required: true })],
 }
 
 const release = (process.env.SIXB_SHAPES_RELEASE ?? "first") as keyof typeof releases
@@ -52,12 +54,32 @@ const Job = defineObjectType({
   properties: [prop("ref", "string", { primary: true, required: true }), ...releases[release]],
 })
 
+/** `Job` as `hourly` declares it, which its migration's values are typed against. */
+const HourlyJob = defineObjectType({
+  id: "Job",
+  name: "Job",
+  properties: [
+    prop("ref", "string", { primary: true, required: true }),
+    prop("hours", "double", { required: true }),
+  ],
+})
+
 const migrations = {
   none: [],
   /** Covers `withoutGate`'s removal. */
   removeGate: [defineMigration("job-gate", Job).removeProperty("gate")],
   /** Covers `renamed`'s rename. */
   renameGate: [defineMigration("job-gate-code", Job).renameProperty("gate", "gateCode")],
+  /** Covers `hourly`'s narrowing: text to a number, and none to 0. */
+  hours: [
+    defineMigration("job-hours", HourlyJob)
+      .convertProperty("hours", ({ value }) => {
+        const hours = Number(value)
+        if (Number.isNaN(hours)) throw new Error(`'${String(value)}' isn't a number`)
+        return hours
+      })
+      .fillProperty("hours", () => 0),
+  ],
   /** Gives the primary property a value: refused at load. */
   invalid: [defineMigration("job-ref", Job).fillProperty("ref", () => "R")],
   /** Removes a property `Job` declares again: inert, and `sixb check` says it can go. */

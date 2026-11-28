@@ -275,9 +275,6 @@ export function runOntologyMigrationValueCases<TStorage extends Storage>(
   async function withSeeded(run: (storage: TStorage) => Promise<void>): Promise<void> {
     const storage = await provider.createStorage()
     try {
-      // A provider without the staging refuses value steps at the gate: nothing to run here.
-      if (!storage.ontology.migrations?.values) return
-
       await seedJobs(storage)
       await run(storage)
     } finally {

@@ -1,6 +1,7 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite"
 import {
   addMigrationCounts,
+  afterUniqueValues,
   type CompiledMigrationSteps,
   compileMigrationSteps,
   migrationBatchConflict,
@@ -25,6 +26,13 @@ import type {
   StartOntologyMigrationRunInput,
 } from "@sixb/core/storage"
 import { insertSqliteRuntimeCommit } from "./commits"
+import {
+  applyStagedObjects,
+  applyStagedUnique,
+  discardStaged,
+  SqliteOntologyMigrationValueStorage,
+  stagedBound,
+} from "./migration-values"
 import type { SqliteRootOperation } from "./shared"
 
 interface SqliteRunRow {
@@ -59,11 +67,14 @@ interface LaneOutcome {
  */
 export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage {
   readonly parallelism = 1
+  readonly values: SqliteOntologyMigrationValueStorage
 
   constructor(
     private readonly db: Database,
     private readonly runRootOperation: SqliteRootOperation
-  ) {}
+  ) {
+    this.values = new SqliteOntologyMigrationValueStorage(db, runRootOperation)
+  }
 
   async getOpenRun(input: { readonly projectId: string }) {
     return this.runRootOperation(() => {
@@ -163,6 +174,7 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
         .query(`DELETE FROM ontology_replacement_plan_identities WHERE version_id IN (${plans})`)
         .run(projectId)
       this.db.query(`DELETE FROM ontology_replacement_plans WHERE project_id = ?`).run(projectId)
+      discardStaged(this.db, { projectId, runId: run.id, others: true })
 
       return run
     })
@@ -253,6 +265,7 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
            WHERE project_id = ? AND id = ?`
         )
         .run(input.appliedAt, run.projectId, run.id)
+      discardStaged(this.db, { projectId: run.projectId, runId: run.id })
 
       return { ...run, status: "applied", appliedAt: input.appliedAt }
     })
@@ -299,15 +312,22 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
       `(SELECT primary_id FROM ${table} WHERE ${ofType} ${afterSql} ${laneEnd}
         ORDER BY primary_id LIMIT 1 OFFSET ?)`
     const nthParams = [projectId, type.objectTypeId, ...afterParams, ...laneEndParams]
-    const bound = this.db
-      .query(
-        `SELECT CASE WHEN o IS NULL THEN e WHEN e IS NULL OR o < e THEN o ELSE e END AS through
-         FROM (SELECT ${nth("objects")} AS o, ${nth("ontology_object_overrides")} AS e)`
-      )
-      .get(...nthParams, input.batchRows - 1, ...nthParams, input.batchRows - 1) as {
-      readonly through: string | null
-    }
-    const last = bound.through ?? undefined
+    const bound = () =>
+      this.db
+        .query(
+          `SELECT CASE WHEN o IS NULL THEN e WHEN e IS NULL OR o < e THEN o ELSE e END AS through
+           FROM (SELECT ${nth("objects")} AS o, ${nth("ontology_object_overrides")} AS e)`
+        )
+        .get(...nthParams, input.batchRows - 1, ...nthParams, input.batchRows - 1) as {
+        readonly through: string | null
+      }
+
+    // Steps that only stage values rewrite only the staged rows: their batches are counted there.
+    const staged = { projectId, objectTypeId: type.objectTypeId, ...(after ? { after } : {}) }
+    const laneRange = { ...staged, ...(through === undefined ? {} : { through }) }
+    const last = valuesOnly(compiled)
+      ? stagedBound(this.db, input.runId, laneRange, input.batchRows)
+      : (bound().through ?? undefined)
 
     const end = last ?? through
     const range = (column: string) =>
@@ -325,11 +345,24 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
     const { objects, edits, vectors } = this.rewriteObjects(input, compiled, batch)
     const links = this.deleteLinks(projectId, type.objectTypeId, compiled, range, rangeParams)
 
+    // After the key steps: their moves leave each staged value's key in place.
+    const values = applyStagedObjects(this.db, {
+      runId: input.runId,
+      compiled,
+      range: { ...staged, ...(end === undefined ? {} : { through: end }) },
+      commitId: input.commit.id,
+      committedAt: input.commit.committedAt,
+    })
+    const rewritten = {
+      objects: objects + (values.objects ?? 0),
+      edits: edits + (values.edits ?? 0),
+    }
+
     // No touch: `startRun` dropped every plan that would read one.
-    if (objects + edits > 0) insertSqliteRuntimeCommit(this.db, input.commit)
+    if (rewritten.objects + rewritten.edits > 0) insertSqliteRuntimeCommit(this.db, input.commit)
 
     return {
-      counts: { objects, edits, links, vectors: vectors + moved },
+      counts: { ...rewritten, links, vectors: vectors + moved + (values.vectors ?? 0) },
       cursor: last === undefined ? null : { kind: "objects", afterPrimaryId: last },
     }
   }
@@ -558,6 +591,15 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
       return this.deleteSourceLinks(projectId, objectTypeId, compiled, cursor.after?.[0], batchRows)
     }
 
+    if (cursor.store === "stagedUnique") {
+      const { runId } = input
+      const after = cursor.after
+      const step = applyStagedUnique(this.db, {
+        ...{ projectId, runId, objectTypeId, compiled, after, batchRows },
+      })
+      return { counts: { uniqueValues: step.rows }, cursor: step.cursor }
+    }
+
     if (cursor.store === "uniqueValues") {
       // What a rename's new id may already hold goes first, before any value moves there, whether
       // or not values do: a release that once made it unique may have left a preparation no object
@@ -608,7 +650,7 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
       this.db
         .query(`DELETE FROM object_unique_properties WHERE ${ofProperties(dropped)}`)
         .run(projectId, objectTypeId)
-      return { counts: { uniqueValues }, cursor: { kind: "derived", store: "artifactRefs" } }
+      return { counts: { uniqueValues }, cursor: afterUniqueValues(compiled) }
     }
 
     const after = Number(cursor.after?.[0] ?? 0)
@@ -849,6 +891,11 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
       lanes: lanes.map(laneRecord),
     }
   }
+}
+
+/** Steps that rewrite no key and remove no link: their batches only apply staged values. */
+function valuesOnly(compiled: CompiledMigrationSteps): boolean {
+  return compiled.keys.length === 0 && compiled.removedLinkIds.length === 0
 }
 
 /** A range's end, when the lane has one. */

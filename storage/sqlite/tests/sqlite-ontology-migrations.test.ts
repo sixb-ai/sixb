@@ -7,8 +7,22 @@ import { runOntologyMigrationContractSuite } from "@sixb/core/testing"
 import { migrateSqliteStorage, SqliteStorage } from "../src"
 import { freshSqliteDatabase } from "../src/migrations"
 import { SqliteOntologyMigrationStorage } from "../src/ontology-storage/migrations"
+import { getSqliteStorageTestingAdapter } from "../src/testing"
 
 const directories = new WeakMap<SqliteStorage, string>()
+
+/** An edit stored before edit times were: its times are its update's. */
+async function clearEditTimes(
+  storage: SqliteStorage,
+  ref: { readonly projectId: string; readonly objectTypeId: string; readonly primaryId: string }
+): Promise<void> {
+  getSqliteStorageTestingAdapter(storage)
+    .db.query(
+      `UPDATE ontology_object_overrides SET edited_at = '{}'
+       WHERE project_id = ? AND object_type_id = ? AND primary_id = ?`
+    )
+    .run(ref.projectId, ref.objectTypeId, ref.primaryId)
+}
 
 // A file, as a project runs on, and a database in memory, as `sixb dev` may.
 runOntologyMigrationContractSuite("SQLite storage", {
@@ -20,6 +34,7 @@ runOntologyMigrationContractSuite("SQLite storage", {
     directories.set(storage, directory)
     return storage
   },
+  clearEditTimes,
   cleanup: async (storage) => {
     storage.close()
     const directory = directories.get(storage)
@@ -29,6 +44,7 @@ runOntologyMigrationContractSuite("SQLite storage", {
 
 runOntologyMigrationContractSuite("SQLite storage in memory", {
   createStorage: () => new SqliteStorage(),
+  clearEditTimes,
   cleanup: (storage) => storage.close(),
 })
 

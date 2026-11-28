@@ -1014,7 +1014,7 @@ function failingAfter<TStorage extends Storage>(storage: TStorage, batches: numb
     getOpenRun: (input) => migrations.getOpenRun(input),
     listSettled: (input) => migrations.listSettled(input),
     settle: (input) => migrations.settle(input),
-    ...(migrations.values ? { values: migrations.values } : {}),
+    values: migrations.values,
     startRun: (input) => migrations.startRun(input),
     finishRun: (input) => migrations.finishRun(input),
     async applyBatch(input) {

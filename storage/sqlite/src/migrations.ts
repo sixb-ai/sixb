@@ -351,6 +351,7 @@ export const sqliteStorageMigrations = defineStorageMigrations({
     sqliteSql("117-ontology-type-shapes", ontologyTypeShapesSql),
     sqliteSql("118-ontology-migrate-executions", ontologyMigrateExecutionsSql),
     sqliteSql("119-ontology-migration-runs", ontologyMigrationRunsSql),
+    sqliteSql("120-ontology-migration-staged-values", ontologyMigrationStagedValuesSql),
   ],
 })
 
@@ -821,5 +822,8 @@ import ontologyMigrateExecutionsSql from "./migrations/118-ontology-migrate-exec
   type: "text",
 }
 import ontologyMigrationRunsSql from "./migrations/119-ontology-migration-runs.sql" with {
+  type: "text",
+}
+import ontologyMigrationStagedValuesSql from "./migrations/120-ontology-migration-staged-values.sql" with {
   type: "text",
 }

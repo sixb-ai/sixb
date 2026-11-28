@@ -69,13 +69,13 @@ export async function applyOntologyMigrations(input: {
 
   // Until the run starts, a failure leaves nothing but the staging behind, which goes with it.
   const discard = async (error: unknown): Promise<never> => {
-    await migrations.values?.discardStaged({ projectId, runId })
+    await migrations.values.discardStaged({ projectId, runId })
     throw error
   }
   if (values.length > 0) {
     await planValueSteps({
       storage,
-      values: migrationValueStorage(migrations),
+      values: migrations.values,
       parallelism: migrations.parallelism,
       projectId,
       runId,
@@ -492,15 +492,6 @@ function migrationHash(migration: MigrationDefinition): string {
     )
   )
   return sha256Canonical({ id: migration.id, objectTypeId: migration.objectTypeId, steps })
-}
-
-function migrationValueStorage(migrations: OntologyMigrationStorage) {
-  if (migrations.values) return migrations.values
-
-  throw new Error(
-    "[Sixb] This storage provider cannot apply fills and converts. Use PostgreSQL, SQLite or " +
-      "in-memory storage."
-  )
 }
 
 function migrationStorage(storage: Storage): OntologyMigrationStorage {

@@ -163,6 +163,7 @@ const SHIPPED_MIGRATIONS = [
   "122-ontology-type-shapes",
   "123-ontology-migrate-executions",
   "124-ontology-migration-runs",
+  "125-ontology-migration-staged-values",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -1470,6 +1471,7 @@ describe("Postgres storage migrations", () => {
         "ontology_link_overrides",
         "ontology_migration_run_lanes",
         "ontology_migration_runs",
+        "ontology_migration_staged_values",
         "ontology_migrations_settled",
         "ontology_object_overrides",
         "ontology_outbox",

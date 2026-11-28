@@ -69,7 +69,14 @@ async function dockerCompose(args: readonly string[]): Promise<void> {
   }
 }
 
-type Release = "first" | "withNote" | "withoutGate" | "retypedGate" | "uniqueGate" | "renamed"
+type Release =
+  | "first"
+  | "withNote"
+  | "withoutGate"
+  | "retypedGate"
+  | "uniqueGate"
+  | "renamed"
+  | "hourly"
 
 /** One CLI run of `release`, on the test's schema. */
 function sixb(
@@ -101,7 +108,11 @@ async function deployedSchema(name: string): Promise<string> {
 }
 
 /** Writes a job as the first release's actions would. */
-async function createJob(schema: string, properties: Readonly<Record<string, string>>) {
+async function createJob(
+  schema: string,
+  properties: Readonly<Record<string, string>>,
+  ref = "J-12"
+) {
   const Job = defineObjectType({
     id: "Job",
     name: "Job",
@@ -125,7 +136,7 @@ async function createJob(schema: string, properties: Readonly<Record<string, str
   try {
     await createTestSixb(host)
       .objects(Job)
-      .upsert({ properties: { ref: "J-12", ...properties } })
+      .upsert({ properties: { ref, ...properties } })
   } finally {
     await storage.close()
   }
@@ -173,14 +184,14 @@ async function withRenamedJobs(
   }
 }
 
-/** Job `J-12`'s properties, as stored. */
-async function storedJob(schema: string) {
+/** A job's properties, as stored: `J-12`'s by default. */
+async function storedJob(schema: string, primaryId = "J-12") {
   const storage = new PostgresStorage({ connectionString: databaseUrl, schemaName: schema })
   try {
     const job = await storage.objects.getByPrimaryId({
       projectId: "cli-type-shapes",
       objectTypeId: "Job",
-      primaryId: "J-12",
+      primaryId,
     })
     return job?.properties
   } finally {
@@ -352,6 +363,43 @@ describe("migrations", () => {
       expect(Object.keys((await storedShape(schema))?.properties ?? {})).not.toContain("gate")
     },
     CLI_TIMEOUT_MS * 3
+  )
+
+  // Removal proof: skip `planValueSteps` in `applyOntologyMigrations`; nothing is staged, the
+  // first deploy goes through without converting, and `J-12` keeps its text.
+  test(
+    "`sixb check --migrate` fills and converts values, refusing first an object the convert fails for",
+    async () => {
+      const schema = await deployedSchema("values")
+      await createJob(schema, { hours: "3" })
+      await createJob(schema, {}, "J-13")
+      await createJob(schema, { hours: "four" }, "J-14")
+      const before = await storedShape(schema)
+
+      const env = { SIXB_SHAPES_MIGRATION: "hours" }
+      const refused = await sixb(schema, "hourly", ["check", "--migrate"], env)
+      expect(refused.exitCode).toBe(1)
+      expect(refused.stdout + refused.stderr).toContain(
+        "Migration 'job-hours' cannot apply: 1 object fails."
+      )
+      expect(refused.stdout + refused.stderr).toContain(
+        "Job 'J-14': convertProperty('hours') failed: 'four' isn't a number"
+      )
+      expect(await storedShape(schema)).toEqual(before)
+      expect(await storedJob(schema, "J-14")).toEqual({ ref: "J-14", hours: "four" })
+
+      await createJob(schema, { hours: "4" }, "J-14")
+      const deployed = await sixb(schema, "hourly", ["check", "--migrate"], env)
+      expect(deployed.exitCode).toBe(0)
+      expect(await storedJob(schema)).toEqual({ ref: "J-12", hours: 3 })
+      expect(await storedJob(schema, "J-13")).toEqual({ ref: "J-13", hours: 0 })
+      expect(await storedJob(schema, "J-14")).toEqual({ ref: "J-14", hours: 4 })
+      expect((await storedShape(schema))?.properties.hours).toEqual({
+        schema: "double",
+        required: true,
+      })
+    },
+    CLI_TIMEOUT_MS * 4
   )
 
   test(
