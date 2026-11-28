@@ -88,6 +88,9 @@ export type {
 } from "./materializations"
 export type {
   ApplyOntologyMigrationBatchInput,
+  ListMigrationValueTargetsInput,
+  MigrationHeldUniqueProperty,
+  MigrationUniqueCollision,
   OntologyMigrationCounts,
   OntologyMigrationLane,
   OntologyMigrationLaneCursor,
@@ -97,8 +100,12 @@ export type {
   OntologyMigrationRunType,
   OntologyMigrationStorage,
   OntologyMigrationStoreStep,
+  OntologyMigrationValueStorage,
   OntologyMigrationVectorMove,
   SettledMigration,
+  StagedObjectValues,
+  StagedUniqueKeys,
+  StagedVectorRequest,
   StartOntologyMigrationRunInput,
 } from "./migrations"
 export type {

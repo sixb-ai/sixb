@@ -8,6 +8,8 @@ import type { OntologyDefinitionCatalog } from "../ontology/registry"
 import { sameShape } from "../ontology/type-shapes"
 import type { ObjectVectorSearchProfile } from "../ontology/types"
 import { uniquePropertiesOf } from "../ontology/unique-values"
+import { computeProjectionOwnership } from "../projections/ownership"
+import type { ProjectionDefinitionCatalog } from "../projections/registry"
 import { computeOntologyRevision } from "../projections/revision"
 import {
   type PendingUniqueRename,
@@ -25,6 +27,7 @@ import {
 } from "../storage/ontology/migrations"
 import type { PreparedUniqueProperty } from "../storage/ontology/unique-values"
 import type { Storage } from "../storage/types"
+import { planValueSteps, type ValuePlanType } from "./plan-values"
 import { stepKindOf } from "./steps"
 import type { MigrationDefinition } from "./types"
 
@@ -37,8 +40,9 @@ export const MIGRATION_BATCH_ROWS = 10_000
 
 /**
  * Applies the migration steps `check` planned, once every check that can fail has passed: the
- * point of no return is `startRun`. From there the run only goes forward, lane by lane, each batch
- * saving where its lane's next one starts; a crash resumes from there with
+ * point of no return is `startRun`. The value steps' functions run before it, and what they give
+ * is staged: a failure there writes nothing else. From there the run only goes forward, lane by
+ * lane, each batch saving where its lane's next one starts; a crash resumes from there with
  * {@link resumeOntologyMigration}. Returns the applied run, or `null` when `check` plans nothing.
  */
 export async function applyOntologyMigrations(input: {
@@ -47,21 +51,43 @@ export async function applyOntologyMigrations(input: {
   readonly ontology: OntologyDefinitionCatalog
   readonly migrations: readonly MigrationDefinition[]
   readonly check: TypeShapeCheck
+  /** The project's projections: the run names those feeding a property it converted. */
+  readonly projections?: Pick<ProjectionDefinitionCatalog, "listObjects">
   readonly batchRows?: number
   /** Called once the run is past its point of no return, before its first batch. */
   readonly onStarted?: (runId: string) => Promise<void> | void
 }): Promise<OntologyMigrationRunRecord | null> {
   const { storage, projectId, check } = input
   const prepared = await storage.ontology.uniqueValues.listPrepared({ projectId })
-  const plan = runPlan({ ...input, prepared })
-  if (!plan) return null
+  const planned = runPlan({ ...input, prepared })
+  if (!planned) return null
 
+  const { plan, values } = planned
   const migrations = migrationStorage(storage)
   const runId = `migration_${randomUUID()}`
+  const startedAt = new Date().toISOString()
+
+  // Until the run starts, a failure leaves nothing but the staging behind, which goes with it.
+  const discard = async (error: unknown): Promise<never> => {
+    await migrations.values?.discardStaged({ projectId, runId })
+    throw error
+  }
+  if (values.length > 0) {
+    await planValueSteps({
+      storage,
+      values: migrationValueStorage(migrations),
+      parallelism: migrations.parallelism,
+      projectId,
+      runId,
+      startedAt,
+      ontology: input.ontology,
+      types: values,
+    }).catch(discard)
+  }
 
   // The shapes the check read are still the stored ones, or another deploy moved them; then the
   // run's execution and the run itself, in one transaction.
-  const run = await storage.transaction(async (tx) => {
+  const starting = storage.transaction(async (tx) => {
     await tx.ontology.typeShapes.lock({ projectId })
     const current = new Map(
       (await tx.ontology.typeShapes.list({ projectId })).map((row) => [row.objectTypeId, row])
@@ -83,11 +109,12 @@ export async function applyOntologyMigrations(input: {
       projectId,
       id: runId,
       executionId,
-      startedAt: new Date().toISOString(),
+      startedAt,
       plan,
       parts: migrations.parallelism,
     })
   })
+  const run = await starting.catch(discard)
 
   console.info(
     `[Sixb] Applying migrations to ${plan.types.map((type) => type.objectTypeId).join(", ")} ` +
@@ -95,7 +122,10 @@ export async function applyOntologyMigrations(input: {
       "`sixb db migrate` finishes it."
   )
   await input.onStarted?.(run.id)
-  return finish(migrations, run, input.batchRows)
+  const finished = await finish(migrations, run, input.batchRows)
+
+  reportProjections(input, plan)
+  return finished
 }
 
 /**
@@ -184,6 +214,22 @@ async function finish(
   return finished
 }
 
+/** The properties `check` runs a fill or a convert of, per type. */
+export function runValueProperties(
+  check: Pick<TypeShapeCheck, "types">,
+  migrations: readonly MigrationDefinition[]
+): { readonly objectTypeId: string; readonly propertyId: string }[] {
+  const byId = new Map(migrations.map((migration) => [migration.id, migration]))
+
+  return check.types.flatMap((type) =>
+    type.run.flatMap(({ migrationId, index }) => {
+      const step = byId.get(migrationId)?.steps[index]
+      if (step?.kind !== "fillProperty" && step?.kind !== "convertProperty") return []
+      return [{ objectTypeId: type.objectTypeId, propertyId: step.propertyId }]
+    })
+  )
+}
+
 /** The renames `check` runs, per type: their unique values are the run's to move or drop. */
 export function runRenames(
   check: Pick<TypeShapeCheck, "types">,
@@ -203,17 +249,22 @@ export function runRenames(
   )
 }
 
-/** What the run applies: the types `check` found steps to run for, and nothing else it found. */
+/**
+ * What the run applies: the types `check` found steps to run for, and nothing else it found; and
+ * the types with value steps, whose functions the plan calls before the run starts.
+ */
 function runPlan(input: {
   readonly ontology: OntologyDefinitionCatalog
   readonly migrations: readonly MigrationDefinition[]
   readonly check: TypeShapeCheck
   readonly prepared: readonly PreparedUniqueProperty[]
-}): OntologyMigrationRunPlan | null {
+  readonly projections?: Pick<ProjectionDefinitionCatalog, "listObjects">
+}): { readonly plan: OntologyMigrationRunPlan; readonly values: ValuePlanType[] } | null {
   const { ontology, check, prepared } = input
   const byId = new Map(input.migrations.map((migration) => [migration.id, migration]))
   const renames = runRenames(check, input.migrations)
   const valueTypes = ontology.getValueTypesById()
+  const values: ValuePlanType[] = []
 
   const types = check.types.flatMap((type) => {
     if (type.run.length === 0 || type.findings.length > 0 || type.next.kind !== "write") return []
@@ -236,40 +287,115 @@ function runPlan(input: {
         .map((rename) => rename.from)
     )
 
-    const steps = type.run.map(({ migrationId, index }) => {
+    // A value step's unique values follow from their staged keys when, once the renames ran,
+    // they are prepared the way the code compares them; otherwise they are built after the run.
+    const valueUnique = new Map<string, "update" | "rebuild">()
+    for (const { migrationId, index } of type.run) {
       const step = byId.get(migrationId)?.steps[index]
-      const storeStep = step && stepKindOf(step).storeStep
-      if (!step || !storeStep) {
-        throw new Error(
-          `[Sixb] This build can't apply step ${index} of migration '${migrationId}'.`
-        )
-      }
-      return { ...storeStep(step, { uniqueMoves }), migrationId }
+      const kind = step && "propertyId" in step ? unique.get(step.propertyId) : undefined
+      if (!step || !kind || !stepKindOf(step).stagesValues) continue
+
+      const to = (step as { readonly propertyId: string }).propertyId
+      const from = renames.find(
+        (rename) => rename.objectTypeId === objectTypeId && rename.to === to
+      )
+      // Values under the property's own id that the recorded shape doesn't keep unique were
+      // dropped before the run (`applyTypeShapes`): what is left is current.
+      const fromUnique = from?.fromUnique ?? true
+      const current = { objectTypeId, from: from?.from ?? to, to, fromUnique }
+      valueUnique.set(to, uniqueValuesMove(prepared, current, kind) ? "update" : "rebuild")
+    }
+
+    const definitions = type.run.map(({ migrationId, index }) => {
+      const step = byId.get(migrationId)?.steps[index]
+      if (!step) throw new Error(`[Sixb] Migration '${migrationId}' has no step ${index}.`)
+      return step
     })
+    const steps = definitions.map((step, position) => ({
+      ...stepKindOf(step).storeStep(step, { uniqueMoves, valueUnique }),
+      migrationId: type.run[position]!.migrationId,
+    }))
 
     const vectors = vectorMoves(
       objectType.search?.vectors ?? {},
       renames.filter((rename) => rename.objectTypeId === objectTypeId)
     )
-    return [
-      {
-        objectTypeId,
-        fromShape,
-        toShape: type.next.shape,
-        steps,
-        ...(vectors.length > 0 ? { vectors } : {}),
-      },
-    ]
+    const planned = {
+      objectTypeId,
+      fromShape,
+      toShape: type.next.shape,
+      steps,
+      ...(vectors.length > 0 ? { vectors } : {}),
+    }
+    if (definitions.some((step) => stepKindOf(step).stagesValues)) {
+      const projected = new Set(projectedProperties(input, objectTypeId).keys())
+      values.push({ type: planned, definitions, projected })
+    }
+    return [planned]
   })
   if (types.length === 0) return null
 
   const ids = [...new Set(types.flatMap((type) => type.steps.map((step) => step.migrationId)))]
 
   return {
-    ontologyRevision: computeOntologyRevision(ontology),
-    migrations: ids.sort().map((id) => ({ id, hash: migrationHash(byId.get(id)!) })),
-    types,
+    plan: {
+      ontologyRevision: computeOntologyRevision(ontology),
+      migrations: ids.sort().map((id) => ({ id, hash: migrationHash(byId.get(id)!) })),
+      types,
+    },
+    values,
   }
+}
+
+/**
+ * Names the projections that feed a property the run converted. Their source values are theirs
+ * to rebuild under the new schema, and keep the old one until they run again: until then, a write
+ * to one of their objects fails the new schema's validation.
+ */
+function reportProjections(
+  input: {
+    readonly ontology: OntologyDefinitionCatalog
+    readonly projections?: Pick<ProjectionDefinitionCatalog, "listObjects">
+  },
+  plan: OntologyMigrationRunPlan
+): void {
+  for (const type of plan.types) {
+    const projected = projectedProperties(input, type.objectTypeId)
+    for (const step of type.steps) {
+      if (step.kind !== "convertProperty") continue
+
+      for (const projectionId of projected.get(step.propertyId) ?? []) {
+        console.warn(
+          `[Sixb] Projection '${projectionId}' feeds '${type.objectTypeId}.${step.propertyId}', ` +
+            "which this run converted in edits only. Its values keep the old schema until it " +
+            "runs again: run it now."
+        )
+      }
+    }
+  }
+}
+
+/** The properties the code's projections feed on the type, with the projections that do. */
+function projectedProperties(
+  input: {
+    readonly ontology: OntologyDefinitionCatalog
+    readonly projections?: Pick<ProjectionDefinitionCatalog, "listObjects">
+  },
+  objectTypeId: string
+): Map<string, string[]> {
+  const fed = new Map<string, string[]>()
+
+  for (const projection of input.projections?.listObjects() ?? []) {
+    const ownership = computeProjectionOwnership(projection, input.ontology)
+    for (const owned of ownership.objects) {
+      if (owned.objectTypeId !== objectTypeId) continue
+      for (const propertyId of owned.propertyIds) {
+        fed.set(propertyId, [...(fed.get(propertyId) ?? []), projection.id])
+      }
+    }
+  }
+
+  return fed
 }
 
 /**
@@ -366,6 +492,15 @@ function migrationHash(migration: MigrationDefinition): string {
     )
   )
   return sha256Canonical({ id: migration.id, objectTypeId: migration.objectTypeId, steps })
+}
+
+function migrationValueStorage(migrations: OntologyMigrationStorage) {
+  if (migrations.values) return migrations.values
+
+  throw new Error(
+    "[Sixb] This storage provider cannot apply fills and converts. Use PostgreSQL, SQLite or " +
+      "in-memory storage."
+  )
 }
 
 function migrationStorage(storage: Storage): OntologyMigrationStorage {

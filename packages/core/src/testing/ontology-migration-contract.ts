@@ -36,10 +36,16 @@ import {
   v2,
   wideRelease,
 } from "./ontology-migration-contract-fixture"
+import { runOntologyMigrationValueCases } from "./ontology-migration-values-contract"
 
 export interface OntologyMigrationContractProvider<TStorage extends Storage> {
   readonly createStorage: () => TStorage | Promise<TStorage>
   readonly cleanup?: (storage: TStorage) => void | Promise<void>
+  /** Empties an edit's times, as legacy rows store them, for a provider that has such rows. */
+  readonly clearEditTimes?: (
+    storage: TStorage,
+    ref: { readonly projectId: string; readonly objectTypeId: string; readonly primaryId: string }
+  ) => Promise<void>
   /** Stores the marker an old storage migration left on a slot, for a provider that has one. */
   readonly writeLegacyLinkConflict?: (
     storage: TStorage,
@@ -72,6 +78,8 @@ export function runOntologyMigrationContractSuite<TStorage extends Storage>(
   name: string,
   provider: OntologyMigrationContractProvider<TStorage>
 ): void {
+  runOntologyMigrationValueCases(name, provider)
+
   async function withSeeded(run: (storage: TStorage) => Promise<void>): Promise<void> {
     const storage = await provider.createStorage()
     try {
@@ -1006,6 +1014,7 @@ function failingAfter<TStorage extends Storage>(storage: TStorage, batches: numb
     getOpenRun: (input) => migrations.getOpenRun(input),
     listSettled: (input) => migrations.listSettled(input),
     settle: (input) => migrations.settle(input),
+    ...(migrations.values ? { values: migrations.values } : {}),
     startRun: (input) => migrations.startRun(input),
     finishRun: (input) => migrations.finishRun(input),
     async applyBatch(input) {

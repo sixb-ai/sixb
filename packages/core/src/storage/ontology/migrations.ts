@@ -3,9 +3,11 @@
  * database has settled. `packages/core/src/migrations/README.md` describes the flow.
  */
 
+import type { JsonValue } from "../../json"
 import { vectorSources } from "../../objects/vectors/profile"
 import type { TypeShape } from "../../ontology/type-shapes"
 import type { OntologyCommitRecord } from "./commits"
+import type { VectorIndexingRequest } from "./vector-indexing"
 
 /** One step as storage applies it, on every store that holds its key. */
 export type OntologyMigrationStoreStep =
@@ -23,6 +25,17 @@ export type OntologyMigrationStoreStep =
       readonly unique: "move" | "drop"
     }
   | { readonly kind: "removeLink"; readonly linkId: string }
+  | {
+      /** Its values were computed and staged before the run started: the run applies them. */
+      readonly kind: "fillProperty" | "convertProperty"
+      readonly propertyId: string
+      /**
+       * For a unique property, how its values follow. `update`: the derived lane releases each
+       * staged object's old key and claims its new one. `rebuild`: they are built again after the
+       * run, as for a newly unique property, since their keys change kind.
+       */
+      readonly unique?: "update" | "rebuild"
+    }
 
 /**
  * A vector profile whose source names a renamed property: its stored vectors keep their
@@ -82,8 +95,11 @@ export type OntologyMigrationLaneCursor =
   | { readonly kind: "sources"; readonly versionId?: string; readonly afterRootKey?: string }
   | {
       readonly kind: "derived"
-      /** Unique values, then artifact refs, then the source rows of removed links. */
-      readonly store: "uniqueValues" | "artifactRefs" | "sourceLinks"
+      /**
+       * Unique values, then those value steps give, then artifact refs, then the source rows of
+       * removed links.
+       */
+      readonly store: "uniqueValues" | "stagedUnique" | "artifactRefs" | "sourceLinks"
       /** The provider's key of the last row deleted, in its own terms. */
       readonly after?: readonly string[]
     }
@@ -151,6 +167,105 @@ export interface ApplyOntologyMigrationBatchInput {
   readonly batchRows: number
 }
 
+/**
+ * What a run's value steps give one object, computed before it starts. The staging is the only
+ * copy of what the steps' functions returned: a resume applies it, and never calls them again.
+ * Every record is keyed by property id, as the code declares it.
+ */
+export interface StagedObjectValues {
+  readonly objectTypeId: string
+  readonly primaryId: string
+  /** Edit values set in place: in `create.properties` or `patch.set`, whichever the edit is. */
+  readonly edits: Readonly<Record<string, JsonValue>>
+  /** Edit times set with them: a fill's is the run's start; a convert keeps the edit's own. */
+  readonly editedAt: Readonly<Record<string, string>>
+  /** Ids a fill gives a value a `patch` had cleared: they leave its `unset`. */
+  readonly restored: readonly string[]
+  /** The effective values that change. */
+  readonly effective: Readonly<Record<string, JsonValue>>
+  /** Per unique property, the key the object holds before the run, and after it. */
+  readonly unique: Readonly<Record<string, StagedUniqueKeys>>
+  /** The vector indexing the new values call for, queued by the batch that applies them. */
+  readonly vectors: readonly StagedVectorRequest[]
+}
+
+export interface StagedUniqueKeys {
+  readonly from: string | null
+  readonly to: string | null
+}
+
+export type StagedVectorRequest = Pick<
+  VectorIndexingRequest,
+  "id" | "profile" | "configuration" | "sourceFingerprint"
+>
+
+export interface ListMigrationValueTargetsInput {
+  readonly projectId: string
+  readonly objectTypeId: string
+  /** Every `create` edit. */
+  readonly creates: boolean
+  /** Every edit that gives one of these a value, in `create.properties` or `patch.set`. */
+  readonly holding: readonly string[]
+  /** Every patch whose `unset` clears one of these: a fill refuses the object, explaining why. */
+  readonly clearing: readonly string[]
+  /** Every object as well, edited or not. */
+  readonly everyObject: boolean
+  readonly afterPrimaryId?: string
+  readonly limit: number
+}
+
+/** A unique property whose values outside a run's staging stay as they are. */
+export interface MigrationHeldUniqueProperty {
+  readonly objectTypeId: string
+  readonly propertyId: string
+  /** The id its values are stored under until the run: a moving rename's `from`, or itself. */
+  readonly storedPropertyId: string
+}
+
+/** A unique key two staged objects take, or that `holder`, outside the staging, keeps. */
+export interface MigrationUniqueCollision {
+  readonly objectTypeId: string
+  readonly propertyId: string
+  readonly valueKey: string
+  /** The staged objects that take it, by primary id. */
+  readonly primaryIds: readonly string[]
+  readonly holder?: string
+}
+
+/** The staging of a run's value steps, written before it starts and read by its batches. */
+export interface OntologyMigrationValueStorage {
+  /**
+   * A keyset page of the primary ids a type's value steps read, losing edits included. Deletes
+   * hold no values: no id is listed for one.
+   */
+  listValueTargets(input: ListMigrationValueTargetsInput): Promise<{
+    readonly primaryIds: readonly string[]
+    readonly nextPrimaryId?: string
+  }>
+
+  /** Adds rows to the staging of a run about to start: `runId` is the id `startRun` takes. */
+  stageValues(input: {
+    readonly projectId: string
+    readonly runId: string
+    readonly rows: readonly StagedObjectValues[]
+  }): Promise<void>
+
+  /**
+   * Up to `limit` unique keys the staging gives two objects, then those an object outside it
+   * holds for one of `held`: the properties whose other values stay as they are, looked up under
+   * the id they are stored by until the run.
+   */
+  findUniqueCollisions(input: {
+    readonly projectId: string
+    readonly runId: string
+    readonly held: readonly MigrationHeldUniqueProperty[]
+    readonly limit: number
+  }): Promise<readonly MigrationUniqueCollision[]>
+
+  /** Drops what a run staged that won't start: a plan that failed. */
+  discardStaged(input: { readonly projectId: string; readonly runId: string }): Promise<void>
+}
+
 export interface OntologyMigrationStorage {
   /**
    * How many lanes the provider applies side by side, and the ranges it splits a large type's
@@ -170,10 +285,17 @@ export interface OntologyMigrationStorage {
   }): Promise<void>
 
   /**
+   * The staging value steps need, on a provider that applies them. Without it, a deploy refuses a
+   * pending fill or convert data needs, as it refuses every migration on a provider without
+   * `migrations`.
+   */
+  readonly values?: OntologyMigrationValueStorage
+
+  /**
    * The point of no return, in the caller's transaction: records the run `applying` with its
    * lanes, marks each planned type's stored shape `migrating` (writing `fromShape` where none is
-   * stored yet), and drops the project's replacement plans, which may hold the old keys. Refuses
-   * while a run is open.
+   * stored yet), and drops the project's replacement plans, which may hold the old keys, and what
+   * other runs staged, which never started. Refuses while a run is open.
    *
    * Batches write no commit touches. Only replacement plans read them, and none can be open: this
    * drops them all, writes are paused (the deploy stops the live release, roles refuse a
@@ -184,16 +306,17 @@ export interface OntologyMigrationStorage {
 
   /**
    * Applies the lane's next batch in one transaction: only rows that hold a key the steps remove
-   * or rename, or a link they remove, set-based, each rewritten object at `version + 1`; the
-   * commit when an object or an edit changed, and no outbox row; the lane's cursor, batches and
-   * counts saved last.
+   * or rename, a link they remove, or values the run staged, set-based, each rewritten object at
+   * `version + 1` once; the commit when an object or an edit changed, and no outbox row; the
+   * lane's cursor, batches and counts saved last.
    */
   applyBatch(input: ApplyOntologyMigrationBatchInput): Promise<OntologyMigrationLaneRecord>
 
   /**
    * Once every lane is done, in one transaction: each planned type's shape becomes its
    * `toShape`, `current`; the run is `applied`; its migrations are settled for the types they ran
-   * on. The provider may refresh its statistics of the rewritten tables after.
+   * on. The provider may then refresh its statistics of the rewritten tables, and drop the run's
+   * staging.
    */
   finishRun(input: {
     readonly projectId: string
@@ -303,6 +426,10 @@ export interface CompiledMigrationSteps {
   /** Renames whose unique values move, by `from`. */
   readonly uniqueMoves: readonly { readonly from: string; readonly to: string }[]
   readonly removedLinkIds: readonly string[]
+  /** The properties value steps give values to: the batches apply what the run staged for them. */
+  readonly valuePropertyIds: readonly string[]
+  /** Those whose unique values the derived lane updates from the staged keys. */
+  readonly uniqueUpdates: readonly string[]
 }
 
 /** One expression per store, never one statement per step. */
@@ -311,6 +438,8 @@ export function compileMigrationSteps(type: OntologyMigrationRunType): CompiledM
   const renames: { readonly from: string; readonly to: string }[] = []
   const uniqueMoves: { readonly from: string; readonly to: string }[] = []
   const removedLinkIds: string[] = []
+  const valuePropertyIds = new Set<string>()
+  const uniqueUpdates = new Set<string>()
 
   for (const step of type.steps) {
     switch (step.kind) {
@@ -324,13 +453,26 @@ export function compileMigrationSteps(type: OntologyMigrationRunType): CompiledM
       case "removeLink":
         removedLinkIds.push(step.linkId)
         break
+      case "fillProperty":
+      case "convertProperty":
+        valuePropertyIds.add(step.propertyId)
+        if (step.unique === "update") uniqueUpdates.add(step.propertyId)
+        break
       default:
         unknownStep(step)
     }
   }
 
   const keys = [...removedPropertyIds, ...renames.map((rename) => rename.from)]
-  return { keys, removedPropertyIds, renames, uniqueMoves, removedLinkIds }
+  return {
+    keys,
+    removedPropertyIds,
+    renames,
+    uniqueMoves,
+    removedLinkIds,
+    valuePropertyIds: [...valuePropertyIds],
+    uniqueUpdates: [...uniqueUpdates],
+  }
 }
 
 /** `values` with the compiled keys dropped and each renamed value under its `to`. */
@@ -374,6 +516,12 @@ export function movedVectorFingerprint(
     move.toSource.map((id, index) => [id, properties[move.fromSource[index]!]])
   )
   return vectorSources(move.toSource, values).sourceFingerprint
+}
+
+/** Where the derived lane goes once the removed and renamed keys' unique values are done. */
+export function afterUniqueValues(compiled: CompiledMigrationSteps): OntologyMigrationLaneCursor {
+  const store = compiled.uniqueUpdates.length > 0 ? "stagedUnique" : "artifactRefs"
+  return { kind: "derived", store }
 }
 
 /** The planned type a lane applies to. */

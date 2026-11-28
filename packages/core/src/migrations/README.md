@@ -28,8 +28,11 @@ step recreates what another consumes; each runs at most once.
 is missing a migration and is probed under its stored key; what the steps covered is probed as
 before. A change is matched by its subject and what it asks of the data, so "added as required" and
 "now required" are one. The gate (`storage/migrations/type-shapes.ts`) turns the missing changes
-data holds into findings; a covered one runs when every step that resolves it has a `storeStep`
-(a kind this build applies), and is a "can't apply it yet" finding otherwise.
+data holds into findings; a covered one runs, probed under its stored key, unless the storage
+provider can't apply its steps (no `migrations`, or no `migrations.values` for a fill or a
+convert). A value step resolves changes of the shape the renames leave (`valueChanges`), not of
+the stored one: a convert of a renamed property's `to` has no change of its own in the stored
+shape. Two such converts conflict on that change too, a finding in check mode as in a deploy.
 
 ## Step kinds
 
@@ -58,7 +61,8 @@ the check planned, between the unique preparation's dry run and its real run
 
 1. **Plan.** Each type whose check has `run` steps and no finding: its stored (or baseline) shape,
    the code's, and the steps as `OntologyMigrationStoreStep`s. The plan is stored with the run;
-   nothing reads the code again.
+   nothing reads the code again. The value steps' functions run here and stage their results
+   (`plan-values.ts`, below); a failure discards the staging and throws.
 2. **Point of no return**, in one transaction that takes the shapes' lock: the shapes the check
    read are still stored; the kernel execution `ontology.migrate`, which every batch commit cites;
    then `startRun` records the run `applying` with its lanes, marks the planned types' shapes
@@ -86,9 +90,9 @@ lanes beside them; each batch is one `applyBatch`, in one transaction, set-based
 
 | Lane | Batch | Stores |
 | --- | --- | --- |
-| `objects`, one per range of a type | up to `batchRows` objects and edits by primary id, ending at the lower of the two last keys | `objects` (`version + 1`, `last_commit_id`), edits (`create.properties`, `patch.set`, `unset`, edit times), vectors whose source held a key, links and link edits by source id |
+| `objects`, one per range of a type | up to `batchRows` objects and edits by primary id, ending at the lower of the two last keys | `objects` (`version + 1`, `last_commit_id`), edits (`create.properties`, `patch.set`, `unset`, edit times), vectors whose source held a key, links and link edits by source id; then the values the run staged |
 | `sources`, one per root-key range of a type | up to `batchRows` source roots of one version, by root key, every version in turn | source row values and `absentSourcePropertyIds` |
-| `derived`, per type | up to `batchRows` rows | unique values and their preparation, then artifact refs, then source rows of removed links (with their versions' `assertion_count`) |
+| `derived`, per type | up to `batchRows` rows | unique values and their preparation, then the staged unique keys, then artifact refs, then source rows of removed links (with their versions' `assertion_count`) |
 
 - **Ranges.** pg splits a type's objects into up to `parallelism` primary-id ranges, and its
   source roots into as many root-key ranges, from a `TABLESAMPLE` of the partition (or of
@@ -155,6 +159,63 @@ A rename moves what already exists instead of rebuilding it:
   with `*`: the reads unique preparation and lineage run in transactions name their columns.
   Tagging every query structure, as visibility indexes are (`visibility-indexes.ts`), would make
   the match exact.
+
+## Fills and converts
+
+A value step computes values in JavaScript, once, before the point of no return (`plan-values.ts`);
+the run then applies them as it applies key steps, set-based, from storage.
+
+1. **Read.** Per type, `migrations.values.listValueTargets` pages the ids whose edits the steps
+   read, under their stored keys through the run's renames: every `create` edit and every patch
+   that unsets the property for a fill, every edit giving the property a value (losing ones
+   included) for a convert. `readState` reads pages of 1,000, as many side by side as the
+   provider's `parallelism`; the next page is read while this one runs, and one staging write
+   stays in flight.
+2. **Per object, in step order.** Key steps move the edit, its times and the source row
+   (`moveKeys`); a value step calls its function on the object they leave
+   (`resolveEffectiveObject`):
+   - a fill, for a `create` edit whose effective value is missing, unless a projection feeds the
+     property: the object's source row holds it or names it absent, or one of the code's
+     projections maps it (`computeProjectionOwnership`), whose next run would be masked. A
+     `patch` that cleared the property, which the gate counts as missing, gets the value in
+     `patch.set`, and the id leaves its `unset` (`restored`), unless a projection feeds it: then
+     the object fails, since no fill may edit a projected property;
+   - a convert, on each edit value, in place, keeping its edit time; not on a value a fill of this
+     run gave, already in the new schema.
+   Edit times are read as materialization reads them (`storedObjectEditedAt`: a legacy row's are
+   its update's). The result is normalized as a commit normalizes it
+   (`validateObjectAuthorityProperties`), may hold no file reference (attaching one needs the right
+   to edit the file), and an object its edit created is validated whole (`validateEffectiveObject`).
+   A projected object is checked on its edit values only: its source values are the projection's.
+3. **Stage.** What changes goes to `stageValues` under the run's id (`StagedObjectValues`): edit
+   values, a fill's edit time (the run's start), the effective values that change, per unique
+   property the key the object releases (from its stored row, under the id it holds until the
+   run) and the one it claims, and vector indexing requests for the profiles whose source
+   fingerprint changes. Nothing is staged once one object failed; every
+   failure is still collected, up to 100 named.
+4. **Unique keys,** in storage, in place of `checkUniqueProperties`' dry run, which leaves the
+   run's value properties out (`valued`): their stored values are not the ones the run leaves.
+   The check: two staged objects taking one key, then a staged key an object
+   outside the staging holds (only for the properties whose other values stay), looked up under
+   the id the values are stored by until the run: a moving rename's `from`. A unique
+   property whose keys change kind is `rebuild`: every object's key is staged to check it, and
+   `prepareUniqueProperties` builds it after the run, as for a newly unique property; otherwise
+   `update`.
+
+Any failure throws `[Sixb] Migration 'x' cannot apply: N objects fail.` with the lines, and the
+caller discards the staging: the deploy's failure path restarts the old release.
+
+**Apply.** In each objects batch, after its key steps: edits take the staged values
+(`create.properties` or `patch.set`, by their kind), objects the effective ones, at one version more
+unless the key steps already bumped them in the batch (`last_commit_id` is the batch's commit), and
+vector work is upserted pending, for the orchestrator's maintenance pass. A type with only value
+steps sizes its batches by staged rows. The derived lane then updates `update` properties' unique
+values from the staged keys, after a rename's moves: every staged key is released before any is
+claimed, so two objects may swap values across batches.
+
+The staging is a plain table in PostgreSQL, not unlogged: after the point of no return it is the
+only copy of what the functions returned. `startRun` drops other runs' staging (a plan that never
+started); `finishRun` drops the run's.
 
 ## Settled migrations
 

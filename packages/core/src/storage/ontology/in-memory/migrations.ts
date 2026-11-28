@@ -31,6 +31,13 @@ import {
   type SettledMigration,
   type StartOntologyMigrationRunInput,
 } from "../migrations"
+import {
+  applyStagedObjects,
+  applyStagedUnique,
+  discardStaged,
+  InMemoryOntologyMigrationValueStorage,
+  stagedRows,
+} from "./migration-values"
 import type { InMemoryOntologyState } from "./shared-state"
 import type { InMemorySnapshots } from "./snapshots"
 import { typeShapeKey } from "./type-shapes"
@@ -48,13 +55,16 @@ interface LaneOutcome {
  */
 export class InMemoryOntologyMigrationStorage implements OntologyMigrationStorage {
   readonly parallelism = 2
+  readonly values: InMemoryOntologyMigrationValueStorage
 
   constructor(
     private readonly state: InMemoryOntologyState,
     private readonly objects: InMemoryObjectStorage,
     private readonly snapshots: InMemorySnapshots,
     private readonly runRootOperation: <T>(run: () => Promise<T> | T) => Promise<T>
-  ) {}
+  ) {
+    this.values = new InMemoryOntologyMigrationValueStorage(state, objects, runRootOperation)
+  }
 
   async getOpenRun(input: { readonly projectId: string }) {
     return this.runRootOperation(() => {
@@ -136,6 +146,7 @@ export class InMemoryOntologyMigrationStorage implements OntologyMigrationStorag
       for (const [key, plan] of this.state.replacementPlans) {
         if (plan.projectId === projectId) this.state.replacementPlans.delete(key)
       }
+      discardStaged(this.state, projectId, (runId) => runId === run.id)
       return structuredClone(run)
     })
   }
@@ -197,6 +208,7 @@ export class InMemoryOntologyMigrationStorage implements OntologyMigrationStorag
         appliedAt: input.appliedAt,
       }
       this.state.migrationRuns.set(runKey(run.projectId, run.id), applied)
+      discardStaged(this.state, run.projectId, (runId) => runId !== run.id)
       return structuredClone(applied)
     })
   }
@@ -303,10 +315,23 @@ export class InMemoryOntologyMigrationStorage implements OntologyMigrationStorag
     }
 
     const links = this.deleteLinks(projectId, objectTypeId, compiled.removedLinkIds, inBatch)
-    if (changed) this.snapshots.commit(input.commit)
+
+    // After the key steps: their moves leave each staged value's key in place.
+    const staged = applyStagedObjects(this.state, adapter, {
+      projectId,
+      rows: stagedRows(this.state, projectId, run.id, objectTypeId, inBatch),
+      commitId,
+      committedAt: input.commit.committedAt,
+    })
+    if (changed || staged.changed) this.snapshots.commit(input.commit)
 
     return {
-      counts: { objects: rewrittenObjects, edits: rewrittenEdits, links, vectors },
+      counts: {
+        objects: rewrittenObjects + (staged.objects ?? 0),
+        edits: rewrittenEdits + (staged.edits ?? 0),
+        links,
+        vectors: vectors + (staged.vectors ?? 0),
+      },
       cursor: through === undefined ? null : { kind: "objects", afterPrimaryId: through },
     }
   }
@@ -462,6 +487,10 @@ export class InMemoryOntologyMigrationStorage implements OntologyMigrationStorag
       uniqueValues += adapter.moveUniqueProperty(run.projectId, objectTypeId, from, uniqueTo)
       artifactRefs += adapter.moveArtifactHolders(run.projectId, objectTypeId, from, to)
     }
+
+    // After the moves: a renamed property's staged keys are its new id's.
+    const staged = stagedRows(this.state, run.projectId, run.id, objectTypeId, () => true)
+    uniqueValues += applyStagedUnique(adapter, run.projectId, compiled, staged)
 
     const sources = this.deleteSourceLinks(run.projectId, objectTypeId, compiled.removedLinkIds)
     return { uniqueValues, artifactRefs, sources }

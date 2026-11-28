@@ -37,12 +37,12 @@ export function missingMigrationLines(
   ]
 }
 
-/** What a change covered by migrations says, while this build can't run them. */
+/** What a change covered by migrations says, on a storage provider that can't run them. */
 export function pendingMigrationLine(migrationIds: readonly string[]): string {
   const names = migrationIds.map((id) => `'${id}'`).join(" and ")
   return migrationIds.length === 1
-    ? `Migration ${names} is pending; this build can't apply it yet.`
-    : `Migrations ${names} are pending; this build can't apply them yet.`
+    ? `Migration ${names} is pending; this storage provider can't apply it.`
+    : `Migrations ${names} are pending; this storage provider can't apply them.`
 }
 
 /** What two pending steps that can't both run say, after the sentence that names them. */

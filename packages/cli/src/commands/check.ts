@@ -214,6 +214,7 @@ function migrationOptions(sixb: LoadedSixbHost) {
     projectId: sixb.id,
     ontology: sixb.definitions.ontology,
     migrations: sixb.definitions.migrations.list(),
+    projections: sixb.definitions.projections,
     security: sixb.definitions.security,
     onMigrationRunStarted: (runId: string) => markMigrationRunStarted(runId),
   }
