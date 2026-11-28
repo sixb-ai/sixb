@@ -120,6 +120,10 @@ interface InMemoryObjectMaterializerAdapter {
   markUniquePropertyPrepared(input: InMemoryPreparedUniqueProperty): void
   deleteArtifactHolder(projectId: string, value: ExactArtifactHolderWrite): void
   insertArtifactHolder(projectId: string, value: ExactArtifactHolderWrite): void
+  /** Drops a property's unique values and preparation, and how many values it held. */
+  dropUniqueProperty(projectId: string, objectTypeId: string, propertyId: string): number
+  /** Drops every artifact holder of a property, and how many there were. */
+  dropArtifactHolders(projectId: string, objectTypeId: string, propertyId: string): number
 }
 
 const materializerAdapters = new WeakMap<InMemoryObjectStorage, InMemoryObjectMaterializerAdapter>()
@@ -217,6 +221,27 @@ export class InMemoryObjectStorage implements ObjectStorage {
 
         const { objectTypeId, primaryId, propertyId } = value
         holders.set(artifactHolderKey(value), { objectTypeId, primaryId, propertyId })
+      },
+      dropUniqueProperty: (projectId, objectTypeId, propertyId) => {
+        const key = uniquePropertyKey(projectId, objectTypeId, propertyId)
+        const values = this.uniqueValues.get(key)?.size ?? 0
+        this.uniqueValues.delete(key)
+        this.uniqueProperties.delete(key)
+        return values
+      },
+      dropArtifactHolders: (projectId, objectTypeId, propertyId) => {
+        let dropped = 0
+        for (const [key, holders] of this.artifactHolders) {
+          if ((JSON.parse(key) as [string, string])[0] !== projectId) continue
+
+          for (const [holderKey, holder] of holders) {
+            if (holder.objectTypeId !== objectTypeId || holder.propertyId !== propertyId) continue
+            holders.delete(holderKey)
+            dropped += 1
+          }
+          if (holders.size === 0) this.artifactHolders.delete(key)
+        }
+        return dropped
       },
     })
   }

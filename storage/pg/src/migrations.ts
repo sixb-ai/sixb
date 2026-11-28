@@ -493,6 +493,7 @@ export const postgresStorageMigrations = defineStorageMigrations<PostgresMigrati
     pgSql("120-hosted-branches", hostedBranchesSql),
     pgSql("121-hosted-branch-namespaces", hostedBranchNamespacesSql),
     pgSql("122-ontology-type-shapes", ontologyTypeShapesSql),
+    pgSql("123-ontology-migrate-executions", ontologyMigrateExecutionsSql),
   ],
 })
 
@@ -629,3 +630,6 @@ import hostedBranchNamespacesSql from "./migrations/121-hosted-branch-namespaces
   type: "text",
 }
 import ontologyTypeShapesSql from "./migrations/122-ontology-type-shapes.sql" with { type: "text" }
+import ontologyMigrateExecutionsSql from "./migrations/123-ontology-migrate-executions.sql" with {
+  type: "text",
+}

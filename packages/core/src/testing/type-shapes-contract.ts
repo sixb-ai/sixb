@@ -141,7 +141,7 @@ export function runTypeShapesContractSuite<TStorage extends Storage>(
         updatedAt: at,
       })
       expect(await shapes.list({ projectId: PROJECT })).toEqual([
-        { objectTypeId: Job.id, shape: SHAPE, previous: null, updatedAt: at },
+        { objectTypeId: Job.id, shape: SHAPE, previous: null, state: "current", updatedAt: at },
       ])
 
       const wider: TypeShape = {
@@ -160,7 +160,7 @@ export function runTypeShapesContractSuite<TStorage extends Storage>(
         })
       })
       expect(await shapes.list({ projectId: PROJECT })).toEqual([
-        { objectTypeId: Job.id, shape: wider, previous: SHAPE, updatedAt: later },
+        { objectTypeId: Job.id, shape: wider, previous: SHAPE, state: "current", updatedAt: later },
       ])
 
       await shapes.remove({ projectId: PROJECT, objectTypeId: Job.id })

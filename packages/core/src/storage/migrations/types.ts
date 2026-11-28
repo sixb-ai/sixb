@@ -146,6 +146,13 @@ export interface StorageMigrationOptions {
   readonly ontologyShapes?: TypeShapeMode
   /** The project's migrations: a change their pending steps cover isn't missing one. */
   readonly migrations?: readonly MigrationDefinition[]
+  /**
+   * Called once an ontology migration run is past its point of no return: right after it started,
+   * or before an open one resumes. From then on the previous release must not start again.
+   *
+   * @internal The deploy's contract with the CLI's migrating commands, not an app author's option.
+   */
+  readonly onMigrationRunStarted?: (runId: string) => Promise<void> | void
 }
 
 export interface StorageMigrationResult {

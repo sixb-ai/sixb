@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises"
+import { dirname } from "node:path"
 import {
   checkStorageSchema,
   isMigrationCapableStorage,
@@ -198,4 +200,23 @@ function concurrentMigrationError(error: unknown, role: StorageSchemaRole): Erro
 function isBusyDatabaseError(error: unknown): boolean {
   const message = error instanceof Error ? `${error.message} ${String(error.cause ?? "")}` : ""
   return /SQLITE_BUSY|database is locked|database table is locked/i.test(message)
+}
+
+/**
+ * Set by a deploy target to a file path: the migrating command writes the run's id there as soon
+ * as an ontology migration run is past its point of no return, whatever happens to the command
+ * afterwards, so the target knows the previous release must not start again.
+ */
+export const MIGRATION_RUN_MARKER_ENV_VAR = "SIXB_MIGRATION_RUN_MARKER"
+
+/** `onMigrationRunStarted` for the migrating commands: writes the deploy's marker, when asked. */
+export async function markMigrationRunStarted(
+  runId: string,
+  env: Record<string, string | undefined> = process.env
+): Promise<void> {
+  const path = env[MIGRATION_RUN_MARKER_ENV_VAR]
+  if (!path) return
+
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, `${runId}\n`)
 }

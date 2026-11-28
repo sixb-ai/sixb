@@ -439,10 +439,24 @@ export function dbMigrateCheckView({
   /** What the stored objects fit against the code, once the schema is current. */
   shapes?: TypeShapeSummary
 }): string {
+  if (shapes?.applying?.length) {
+    return screen(
+      headline("warn", "An ontology migration is being applied", projectId),
+      `  ${tone.muted(`To ${shapes.applying.join(", ")}: \`sixb db migrate\` finishes it. The deploy only goes forward.`)}`
+    )
+  }
+
   if (shapes && shapes.findings.length > 0) {
     return screen(
       headline("fail", "The stored objects don't fit this code", projectId),
       typeShapeFindingLines(shapes.findings)
+    )
+  }
+
+  if (shapes?.migrating?.length) {
+    return screen(
+      headline("warn", "Ontology migrations will run", projectId),
+      `  ${tone.muted(`On ${shapes.migrating.join(", ")}: the services stop, and once the migrations apply the deploy only goes forward.`)}`
     )
   }
 
@@ -472,6 +486,10 @@ export interface TypeShapeSummary {
   readonly findings: readonly { readonly message: string; readonly remedy: readonly string[] }[]
   /** A change the old release would undo: the services stop before the shapes are recorded. */
   readonly narrows: boolean
+  /** Types a migration run is past its point of no return on. */
+  readonly applying?: readonly string[]
+  /** Types the deploy will run migrations on. */
+  readonly migrating?: readonly string[]
 }
 
 /** One `✗` line per change the data doesn't fit, then what to do about it. */

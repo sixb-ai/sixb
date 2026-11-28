@@ -74,6 +74,16 @@ export {
   recordTypeShapes,
   TypeShapeMismatchError,
 } from "./migrations/type-shapes"
+export {
+  addMigrationCounts,
+  compileMigrationSteps,
+  migrationBatchConflict,
+  migrationLanes,
+  migrationRunAlreadyOpen,
+  migrationRunType,
+  rootKeyEnd,
+  rootKeyPrefix,
+} from "./ontology/migrations"
 export { canRequeuePipelineRunAfterEnqueueFailure } from "./pipeline-runs/idempotency"
 export { canFinishPipelineRun } from "./pipeline-runs/transitions"
 export { projectionRunObjectTypesVisible, zeroProjectionRunProgress } from "./projection-runs/types"

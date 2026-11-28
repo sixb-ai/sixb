@@ -120,6 +120,8 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
             type: "artifacts.transcribeMedia",
             digest: `sha256:${"a".repeat(64)}`,
           }),
+          // Reproduce by leaving `ontology.migrate` out of a provider's migration.
+          kernelExecution("migrate-execution", { type: "ontology.migrate", runId: "run-1" }),
           scriptExecution("script-execution"),
         ] as const
 

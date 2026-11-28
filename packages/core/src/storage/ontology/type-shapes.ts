@@ -13,11 +13,19 @@ export interface StoredTypeShape {
   /**
    * The shape recorded before `shape`, by the deploy that recorded `shape`: what the previous
    * release's code defines, which a role of that release may start on. `null` when there was none,
-   * or when the previous release can't serve the data any more.
+   * or when the previous release can't serve the data any more, as after a migration run.
    */
   readonly previous: TypeShape | null
+  /**
+   * `migrating` from the point of no return of a migration run until it finishes: roles refuse to
+   * start, and `sixb db migrate --check` exits 4.
+   */
+  readonly state: "current" | "migrating"
   readonly updatedAt: string
 }
+
+/** What recording writes: a shape the stored objects fit. A row's state is left as it is. */
+export type TypeShapeWrite = Omit<StoredTypeShape, "state"> & { readonly projectId: string }
 
 /**
  * What one probe looks for among a type's stored data. Each reads every store the key can live in:
@@ -68,7 +76,7 @@ export interface OntologyTypeShapeStorage {
 
   list(input: { readonly projectId: string }): Promise<readonly StoredTypeShape[]>
 
-  write(input: StoredTypeShape & { readonly projectId: string }): Promise<void>
+  write(input: TypeShapeWrite): Promise<void>
 
   remove(input: { readonly projectId: string; readonly objectTypeId: string }): Promise<void>
 

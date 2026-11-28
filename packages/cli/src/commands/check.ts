@@ -13,6 +13,7 @@ import {
   readAppliedMarkingNotices,
   stopSixbProviders,
 } from "../lib/runtime"
+import { markMigrationRunStarted } from "../lib/storage-migration"
 import { generateProjectTypes } from "../lib/typegen"
 import {
   checkView,
@@ -43,14 +44,18 @@ export async function runCheck(options: CheckOptions = {}) {
   })
 
   try {
-    // Every check that can fail runs before the unique values and the object shapes are written,
-    // the writes the old release can't run beside: a deploy that fails here restarts it on data
-    // it still fits, with nothing prepared it would leave stale.
+    // Every check that can fail runs before the ontology migrations, the unique values and the
+    // object shapes, the writes the old release can't run beside: a deploy that fails here
+    // restarts it on data it still fits, with nothing prepared it would leave stale. From the
+    // first migration batch on, the deploy only goes forward.
     const shapes = options.migrate ? await migrate(sixb) : undefined
     const passed = await probe(sixb, entry, options.lake === true, shapes)
 
     if (passed && shapes) {
-      await withTask("check", "Recording object shapes", () =>
+      const label = shapes.types.some((type) => type.run.length > 0)
+        ? "Applying ontology migrations"
+        : "Recording object shapes"
+      await withTask("check", label, () =>
         applyTypeShapes(sixb.storage, migrationOptions(sixb), shapes)
       )
     }
@@ -177,11 +182,25 @@ async function checkShapes(
       }))
     const findings = check.types.flatMap((type) => type.findings)
 
+    if (check.applying.length > 0) {
+      return {
+        ok: false,
+        message: "a migration is being applied: `sixb db migrate` finishes it",
+        findings,
+        narrows: true,
+      }
+    }
     if (findings.length > 0) {
       const count = findings.length === 1 ? "1 change" : `${findings.length} changes`
       return { ok: false, message: `${count} they don't fit`, findings, narrows: check.narrows }
     }
-    const message = check.narrows ? "fit · the services stop while their shapes change" : "fit"
+    const runs = check.types.filter((type) => type.run.length > 0).map((type) => type.objectTypeId)
+    const message =
+      runs.length > 0
+        ? `fit once migrations apply to ${runs.join(", ")} · the services stop meanwhile`
+        : check.narrows
+          ? "fit · the services stop while their shapes change"
+          : "fit"
     return { ok: true, message, findings, narrows: check.narrows }
   } catch (error) {
     return { ok: false, message: errorMessage(error), findings: [], narrows: false }
@@ -196,14 +215,16 @@ function migrationOptions(sixb: LoadedSixbHost) {
     ontology: sixb.definitions.ontology,
     migrations: sixb.definitions.migrations.list(),
     security: sixb.definitions.security,
+    onMigrationRunStarted: (runId: string) => markMigrationRunStarted(runId),
   }
 }
 
 /**
  * Migrates before anything is probed, since the probes read the schema. Always, as
  * `sixb db migrate` does: a release with no schema change can still add a query index or make a
- * property unique, and the services start with `--no-migrate`. The object shapes are only checked
- * here, and unique values left as they are: `runCheck` applies both once every other check passed.
+ * property unique, and the services start with `--no-migrate`. A migration run a crash left open is
+ * finished first. The object shapes are only checked here, and unique values left as they are:
+ * `runCheck` applies the migrations, the values and the shapes once every other check passed.
  */
 async function migrate(sixb: LoadedSixbHost): Promise<TypeShapeCheck | undefined> {
   const result = await withTask("check", "Migrating storage", () =>

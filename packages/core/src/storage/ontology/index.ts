@@ -1,5 +1,6 @@
 import type { OntologyCommitStorage } from "./commits"
 import type { OntologyMaterializationStorage } from "./materializations"
+import type { OntologyMigrationStorage } from "./migrations"
 import type { OntologyOutboxStorage } from "./outbox"
 import type { OntologyReplacementPlanStorage } from "./replacement-plans"
 import type { OntologySourceStorage } from "./sources"
@@ -86,6 +87,20 @@ export type {
   UniqueValueRef,
 } from "./materializations"
 export type {
+  ApplyOntologyMigrationBatchInput,
+  OntologyMigrationCounts,
+  OntologyMigrationLane,
+  OntologyMigrationLaneCursor,
+  OntologyMigrationLaneRecord,
+  OntologyMigrationRunPlan,
+  OntologyMigrationRunRecord,
+  OntologyMigrationRunType,
+  OntologyMigrationStorage,
+  OntologyMigrationStoreStep,
+  SettledMigration,
+  StartOntologyMigrationRunInput,
+} from "./migrations"
+export type {
   ClaimedOntologyOutboxRow,
   ClaimOntologyOutboxInput,
   CompleteOntologyOutboxLeaseInput,
@@ -147,6 +162,7 @@ export type {
   StoredTypeShape,
   TypeShapeProbe,
   TypeShapeProbeInput,
+  TypeShapeWrite,
 } from "./type-shapes"
 export type {
   OntologyUniqueValueStorage,
@@ -166,6 +182,8 @@ export interface OntologyStorage {
   readonly outbox: OntologyOutboxStorage
   readonly uniqueValues: OntologyUniqueValueStorage
   readonly typeShapes: OntologyTypeShapeStorage
+  /** Applies ontology migrations. Without it, a deploy a migration must run on refuses. */
+  readonly migrations?: OntologyMigrationStorage
 }
 
 export type {

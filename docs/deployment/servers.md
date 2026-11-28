@@ -149,7 +149,7 @@ A deploy:
 
 Any failure before the routes move leaves the live release serving; a failure after it moves the routes and singletons back. Either way, the deploy says what failed. The server runs the deploy, so closing your laptop or losing the connection doesn't stop it: `sixb deploy status` shows the release once it ends. Two deploys of the same project never overlap; the second waits for the first.
 
-A release with storage migrations is the exception: the live release was built for the schema before them, so it stops while they run, and the new release starts cold once they're done. The cutover takes as long as the migrations and the new release's start, usually seconds. A failure after the services stopped starts the previous release again. A [narrowed object type](object-type-changes.md) stops the live release the same way, while the deploy checks the stored objects against it.
+A release with storage migrations is the exception: the live release was built for the schema before them, so it stops while they run, and the new release starts cold once they're done. The cutover takes as long as the migrations and the new release's start, usually seconds. A failure after the services stopped starts the previous release again. A [narrowed object type](object-type-changes.md) stops the live release the same way, while the deploy checks the stored objects against it. Once an [ontology migration](../ontology/migrations.md) run has started, the deploy only goes forward: a later failure leaves the previous release stopped until you deploy a fix.
 
 ## Operate the deployment
 
@@ -162,7 +162,7 @@ A release with storage migrations is the exception: the live release was built f
 
 A process that exits is restarted automatically, and the services start when the server boots, without anyone logging in.
 
-To return to an earlier release, deploy its commit with `--ref`. Storage migrations are not reversed.
+To return to an earlier release, deploy its commit with `--ref`. Storage migrations are not reversed, and neither are ontology migrations: the older commit is checked against the stored objects like any other, so one that requires a property a migration removed is refused ([Changing object types](object-type-changes.md)).
 
 ## Next steps
 

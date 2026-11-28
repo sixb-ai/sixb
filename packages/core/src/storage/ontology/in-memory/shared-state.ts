@@ -12,6 +12,7 @@ import type {
   StoredLinkSlotOverride,
   StoredObjectOverride,
 } from "../materializations"
+import type { OntologyMigrationRunRecord } from "../migrations"
 import type { OntologyMaterializationEventDraft, OntologyOutboxRecord } from "../outbox"
 import type {
   OntologySourceRecord,
@@ -75,6 +76,10 @@ export interface InMemoryOntologyState {
   /** What each commit touched among the inputs plans read, keyed by its `commitsById` ordinal. */
   readonly commitTouches: Map<number, InMemoryCommitTouches>
   readonly typeShapes: Map<string, StoredTypeShape & { readonly projectId: string }>
+  /** Keyed by `[projectId, runId]`. */
+  readonly migrationRuns: Map<string, OntologyMigrationRunRecord>
+  /** Keyed by `[projectId, objectTypeId, migrationId]`, with when each settled. */
+  readonly settledMigrations: Map<string, string>
 }
 
 /** Reads one execution of the same storage, the record an ontology commit references. */
@@ -119,6 +124,8 @@ export function createInMemoryOntologyState(): InMemoryOntologyState {
     replacementPlans: new Map(),
     commitTouches: new Map(),
     typeShapes: new Map(),
+    migrationRuns: new Map(),
+    settledMigrations: new Map(),
   }
 }
 

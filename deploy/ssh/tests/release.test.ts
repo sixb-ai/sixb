@@ -10,7 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import {
   type DeploySlot,
   deploymentLayout,
@@ -70,14 +70,34 @@ class FakeServer implements ReleaseHost {
   caddyAccepts = true
   /** Whether `sixb db migrate --check` finds migrations pending. */
   pendingMigrations = false
+  /** Whether an ontology migration run is past its point of no return: `--check` exits 4. */
+  migrationApplying = false
+  /** Whether `sixb check --migrate` starts an ontology migration run: it writes the marker. */
+  migrationRuns = false
+  /** Makes `sixb check --migrate` fail, after starting its run when `migrationRuns`. */
+  migrateFails = false
 
-  async run(command: readonly string[]) {
+  async run(
+    command: readonly string[],
+    options: { readonly env?: Readonly<Record<string, string | undefined>> } = {}
+  ) {
     const words = command.map((word) =>
       word.replace(/.*\/node_modules\/\.bin\//, "").replace(/.*\/\.sixb\/bun\/[^/]+\/bun$/, "bun")
     )
     this.calls.push(words.join(" "))
     const line = words.join(" ")
-    if (line.endsWith("db migrate --check")) return this.pendingMigrations ? 3 : 0
+    if (line.endsWith("db migrate --check")) {
+      if (this.migrationApplying) return 4
+      return this.pendingMigrations ? 3 : 0
+    }
+    if (line.includes("check --migrate")) {
+      const marker = options.env?.SIXB_MIGRATION_RUN_MARKER
+      if (this.migrationRuns && marker) {
+        await mkdir(dirname(marker), { recursive: true })
+        await writeFile(marker, "migration_run\n")
+      }
+      return this.migrateFails ? 1 : 0
+    }
     return 0
   }
 
@@ -588,6 +608,71 @@ describe("a release with storage migrations", () => {
     expect(String(error)).toContain("The previous release, stopped for the migration, has started")
     expect(server.active).toEqual(new Set(["sixb-northline@blue.service"]))
     expect(server.routedPort()).toBe("3001")
+  })
+
+  // Reproduce: drop the marker read in `runRelease`; blue then starts again on objects a run has
+  // half rewritten, whatever the failed command's exit code says.
+  test("keeps blue stopped when the migrating command fails after a run started", async () => {
+    const server = new FakeServer()
+    await liveInBlue(server)
+    server.pendingMigrations = true
+    server.migrationRuns = true
+    server.migrateFails = true
+
+    const error = await runRelease(plan(), server, { home, user: "deploy" }).catch(
+      (failure: unknown) => failure
+    )
+
+    expect(String(error)).toContain("The previous release stays stopped: an ontology migration ran")
+    expect(server.printed.join("\n")).toContain("the deploy only goes forward")
+    expect(server.active).toEqual(new Set())
+  })
+
+  // The first upgrade with a storage migration and a removal: `--check` says 3, and only the
+  // marker tells that the run applied. Reproduce: read the marker only after a failed command.
+  test("keeps blue stopped when the release fails after its migrations applied", async () => {
+    const server = new FakeServer()
+    await liveInBlue(server)
+    server.pendingMigrations = true
+    server.migrationRuns = true
+    server.ready = false
+
+    const error = await runRelease(plan(), server, { home, user: "deploy" }).catch(
+      (failure: unknown) => failure
+    )
+
+    expect(String(error)).toContain("The previous release stays stopped: an ontology migration ran")
+    expect(server.active).not.toContain("sixb-northline@blue.service")
+  })
+
+  test("starts blue again when the migrating command fails before its point of no return", async () => {
+    const server = new FakeServer()
+    await liveInBlue(server)
+    server.pendingMigrations = true
+    server.migrateFails = true
+
+    const error = await runRelease(plan(), server, { home, user: "deploy" }).catch(
+      (failure: unknown) => failure
+    )
+
+    expect(String(error)).toContain("The previous release, stopped for the migration, has started")
+    expect(server.active).toEqual(new Set(["sixb-northline@blue.service"]))
+  })
+
+  // Reproduce: treat exit 4 of `--check` like 0 in `pendingMigrations`; blue then serves while
+  // the run it was stopped for is resumed.
+  test("stops blue for a run an earlier deploy left under way, then finishes it", async () => {
+    const server = new FakeServer()
+    await liveInBlue(server)
+    server.migrationApplying = true
+
+    await runRelease(plan(), server, { home, user: "deploy" })
+
+    const migrate = server.calls.indexOf("bun sixb check --migrate --lake")
+    const stop = server.calls.indexOf("systemctl stop sixb-northline@blue.service")
+    expect(stop).toBeGreaterThan(-1)
+    expect(stop).toBeLessThan(migrate)
+    expect(server.routedPort()).toBe("3011")
   })
 
   test("without any, blue keeps serving throughout", async () => {

@@ -1,5 +1,6 @@
 import { stableJsonStringify } from "../../json"
 import type { PropertyShape, TypeShape, TypeShapeChange } from "../../ontology/type-shapes"
+import type { OntologyMigrationStoreStep } from "../../storage/ontology/migrations"
 import type { OntologyMigrationStep } from "../types"
 
 /**
@@ -52,6 +53,12 @@ export interface StepKind<S extends OntologyMigrationStep> {
 
   /** The call `sixb check` writes for a change this kind of step resolves, or `null`. */
   suggest(change: TypeShapeChange): StepSuggestion | null
+
+  /**
+   * The step as storage applies it, for a kind this build applies. A change data holds runs when
+   * every step that resolves it has one; otherwise the deploy says it can't apply it yet.
+   */
+  storeStep?(step: S): OntologyMigrationStoreStep
 }
 
 /**

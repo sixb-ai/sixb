@@ -6,6 +6,7 @@ import type { ProviderMaterializationTransactionLifecycle } from "../provider"
 import type { AssertSourceMaterializationExecution } from "../sources"
 import { InMemoryOntologyCommitStorage } from "./commits"
 import { InMemoryOntologyMaterializationStorage } from "./materializations"
+import { InMemoryOntologyMigrationStorage } from "./migrations"
 import { InMemoryOntologyOutboxStorage } from "./outbox"
 import { InMemoryOntologyReplacementPlanStorage } from "./replacement-plans"
 import {
@@ -50,6 +51,7 @@ export class InMemoryOntologyStorage implements OntologyStorage {
   readonly outbox: InMemoryOntologyOutboxStorage
   readonly uniqueValues: InMemoryOntologyUniqueValueStorage
   readonly typeShapes: InMemoryOntologyTypeShapeStorage
+  readonly migrations: InMemoryOntologyMigrationStorage
   /** @internal What the in-memory storage loads and reads a snapshot through. */
   readonly snapshots: InMemorySnapshots
   private testHooks: InMemoryOntologyStorageTestHooks = {}
@@ -96,6 +98,12 @@ export class InMemoryOntologyStorage implements OntologyStorage {
       options.runRootOperation
     )
     this.snapshots = new InMemorySnapshots(this.state, objects, timeseries)
+    this.migrations = new InMemoryOntologyMigrationStorage(
+      this.state,
+      objects,
+      this.snapshots,
+      options.runRootOperation
+    )
     const hooks: InMemoryOntologyStorageTestHooks = {
       beforeRead: (boundary) => this.testHooks.beforeRead?.(boundary),
       beforeWrite: (boundary, ordinal) => this.testHooks.beforeWrite?.(boundary, ordinal),

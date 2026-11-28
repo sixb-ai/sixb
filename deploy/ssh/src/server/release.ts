@@ -115,16 +115,19 @@ export async function runRelease(
     return result
   }
   const env = { ...release.env, PATH: `${next.bunDir}:${process.env.PATH ?? ""}` }
-  const sixb = (args: readonly string[]) =>
+  const sixb = (args: readonly string[], extra: Record<string, string> = {}) =>
     host.run([next.bun, `${next.project}/node_modules/.bin/sixb`, ...args], {
       cwd: next.project,
-      env,
+      env: { ...env, ...extra },
     })
-  const mustRun = async (command: DeployCommand) => {
+  const mustRun = async (command: DeployCommand, extra: Record<string, string> = {}) => {
     const code =
       command.program === "sixb"
-        ? await sixb(command.args)
-        : await host.run([next.bun, ...command.args], { cwd: next.project, env })
+        ? await sixb(command.args, extra)
+        : await host.run([next.bun, ...command.args], {
+            cwd: next.project,
+            env: { ...env, ...extra },
+          })
     if (code !== 0)
       throw new Error(`[SshTarget] ${commandLabel(command)} exited with code ${code}.`)
   }
@@ -136,6 +139,8 @@ export async function runRelease(
   const slot = slotLayout(layout, live ? otherSlot(live.slot) : await idleSlot(layout))
   const undo: Undo[] = []
   let committed = false
+  /** An ontology migration got past its point of no return: the previous release can't come back. */
+  let rolledForward = false
 
   if (release.steps.env) {
     const pull = release.steps.env
@@ -161,9 +166,11 @@ export async function runRelease(
     })
   }
 
+  // Whether the live release must stop first: a schema or shape change (3), or a run under way (4).
   const pendingMigrations = async (): Promise<boolean> => {
     const code = await sixb(["db", "migrate", "--check"])
-    if (code === 0 || code === MIGRATIONS_PENDING) return code === MIGRATIONS_PENDING
+    if (code === 0) return false
+    if (code === MIGRATIONS_PENDING || code === ONTOLOGY_MIGRATION_APPLYING) return true
     throw new Error(`[SshTarget] sixb db migrate --check exited with code ${code}.`)
   }
 
@@ -172,14 +179,36 @@ export async function runRelease(
       await step(commandLabel(command), async () => {
         // The live release was built for the schema before this one's migrations, so it stops
         // while they run, and the new release starts cold. A deploy without any keeps serving.
-        if (migrates(command) && serving && (await pendingMigrations())) {
-          const stopped = serving
-          host.print("Stopping the services while the storage schema migrates.")
-          undo.push(() => startLive(layout, stopped, host))
-          await stopLive(layout, stopped, host)
-          serving = null
+        if (!(migrates(command) && serving && (await pendingMigrations()))) {
+          await mustRun(command)
+          return
         }
-        await mustRun(command)
+
+        const stopped = serving
+        const restart: Undo = () => startLive(layout, stopped, host)
+        host.print("Stopping the services while the storage schema migrates.")
+        undo.push(restart)
+        await stopLive(layout, stopped, host)
+        serving = null
+
+        // The command writes the marker once an ontology migration run is past its point of no
+        // return. Read whatever the command's outcome: a run that applied and a command that then
+        // failed or was killed leave the previous release unable to start again all the same.
+        const marker = join(next.project, MIGRATION_RUN_MARKER)
+        await rm(marker, { force: true })
+        try {
+          await mustRun(command, { [MIGRATION_RUN_MARKER_ENV_VAR]: marker })
+        } finally {
+          if (await exists(marker)) {
+            const at = undo.indexOf(restart)
+            if (at >= 0) undo.splice(at, 1)
+            rolledForward = true
+            host.print(
+              "An ontology migration ran: the deploy only goes forward. If it stopped, run " +
+                `\`sixb db migrate\` in ${next.project} to finish it.`
+            )
+          }
+        }
       })
     }
 
@@ -265,13 +294,19 @@ export async function runRelease(
     for (const back of undo.reverse()) {
       await back().catch((failure: unknown) => host.print(errorMessage(failure)))
     }
-    throw new Error(`${errorMessage(error)}${afterRollback(live, serving)}`)
+    throw new Error(`${errorMessage(error)}${afterRollback(live, serving, rolledForward)}`)
   }
 }
 
 /** What serves once a failed deploy has been undone. */
-function afterRollback(live: Live | null, serving: Live | null): string {
+function afterRollback(live: Live | null, serving: Live | null, forwardOnly: boolean): string {
   if (serving) return "\nThe previous release is still serving."
+  if (live && forwardOnly) {
+    return (
+      "\nThe previous release stays stopped: an ontology migration ran on its objects. Fix this " +
+      "release and deploy again."
+    )
+  }
   if (live) return "\nThe previous release, stopped for the migration, has started again."
   return ""
 }
@@ -665,6 +700,16 @@ const LEGACY_FILES = [
 
 /** `sixb db migrate --check` exits with this when migrations are pending. */
 const MIGRATIONS_PENDING = 3
+
+/** …and with this while an ontology migration run is past its point of no return. */
+const ONTOLOGY_MIGRATION_APPLYING = 4
+
+/**
+ * The deploy-internal contract with `sixb check --migrate` and `sixb db migrate`: they write the
+ * run's id to the file this names once an ontology migration run is past its point of no return.
+ */
+const MIGRATION_RUN_MARKER_ENV_VAR = "SIXB_MIGRATION_RUN_MARKER"
+const MIGRATION_RUN_MARKER = ".sixb/migration-run-started"
 
 function migrates(command: DeployCommand): boolean {
   return command.program === "sixb" && command.args.includes("--migrate")

@@ -237,6 +237,7 @@ const shippedMigrationIds = [
   "115-skipped-action-effects",
   "116-lake-slice-credentials",
   "117-ontology-type-shapes",
+  "118-ontology-migrate-executions",
 ]
 
 afterEach(async () => {

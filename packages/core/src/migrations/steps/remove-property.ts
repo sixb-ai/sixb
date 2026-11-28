@@ -32,4 +32,6 @@ export const removeProperty: StepKind<RemoveProperty> = {
     if (change.kind !== "property-removed" || change.effect !== "narrowing") return null
     return { verb: "remove", call: `removeProperty(${quoted(change.propertyId)})` }
   },
+
+  storeStep: (step) => ({ kind: "removeProperty", propertyId: step.propertyId }),
 }

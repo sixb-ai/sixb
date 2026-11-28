@@ -43,9 +43,11 @@ export interface PendingSteps {
  * already satisfied never runs. No ledger, no order of files: two branches migrating different
  * properties compose.
  *
- * A migration of a type applies to each subtype that inherits what its steps touch. A migration
- * runs at most once per database: once `settled` there, it is never pending again, even when its
- * conditions hold anew, as an old convert's would after a second narrowing of its property.
+ * A migration of a type applies to each subtype that inherits what its steps touch. Its value
+ * steps run at most once per database: once it is `settled` there, a fill or a convert is never
+ * pending again, even when its condition holds anew, as an old convert's would after a second
+ * narrowing of its property. Key steps are idempotent by shape: a removal is pending again whenever
+ * a recorded shape holds the key again, as after an old release wrote it back.
  */
 export function planPendingSteps(input: {
   readonly objectTypeId: string
@@ -56,12 +58,13 @@ export function planPendingSteps(input: {
   /** Migrations this database already ran, or recorded a shape past without needing. */
   readonly settled?: ReadonlySet<string>
 }): PendingSteps {
-  const { objectTypeId, stored, ontology } = input
+  const { objectTypeId, stored, ontology, migrations } = input
   const settled = input.settled ?? new Set<string>()
-  const migrations = input.migrations.filter((migration) => !settled.has(migration.id))
 
   const code = typeShape(ontology.resolveObjectType(objectTypeId), ontology)
-  const candidates = candidateSteps(objectTypeId, code, ontology, migrations)
+  const candidates = candidateSteps(objectTypeId, code, ontology, migrations).filter(
+    (planned) => !(settled.has(planned.migrationId) && stepKindOf(planned.step).stagesValues)
+  )
 
   let shape = stored
   const ordered: PlannedStep[] = []
@@ -110,6 +113,23 @@ export function planPendingSteps(input: {
       return key
     },
   }
+}
+
+/**
+ * The migrations with a step that concerns the type, settled once its shape is recorded while
+ * none of them is pending. A migration whose steps the type declares again is left out: it may
+ * concern a later version of the code.
+ */
+export function concerningMigrations(input: {
+  readonly objectTypeId: string
+  readonly ontology: OntologyDefinitionCatalog
+  readonly migrations: readonly MigrationDefinition[]
+}): string[] {
+  const { objectTypeId, ontology, migrations } = input
+  const code = typeShape(ontology.resolveObjectType(objectTypeId), ontology)
+  const steps = candidateSteps(objectTypeId, code, ontology, migrations)
+
+  return [...new Set(steps.map((planned) => planned.migrationId))]
 }
 
 /**
