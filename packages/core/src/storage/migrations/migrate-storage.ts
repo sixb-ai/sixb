@@ -183,6 +183,7 @@ export async function applyTypeShapes(
     check: shapes,
     ...(options.projections ? { projections: options.projections } : {}),
     ...(options.onMigrationRunStarted ? { onStarted: options.onMigrationRunStarted } : {}),
+    ...(options.onUncheckedValue ? { onUnchecked: options.onUncheckedValue } : {}),
   })
 
   // Past the point of no return, or with no run at all: the values a run moved are current, those

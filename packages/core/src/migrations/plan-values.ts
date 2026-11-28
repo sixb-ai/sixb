@@ -46,6 +46,12 @@ export interface ValuePlanType {
    * gets no fill of one: its next run gives it the projection's value, which an edit would mask.
    */
   readonly projected: ReadonlySet<string>
+  /**
+   * The properties the check didn't read (`unseen`): a step that fails on one leaves the object's
+   * value as it was and reports it (`onUnchecked`) instead of refusing the object. Empty in
+   * production, whose check reads everything.
+   */
+  readonly unchecked?: ReadonlySet<string>
 }
 
 /** An object the value steps refuse, or a unique key two of them would share. */
@@ -88,6 +94,8 @@ export async function planValueSteps(input: {
   readonly startedAt: string
   readonly ontology: OntologyDefinitionCatalog
   readonly types: readonly ValuePlanType[]
+  /** Each object a step fails on a property its type's check didn't read. */
+  readonly onUnchecked?: (failure: ValuePlanFailure) => void
 }): Promise<void> {
   const failures: ValuePlanFailure[] = []
   let failed = 0
@@ -142,6 +150,7 @@ function typePlanner(
 ) {
   const { storage, values, projectId, ontology, startedAt } = input
   const { type, definitions } = planned
+  const unchecked = planned.unchecked ?? new Set<string>()
   const { objectTypeId } = type
   const objectType = ontology.resolveObjectType(objectTypeId)
   const primaryPropertyId = ontology.getPrimaryPropertyId(objectTypeId)
@@ -232,12 +241,19 @@ function typePlanner(
       const given = giveValue(state, current, definition)
       if (given === null) continue
       if ("reason" in given) {
-        fail({
+        const failure = {
           objectTypeId,
           migrationId: step.migrationId,
           line: objectLine(objectTypeId, primaryId, given.reason),
-        })
-        return null
+        }
+        if (!unchecked.has(definition.propertyId)) {
+          fail(failure)
+          return null
+        }
+
+        // A value the check didn't read: the object keeps it, and the step goes on to the next.
+        input.onUnchecked?.(failure)
+        continue
       }
 
       if (
@@ -277,8 +293,13 @@ function typePlanner(
     const created = current.override?.kind === "create" && !current.source
     if (changed && created && after) {
       try {
-        const unrequired = withheld.of(state.effective)?.propertyIds ?? []
-        validateEffectiveObject(ontology, state.ref, after, undefined, { unrequired })
+        // A property the check didn't read is checked by its own steps, value by value: what one
+        // of them couldn't convert keeps its old value, and a missing one stays missing.
+        const unrequired = [...(withheld.of(state.effective)?.propertyIds ?? []), ...unchecked]
+        const checked = Object.fromEntries(
+          Object.entries(after).filter(([propertyId]) => !unchecked.has(propertyId))
+        )
+        validateEffectiveObject(ontology, state.ref, checked, undefined, { unrequired })
       } catch (error) {
         const line = objectLine(objectTypeId, primaryId, messageOf(error))
         fail({ objectTypeId, migrationId: lastMigrationId, line })

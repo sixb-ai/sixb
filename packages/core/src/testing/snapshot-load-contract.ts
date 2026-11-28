@@ -449,33 +449,26 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
   )
 
   // Red check: in import.ts, pass no `unseenValues` to the gate: the devices are refused, each
-  // one's name counted as an edit the code refuses, and the convert rewrites them all.
+  // one's name counted as an edit the code refuses.
   test(
     `${name} leaves the values of a type copied as created objects to its projection`,
     async () => {
       await withStorage(async (storage) => {
-        const Retyped = retypedDevice()
-        const ontology = new OntologyRegistry({ sources: [Retyped] })
-        const convert = defineMigration("device-name-length", Retyped).convertProperty(
-          "name",
-          ({ value }) => String(value).length
-        )
+        const ontology = new OntologyRegistry({ sources: [retypedDevice()] })
         const unchecked = [
           "SnapshotDevice: 'name' changed from string to integer: not checked, the copy can't tell its projection's values from edits.",
         ]
 
         // The snapshot names the properties, or else every property but the primary may be fed.
-        for (const [label, propertyIds, migrations] of [
-          ["named", ["name"], []],
-          ["unnamed", undefined, []],
-          ["converted", ["name"], [convert]],
+        for (const [label, propertyIds] of [
+          ["named", ["name"]],
+          ["unnamed", undefined],
         ] as const) {
           const branchStorage = await storage.createBranchNamespace(`devices-${label}`)
           const report = await importSnapshot({
             snapshot: copiedDevicesSnapshot(propertyIds),
             storage: branchStorage,
             ontology,
-            migrations,
           })
 
           expect(report.skipped).toEqual([])
@@ -510,6 +503,49 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
             unchecked: [],
           }),
         ])
+      })
+    },
+    TIMEOUT_MS
+  )
+
+  // Red check: in type-shapes.ts, leave the `valuesUnseen` changes out of `runnable`: the convert
+  // never runs, and every device keeps a name its integer refuses. In plan-values.ts, refuse an
+  // object whatever property its step failed on: the devices are left out for d-2.
+  test(
+    `${name} converts the values of a type copied as created objects, refusing none`,
+    async () => {
+      await withStorage(async (storage) => {
+        const Retyped = retypedDevice()
+        const convert = defineMigration("device-name-length", Retyped).convertProperty(
+          "name",
+          ({ value }) => {
+            if (value === "B") throw new Error("no length for B")
+            return String(value).length
+          }
+        )
+
+        const branchStorage = await storage.createBranchNamespace("devices-converted")
+        const report = await importSnapshot({
+          snapshot: copiedDevicesSnapshot(["name"]),
+          storage: branchStorage,
+          ontology: new OntologyRegistry({ sources: [Retyped] }),
+          migrations: [convert],
+        })
+
+        expect(report.skipped).toEqual([])
+        expect(report.types).toEqual([
+          expect.objectContaining({
+            objectTypeId: Device.id,
+            migrationIds: ["device-name-length"],
+            refusedByDeploy: [],
+            unchecked: [
+              "SnapshotDevice: 'name' changed from string to integer: not checked, the copy can't tell its projection's values from edits.",
+              "SnapshotDevice 'd-2': convertProperty('name') failed: no length for B: not checked, so it keeps its value.",
+            ],
+          }),
+        ])
+        expect(await storedName(branchStorage, "d-1")).toBe(1)
+        expect(await storedName(branchStorage, "d-2")).toBe("B")
       })
     },
     TIMEOUT_MS

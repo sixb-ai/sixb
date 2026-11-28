@@ -195,6 +195,8 @@ export async function importSnapshot(input: ImportSnapshotInput): Promise<Snapsh
   for (;;) {
     if (refused.length > 0) copy = await loadAgain(input, storage, copy, read, refused)
 
+    // What the steps couldn't give values the check didn't read: listed, never refused.
+    const values = new UncheckedValues()
     try {
       const migration = await applyTypeShapes(
         storage,
@@ -203,10 +205,11 @@ export async function importSnapshot(input: ImportSnapshotInput): Promise<Snapsh
           ontology: input.ontology,
           migrations: input.migrations ?? [],
           ...(input.projections ? { projections: input.projections } : {}),
+          onUncheckedValue: (failure) => values.add(failure),
         },
         copy.check
       )
-      return report(copy, migration)
+      return report(copy, migration, values)
     } catch (error) {
       // The plan of fills and converts runs before the point of no return: nothing was written.
       if (!(error instanceof ValuePlanError)) throw error
@@ -258,7 +261,8 @@ function planRefusals(error: ValuePlanError): SnapshotSkip[] {
 
 function report(
   copy: LoadedCopy,
-  migration: OntologyMigrationRunRecord | null
+  migration: OntologyMigrationRunRecord | null,
+  values: UncheckedValues
 ): SnapshotImportReport {
   return {
     projectId: copy.manifest.projectId,
@@ -267,7 +271,7 @@ function report(
     commitId: copy.commit.id,
     members: copy.manifest.members,
     users: copy.users,
-    types: copy.plan.report(migration, copy.check),
+    types: copy.plan.report(migration, copy.check, values),
     skipped: copy.plan.skips(),
   }
 }
@@ -756,7 +760,8 @@ class ImportPlan {
 
   report(
     migration: OntologyMigrationRunRecord | null,
-    check: TypeShapeCheck
+    check: TypeShapeCheck,
+    values: UncheckedValues
   ): readonly ImportedSnapshotType[] {
     const run = new Map(migration?.plan.types.map((type) => [type.objectTypeId, type]))
     const checked = new Map(check.types.map((type) => [type.objectTypeId, type]))
@@ -777,7 +782,10 @@ class ImportPlan {
         ...new Set(run.get(plan.manifest.objectTypeId)?.steps.map((step) => step.migrationId)),
       ],
       refusedByDeploy: refusedByDeploy(plan),
-      unchecked: unchecked(plan, checked.get(plan.manifest.objectTypeId)),
+      unchecked: [
+        ...unchecked(plan, checked.get(plan.manifest.objectTypeId)),
+        ...values.lines(plan.manifest.objectTypeId),
+      ],
       ...(plan.manifest.projection
         ? {
             projectionId: plan.manifest.projection.projectionId,
@@ -849,6 +857,37 @@ function unchecked(plan: TypePlan, check: TypeShapeTypeCheck | undefined): reado
     )
 
   return [...new Set(lines)]
+}
+
+/** Objects listed per type for a step that failed on a value the check didn't read. */
+const LISTED_UNCHECKED = 100
+
+/**
+ * The objects a fill or a convert failed on, for a property the check didn't read: each keeps its
+ * value on the copy, where a deploy would have read edits only and left the rest to the projection.
+ */
+class UncheckedValues {
+  readonly #byType = new Map<string, { readonly lines: string[]; failed: number }>()
+
+  add(failure: { readonly objectTypeId: string; readonly line: string }): void {
+    const type = this.#byType.get(failure.objectTypeId) ?? { lines: [], failed: 0 }
+    this.#byType.set(failure.objectTypeId, type)
+
+    type.failed += 1
+    if (type.lines.length < LISTED_UNCHECKED) {
+      type.lines.push(`${failure.line}: not checked, so it keeps its value.`)
+    }
+  }
+
+  lines(objectTypeId: string): readonly string[] {
+    const type = this.#byType.get(objectTypeId)
+    if (!type) return []
+
+    const more = type.failed - type.lines.length
+    return more > 0
+      ? [...type.lines, `… and ${more.toLocaleString("en-US")} more not checked.`]
+      : type.lines
+  }
 }
 
 function sameChange(left: NarrowedChange, right: NarrowedChange): boolean {

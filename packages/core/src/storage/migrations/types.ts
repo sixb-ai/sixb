@@ -156,6 +156,17 @@ export interface StorageMigrationOptions {
    * @internal The deploy's contract with the CLI's migrating commands, not an app author's option.
    */
   readonly onMigrationRunStarted?: (runId: string) => Promise<void> | void
+  /**
+   * Called for each object a fill or a convert fails on a property the check didn't read
+   * (`unseen`): the object keeps its value, and the run goes on.
+   *
+   * @internal A branch's import lists them as not checked.
+   */
+  readonly onUncheckedValue?: (failure: {
+    readonly objectTypeId: string
+    /** The object, and why the step failed on it. */
+    readonly line: string
+  }) => void
 }
 
 export interface StorageMigrationResult {

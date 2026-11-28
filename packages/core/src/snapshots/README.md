@@ -156,14 +156,18 @@ Otherwise the type travels as created objects, and the manifest and the import r
 
 Each object is then one `create` edit, which flattens the projection's values into edits. A deploy
 reads only edits for a value's fit and for a missing required value, and leaves the projection's
-values to the projection, fills and converts included. So the properties production's projection
-feeds (`propertyIds`, from its definition; for an older snapshot, the branch's projection of the
-same id, or else every property but the primary), and those the branch's projections feed, are
-`unseenValues`: a change of their values or
-of whether they are required is listed as not checked, and no fill or convert runs on them. Their
-keys are still read: a removal or a rename is decided and runs as for any property. The limit: a
-real edit production holds over one of those values is flattened like the rest, so the branch
-can't check it either.
+values to the projection. So the properties production's projection feeds (`propertyIds`, from its
+definition; for an older snapshot, the branch's projection of the same id, or else every property
+but the primary), and those the branch's projections feed, are `unseenValues`: a change of their
+values or of whether they are required is listed as not checked, never refused. Their keys are
+still read: a removal or a rename is decided and runs as for any property.
+
+The branch's fills and converts still run on them, so the copy fits its code where they can: an
+object one of them fails on keeps its value, and is listed as not checked too (`onUncheckedValue`).
+A value the branch's schema refuses with no convert declared stays as it is: a write to its object
+fails on the branch until a convert exists, and a required one nothing fills stays missing. The
+limit: a real edit production holds over one of those values is flattened like the rest, so the
+branch can't check it either.
 
 ## Branch namespaces
 

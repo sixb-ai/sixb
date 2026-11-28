@@ -27,7 +27,7 @@ import {
 } from "../storage/ontology/migrations"
 import type { PreparedUniqueProperty } from "../storage/ontology/unique-values"
 import type { Storage } from "../storage/types"
-import { planValueSteps, type ValuePlanType } from "./plan-values"
+import { planValueSteps, type ValuePlanFailure, type ValuePlanType } from "./plan-values"
 import { stepKindOf } from "./steps"
 import type { MigrationDefinition } from "./types"
 
@@ -56,6 +56,8 @@ export async function applyOntologyMigrations(input: {
   readonly batchRows?: number
   /** Called once the run is past its point of no return, before its first batch. */
   readonly onStarted?: (runId: string) => Promise<void> | void
+  /** Called for each object a value step fails on a property `check` didn't read. */
+  readonly onUnchecked?: (failure: ValuePlanFailure) => void
 }): Promise<OntologyMigrationRunRecord | null> {
   const { storage, projectId, check } = input
   const prepared = await storage.ontology.uniqueValues.listPrepared({ projectId })
@@ -82,6 +84,7 @@ export async function applyOntologyMigrations(input: {
       startedAt,
       ontology: input.ontology,
       types: values,
+      ...(input.onUnchecked ? { onUnchecked: input.onUnchecked } : {}),
     }).catch(discard)
   }
 
@@ -329,7 +332,10 @@ function runPlan(input: {
     }
     if (definitions.some((step) => stepKindOf(step).stagesValues)) {
       const projected = new Set(projectedProperties(input, objectTypeId).keys())
-      values.push({ type: planned, definitions, projected })
+      const unchecked = new Set(
+        (type.unseen ?? []).flatMap((change) => ("propertyId" in change ? [change.propertyId] : []))
+      )
+      values.push({ type: planned, definitions, projected, unchecked })
     }
     return [planned]
   })

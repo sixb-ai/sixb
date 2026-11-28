@@ -644,7 +644,10 @@ export interface TypeChangeClasses {
   readonly runnable: readonly ProbedChange[]
   /** Changes pending steps cover with a step storage can't apply: a finding when data holds them. */
   readonly blocked: readonly ProbedChange[]
-  /** Changes of a property whose data isn't there to read (`unseen`), in no other class. */
+  /**
+   * Changes of a property whose data isn't there to read (`unseen`), in no other class; or whose
+   * values can't be read for what they are (`unseenValues`), whose steps still run.
+   */
   readonly unseen: readonly ProbedChange[]
   readonly coverage: MigrationCoverage<ProbedChange>
 }
@@ -683,10 +686,11 @@ export function classifyTypeChanges(input: {
   const holds = (properties: ReadonlySet<string> | undefined, propertyId: string) =>
     properties !== undefined &&
     (properties.has(propertyId) || properties.has(coverage.storedKey(propertyId)))
+  const hidden = (change: ProbedChange) =>
+    "propertyId" in change && holds(input.unseen, change.propertyId)
   const unseen = (change: ProbedChange) =>
-    "propertyId" in change &&
-    (holds(input.unseen, change.propertyId) ||
-      (readsValues(change) && holds(input.unseenValues, change.propertyId)))
+    hidden(change) ||
+    ("propertyId" in change && readsValues(change) && holds(input.unseenValues, change.propertyId))
 
   const conflicts = coverage.conflicts.map(({ change, message }) => ({
     objectTypeId,
@@ -700,11 +704,14 @@ export function classifyTypeChanges(input: {
   const missing = coverage.missing.filter(needsData)
   const covered = [...coverage.covered, ...coverage.valueChanges.filter(needsData)]
   const seen = covered.filter((change) => !unseen(change))
+  // Values the check can't read for what they are still get their steps, so the data fits the
+  // code where it can: what the steps refuse there is not checked, never refused.
+  const valuesUnseen = covered.filter((change) => unseen(change) && !hidden(change))
 
   return {
     conflicts,
     missing: missing.filter((change) => !unseen(change)),
-    runnable: input.appliesMigrations ? seen : [],
+    runnable: input.appliesMigrations ? [...seen, ...valuesUnseen] : [],
     blocked: input.appliesMigrations ? [] : seen,
     unseen: [...new Set([...missing, ...covered].filter(unseen))],
     coverage,
