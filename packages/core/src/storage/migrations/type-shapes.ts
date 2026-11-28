@@ -22,6 +22,7 @@ import type { Storage } from "../types"
 import {
   finding,
   mismatchMessage,
+  type NarrowedChange,
   narrows,
   needsData,
   type ProbedChange,
@@ -38,8 +39,9 @@ export { formatTypeShapeFindings, type TypeShapeFinding } from "./type-shape-mes
  * - `deploy`: compares and probes, then records the code's shapes, or throws
  *   {@link TypeShapeMismatchError} and records nothing. `sixb db migrate`, `sixb check --migrate`.
  * - `dev`: compares and probes, records the types whose data fits, and warns about the others.
- * - `role`: never probes. Throws when the code changed a type in a way that isn't compatible;
- *   records compatible changes, and the code's shape for a new type that holds no data yet.
+ * - `role`: never probes ({@link roleCheck}). Records what the code adds or widens, starts the
+ *   release before the recorded shape as it is, and throws on anything else. Records the code's
+ *   shape for a new type that holds no data yet.
  */
 export type TypeShapeMode = "check" | "deploy" | "dev" | "role"
 
@@ -214,6 +216,8 @@ async function checkType(input: {
     if (mode === "role") return "unrecorded"
   }
 
+  if (mode === "role") return roleCheck({ objectTypeId, stored: stored!, code, ontology })
+
   const baseline = stored
     ? undefined
     : await baselineShape(storage, projectId, objectType!, code!, ontology)
@@ -222,10 +226,14 @@ async function checkType(input: {
   const narrowed = changes.filter(narrows)
   const pending = narrowed.filter(needsData)
 
-  const findings =
-    mode === "role"
-      ? narrowed.map((change) => unprobedFinding(objectTypeId, change))
-      : await probeChanges({ storage, projectId, objectType, objectTypeId, ontology, pending })
+  const findings = await probeChanges({
+    storage,
+    projectId,
+    objectType,
+    objectTypeId,
+    ontology,
+    pending,
+  })
 
   return {
     objectTypeId,
@@ -238,6 +246,96 @@ async function checkType(input: {
     pausesWrites: narrowed.length > 0 || baseline !== undefined,
     next: nextWrite({ mode, code, baseline, stored, findings }),
   }
+}
+
+/**
+ * What a role does with a type's recorded shape. It reads no data, so whether the stored objects
+ * fit its code has to follow from the shapes:
+ *
+ * - code that only adds or widens what is recorded: a compatible change, recorded;
+ * - the code of the release before the recorded shape (`previous`), as when it starts again after
+ *   a deploy: it starts, and keeps recorded what that deploy added or widened, so the next deploy
+ *   still probes its removal. Something the deploy narrowed it records back as it defines it. A
+ *   property it makes unique, or narrows where the deploy did too, is refused: a role can't build
+ *   unique values, nor tell what the data fits;
+ * - anything else is refused, for `sixb db migrate` to read the data: newer code than the
+ *   recorded shape, or code older than the one before it.
+ *
+ * A type only the recorded shapes hold is a newer release's: the role neither reads nor writes it.
+ */
+function roleCheck(input: {
+  readonly objectTypeId: string
+  readonly stored: StoredTypeShape
+  readonly code: TypeShape | null
+  readonly ontology: OntologyDefinitionCatalog
+}): TypeShapeTypeCheck {
+  const { objectTypeId, stored, code } = input
+  const recorded = withoutRemovedTargets(stored.shape, input.ontology)
+  const changes = diffTypeShapes(recorded, code)
+  const kept = { objectTypeId, stored, changes, pausesWrites: false } as const
+  const keep = { ...kept, findings: [], next: { kind: "keep" } } as const
+  if (!code) return keep
+
+  const narrowed = changes.filter(narrows)
+  if (narrowed.length === 0) {
+    return sameShape(stored.shape, code) ? keep : { ...keep, next: { kind: "write", shape: code } }
+  }
+
+  const refuse = (refused: readonly NarrowedChange[]): TypeShapeTypeCheck => ({
+    ...keep,
+    findings: refused.map((change) => unprobedFinding(objectTypeId, change)),
+  })
+  if (!stored.previous || !sameShape(stored.previous, code)) return refuse(narrowed)
+
+  // The release before, started again: each property and link the deploy changed, alone.
+  const reverse = groupByKey(diffTypeShapes(code, recorded))
+  const properties = { ...code.properties }
+  const links = { ...code.links }
+  const refused: NarrowedChange[] = []
+
+  for (const [key, forward] of groupByKey(changes)) {
+    if (forward.every((change) => !narrows(change))) continue
+
+    // A primary property is the type's, not a key's: it is never kept from the recorded shape.
+    const widenedInStore =
+      key !== TYPE_KEY &&
+      !forward.some((change) => change.kind === "property-unique") &&
+      (reverse.get(key) ?? []).every((change) => !narrows(change))
+    if (!widenedInStore) {
+      refused.push(...forward.filter(narrows))
+      continue
+    }
+
+    const [kind, id] = JSON.parse(key) as ["property" | "link", string]
+    const target: Record<string, unknown> = kind === "property" ? properties : links
+    const definition = kind === "property" ? recorded.properties[id] : recorded.links[id]
+    if (definition) target[id] = definition
+    else delete target[id]
+  }
+  if (refused.length > 0) return refuse(refused)
+
+  const merged = { properties: sortKeys(properties), links: sortKeys(links) }
+  return sameShape(stored.shape, merged)
+    ? keep
+    : { ...keep, next: { kind: "write", shape: merged } }
+}
+
+/** The key of a change that belongs to no property or link: the primary property, the type. */
+const TYPE_KEY = "type"
+
+/** Changes by the property or link they belong to, in the order they came. */
+function groupByKey(changes: readonly TypeShapeChange[]): Map<string, TypeShapeChange[]> {
+  const groups = new Map<string, TypeShapeChange[]>()
+  for (const change of changes) {
+    const key =
+      "propertyId" in change
+        ? JSON.stringify(["property", change.propertyId])
+        : "linkId" in change
+          ? JSON.stringify(["link", change.linkId])
+          : TYPE_KEY
+    groups.set(key, [...(groups.get(key) ?? []), change])
+  }
+  return groups
 }
 
 function nextWrite(input: {

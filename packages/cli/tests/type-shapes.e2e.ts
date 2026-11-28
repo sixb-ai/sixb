@@ -66,7 +66,7 @@ async function dockerCompose(args: readonly string[]): Promise<void> {
   }
 }
 
-type Release = "first" | "withNote" | "withoutGate" | "uniqueGate"
+type Release = "first" | "withNote" | "withoutGate" | "retypedGate" | "uniqueGate"
 
 /** One CLI run of `release`, on the test's schema. */
 function sixb(
@@ -263,10 +263,10 @@ describe("a role", () => {
       const schema = await deployedSchema("role")
 
       for (const args of [["orchestrator"], ["orchestrator", "--no-migrate"]]) {
-        const started = await sixb(schema, "withoutGate", args)
+        const started = await sixb(schema, "retypedGate", args)
         expect(started.exitCode).not.toBe(0)
         expect(started.stdout + started.stderr).toContain(
-          "Job: 'gate' was removed since its shape was recorded."
+          "Job: 'gate' changed from string to integer since its shape was recorded."
         )
       }
     },
@@ -306,6 +306,59 @@ describe("a rolled-back release", () => {
       expect(Object.keys((await storedShape(schema))?.properties ?? {})).toContain("gate")
     },
     CLI_TIMEOUT_MS * 3
+  )
+})
+
+describe("the release before a deploy that only added a property", () => {
+  // Revert check: in `roleCheck`, refuse every change that narrows, as before the previous release
+  // was told apart: the old release then refuses the shape with `note`, and never becomes ready.
+  test(
+    "starts with --no-migrate, and leaves the recorded shape as it was",
+    async () => {
+      const schema = await deployedSchema("widened")
+      expect((await sixb(schema, "withNote", ["db", "migrate"])).exitCode).toBe(0)
+      const recorded = await storedShape(schema)
+
+      const logs = await mkdtemp(join(tmpdir(), "sixb-type-shapes-widened-"))
+      try {
+        const { ready } = await startRoleUntilReadyThenStop({
+          cmd: [process.execPath, cli, "orchestrator", "--no-migrate", "--entry", entry],
+          cwd: repoRoot,
+          logPath: join(logs, "operations.log"),
+          env: {
+            DATABASE_URL: databaseUrl,
+            SIXB_SHAPES_SCHEMA: schema,
+            SIXB_SHAPES_RELEASE: "first",
+          },
+          timeoutMs: CLI_TIMEOUT_MS,
+        })
+        expect(ready).toBe(true)
+      } finally {
+        await rm(logs, { recursive: true, force: true })
+      }
+
+      expect(await storedShape(schema)).toEqual(recorded)
+    },
+    CLI_TIMEOUT_MS * 3
+  )
+})
+
+describe("newer code than the recorded shape", () => {
+  // Revert check: in `roleCheck`, drop the `previous` test: the role then keeps `note` recorded
+  // and serves before `sixb db migrate` read the objects that hold it.
+  test(
+    "refuses to start when it removes what the recorded shape holds",
+    async () => {
+      const schema = `type_shapes_newer_${process.pid}`
+      expect((await sixb(schema, "withNote", ["db", "migrate"])).exitCode).toBe(0)
+
+      const started = await sixb(schema, "first", ["orchestrator", "--no-migrate"])
+      expect(started.exitCode).not.toBe(0)
+      expect(started.stdout + started.stderr).toContain(
+        "Job: 'note' was removed since its shape was recorded."
+      )
+    },
+    CLI_TIMEOUT_MS * 2
   )
 })
 

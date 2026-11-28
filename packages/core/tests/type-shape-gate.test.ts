@@ -8,6 +8,7 @@ import {
   type Property,
   prop,
   type Storage,
+  stringEnum,
 } from "../src"
 import { createTestingScope } from "../src/execution/scopes"
 import type { JsonValue } from "../src/json"
@@ -569,16 +570,161 @@ describe("a role", () => {
     expect((await storedJob(storage))?.shape.properties.gate).toEqual({ schema: "string" })
   })
 
-  test("refuses code that narrows a type, without reading its data", async () => {
+  test("refuses code that narrows a type both ways, without reading its data", async () => {
     const storage = new InMemoryStorage()
     await deploy(storage, withGate)
+    const retyped = jobOntology(
+      [prop("gate", "integer"), prop("hours", "string")],
+      [link("crew", Technician)]
+    )
 
-    expect(await messageOf(startRole(storage, withoutGate))).toBe(
+    expect(await messageOf(startRole(storage, retyped))).toBe(
       [
         "[Sixb] The code changed object types since their shape was recorded, and the stored objects may not fit:",
-        "  ✗ Job: 'gate' was removed since its shape was recorded.",
+        "  ✗ Job: 'gate' changed from string to integer since its shape was recorded.",
         "Run `sixb db migrate` first: it checks the stored objects and records the new shapes.",
       ].join("\n")
+    )
+  })
+
+  describe("of the release before a deploy that only added things", () => {
+    // Revert check: in `roleCheck`, refuse every change that narrows, as before the release before
+    // was told from newer code (`previous`): the old release then refuses every shape a newer one
+    // widened.
+    const v1 = jobOntology(
+      [prop("gate", "string"), prop("status", stringEnum(["open", "done"]))],
+      [link("crew", Technician)]
+    )
+    const releases = {
+      "an optional property": jobOntology(
+        [
+          prop("gate", "string"),
+          prop("note", "string"),
+          prop("status", stringEnum(["open", "done"])),
+        ],
+        [link("crew", Technician)]
+      ),
+      "a link": jobOntology(
+        [prop("gate", "string"), prop("status", stringEnum(["open", "done"]))],
+        [link("crew", Technician), link("lead", Technician)]
+      ),
+      "an enum value": jobOntology(
+        [prop("gate", "string"), prop("status", stringEnum(["open", "done", "urgent"]))],
+        [link("crew", Technician)]
+      ),
+      "`nullable`": jobOntology(
+        [prop("gate", "string", { nullable: true }), prop("status", stringEnum(["open", "done"]))],
+        [link("crew", Technician)]
+      ),
+    }
+
+    for (const [added, v2] of Object.entries(releases)) {
+      test(`starts after one that added ${added}, and keeps its shape`, async () => {
+        const storage = new InMemoryStorage()
+        await deploy(storage, v1)
+        await deploy(storage, v2)
+        const recorded = await storedJob(storage)
+
+        await startRole(storage, v1)
+        expect(await storedJob(storage)).toEqual(recorded)
+      })
+    }
+
+    test("starts after one that added a type, and keeps its shape", async () => {
+      const storage = new InMemoryStorage()
+      await deploy(storage, v1)
+      const Invoice = defineObjectType({
+        id: "GateInvoice",
+        name: "Invoice",
+        properties: [prop("id", "string", { primary: true, required: true })],
+      })
+      await deploy(storage, new OntologyRegistry({ sources: [...v1.listObjectTypes(), Invoice] }))
+      const recorded = await stored(storage)
+
+      await startRole(storage, v1)
+      expect(await stored(storage)).toEqual(recorded)
+    })
+
+    test("records what its code adds, next to what the recorded shape adds", async () => {
+      const storage = new InMemoryStorage()
+      await deploy(storage, withGate)
+      const v2 = jobOntology(
+        [prop("hours", "string"), prop("note", "string")],
+        [link("crew", Technician)]
+      )
+      await deploy(storage, v2)
+
+      await startRole(storage, withGate)
+      expect(Object.keys((await storedJob(storage))!.shape.properties)).toEqual([
+        "gate",
+        "hours",
+        "note",
+        "ref",
+      ])
+
+      // Revert check: in `recordTypeShapes`, record the replaced shape as `previous` for a role
+      // too: the release that recorded the merge then can't start again.
+      await startRole(storage, withGate)
+      expect(Object.keys((await storedJob(storage))!.previous!.properties)).toEqual([
+        "gate",
+        "hours",
+        "ref",
+      ])
+    })
+
+    test("leaves a later removal for the next deploy to probe", async () => {
+      const storage = new InMemoryStorage()
+      await deploy(storage, v1)
+      const v2 = releases["an optional property"]
+      await deploy(storage, v2)
+      await commit(storage, v2, [create("J-1", { note: "Side door" })])
+
+      await startRole(storage, v1)
+      expect(await messageOf(deploy(storage, v1))).toContain(
+        "Job: 'note' was removed, and 1 object holds it."
+      )
+    })
+
+    test("records a dropped `unique`, as any compatible change", async () => {
+      const storage = new InMemoryStorage()
+      const unique = jobOntology(
+        [prop("gate", "string", { unique: true }), prop("hours", "string")],
+        [link("crew", Technician)]
+      )
+      await deploy(storage, unique)
+
+      await startRole(storage, withGate)
+      expect((await storedJob(storage))?.shape.properties.gate).toEqual({ schema: "string" })
+    })
+
+    // Revert check: in `roleCheck`, drop the `property-unique` test: the recorded shape, which
+    // isn't unique, is then kept, and the role starts on values it never built.
+    test("refuses a property it makes unique again after a deploy dropped `unique`", async () => {
+      const storage = new InMemoryStorage()
+      const unique = jobOntology(
+        [prop("gate", "string", { unique: true }), prop("hours", "string")],
+        [link("crew", Technician)]
+      )
+      await deploy(storage, unique)
+      await deploy(storage, withGate)
+
+      expect(await messageOf(startRole(storage, unique))).toContain("Job: 'gate' is now unique")
+    })
+  })
+
+  // Revert check: in `roleCheck`, drop the `previous` test: newer code then keeps the recorded
+  // `note` and starts, before `sixb db migrate` read the objects that hold it.
+  test("refuses newer code that removes what the recorded shape holds", async () => {
+    const storage = new InMemoryStorage()
+    const withNote = jobOntology(
+      [prop("gate", "string"), prop("hours", "string"), prop("note", "string")],
+      [link("crew", Technician)]
+    )
+    await deploy(storage, withNote)
+    await commit(storage, withNote, [create("J-1", { note: "Side door" })])
+
+    expect(await messageOf(startRole(storage, withGate))).toContain(
+      "Job: 'note' was removed since its shape was recorded."
     )
   })
 

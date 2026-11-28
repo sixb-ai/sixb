@@ -20,6 +20,8 @@ const releases = {
   withNote: [prop("gate", "string"), prop("hours", "string"), prop("note", "string")],
   /** Removes `gate`: a narrowing, which data may hold. */
   withoutGate: [prop("hours", "string")],
+  /** Makes `gate` an integer: a narrowing both ways, which a role refuses. */
+  retypedGate: [prop("gate", "integer"), prop("hours", "string")],
   /** Makes `gate` unique: a narrowing unique preparation checks. */
   uniqueGate: [prop("gate", "string", { unique: true }), prop("hours", "string")],
 }

@@ -24,7 +24,9 @@ can't write a value another object holds while the values are built.
 
 `ontology_type_shapes` holds one row per concrete type: its `TypeShape`
 (`ontology/type-shapes.ts`, value types written in place, subtypes with their inherited
-properties) and when it was written. Only the current shape is kept.
+properties), the one recorded before it (`previous`), and when it was written. A deploy or `sixb
+dev` that records a new shape over a stored one keeps the stored one as `previous`; a role never
+changes it.
 
 `checkTypeShapes` builds one `TypeShapeTypeCheck` per type in code or in storage:
 
@@ -64,12 +66,25 @@ shape already is the code's.
 | `check` | yes | nothing | returns the findings |
 | `deploy` | yes | the code's shapes | throws `TypeShapeMismatchError`, writes nothing |
 | `dev` | yes | the types that fit, the baseline of a new one that doesn't | warns |
-| `role` | no | compatible changes; the code's shape of a type holding nothing | throws on any change that isn't compatible |
+| `role` | no | compatible changes, and the previous release's own changes back; the code's shape of a type holding nothing | throws on anything else |
 
 `check` returns `narrows`, any type's `pausesWrites`: `sixb db migrate --check` exits 3 on it so the
 live release stops before the shape is recorded, since the old code would write what the new shape
-refuses. A role started with `--no-migrate` checks and records in `role` mode too: an old release
-restarted after a failed deploy puts its own shape back, so the next deploy probes what it wrote.
+refuses. A role started with `--no-migrate` checks and records in `role` mode too.
+
+Shapes alone can't tell newer code from older, so `roleCheck` goes by `previous`:
+
+- **The code only adds or widens:** a compatible change, recorded.
+- **The code is `previous`**, the release before a deploy, started again: it starts. Each property
+  and link the deploy changed is decided alone: what the deploy narrowed goes back as the code
+  defines it, so the next deploy probes it; what the deploy added or widened (a property, a link,
+  an enum value, `nullable`, `required` dropped) stays recorded, since writing the old code's
+  narrower definition would let the next deploy drop a key the data holds without probing it. A
+  property the code makes unique, or one narrower both ways, is refused: a role can't build unique
+  values, nor tell what the data fits. It records the merge only when it isn't the stored shape.
+- **Anything else is refused**, newer code included: a role can't read what the data holds.
+
+A type only the stored shapes hold is a newer release's: the role neither reads nor writes it.
 
 ## Concurrency
 

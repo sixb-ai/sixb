@@ -52,8 +52,9 @@ export interface RoleStorageMigration {
  * `sixb db migrate` cannot surface as a missing column on the first request.
  *
  * It also refuses to serve code the stored objects may not fit. A role never reads data to decide:
- * it compares the recorded shapes with the code's, records the changes that are compatible, and
- * leaves the rest to `sixb db migrate`, which runs before the new release starts.
+ * it compares the recorded shapes with the code's. It records what the code adds or widens, starts
+ * the release before the recorded shape again, and leaves the rest to `sixb db migrate`, which
+ * runs before the new release starts.
  *
  * Concurrent replicas are handled below this call: Postgres serializes migrators on a session
  * advisory lock, and every adapter refuses a history it does not recognize, so late replicas
@@ -138,10 +139,10 @@ export async function findPendingMigrations(storage: Storage): Promise<readonly 
 
 /**
  * What a role started with `--no-migrate` still does with the shapes: refuse code the stored
- * objects may not fit, and record the compatible changes of code that fits. That covers an old
- * release restarted after a failed deploy recorded a narrower shape: its own shape goes back, so
- * the next deploy probes what it writes. A schema that isn't current is the readiness probe's to
- * report.
+ * objects may not fit, and record the compatible changes of code that fits. That covers the
+ * release before a deploy, started again: what the deploy narrowed goes back as it defines it, so
+ * the next deploy probes it, and what the deploy added stays recorded, so the next deploy still
+ * probes its removal. A schema that isn't current is the readiness probe's to report.
  */
 async function refuseUnfitShapes(sixb: LoadedSixbHost): Promise<void> {
   if (!(await checkStorageSchema(sixb.storage)).ok) return

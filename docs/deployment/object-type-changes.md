@@ -52,10 +52,13 @@ object holds while the values are built, so building them is part of the deploy'
 
 ## Roles and `sixb dev`
 
-- A role (`api`, `orchestrator`, workers) compares the recorded shapes with its code and refuses to
-  start on a change that isn't compatible, `--no-migrate` included. It never reads objects: run
-  `sixb db migrate` first. It records compatible changes itself, so an old release restarted after
-  a failed deploy puts back the shape it writes.
+- A role (`api`, `orchestrator`, workers) compares the recorded shapes with its code,
+  `--no-migrate` included. It never reads objects:
+  - code that only adds or widens starts, and records the change;
+  - the previous release starts again after a deploy, a failed one included. What the deploy
+    added stays recorded, so the next deploy still checks its removal. It can't edit an object
+    holding what the newer release added: the edit fails with `Unknown property`;
+  - anything else stops it, a property made unique included: run `sixb db migrate` first.
 - A role that finds a type holding objects and no recorded shape starts as before and says so:
   `sixb db migrate` records it.
 - `sixb dev` warns instead of refusing, and leaves the recorded shape, and that type's unique
