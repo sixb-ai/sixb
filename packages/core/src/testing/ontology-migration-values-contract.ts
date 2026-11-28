@@ -418,7 +418,7 @@ export function runOntologyMigrationValueCases<TStorage extends Storage>(
         )
 
         expect(String(failed)).toContain(
-          `ValueJob 'c-3': 'position' would take "1", which 'c-1' holds.`
+          `ValueJob 'c-3': 'position' would take the value 'c-1' holds.`
         )
         expect(await dumpStores(storage)).toEqual(before)
       })
@@ -551,7 +551,8 @@ export function runOntologyMigrationValueCases<TStorage extends Storage>(
   )
 
   // Removal proof: drop the kept-value query of `findUniqueCollisions`, and `c-3` takes `c-8`'s
-  // value after the point of no return.
+  // value after the point of no return. The lines never print the value, which may be marked: put
+  // `collision.valueKey` back into `collisionLine` and they fail.
   test(
     `${name} finds unique keys staged twice, or kept by another object, and writes nothing`,
     async () => {
@@ -571,8 +572,8 @@ export function runOntologyMigrationValueCases<TStorage extends Storage>(
         expect(String(failed)).toContain(
           [
             "[Sixb] Migration 'job-code' cannot apply: 3 objects fail.",
-            `  ValueJob 'c-1': 'code' would take "A", as would 'c-7'.`,
-            `  ValueJob 'c-3': 'code' would take "C", which 'c-8' holds.`,
+            `  ValueJob 'c-1': 'code' would take the same value as 'c-7'.`,
+            `  ValueJob 'c-3': 'code' would take the value 'c-8' holds.`,
           ].join("\n")
         )
         // Every object is named: none is left to count.
@@ -641,7 +642,9 @@ export function runOntologyMigrationValueCases<TStorage extends Storage>(
         const failed = await deploy(storage, ranks.ontology, [toNumber]).catch(
           (error: unknown) => error
         )
-        expect(String(failed)).toContain(`ValueJob 'c-1': 'rank' would take "1", as would 'c-3'.`)
+        expect(String(failed)).toContain(
+          `ValueJob 'c-1': 'rank' would take the same value as 'c-3'.`
+        )
         expect(await dumpStores(storage)).toEqual(before)
 
         await client(storage)

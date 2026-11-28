@@ -541,12 +541,13 @@ function valueMigrationOf(
   return step?.migrationId ?? type?.type.steps[0]?.migrationId ?? "unknown"
 }
 
+/** Names the objects, never the value: a unique value may be marked, as an email is. */
 function collisionLine(collision: MigrationUniqueCollision): string {
   const [first, ...others] = collision.primaryIds
-  const value = `'${collision.propertyId}' would take ${JSON.stringify(collision.valueKey)}`
-  const reason = collision.holder
-    ? `${value}, which '${collision.holder}' holds.`
-    : `${value}, as would ${others.map((id) => `'${id}'`).join(", ")}.`
+  const value = collision.holder
+    ? `the value '${collision.holder}' holds`
+    : `the same value as ${others.map((id) => `'${id}'`).join(", ")}`
+  const reason = `'${collision.propertyId}' would take ${value}.`
   return objectLine(collision.objectTypeId, first!, reason)
 }
 
