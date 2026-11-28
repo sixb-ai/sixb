@@ -336,7 +336,44 @@ function branchNotice(branch: BranchFromProduction, apiUrl: string): string[] {
     "Off on this branch: connectors, action writebacks and effects, syncs, inbound webhooks, emails, cron schedules and directory checks. Your project's own fetch calls and the agent's web tools still go out.",
     `Run a cron schedule on this branch: sixb schedules run <id> --api-url ${apiUrl}`,
     ...(branch.lake === "in place" ? [] : [`Datasets: ${branch.lake}.`]),
+    ...copyNotice(branch.copy),
     ...branch.dropped.map((gitBranch) => `Dropped the copy of deleted git branch ${gitBranch}.`),
+  ]
+}
+
+/** What the copy left out, what it holds in part, and the migrations it ran on the rest. */
+export function copyNotice(copy: BranchFromProduction["copy"]): string[] {
+  const named = (ids: readonly string[]) => ids.map((id) => `'${id}'`).join(", ")
+  const indented = (lines: readonly string[]) => lines.map((line) => `  ${line}`)
+  const migrated = new Set(copy.migrated.map((type) => type.objectTypeId))
+
+  return [
+    // What a deploy would refuse says so as the deploy does, a line per change, counted.
+    ...copy.skipped.flatMap(({ objectTypeId, reason, findings }) => [
+      `Not copied: ${objectTypeId}: ${reason}.`,
+      ...indented(findings),
+    ]),
+    ...copy.refusedByDeploy.flatMap(({ objectTypeId, findings }) => [
+      `Left out of ${objectTypeId}: what this branch removed, which a deploy would refuse:`,
+      ...indented(findings),
+    ]),
+    ...copy.unchecked.flatMap(({ objectTypeId, lines }) => [
+      `Not checked on ${objectTypeId}: your copy doesn't hold its values as production does.`,
+      ...indented(lines),
+    ]),
+    ...copy.partial.map(({ objectTypeId, hiddenPropertyIds, throughCondition }) => {
+      const hidden = [
+        ...(hiddenPropertyIds.length > 0 ? [`${named(hiddenPropertyIds)} hidden from you`] : []),
+        ...(throughCondition ? ["some objects hidden from you"] : []),
+      ]
+      // Only a type the migrations ran on says what they ran on.
+      const ran = migrated.has(objectTypeId) ? " Migrations ran on what you read." : ""
+      return `Copied in part: ${objectTypeId}, ${hidden.join(" and ")}.${ran}`
+    }),
+    ...copy.migrated.map(
+      ({ objectTypeId, migrationIds }) =>
+        `Migrated on the copy: ${objectTypeId}, by ${named(migrationIds)}.`
+    ),
   ]
 }
 

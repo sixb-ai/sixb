@@ -3,6 +3,7 @@ import { putOnBranch } from "../branch-mode"
 import type { LakeStorage } from "../lake-storage/types"
 import { hostOptionsOf, SixbHost, type SixbHostView } from "../runtime/host"
 import type { BranchData, BranchError, BranchState } from "../storage/branches"
+import { parseCopyTypes } from "../storage/branches/record"
 import type { Storage } from "../storage/types"
 import { branchBlobStorage } from "./blobs"
 import { branchHandoverAuth } from "./handover"
@@ -144,7 +145,15 @@ export interface BranchLoadedCopy {
   readonly takenAt: string
   readonly objects: number
   /** Types left out: unreadable in production, or no longer fitting the branch's definitions. */
-  readonly skipped: readonly { readonly objectTypeId: string; readonly reason: string }[]
+  readonly skipped: BranchData["skipped"]
+  /** Types its creator reads only in part: the branch's migrations ran on the rest. */
+  readonly partial: BranchData["partial"]
+  /** What a deploy of the branch's code would refuse in what the copy held. */
+  readonly refusedByDeploy: BranchData["refusedByDeploy"]
+  /** What a deploy would check that the copy can't. */
+  readonly unchecked: BranchData["unchecked"]
+  /** The branch's migrations the copy ran, by type. */
+  readonly migrated: BranchData["migrated"]
   /** Datasets its lake slice left out: their creator may not read every column. */
   readonly skippedDatasets: BranchData["skippedDatasets"]
   readonly lakeSliceId: string | null
@@ -210,15 +219,11 @@ export function parseLoadedCopy(value: unknown): BranchLoadedCopy | null {
   const copy = value as Record<string, unknown>
   if (typeof copy.takenAt !== "string" || typeof copy.objects !== "number") return null
 
-  const skipped = Array.isArray(copy.skipped) ? copy.skipped : []
   const skippedDatasets = Array.isArray(copy.skippedDatasets) ? copy.skippedDatasets : []
   return {
     takenAt: copy.takenAt,
     objects: copy.objects,
-    skipped: skipped.map((entry) => {
-      const skip = (entry ?? {}) as Record<string, unknown>
-      return { objectTypeId: String(skip.objectTypeId), reason: String(skip.reason) }
-    }),
+    ...parseCopyTypes(copy),
     skippedDatasets: skippedDatasets.map((entry) => {
       const skip = (entry ?? {}) as Record<string, unknown>
       return {

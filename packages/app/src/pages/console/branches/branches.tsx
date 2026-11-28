@@ -879,10 +879,24 @@ function Callout({
 }
 
 function hasSkips(branch: Branch): boolean {
-  return (branch.data?.skipped.length ?? 0) + (branch.data?.skippedDatasets.length ?? 0) > 0
+  const data = branch.data
+  if (!data) return false
+
+  return (
+    data.skipped.length +
+      data.skippedDatasets.length +
+      data.partial.length +
+      data.refusedByDeploy.length +
+      data.unchecked.length +
+      data.migrated.length >
+    0
+  )
 }
 
-/** What the copy left out, folded: each type and dataset with a plain reason. */
+/**
+ * What the copy left out, holds in part, and the migrations it ran, folded: each type and dataset
+ * with a plain sentence, and what a deploy would print behind its own Details.
+ */
 function NotCopied({ branch }: { readonly branch: Branch }) {
   const messages = useBranchesMessages().notCopied
   const me = useCurrentUser()
@@ -896,15 +910,28 @@ function NotCopied({ branch }: { readonly branch: Branch }) {
       : creator?.displayName || creator?.email || messages.someone
   const types = branch.data?.skipped ?? []
   const datasets = branch.data?.skippedDatasets ?? []
+  const partial = branch.data?.partial ?? []
+  const refused = branch.data?.refusedByDeploy ?? []
+  const unchecked = branch.data?.unchecked ?? []
+  const migrated = branch.data?.migrated ?? []
+  const inPart = new Set([...partial, ...refused, ...unchecked].map((type) => type.objectTypeId))
+    .size
 
   return (
     <Collapsible>
-      <CollapsibleTrigger className="group flex items-center gap-1 rounded text-[0.8125rem] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <CollapsibleTrigger className="group flex items-start gap-1 rounded text-left text-[0.8125rem] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <ChevronRight
           aria-hidden
-          className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
+          className="mt-0.5 size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90"
         />
-        {messages.summary(types.length, datasets.length)}
+        <span className="min-w-0">
+          {messages.summary({
+            types: types.length,
+            datasets: datasets.length,
+            inPart,
+            migrated: migrated.length,
+          })}
+        </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <ul className="mt-2 flex flex-col divide-y divide-border rounded-lg border border-border">
@@ -912,12 +939,8 @@ function NotCopied({ branch }: { readonly branch: Branch }) {
             <SkipRow
               key={`type:${skip.objectTypeId}`}
               name={skip.objectTypeId}
-              reason={
-                skip.reason.startsWith("the person who took it")
-                  ? messages.unreadable(who)
-                  : messages.changed
-              }
-              detail={skip.reason.startsWith("the person who took it") ? undefined : skip.reason}
+              reason={skip.kind === "unreadable" ? messages.unreadable(who) : messages[skip.kind]}
+              details={skip.findings}
             />
           ))}
           {datasets.map((skip) => (
@@ -925,6 +948,41 @@ function NotCopied({ branch }: { readonly branch: Branch }) {
               key={`dataset:${skip.datasetId}`}
               name={skip.datasetId}
               reason={messages.hiddenColumns(who, skip.columns.join(", "))}
+            />
+          ))}
+          {refused.map((type) => (
+            <SkipRow
+              key={`refused:${type.objectTypeId}`}
+              name={type.objectTypeId}
+              reason={messages.removedValues}
+              details={type.findings}
+            />
+          ))}
+          {unchecked.map((type) => (
+            <SkipRow
+              key={`unchecked:${type.objectTypeId}`}
+              name={type.objectTypeId}
+              reason={messages.unchecked}
+              details={type.lines}
+            />
+          ))}
+          {partial.map((type) => (
+            <SkipRow
+              key={`partial:${type.objectTypeId}`}
+              name={type.objectTypeId}
+              reason={messages.inPart(
+                who,
+                type.hiddenPropertyIds.join(", "),
+                type.throughCondition
+              )}
+            />
+          ))}
+          {migrated.map((type) => (
+            <SkipRow
+              key={`migrated:${type.objectTypeId}`}
+              name={type.objectTypeId}
+              reason={messages.migrated}
+              details={type.migrationIds}
             />
           ))}
         </ul>
@@ -936,18 +994,73 @@ function NotCopied({ branch }: { readonly branch: Branch }) {
 function SkipRow({
   name,
   reason,
-  detail,
+  details = [],
 }: {
   readonly name: string
   readonly reason: string
-  readonly detail?: string
+  /** Technical lines, such as what a deploy prints: folded under Details. */
+  readonly details?: readonly string[]
 }) {
+  const messages = useBranchesMessages().attention
+
   return (
-    <li className="px-3.5 py-2.5 text-[0.8125rem]">
-      <span className="font-mono text-xs font-medium">{name}</span>
+    <li className="min-w-0 px-3.5 py-2.5 text-[0.8125rem]">
+      <span className="font-mono text-xs font-medium break-all">{name}</span>
       <p className="mt-0.5 text-muted-foreground">{reason}</p>
-      {detail ? <p className="mt-0.5 font-mono text-xs text-muted-foreground">{detail}</p> : null}
+      {details.length > 0 ? (
+        <Collapsible>
+          <CollapsibleTrigger className="group mt-1 flex items-center gap-1 rounded text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <ChevronRight
+              aria-hidden
+              className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90"
+            />
+            {messages.details}
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <DetailLines lines={details} />
+          </CollapsibleContent>
+        </Collapsible>
+      ) : null}
     </li>
+  )
+}
+
+/**
+ * What a deploy prints, as `formatTypeShapeFindings` lays it out: a `✗` line, then remedy lines
+ * indented under it, the migration to write the most. The sentences wrap with their indent; a
+ * `defineMigration(…)` line is code, kept whole and scrolled inside its own box.
+ */
+function DetailLines({ lines }: { readonly lines: readonly string[] }) {
+  return (
+    <div className="mt-1.5 flex max-h-64 min-w-0 flex-col gap-1 overflow-y-auto rounded-md border border-border bg-background p-2.5 text-xs leading-5 text-muted-foreground">
+      {lines.map((line, index) => {
+        const text = line.trimStart()
+        const depth = Math.floor((line.length - text.length) / 2)
+
+        if (text.startsWith("defineMigration(")) {
+          return (
+            <pre
+              key={index}
+              className="ml-4 overflow-x-auto rounded border border-border bg-muted/60 px-2 py-1 font-mono whitespace-pre"
+            >
+              {text}
+            </pre>
+          )
+        }
+
+        const marked = text.startsWith("✗ ")
+        return (
+          <p key={index} className={cn("flex min-w-0 gap-1.5 break-words", depth > 0 && "ml-4")}>
+            {marked ? (
+              <span aria-hidden className="shrink-0 text-red-700 dark:text-red-300">
+                ✗
+              </span>
+            ) : null}
+            <span className="min-w-0">{marked ? text.slice(2) : text}</span>
+          </p>
+        )
+      })}
+    </div>
   )
 }
 

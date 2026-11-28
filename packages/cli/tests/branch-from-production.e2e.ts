@@ -338,7 +338,7 @@ describe.each(laptops)("a laptop branch on %s", (_name, localStorage) => {
 
   // Red check: in `loadCopy` (lib/branch-from-production.ts), pass no `migrations` to the
   // import: `title` is left out of the copy, and every heading is empty.
-  test("runs the branch's migrations on the copy", async () => {
+  test("runs the branch's migrations on the copy, and says what Alice's copy holds in part", async () => {
     const Retitled = defineObjectType({
       id: Ticket.id,
       name: "Ticket",
@@ -374,6 +374,17 @@ describe.each(laptops)("a laptop branch on %s", (_name, localStorage) => {
       "t-3:Ticket t-3",
     ])
 
+    // She reads open tickets only: the dry run saw those, and says so.
+    const partial = [{ objectTypeId: Ticket.id, hiddenPropertyIds: [], throughCondition: true }]
+    expect(opened.copy).toEqual({
+      skipped: [],
+      partial,
+      refusedByDeploy: [],
+      unchecked: [],
+      migrated: [{ objectTypeId: Ticket.id, migrationIds: ["ticket-heading"] }],
+    })
+    expect((await loadedCopyOf(local.projectRoot, opened.namespace))?.partial).toEqual(partial)
+
     await opened.host.lakeStorage.close?.()
     await local.lake.close()
     await local.storage.close?.()
@@ -407,8 +418,10 @@ describe.each(laptops)("a laptop branch on %s", (_name, localStorage) => {
       gitBranches: ["feature/x"],
     })
 
-    const loaded = await loadedCopyOf(local.projectRoot, opened.namespace)
-    expect(loaded?.skipped.map((skip) => skip.objectTypeId)).toEqual([Ticket.id])
+    expect(opened.copy.skipped).toEqual([
+      expect.objectContaining({ objectTypeId: Ticket.id, kind: "unfit" }),
+    ])
+    expect(opened.copy.skipped[0]?.findings[0]).toContain("'title'")
     const tickets = await createTestSixb(opened.host as never)
       .objects(Numbered)
       .query()

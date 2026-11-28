@@ -52,7 +52,27 @@ export function runBranchStorageContractSuite<TStorage extends BranchStorage>(
           data: {
             takenAt: new Date("2026-11-24T12:01:00.000Z"),
             objects: 50_000,
-            skipped: [{ objectTypeId: "Payroll", reason: "not readable" }],
+            skipped: [
+              {
+                objectTypeId: "Payroll",
+                kind: "unfit",
+                reason: "its objects don't fit",
+                findings: ["✗ Payroll: 'amount' was removed, and 2 objects hold it."],
+              },
+            ],
+            partial: [
+              { objectTypeId: "Invoice", hiddenPropertyIds: ["memo"], throughCondition: true },
+            ],
+            refusedByDeploy: [
+              {
+                objectTypeId: "Invoice",
+                findings: ["✗ Invoice: 'old' was removed, and 1 object holds it."],
+              },
+            ],
+            unchecked: [
+              { objectTypeId: "Invoice", lines: ["Invoice: 'memo' is now required: not checked."] },
+            ],
+            migrated: [{ objectTypeId: "Invoice", migrationIds: ["invoice-total"] }],
             skippedDatasets: [
               { datasetId: "salaries", reason: "missing_clearance", columns: ["amount"] },
             ],

@@ -1,3 +1,4 @@
+import { SNAPSHOT_SKIP_KINDS } from "@sixb/core/internal/snapshots"
 import { z } from "zod"
 
 export const BranchNameBodySchema = z.object({
@@ -37,7 +38,34 @@ export const BranchSchema = z.object({
     .object({
       takenAt: z.string(),
       objects: z.number(),
-      skipped: z.array(z.object({ objectTypeId: z.string(), reason: z.string() })),
+      skipped: z.array(
+        z.object({
+          objectTypeId: z.string(),
+          kind: z.enum(SNAPSHOT_SKIP_KINDS),
+          reason: z.string(),
+          /** The lines a deploy of the branch's code prints for it. */
+          findings: z.array(z.string()),
+        })
+      ),
+      /** Types its creator reads only in part: the branch's migrations ran on the rest. */
+      partial: z.array(
+        z.object({
+          objectTypeId: z.string(),
+          hiddenPropertyIds: z.array(z.string()),
+          throughCondition: z.boolean(),
+        })
+      ),
+      /** What a deploy of the branch's code would refuse in what the copy held, left out of it. */
+      refusedByDeploy: z.array(
+        z.object({ objectTypeId: z.string(), findings: z.array(z.string()) })
+      ),
+      /**
+       * What a deploy would check that the copy can't: values hidden from its creator, or of keys
+       * production's code no longer declares, which never travel.
+       */
+      unchecked: z.array(z.object({ objectTypeId: z.string(), lines: z.array(z.string()) })),
+      /** The branch's migrations the copy ran, by type. */
+      migrated: z.array(z.object({ objectTypeId: z.string(), migrationIds: z.array(z.string()) })),
       /** Datasets left out: their creator may not read every column. */
       skippedDatasets: z.array(
         z.object({

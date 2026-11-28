@@ -174,7 +174,20 @@ function serializeBranch(branch: BranchView) {
     data: branch.data && {
       ...branch.data,
       takenAt: branch.data.takenAt.toISOString(),
-      skipped: branch.data.skipped.map((skip) => ({ ...skip })),
+      skipped: branch.data.skipped.map((skip) => ({ ...skip, findings: [...skip.findings] })),
+      refusedByDeploy: branch.data.refusedByDeploy.map((type) => ({
+        ...type,
+        findings: [...type.findings],
+      })),
+      unchecked: branch.data.unchecked.map((type) => ({ ...type, lines: [...type.lines] })),
+      migrated: branch.data.migrated.map((type) => ({
+        ...type,
+        migrationIds: [...type.migrationIds],
+      })),
+      partial: branch.data.partial.map((type) => ({
+        ...type,
+        hiddenPropertyIds: [...type.hiddenPropertyIds],
+      })),
       skippedDatasets: branch.data.skippedDatasets.map((skip) => ({
         ...skip,
         columns: [...skip.columns],

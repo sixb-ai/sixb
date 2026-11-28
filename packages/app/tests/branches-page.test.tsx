@@ -95,6 +95,10 @@ function branch(overrides: Partial<Branch> = {}): Branch {
       takenAt: ago(2 * 60 * 60_000),
       objects: 48_210,
       skipped: [],
+      partial: [],
+      refusedByDeploy: [],
+      unchecked: [],
+      migrated: [],
       skippedDatasets: [],
       lakeSliceId: null,
     },
@@ -529,7 +533,14 @@ describe("Console › Branches", () => {
     expect(view.getByText("SyntaxError: Unexpected token '}'")).toBeDefined()
   })
 
-  test("says, folded, which types and datasets weren't copied and why", () => {
+  // Red check: in branches.tsx, pick each skip's sentence by its reason instead of its kind: the
+  // migrating and conflicting types read as changed definitions.
+  test("says, folded, what the copy left out, holds in part and migrated, each in plain words", () => {
+    const deployLines = [
+      "✗ route: 'stops' is now required, and 12 objects lack it: created without it or cleared by an edit.",
+      "  Fill it in a migration:",
+      '    defineMigration("route-stops", Route).fillProperty("stops", ({ object }) => …)',
+    ]
     const { view } = renderPage({
       branches: [
         branch({
@@ -537,15 +548,46 @@ describe("Console › Branches", () => {
           data: {
             ...branch().data!,
             skipped: [
-              { objectTypeId: "payslip", reason: "the person who took it cannot read this type" },
+              {
+                objectTypeId: "payslip",
+                kind: "unreadable",
+                reason: "the person who took it cannot read this type",
+                findings: [],
+              },
               {
                 objectTypeId: "route",
-                reason: "property 'stops' is required on the branch but not in production",
+                kind: "unfit",
+                reason: "production's objects don't fit the branch's code",
+                findings: deployLines,
+              },
+              {
+                objectTypeId: "shift",
+                kind: "migrating",
+                reason: "production was applying a migration to it",
+                findings: [],
               },
             ],
             skippedDatasets: [
               { datasetId: "driver_salaries", reason: "missing_clearance", columns: ["amount"] },
             ],
+            partial: [
+              { objectTypeId: "driver", hiddenPropertyIds: ["salary"], throughCondition: true },
+            ],
+            refusedByDeploy: [
+              {
+                objectTypeId: "vehicle",
+                findings: ["✗ vehicle: 'plate' was removed, and 3 objects hold it."],
+              },
+            ],
+            unchecked: [
+              {
+                objectTypeId: "payroll",
+                lines: [
+                  "payroll: 'iban' is now required: not checked, the copy holds none of its values.",
+                ],
+              },
+            ],
+            migrated: [{ objectTypeId: "job", migrationIds: ["job-gate-code"] }],
           },
         }),
       ],
@@ -558,14 +600,54 @@ describe("Console › Branches", () => {
         "Some connected services may not work here: production can't read your project's development settings. Ask a developer to give production access to them."
       )
     ).toBeDefined()
-    fireEvent.click(view.getByRole("button", { name: "2 types and 1 dataset weren't copied" }))
+    fireEvent.click(
+      view.getByRole("button", {
+        name: "3 types and 1 dataset weren't copied, 3 types copied in part, 1 type migrated",
+      })
+    )
     expect(view.getByText("Ada Laurent can't read it in production.")).toBeDefined()
     expect(
-      view.getByText("Its definition changed on this branch, so production's rows no longer fit.")
+      view.getByText(
+        "Its definition changed on this branch, and production's rows don't fit it: see why below."
+      )
+    ).toBeDefined()
+    expect(
+      view.getByText(
+        "Production was updating it when the copy was taken. Refresh to copy it again."
+      )
+    ).toBeDefined()
+    expect(
+      view.getByText(
+        "This branch removed some of its values, so they weren't copied. Production needs a migration to remove them too."
+      )
+    ).toBeDefined()
+    expect(view.getByText("This branch's migrations updated its rows on this copy.")).toBeDefined()
+    expect(
+      view.getByText(
+        "Some of this branch's changes to it couldn't be checked here: the copy doesn't hold the values they touch as production does."
+      )
+    ).toBeDefined()
+    expect(
+      view.getByText(
+        "Ada Laurent can't read salary, so those values weren't copied. Ada Laurent reads only some of its rows: the others weren't copied."
+      )
     ).toBeDefined()
     expect(
       view.getByText("Ada Laurent can't read every column (amount), so none of it was copied.")
     ).toBeDefined()
+
+    // What a deploy prints is technical: folded under the type's own Details. Its sentences wrap;
+    // the line to write is code, kept whole on a phone and scrolled in its own box.
+    // Red check: in branches.tsx, render `DetailLines` as one wrapping block: the code is no
+    // longer an element of its own.
+    expect(view.queryByText(/defineMigration/)).toBeNull()
+    fireEvent.click(view.getAllByRole("button", { name: "Details" })[0]!)
+    const code = view.getByText(/^defineMigration\("route-stops"/)
+    expect(code.tagName).toBe("PRE")
+    expect(code.className.split(" ")).toEqual(
+      expect.arrayContaining(["whitespace-pre", "overflow-x-auto"])
+    )
+    expect(view.getByText("Fill it in a migration:").tagName).toBe("SPAN")
   })
 
   // The banner of a branch's app links here: the page asks, rather than refreshing on a link.
