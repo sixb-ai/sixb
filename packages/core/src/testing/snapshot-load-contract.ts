@@ -515,6 +515,38 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
     TIMEOUT_MS
   )
 
+  // Red check: in import.ts, take only the snapshot's `propertyIds` in `projectedPropertyIds`:
+  // the serial the branch's projection newly feeds is counted missing on every device, and the
+  // type is refused where a deploy passes it.
+  test(
+    `${name} leaves a required property the branch's projection newly feeds to it`,
+    async () => {
+      await withStorage(async (storage) => {
+        const branchStorage = await storage.createBranchNamespace("devices-fed")
+        const branch = serialHost(branchStorage)
+
+        const report = await importSnapshot({
+          snapshot: copiedDevicesSnapshot(["name"]),
+          storage: branchStorage,
+          ontology: branch.definitions.ontology as OntologyRegistry,
+          projections: branch.definitions.projections,
+        })
+
+        expect(report.skipped).toEqual([])
+        expect(report.types).toEqual([
+          expect.objectContaining({
+            objectTypeId: Device.id,
+            objects: 3,
+            unchecked: [
+              "SnapshotDevice: 'serial' was added as required: not checked, the copy can't tell its projection's values from edits.",
+            ],
+          }),
+        ])
+      })
+    },
+    TIMEOUT_MS
+  )
+
   test(
     `${name} keeps branch namespaces apart`,
     async () => {

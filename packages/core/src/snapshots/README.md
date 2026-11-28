@@ -158,7 +158,8 @@ Each object is then one `create` edit, which flattens the projection's values in
 reads only edits for a value's fit and for a missing required value, and leaves the projection's
 values to the projection, fills and converts included. So the properties production's projection
 feeds (`propertyIds`, from its definition; for an older snapshot, the branch's projection of the
-same id, or else every property but the primary) are `unseenValues`: a change of their values or
+same id, or else every property but the primary), and those the branch's projections feed, are
+`unseenValues`: a change of their values or
 of whether they are required is listed as not checked, and no fill or convert runs on them. Their
 keys are still read: a removal or a rename is decided and runs as for any property. The limit: a
 real edit production holds over one of those values is flattened like the rest, so the branch

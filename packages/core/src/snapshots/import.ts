@@ -1153,9 +1153,10 @@ async function loadEdits(plan: ImportPlan, loader: SnapshotLoader, record: Snaps
 }
 
 /**
- * The properties production's projection feeds on a type loaded as created objects, as the
- * snapshot names them; one taken before it did names none, so the branch's projection of the same
- * id says, or else every property but the primary may be the projection's.
+ * The properties a projection feeds on a type loaded as created objects: those production's feeds,
+ * as the snapshot names them, and those the branch's feed, a property one newly feeds included. A
+ * snapshot taken before it named them names none: the branch's projection of the same id says, or
+ * else every property but the primary may be the projection's.
  */
 function projectedPropertyIds(
   type: SnapshotTypeManifest,
@@ -1165,15 +1166,20 @@ function projectedPropertyIds(
 ): ReadonlySet<string> {
   const projection = type.projection
   if (!projection) return new Set()
-  if (projection.propertyIds) return new Set(projection.propertyIds)
 
-  const branch = projections
-    ?.listObjects()
-    .find((definition) => definition.id === projection.projectionId)
-  if (branch?.objectTypeId === type.objectTypeId) {
-    const ownership = computeProjectionOwnership(branch, ontology)
-    return new Set(ownership.objects.flatMap((owned) => owned.propertyIds))
-  }
+  const definitions = projections?.listObjects() ?? []
+  const fed = definitions.flatMap((definition) =>
+    computeProjectionOwnership(definition, ontology).objects.flatMap((owned) =>
+      owned.objectTypeId === type.objectTypeId ? owned.propertyIds : []
+    )
+  )
+  if (projection.propertyIds) return new Set([...projection.propertyIds, ...fed])
+
+  const continued = definitions.some(
+    (definition) =>
+      definition.id === projection.projectionId && definition.objectTypeId === type.objectTypeId
+  )
+  if (continued) return new Set(fed)
 
   const propertyIds = [
     ...Object.keys(type.shape?.fits.properties ?? {}),
