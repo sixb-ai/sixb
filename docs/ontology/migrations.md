@@ -105,7 +105,7 @@ Everything that holds the old key moves to the new one, without being rebuilt:
 | Unique values | Moved as they are; built after the run if `gate` wasn't unique the same way |
 | File references | Held by `gateCode` |
 | Vectors | Still found by search: the embedding stays, and was computed from text that named `gate` |
-| Query indexes | Those on `gate` are dropped before the run; those on `gateCode` are prepared |
+| Query indexes | Those on `gate` are dropped before the run; those on `gateCode` are built after it |
 
 - `removeLink` deletes the links of that kind, their edits (edges and slots, cleared ones
   included) and the links a projection asserted.

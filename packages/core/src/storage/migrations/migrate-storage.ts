@@ -36,7 +36,8 @@ export function isMigrationCapableStorage(storage: Storage): storage is Migratio
  * 1. finish a migration run a crash left open (every mode but `role`: it is past its point of no
  *    return);
  * 2. check the shapes the stored objects fit against the code's;
- * 3. prepare query indexes when the provider supports it;
+ * 3. prepare query indexes when the provider supports it, unless the check found steps to run:
+ *    {@link applyTypeShapes} prepares them after the run then;
  * 4. apply the migration steps the check found data for (`deploy`, `dev`), then prepare the
  *    stored values of unique properties, and record the new shapes last ({@link applyTypeShapes}).
  *
@@ -85,9 +86,10 @@ export async function migrateStorage(
     )
   }
 
-  // Query indexes only ever add: one for a property the data doesn't hold yet is harmless.
+  // Query indexes only ever add: one for a property the data doesn't hold yet is harmless. Not
+  // before a run, though: every batch would maintain the indexes on a renamed key's new id.
   let queries: ObjectQueryPreparationResult | undefined
-  if (options && isQueryPreparationCapableStorage(storage)) {
+  if (options && isQueryPreparationCapableStorage(storage) && !(shapes && plansRun(shapes))) {
     queries = await prepareObjectQueries({ ...options, storage })
     for (const warning of queries.warnings) {
       console.warn(`[Sixb] ${warning}`)
@@ -172,9 +174,12 @@ export async function applyTypeShapes(
   await prepareUniqueProperties({ ...options, storage, keepObjectTypeIds, rebuild })
 
   // The run dropped the query structures on the keys it removed or renamed: preparation builds
-  // what the code needs that went with them.
-  if (migration && isQueryPreparationCapableStorage(storage)) {
-    await prepareObjectQueries({ ...options, storage })
+  // what the code needs, which `migrateStorage` left for now once the check found steps to run.
+  if (plansRun(shapes) && isQueryPreparationCapableStorage(storage)) {
+    const queries = await prepareObjectQueries({ ...options, storage })
+    for (const warning of queries.warnings) {
+      console.warn(`[Sixb] ${warning}`)
+    }
   }
 
   await recordTypeShapes(storage, shapes)
@@ -189,4 +194,9 @@ function recordedUnique(
   const type = shapes.types.find((candidate) => candidate.objectTypeId === property.objectTypeId)
   const recorded = type?.stored?.shape ?? type?.baseline
   return recorded?.properties[property.propertyId]?.unique === true
+}
+
+/** Whether the check found migration steps to run for a type: the query indexes wait for them. */
+function plansRun(shapes: TypeShapeCheck): boolean {
+  return shapes.types.some((type) => type.run.length > 0)
 }

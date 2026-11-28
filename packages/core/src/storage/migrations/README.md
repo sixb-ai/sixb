@@ -8,7 +8,8 @@
    return (`migrations/run.ts`).
 3. **The ontology step** (`type-shapes.ts`), when `ontologyShapes` names a mode, compares the shape
    the stored objects of each type fit with the code's.
-4. **Query preparation**, which only adds indexes.
+4. **Query preparation**, which only adds indexes. When the check found steps to run, it waits
+   for the run (7): every batch would otherwise maintain the indexes on a renamed key's new id.
 5. **Unique preparation, first as a dry run** (`checkUniqueProperties`): each property preparation
    would build is built in a transaction that rolls back, so a duplicate fails the deploy while
    nothing is written and the old release can still start. A renamed property is read under its
@@ -18,8 +19,8 @@
 7. **Unique preparation** for real (`prepare-unique-properties.ts`), from the objects the run
    left: the values a run moved are current, those it dropped are gone. It leaves alone the types
    whose data the code doesn't fit: their values rebuilt for the code's shape would drop what a
-   migration has to move. Query preparation then builds what the code needs that the run dropped
-   on old keys.
+   migration has to move. Query preparation then builds what the code needs, the indexes on
+   renamed keys' new ids included.
 8. **Recording** the new shapes, last, so nothing that can fail runs after it, and settling the
    migrations past which they are recorded (`migrations/README.md`).
 
