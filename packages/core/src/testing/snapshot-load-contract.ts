@@ -371,6 +371,38 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
     TIMEOUT_MS
   )
 
+  // Red check: in SQLite's `unloadSnapshot`, empty `LOADED_TABLES` in their own order: the
+  // sources go before the roots and rows that hold them, and the import fails on a foreign key.
+  test(
+    `${name} empties a load that took a projection's source over, when the branch refuses its type`,
+    async () => {
+      await withStorage(async (storage) => {
+        const branchStorage = await storage.createBranchNamespace("devices-refused")
+        const production = devicesHost(branchStorage)
+
+        // d-2's edit holds a name the branch's integer refuses, and no migration converts it.
+        const report = await importSnapshot({
+          snapshot: () => devicesSnapshot(production),
+          storage: branchStorage,
+          ontology: new OntologyRegistry({ sources: [retypedDevice()] }),
+          projections: production.definitions.projections,
+        })
+        expect(report.skipped).toEqual([
+          expect.objectContaining({ objectTypeId: Device.id, kind: "unfit" }),
+        ])
+        expect(report.types).toEqual([])
+
+        const active = await branchStorage.ontology.sources.getActive({
+          projectId: PROJECT,
+          source: { projectionId: fromDevices.id },
+        })
+        expect(active).toBeNull()
+        expect((await branchStorage.objects.list({ projectId: PROJECT })).total).toBe(0)
+      })
+    },
+    TIMEOUT_MS
+  )
+
   // Red check: in import.ts, drop `projections` from the `applyTypeShapes` call: the fill edits
   // d-1, which its source stands for, and the edit masks the value the projection gives it.
   test(

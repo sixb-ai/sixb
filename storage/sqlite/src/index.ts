@@ -418,7 +418,8 @@ export class SqliteStorage
           )
         }
 
-        for (const table of LOADED_TABLES) db.run(`DELETE FROM ${table}`)
+        // Last filled, first emptied: a source's rows hold its roots, which hold the source.
+        for (const table of [...LOADED_TABLES].reverse()) db.run(`DELETE FROM ${table}`)
         db.query("DELETE FROM object_unique_properties WHERE project_id = ?").run(input.projectId)
         db.query("DELETE FROM ontology_commits WHERE project_id = ? AND id = ?").run(
           input.projectId,
