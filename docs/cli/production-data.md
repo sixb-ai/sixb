@@ -51,7 +51,8 @@ defineRole("developers", { grantedTo: [developers], grants: [can.manage(project.
   a view condition hides are copied without those values, so the migrations ran on what you read
   only. Values your production code no longer declares never travel. A migration added after the
   copy needs a new copy (`--refresh`, or **Refresh from production** in the Console) to run on
-  the keys the copy left out.
+  the keys the copy left out. A copy of a production still on Sixb 0.2.x carries no shapes: a
+  property removed with no migration leaves its whole type out, with the lines a deploy prints.
 
 ## What is off, and what is not
 
