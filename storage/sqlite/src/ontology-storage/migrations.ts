@@ -555,8 +555,7 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
     const dropped = compiled.keys.filter((key) => !moves.some((move) => move.from === key))
 
     if (cursor.store === "sourceLinks") {
-      const sources = this.deleteSourceLinks(projectId, objectTypeId, compiled, batchRows)
-      return { counts: { sources }, cursor: sources === batchRows ? cursor : null }
+      return this.deleteSourceLinks(projectId, objectTypeId, compiled, cursor.after?.[0], batchRows)
     }
 
     if (cursor.store === "uniqueValues") {
@@ -655,28 +654,46 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
   }
 
   /**
-   * Up to `batchRows` source rows, of every version, of a removed link whose source is of the
-   * type, through the link-source index, and their versions' assertion counts with them. The rows
-   * go, so the next batch starts where this one left off without a cursor.
+   * The next source rows, of every version, of a removed link whose source is of the type: those
+   * of the source ids the next `batchRows` rows after the cursor reach, in the order of the
+   * link-source index `(source_type_id, source_primary_id, link_id)`, and their versions'
+   * assertion counts with them. The batch is a range of that index, as in PostgreSQL: a batch that
+   * took the first rows left would walk again every other link's entry the batches before it did.
    */
   private deleteSourceLinks(
     projectId: string,
     objectTypeId: string,
     compiled: CompiledMigrationSteps,
+    after: string | undefined,
     batchRows: number
-  ): number {
+  ): LaneOutcome {
     const linkIds = compiled.removedLinkIds
-    const batch = this.db
+    const ofLink = `rows.entity_kind = 'link' AND rows.source_type_id = ?
+      AND rows.link_id IN (${linkIds.map(() => "?").join(", ")})`
+    const lower = after === undefined ? "" : "AND rows.source_primary_id > ?"
+    const bounds = [objectTypeId, ...linkIds, ...(after === undefined ? [] : [after])]
+
+    // Read in the index alone: another project's rows only make a batch larger. Every row of the
+    // last source it reaches goes with it, so a source never spans two batches.
+    const bound = this.db
       .query(
-        `SELECT json_group_array(rowid) AS ids, count(*) AS rows FROM (
-           SELECT rows.rowid FROM ontology_source_rows AS rows
-           JOIN ontology_source_roots AS roots ON roots.id = rows.root_id
-           WHERE rows.entity_kind = 'link' AND rows.source_type_id = ?
-             AND rows.link_id IN (${linkIds.map(() => "?").join(", ")}) AND roots.project_id = ?
-           LIMIT ?
+        `SELECT count(*) AS rows, max(source_primary_id) AS through FROM (
+           SELECT rows.source_primary_id FROM ontology_source_rows AS rows
+           WHERE ${ofLink} ${lower}
+           ORDER BY rows.source_primary_id LIMIT ?
          )`
       )
-      .get(objectTypeId, ...linkIds, projectId, batchRows) as {
+      .get(...bounds, batchRows) as { readonly rows: number; readonly through: string | null }
+    if (bound.through === null) return { counts: {}, cursor: null }
+
+    const batch = this.db
+      .query(
+        `SELECT json_group_array(rows.rowid) AS ids, count(*) AS rows
+         FROM ontology_source_rows AS rows
+         JOIN ontology_source_roots AS roots ON roots.id = rows.root_id
+         WHERE ${ofLink} ${lower} AND rows.source_primary_id <= ? AND roots.project_id = ?`
+      )
+      .get(...bounds, bound.through, projectId) as {
       readonly ids: string
       readonly rows: number
     }
@@ -695,7 +712,9 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
       .run(batch.ids)
     this.db.query(`DELETE FROM ontology_source_rows WHERE rowid IN (${inBatch})`).run(batch.ids)
 
-    return batch.rows
+    const counts = { sources: batch.rows }
+    if (bound.rows < batchRows) return { counts, cursor: null }
+    return { counts, cursor: { kind: "derived", store: "sourceLinks", after: [bound.through] } }
   }
 
   /**

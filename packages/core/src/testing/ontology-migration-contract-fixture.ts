@@ -37,7 +37,8 @@ import { createStoredArtifact } from "./stored-artifacts"
 // remove `gate` and `contract`, or rename them and remove the links. Edit-created jobs hold values,
 // a vector, an artifact, a unique value and links; projected jobs hold source rows and source
 // links, a losing edit, an unset, a cleared lead, absent values and a row a delete hides; an
-// inspection, a subtype, inherits it all.
+// inspection, a subtype, inherits it all. Every release keeps a projected `depot`, whose source
+// links sit beside the removed `lead`'s.
 
 export const PROJECT = "ontology-migration-contract"
 export const ARTIFACT = "art_m1g2r3t4n5"
@@ -65,7 +66,7 @@ export interface ReleaseOptions {
   /** The id `gate` has in the release, or `null` once removed. */
   readonly gate: "gate" | "gateCode" | null
   readonly contract: "contract" | "agreement" | null
-  /** Whether jobs have a `crew` and a `lead`. */
+  /** Whether jobs have a `crew` and a `lead`; every release has a `depot`. */
   readonly links: boolean
   readonly uniqueGate?: boolean
   readonly uniqueNote?: boolean
@@ -95,12 +96,15 @@ export function release(options: ReleaseOptions) {
       }),
       prop("temperature", "double", { mode: "telemetry" }),
     ],
-    links: options.links
-      ? [
-          link("crew", Technician, { cardinality: "many" }),
-          link("lead", Technician, { cardinality: "one" }),
-        ]
-      : [],
+    links: [
+      link("depot", Technician, { cardinality: "one" }),
+      ...(options.links
+        ? [
+            link("crew", Technician, { cardinality: "many" }),
+            link("lead", Technician, { cardinality: "one" }),
+          ]
+        : []),
+    ],
     search: {
       vectors: {
         ...(gate ? { gates: { source: [gate], model: embedding } } : {}),
@@ -125,17 +129,21 @@ export function release(options: ReleaseOptions) {
       col("id", "string"),
       col("gate", "string", { nullable: true }),
       col("lead_id", "string", { nullable: true }),
+      col("depot_id", "string", { nullable: true }),
       col("updated_at", "timestamp"),
     ],
   })
   const mapped = defineProjection("migration_contract_jobs", Job)
     .fromDataset(jobs)
     .properties(gate ? ({ id: "id", [gate]: "gate" } as { id: "id" }) : { id: "id" })
-  const projection = (
-    options.links
-      ? mapped.withLinks({ lead: { link: Job.l.lead, sourceField: "lead_id", target: Technician } })
-      : mapped
-  ).resolveConflicts({ strategy: "mostRecent", sourceTimestamp: "updated_at" })
+  const depot = { link: Job.l.depot, sourceField: "depot_id" as const, target: Technician }
+  const projection = mapped
+    .withLinks(
+      options.links
+        ? { depot, lead: { link: Job.l.lead, sourceField: "lead_id", target: Technician } }
+        : { depot }
+    )
+    .resolveConflicts({ strategy: "mostRecent", sourceTimestamp: "updated_at" })
   const projections = new ProjectionRegistry({
     projections: [projection],
     ontology,
@@ -470,7 +478,7 @@ function patch(
   }
 }
 
-/** One dataset row: the job's projected `gate`, or `gate` named absent, and its lead. */
+/** One dataset row: the job's projected `gate`, or `gate` named absent, its lead and its depot. */
 function entry(primaryId: string, gate?: string, lead?: string): ProjectionSourceEntry {
   const ref = jobRef(primaryId)
   return {
@@ -481,6 +489,10 @@ function entry(primaryId: string, gate?: string, lead?: string): ProjectionSourc
         ref,
         properties: gate === undefined ? { id: primaryId } : { id: primaryId, gate },
         ...(gate === undefined ? { absentSourcePropertyIds: ["gate"] } : {}),
+      },
+      {
+        kind: "link" as const,
+        ref: { source: ref, linkId: "depot", target: technicianRef("t-1") },
       },
       ...(lead
         ? [

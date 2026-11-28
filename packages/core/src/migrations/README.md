@@ -102,7 +102,10 @@ lanes beside them; each batch is one `applyBatch`, in one transaction, set-based
   heap page (TID ranges up to the table's size at the first batch) when the properties hold at
   least a quarter as many values as the table has pages, and one property at a time by key
   otherwise. Values in `value_hash` order lie on random pages: a walk by key reads about one
-  random page per value, so a large property would read every page many times over.
+  random page per value, so a large property would read every page many times over. Source rows
+  of removed links go by source id after the cursor, every row of the last id a batch reaches with
+  it: the link-source index also holds the links the type keeps, which a batch starting from the
+  type's first entry would walk again each time.
 - **No touches.** Only replacement plans read commit touches, and `startRun` drops them all; writes
   are paused, roles refuse a `migrating` shape and `sixb dev` starts its workers after migrating, so
   no plan opens before `finishRun`.

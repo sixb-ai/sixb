@@ -31,6 +31,7 @@ import {
   seedJobs,
   TECHNICIAN,
   TIMEOUT_MS,
+  technicianRef,
   v1,
   v2,
   wideRelease,
@@ -859,6 +860,48 @@ export function runOntologyMigrationContractSuite<TStorage extends Storage>(
           unset: ["gateCode", "note"],
         })
         await expectUniqueMoved(storage)
+      })
+    },
+    TIMEOUT_MS
+  )
+
+  // Removal proof: in a provider's source-link batch, delete only the first `batchRows` rows and
+  // move the cursor past their last source; `p-1`'s second lead, in another version, then stays.
+  test(
+    `${name} removes a link's source rows one source at a time, and keeps another link's`,
+    async () => {
+      await withSeeded(async (storage) => {
+        const jobsSource = { projectId: PROJECT, source: { projectionId: v1.projection.id } }
+        const assertions = (await storage.ontology.sources.getActive(jobsSource))?.assertionCount
+        const depots = ["p-1", "p-2", "p-3", "p-4"].map((id) => ({
+          source: jobRef(id),
+          linkId: "depot",
+          target: technicianRef("t-1"),
+        }))
+
+        // One row a batch: `p-1` and `p-3` each hold a lead in both versions, beside their depot.
+        const run = await migrate(storage, {
+          batchRows: 1,
+          migrations: [renameGate],
+          ontology: renamed.ontology,
+        })
+
+        const derived = run?.lanes.find(
+          (lane) => lane.lane.kind === "derived" && lane.lane.objectTypeId === JOB
+        )
+        expect(derived?.counts.sources).toBe(4)
+        expect((await storage.ontology.sources.getActive(jobsSource))?.assertionCount).toBe(
+          assertions! - 2
+        )
+
+        const state = await storage.ontology.materializations.readState({
+          projectId: PROJECT,
+          objects: [],
+          links: depots,
+          linkScopes: [],
+        })
+        const projected = state.links.map((link) => link.source?.assertion.ref.source.primaryId)
+        expect(projected.sort()).toEqual(depots.map((depot) => depot.source.primaryId))
       })
     },
     TIMEOUT_MS
