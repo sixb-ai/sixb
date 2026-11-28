@@ -121,7 +121,7 @@ export function runTypeShapesContractSuite<TStorage extends Storage>(
     }
   }
 
-  test(`${name} records, reads and removes a type's shape, per project`, async () => {
+  test(`${name} records, reads and removes a type's shape and the one before it, per project`, async () => {
     await withStorage(async (storage) => {
       const shapes = storage.ontology.typeShapes
       const at = "2026-04-01T00:00:00.000Z"
@@ -130,16 +130,18 @@ export function runTypeShapesContractSuite<TStorage extends Storage>(
         projectId: PROJECT,
         objectTypeId: Job.id,
         shape: SHAPE,
+        previous: null,
         updatedAt: at,
       })
       await shapes.write({
         projectId: OTHER_PROJECT,
         objectTypeId: Job.id,
         shape: SHAPE,
+        previous: null,
         updatedAt: at,
       })
       expect(await shapes.list({ projectId: PROJECT })).toEqual([
-        { objectTypeId: Job.id, shape: SHAPE, updatedAt: at },
+        { objectTypeId: Job.id, shape: SHAPE, previous: null, updatedAt: at },
       ])
 
       const wider: TypeShape = {
@@ -153,11 +155,12 @@ export function runTypeShapesContractSuite<TStorage extends Storage>(
           projectId: PROJECT,
           objectTypeId: Job.id,
           shape: wider,
+          previous: SHAPE,
           updatedAt: later,
         })
       })
       expect(await shapes.list({ projectId: PROJECT })).toEqual([
-        { objectTypeId: Job.id, shape: wider, updatedAt: later },
+        { objectTypeId: Job.id, shape: wider, previous: SHAPE, updatedAt: later },
       ])
 
       await shapes.remove({ projectId: PROJECT, objectTypeId: Job.id })
@@ -175,6 +178,7 @@ export function runTypeShapesContractSuite<TStorage extends Storage>(
             projectId: PROJECT,
             objectTypeId: Job.id,
             shape: SHAPE,
+            previous: null,
             updatedAt: "2026-04-01T00:00:00.000Z",
           })
           throw failure

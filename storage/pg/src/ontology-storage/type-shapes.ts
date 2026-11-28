@@ -16,6 +16,7 @@ type Query = postgres.PendingQuery<postgres.Row[]>
 interface PgTypeShapeRow {
   readonly object_type_id: string
   readonly shape: TypeShape
+  readonly previous_shape: TypeShape | null
   readonly updated_at: Date | string
 }
 
@@ -42,13 +43,14 @@ export class PgOntologyTypeShapeStorage implements OntologyTypeShapeStorage {
   async list(input: { readonly projectId: string }): Promise<readonly StoredTypeShape[]> {
     return this.runRootOperation(async (sql) => {
       const rows = await sql<PgTypeShapeRow[]>`
-        SELECT object_type_id, shape, updated_at FROM ontology_type_shapes
+        SELECT object_type_id, shape, previous_shape, updated_at FROM ontology_type_shapes
         WHERE project_id = ${input.projectId}
         ORDER BY object_type_id
       `
       return rows.map((row) => ({
         objectTypeId: row.object_type_id,
         shape: row.shape,
+        previous: row.previous_shape,
         updatedAt: toIsoString(row.updated_at),
       }))
     })
@@ -57,13 +59,19 @@ export class PgOntologyTypeShapeStorage implements OntologyTypeShapeStorage {
   async write(input: StoredTypeShape & { readonly projectId: string }): Promise<void> {
     await this.runRootOperation(async (sql) => {
       await sql`
-        INSERT INTO ontology_type_shapes (project_id, object_type_id, shape, updated_at)
+        INSERT INTO ontology_type_shapes (
+          project_id, object_type_id, shape, previous_shape, updated_at
+        )
         VALUES (
           ${input.projectId}, ${input.objectTypeId}, ${jsonParameter(sql, input.shape)}::jsonb,
+          ${input.previous === null ? null : jsonParameter(sql, input.previous)}::jsonb,
           ${input.updatedAt}::timestamptz
         )
         ON CONFLICT (project_id, object_type_id)
-        DO UPDATE SET shape = EXCLUDED.shape, updated_at = EXCLUDED.updated_at
+        DO UPDATE SET
+          shape = EXCLUDED.shape,
+          previous_shape = EXCLUDED.previous_shape,
+          updated_at = EXCLUDED.updated_at
       `
     })
   }

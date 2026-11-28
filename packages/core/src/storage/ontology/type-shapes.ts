@@ -10,6 +10,12 @@ import type { TypeShape } from "../../ontology/type-shapes"
 export interface StoredTypeShape {
   readonly objectTypeId: string
   readonly shape: TypeShape
+  /**
+   * The shape recorded before `shape`, by the deploy that recorded `shape`: what the previous
+   * release's code defines, which a role of that release may start on. `null` when there was none,
+   * or when the previous release can't serve the data any more.
+   */
+  readonly previous: TypeShape | null
   readonly updatedAt: string
 }
 

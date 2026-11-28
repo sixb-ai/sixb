@@ -18,6 +18,7 @@ interface Holder {
 interface SqliteTypeShapeRow {
   readonly object_type_id: string
   readonly shape: string
+  readonly previous_shape: string | null
   readonly updated_at: string
 }
 
@@ -34,7 +35,7 @@ export class SqliteOntologyTypeShapeStorage implements OntologyTypeShapeStorage 
     return this.runRootOperation(() => {
       const rows = this.db
         .query(
-          `SELECT object_type_id, shape, updated_at FROM ontology_type_shapes
+          `SELECT object_type_id, shape, previous_shape, updated_at FROM ontology_type_shapes
            WHERE project_id = ? ORDER BY object_type_id`
         )
         .all(input.projectId) as SqliteTypeShapeRow[]
@@ -42,6 +43,7 @@ export class SqliteOntologyTypeShapeStorage implements OntologyTypeShapeStorage 
       return rows.map((row) => ({
         objectTypeId: row.object_type_id,
         shape: JSON.parse(row.shape),
+        previous: row.previous_shape === null ? null : JSON.parse(row.previous_shape),
         updatedAt: row.updated_at,
       }))
     })
@@ -51,12 +53,22 @@ export class SqliteOntologyTypeShapeStorage implements OntologyTypeShapeStorage 
     await this.runRootOperation(() => {
       this.db
         .query(
-          `INSERT INTO ontology_type_shapes (project_id, object_type_id, shape, updated_at)
-           VALUES (?, ?, ?, ?)
+          `INSERT INTO ontology_type_shapes
+             (project_id, object_type_id, shape, previous_shape, updated_at)
+           VALUES (?, ?, ?, ?, ?)
            ON CONFLICT (project_id, object_type_id)
-           DO UPDATE SET shape = excluded.shape, updated_at = excluded.updated_at`
+           DO UPDATE SET
+             shape = excluded.shape,
+             previous_shape = excluded.previous_shape,
+             updated_at = excluded.updated_at`
         )
-        .run(input.projectId, input.objectTypeId, JSON.stringify(input.shape), input.updatedAt)
+        .run(
+          input.projectId,
+          input.objectTypeId,
+          JSON.stringify(input.shape),
+          input.previous === null ? null : JSON.stringify(input.previous),
+          input.updatedAt
+        )
     })
   }
 
