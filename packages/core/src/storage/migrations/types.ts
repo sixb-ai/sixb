@@ -2,6 +2,7 @@ import type { OntologyDefinitionCatalog } from "../../ontology/registry"
 import type { SecurityDefinitionCatalog } from "../../security/registry"
 import type { ObjectQueryPreparationResult } from "../objects/query-preparation"
 import type { Storage } from "../types"
+import type { TypeShapeCheck, TypeShapeMode } from "./type-shapes"
 
 export interface MigrationStepInfo {
   readonly id: string
@@ -134,10 +135,17 @@ export interface StorageMigrationOptions {
    * for them is left as it is.
    */
   readonly security?: Pick<SecurityDefinitionCatalog, "listViewConditions">
+  /**
+   * What the ontology step may do with the shapes the stored objects fit: compare, probe, record
+   * or refuse. Without it, the step does not run. See {@link TypeShapeMode}.
+   */
+  readonly ontologyShapes?: TypeShapeMode
 }
 
 export interface StorageMigrationResult {
   readonly queries?: ObjectQueryPreparationResult
+  /** What the ontology step found, when `ontologyShapes` asked for it. */
+  readonly shapes?: TypeShapeCheck
   readonly status: "migrated" | "current" | "skipped"
   readonly reports: readonly MigrationReport[]
 }

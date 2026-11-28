@@ -66,6 +66,13 @@ export {
   parseMaintenanceHeartbeatRow,
   serializeMaintenancePasses,
 } from "./maintenance-heartbeats/record"
+export { applyTypeShapes } from "./migrations/migrate-storage"
+export {
+  checkTypeShapes,
+  formatTypeShapeFindings,
+  recordTypeShapes,
+  TypeShapeMismatchError,
+} from "./migrations/type-shapes"
 export { canRequeuePipelineRunAfterEnqueueFailure } from "./pipeline-runs/idempotency"
 export { canFinishPipelineRun } from "./pipeline-runs/transitions"
 export { projectionRunObjectTypesVisible, zeroProjectionRunProgress } from "./projection-runs/types"

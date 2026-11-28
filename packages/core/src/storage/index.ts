@@ -650,6 +650,10 @@ export type {
   StorageMigrationResult,
   StorageMigrator,
   StorageSchemaCheck,
+  TypeShapeCheck,
+  TypeShapeFinding,
+  TypeShapeMode,
+  TypeShapeTypeCheck,
 } from "./migrations"
 export {
   checkStorageSchema,

@@ -1,4 +1,5 @@
 import { migrateStorage } from "@sixb/core"
+import { checkTypeShapes } from "@sixb/core/internal/storage"
 import { loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
 import { stopSixbProviders } from "../lib/runtime"
@@ -6,8 +7,9 @@ import { findPendingMigrations } from "../lib/storage-migration"
 import { dbMigrateCheckView, dbMigrateView, renderStatic, withTask } from "../ui"
 
 /**
- * `--check` exits with this code when `sixb db migrate` would change the schema. Not 2, which
- * every command uses for a usage error, such as an option an older `sixb` does not know.
+ * `--check` exits with this code when `sixb db migrate` would change the schema, or record object
+ * shapes the old release would write around. Not 2, which every command uses for a usage error,
+ * such as an option an older `sixb` does not know.
  */
 const MIGRATIONS_PENDING_EXIT_CODE = 3
 
@@ -26,10 +28,40 @@ export async function runDbMigrate(options: DbMigrateOptions = {}) {
       const pending = await withTask("db migrate", "Reading the storage schema", () =>
         findPendingMigrations(sixb.storage)
       )
-      await renderStatic(dbMigrateCheckView({ projectId: sixb.id, pending }))
 
-      // A deploy reads the code: the release it is about to start needs the services stopped.
-      if (pending.length > 0) process.exitCode = MIGRATIONS_PENDING_EXIT_CODE
+      // Stored shapes are read once the schema holds them. A pending schema migration stops the
+      // services anyway, and `sixb check --migrate` checks the shapes after it.
+      const shapes =
+        pending.length > 0
+          ? undefined
+          : await withTask("db migrate", "Checking the stored objects", () =>
+              checkTypeShapes({
+                storage: sixb.storage,
+                projectId: sixb.id,
+                ontology: sixb.definitions.ontology,
+                mode: "check",
+                // Read while the live release serves: only a property the code makes unique is
+                // built, in a transaction that rolls back.
+                uniqueDuplicates: true,
+              })
+            )
+      const findings = shapes?.types.flatMap((type) => type.findings) ?? []
+
+      await renderStatic(
+        dbMigrateCheckView({
+          projectId: sixb.id,
+          pending,
+          ...(shapes ? { shapes: { findings, narrows: shapes.narrows } } : {}),
+        })
+      )
+
+      // A deploy reads the code. Data the new code doesn't fit fails it before anything stops;
+      // a schema change or a narrowed type needs the services stopped, so the old release
+      // doesn't write what the new shape refuses.
+      if (findings.length > 0) process.exitCode = 1
+      else if (pending.length > 0 || shapes?.narrows) {
+        process.exitCode = MIGRATIONS_PENDING_EXIT_CODE
+      }
     } finally {
       await stopSixbProviders(sixb)
     }
@@ -42,6 +74,7 @@ export async function runDbMigrate(options: DbMigrateOptions = {}) {
         projectId: sixb.id,
         ontology: sixb.definitions.ontology,
         security: sixb.definitions.security,
+        ontologyShapes: "deploy",
       })
     )
     await renderStatic(

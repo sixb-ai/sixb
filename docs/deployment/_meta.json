@@ -1,6 +1,7 @@
 [
   "overview.md",
   "servers.md",
+  "object-type-changes.md",
   "branches.md",
   "host-requirements.md",
   "environment-variables.md",

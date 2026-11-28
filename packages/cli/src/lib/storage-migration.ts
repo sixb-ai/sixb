@@ -1,9 +1,15 @@
 import {
+  checkStorageSchema,
   isMigrationCapableStorage,
   type MigrationStatus,
   migrateStorage,
   type Storage,
 } from "@sixb/core"
+import {
+  checkTypeShapes,
+  recordTypeShapes,
+  TypeShapeMismatchError,
+} from "@sixb/core/internal/storage"
 import { SixbCliError } from "./errors"
 import type { LoadedSixbHost } from "./loadSixb"
 import type { StorageSchemaRole } from "./production-roles"
@@ -45,6 +51,11 @@ export interface RoleStorageMigration {
  * Brings the storage schema up to date before a production role starts serving, so a forgotten
  * `sixb db migrate` cannot surface as a missing column on the first request.
  *
+ * It also refuses to serve code the stored objects may not fit. A role never reads data to decide:
+ * it compares the recorded shapes with the code's. It records what the code adds or widens, starts
+ * the release before the recorded shape again, and leaves the rest to `sixb db migrate`, which
+ * runs before the new release starts.
+ *
  * Concurrent replicas are handled below this call: Postgres serializes migrators on a session
  * advisory lock, and every adapter refuses a history it does not recognize, so late replicas
  * no-op instead of racing. SQLite is the exception, and its error is translated rather than
@@ -61,6 +72,8 @@ export async function migrateStorageForRole(
   // An opt-out says so out loud. Silence here is what made the old missing-migration
   // failure so hard to place, and this is the path an operator chose deliberately.
   if (options.noMigrate || skippedByEnv) {
+    await refuseUnfitShapes(sixb)
+
     const source = options.noMigrate ? "--no-migrate" : `${SKIP_ENV_VAR}=1`
     return {
       outcome: "disabled",
@@ -124,12 +137,34 @@ export async function findPendingMigrations(storage: Storage): Promise<readonly 
   return pending
 }
 
+/**
+ * What a role started with `--no-migrate` still does with the shapes: refuse code the stored
+ * objects may not fit, and record the compatible changes of code that fits. That covers the
+ * release before a deploy, started again: what the deploy narrowed goes back as it defines it, so
+ * the next deploy probes it, and what the deploy added stays recorded, so the next deploy still
+ * probes its removal. A schema that isn't current is the readiness probe's to report.
+ */
+async function refuseUnfitShapes(sixb: LoadedSixbHost): Promise<void> {
+  if (!(await checkStorageSchema(sixb.storage)).ok) return
+
+  const check = await checkTypeShapes({
+    storage: sixb.storage,
+    projectId: sixb.id,
+    ontology: sixb.definitions.ontology,
+    mode: "role",
+  })
+  if (check.blocked) throw new TypeShapeMismatchError(check)
+
+  await recordTypeShapes(sixb.storage, check)
+}
+
 async function runMigration(sixb: LoadedSixbHost, role: StorageSchemaRole) {
   try {
     return await migrateStorage(sixb.storage, {
       projectId: sixb.id,
       ontology: sixb.definitions.ontology,
       security: sixb.definitions.security,
+      ontologyShapes: "role",
     })
   } catch (error) {
     throw isBusyDatabaseError(error) ? concurrentMigrationError(error, role) : error

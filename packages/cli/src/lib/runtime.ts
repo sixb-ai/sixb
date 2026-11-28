@@ -102,11 +102,17 @@ export function recordApiPublicOrigin(sixb: LoadedSixbHost, value: string | unde
   if (origin) setApiPublicOrigin(sixb, origin)
 }
 
+/**
+ * `sixb dev`'s migration: there is no old release to protect, so a narrowing whose data fits is
+ * recorded at once, and one whose data doesn't is a warning that leaves the recorded shape as it
+ * was, for a migration added later to apply to.
+ */
 export async function migrateRuntimeStorage(sixb: LoadedSixbHost): Promise<void> {
   await migrateStorage(sixb.storage, {
     projectId: sixb.id,
     ontology: sixb.definitions.ontology,
     security: sixb.definitions.security,
+    ontologyShapes: "dev",
   })
 }
 
