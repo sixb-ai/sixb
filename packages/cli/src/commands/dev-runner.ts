@@ -358,7 +358,7 @@ export function copyNotice(copy: BranchFromProduction["copy"]): string[] {
       ...indented(findings),
     ]),
     ...copy.unchecked.flatMap(({ objectTypeId, lines }) => [
-      `Not checked on ${objectTypeId}: its values aren't in your copy.`,
+      `Not checked on ${objectTypeId}: your copy doesn't hold its values as production does.`,
       ...indented(lines),
     ]),
     ...copy.partial.map(({ objectTypeId, hiddenPropertyIds, throughCondition }) => {

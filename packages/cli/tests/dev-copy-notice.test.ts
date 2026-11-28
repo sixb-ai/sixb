@@ -8,7 +8,14 @@ describe("what sixb dev says of a branch's copy", () => {
     const lines = copyNotice({
       skipped: [],
       refusedByDeploy: [],
-      unchecked: [],
+      unchecked: [
+        {
+          objectTypeId: "device",
+          lines: [
+            "device: 'name' changed from string to integer: not checked, the copy can't tell its projection's values from edits.",
+          ],
+        },
+      ],
       partial: [
         { objectTypeId: "job", hiddenPropertyIds: ["note"], throughCondition: false },
         { objectTypeId: "crew", hiddenPropertyIds: [], throughCondition: true },
@@ -17,6 +24,8 @@ describe("what sixb dev says of a branch's copy", () => {
     })
 
     expect(lines).toEqual([
+      "Not checked on device: your copy doesn't hold its values as production does.",
+      "  device: 'name' changed from string to integer: not checked, the copy can't tell its projection's values from edits.",
       "Copied in part: job, 'note' hidden from you. Migrations ran on what you read.",
       "Copied in part: crew, some objects hidden from you.",
       "Migrated on the copy: job, by 'job-gate-code'.",

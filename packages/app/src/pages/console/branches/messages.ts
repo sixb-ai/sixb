@@ -153,7 +153,7 @@ export const en = {
       "This branch removed some of its values, so they weren't copied. Production needs a migration to remove them too.",
     migrated: "This branch's migrations updated its rows on this copy.",
     unchecked:
-      "Some of this branch's changes to it couldn't be checked here: the copy doesn't hold the values they touch.",
+      "Some of this branch's changes to it couldn't be checked here: the copy doesn't hold the values they touch as production does.",
     inPart: (name: string, properties: string, someObjects: boolean) =>
       [
         ...(properties
@@ -342,7 +342,7 @@ export const fr: Translation<BranchesMessages> = {
       "Cette branche a retiré certaines de ses valeurs : elles n’ont pas été copiées. La production a besoin d’une migration pour les retirer aussi.",
     migrated: "Les migrations de cette branche ont mis à jour ses lignes sur cette copie.",
     unchecked:
-      "Certains changements de cette branche n’ont pas pu y être vérifiés : la copie ne contient pas les valeurs qu’ils touchent.",
+      "Certains changements de cette branche n’ont pas pu y être vérifiés : la copie ne contient pas les valeurs qu’ils touchent telles que la production les contient.",
     inPart: (name: string, properties: string, someObjects: boolean) =>
       [
         ...(properties

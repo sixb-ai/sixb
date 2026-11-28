@@ -624,7 +624,7 @@ describe("Console › Branches", () => {
     expect(view.getByText("This branch's migrations updated its rows on this copy.")).toBeDefined()
     expect(
       view.getByText(
-        "Some of this branch's changes to it couldn't be checked here: the copy doesn't hold the values they touch."
+        "Some of this branch's changes to it couldn't be checked here: the copy doesn't hold the values they touch as production does."
       )
     ).toBeDefined()
     expect(
