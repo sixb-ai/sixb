@@ -382,6 +382,27 @@ export function runTypeShapesContractSuite<TStorage extends Storage>(
     })
   })
 
+  // Red check: in a provider's `listHeldPropertyKeys`, drop the edits' `unset` and edit times:
+  // `note` goes missing, though an edit still holds it.
+  test(`${name} lists the property keys a type's data holds, values unread`, async () => {
+    await withStorage(async (storage) => {
+      const keys = () =>
+        storage.ontology.typeShapes.listHeldPropertyKeys({
+          projectId: PROJECT,
+          objectTypeId: Job.id,
+        })
+      expect(await keys()).toEqual([])
+
+      await edits(storage).commit([create("j1", { gate: "B12" }), create("j2", {})])
+      await edits(storage, "2026-04-01T00:00:02.000Z").commit([
+        patch("j2", { crewLead: "t1" }, ["note"]),
+      ])
+      await appendTemperature(storage, "j1")
+
+      expect(await keys()).toEqual(["crewLead", "gate", "id", "note", "temperature"])
+    })
+  })
+
   test(`${name} lists the link and telemetry ids a type's data holds`, async () => {
     await withStorage(async (storage) => {
       expect(

@@ -4,6 +4,8 @@ import { createKernelScope } from "../execution/scopes"
 import type { JsonValue } from "../json"
 import { sha256Canonical } from "../materialization/identity"
 import { projectionEntityKey } from "../materialization/refs"
+import { ValuePlanError } from "../migrations/plan-values"
+import type { MigrationDefinition } from "../migrations/types"
 import { vectorConfiguration } from "../objects/vectors/profile"
 import type { OntologyRegistry } from "../ontology"
 import { collectArtifactRefIds } from "../ontology/artifact-ref"
@@ -11,7 +13,23 @@ import type { ObjectType, Property } from "../ontology/types"
 import { UNIQUE_VALUE_KEY_VERSION, uniqueValueKey } from "../ontology/unique-values"
 import type { UserRef } from "../ontology/user-ref"
 import type { ProjectionDefinitionCatalog } from "../projections"
+import { computeProjectionOwnership } from "../projections/ownership"
 import { computeOntologyRevision } from "../projections/revision"
+import { applyTypeShapes } from "../storage/migrations/migrate-storage"
+import {
+  finding,
+  formatTypeShapeFindings,
+  heldFinding,
+  type NarrowedChange,
+  narrows,
+  type ProbedChange,
+  uncheckedLine,
+} from "../storage/migrations/type-shape-messages"
+import {
+  checkTypeShapes,
+  type TypeShapeCheck,
+  type TypeShapeTypeCheck,
+} from "../storage/migrations/type-shapes"
 import {
   type OntologyCommitRecord,
   SNAPSHOT_COMMIT_ID_PREFIX,
@@ -21,6 +39,7 @@ import type {
   ExactArtifactHolderWrite,
   ExactUniqueValueClaim,
 } from "../storage/ontology/materializations"
+import type { OntologyMigrationRunRecord } from "../storage/ontology/migrations"
 import type { PreparedUniqueProperty } from "../storage/ontology/unique-values"
 import {
   isSnapshotLoadStorage,
@@ -43,14 +62,20 @@ import {
   type SnapshotObjects,
   type SnapshotPoints,
   type SnapshotRecord,
+  type SnapshotSkipKind,
   type SnapshotSourceRoots,
   type SnapshotTypeManifest,
+  type SnapshotTypeShape,
   type SnapshotVectors,
 } from "./format"
 
 export interface ImportSnapshotInput {
-  /** The snapshot's bytes, from a file or straight from {@link exportSnapshot}. */
-  readonly snapshot: AsyncIterable<Uint8Array>
+  /**
+   * The snapshot's bytes, from a file or straight from {@link exportSnapshot}. A function reads
+   * them again when the copy must load anew without the types the branch's gate refused; bytes
+   * that can't be read again fail the import in that case.
+   */
+  readonly snapshot: AsyncIterable<Uint8Array> | (() => AsyncIterable<Uint8Array>)
   /** The branch's storage: a namespace that holds no object yet. */
   readonly storage: Storage
   /** The branch's definitions: each type is checked against them, and imported if it fits. */
@@ -60,6 +85,21 @@ export interface ImportSnapshotInput {
    * branch's projection of the same id still feeds it; otherwise as created objects.
    */
   readonly projections?: ProjectionDefinitionCatalog
+  /**
+   * The branch's migrations. Once the copy is loaded with production's shapes, the branch's gate
+   * runs on it as a deploy would, and applies those still pending: the branch is the dry run.
+   */
+  readonly migrations?: readonly MigrationDefinition[]
+}
+
+/** A type left out of the copy. */
+export interface SnapshotSkip {
+  readonly objectTypeId: string
+  readonly kind: SnapshotSkipKind
+  /** Why, in a sentence. */
+  readonly reason: string
+  /** The lines a deploy of the branch's code prints for it, with the data's counts. */
+  readonly findings: readonly string[]
 }
 
 export interface SnapshotImportReport {
@@ -71,8 +111,11 @@ export interface SnapshotImportReport {
   readonly members: "all" | "self"
   readonly users: number
   readonly types: readonly ImportedSnapshotType[]
-  /** Types left out, and why: unreadable in production, or no longer fitting the branch. */
-  readonly skipped: readonly { readonly objectTypeId: string; readonly reason: string }[]
+  /**
+   * Types left out, and why: unreadable in production, or no longer fitting the branch, with the
+   * lines a deploy would print and the migration that would resolve them.
+   */
+  readonly skipped: readonly SnapshotSkip[]
 }
 
 export interface ImportedSnapshotType {
@@ -81,8 +124,13 @@ export interface ImportedSnapshotType {
   readonly links: number
   readonly points: number
   readonly vectors: number
-  /** Properties the person cannot read: no object holds a value for them. */
+  /**
+   * Properties the person cannot read: no object holds a value for them, so the branch's
+   * migrations never ran on them.
+   */
   readonly hiddenPropertyIds: readonly string[]
+  /** Whether a view condition hides some of the type's objects from the person. */
+  readonly throughCondition: boolean
   /**
    * The hidden properties the branch requires. The objects and their links read normally; any
    * write to one, a new link included, fails while the property is unset, and says why.
@@ -94,6 +142,19 @@ export interface ImportedSnapshotType {
   readonly droppedLinks: number
   /** Vector profiles left out, and why. */
   readonly skippedVectors: readonly { readonly profile: string; readonly reason: string }[]
+  /** The branch's migrations applied to the copy's objects of the type. */
+  readonly migrationIds: readonly string[]
+  /**
+   * What a deploy of the branch's code would refuse in what the copy held: properties and links
+   * it removed with no migration, which the copy leaves out. The lines a deploy prints, counted.
+   */
+  readonly refusedByDeploy: readonly string[]
+  /**
+   * What a deploy would read that the copy can't, one line each: changes of properties hidden
+   * from the person, or of keys production's code no longer declares, whose values don't travel,
+   * and value changes of properties a projection feeds on a type copied as created objects.
+   */
+  readonly unchecked: readonly string[]
   /** Set for a type a projection feeds in production. */
   readonly projectionId?: string
   /**
@@ -108,7 +169,8 @@ export interface ImportedSnapshotType {
 /**
  * Load a snapshot into a branch's storage as one base commit: no event is emitted and no outbox
  * row is written, so nothing reacts to the import. Unique values and artifact references are
- * derived from the objects, as a write would, and the provider indexes after the load.
+ * derived from the objects, as a write would, and the provider indexes after the load. Then the
+ * branch's gate runs on the copy, from production's shapes, and applies its pending migrations.
  */
 export async function importSnapshot(input: ImportSnapshotInput): Promise<SnapshotImportReport> {
   const storage = input.storage
@@ -118,14 +180,136 @@ export async function importSnapshot(input: ImportSnapshotInput): Promise<Snapsh
     )
   }
 
-  const records = decodeSnapshot(input.snapshot)[Symbol.asyncIterator]()
+  const read = typeof input.snapshot === "function" ? input.snapshot : undefined
+  let copy = await loadCopy(
+    input,
+    storage,
+    read ? read() : (input.snapshot as AsyncIterable<Uint8Array>)
+  )
+
+  // The deploy decides from data: a type whose copied objects the branch's code doesn't fit, with
+  // no migration that makes them fit, is refused, and so is one whose value steps refuse objects.
+  // The copy is emptied and loaded again without it, so that nothing on the branch holds data its
+  // code can't serve. A refusal is final, so this ends: each round leaves out one type more.
+  let refused = refusedTypes(copy)
+  for (;;) {
+    if (refused.length > 0) copy = await loadAgain(input, storage, copy, read, refused)
+
+    // What the steps couldn't give values the check didn't read: listed, never refused.
+    const values = new UncheckedValues()
+    try {
+      const migration = await applyTypeShapes(
+        storage,
+        {
+          projectId: copy.manifest.projectId,
+          ontology: input.ontology,
+          migrations: input.migrations ?? [],
+          ...(input.projections ? { projections: input.projections } : {}),
+          onUncheckedValue: (failure) => values.add(failure),
+        },
+        copy.check
+      )
+      return report(copy, migration, values)
+    } catch (error) {
+      // The plan of fills and converts runs before the point of no return: nothing was written.
+      if (!(error instanceof ValuePlanError)) throw error
+
+      const left = new Set(refused.map((skip) => skip.objectTypeId))
+      const more = planRefusals(error).filter((skip) => !left.has(skip.objectTypeId))
+      if (more.length === 0) throw error
+      refused = [...refused, ...more]
+    }
+  }
+}
+
+/**
+ * Empty the copy and load it again without the types refused so far. The copy read again must
+ * be the same one, and the gate must refuse nothing more: anything else is a copy read wrongly.
+ */
+async function loadAgain(
+  input: ImportSnapshotInput,
+  storage: SnapshotLoadStorage,
+  copy: LoadedCopy,
+  read: (() => AsyncIterable<Uint8Array>) | undefined,
+  refused: readonly SnapshotSkip[]
+): Promise<LoadedCopy> {
+  await storage.unloadSnapshot({ projectId: copy.manifest.projectId, commitId: copy.commit.id })
+  if (!read) {
+    throw new Error(
+      `[Sixb] The branch's code doesn't fit the copy of ${refused.map((skip) => skip.objectTypeId).join(", ")}, and the copy can't be read again to load without it. Pass the snapshot as a function that reads it again.`
+    )
+  }
+
+  const again = await loadCopy(input, storage, read(), refused)
+  if (again.manifest.takenAt !== copy.manifest.takenAt || refusedTypes(again).length > 0) {
+    throw new Error(
+      "[Sixb] The copy read again is not the one loaded first, or still holds data the branch's code doesn't fit. Take a new copy."
+    )
+  }
+  return again
+}
+
+/** The types whose objects a fill or a convert refuses, each with the lines a deploy prints. */
+function planRefusals(error: ValuePlanError): SnapshotSkip[] {
+  return [...error.byType()].map(([objectTypeId, lines]) => ({
+    objectTypeId,
+    kind: "unfit" as const,
+    reason: "the branch's migrations can't give its objects values the code accepts",
+    findings: [`✗ ${lines[0]}`, ...lines.slice(1)],
+  }))
+}
+
+function report(
+  copy: LoadedCopy,
+  migration: OntologyMigrationRunRecord | null,
+  values: UncheckedValues
+): SnapshotImportReport {
+  return {
+    projectId: copy.manifest.projectId,
+    takenAt: copy.manifest.takenAt,
+    takenBy: copy.manifest.takenBy,
+    commitId: copy.commit.id,
+    members: copy.manifest.members,
+    users: copy.users,
+    types: copy.plan.report(migration, copy.check, values),
+    skipped: copy.plan.skips(),
+  }
+}
+
+interface LoadedCopy {
+  readonly manifest: SnapshotManifest
+  readonly plan: ImportPlan
+  readonly commit: OntologyCommitRecord
+  readonly users: number
+  /** The branch's gate on the loaded copy, in `check` mode: what a deploy would decide. */
+  readonly check: TypeShapeCheck
+}
+
+/**
+ * One load of the copy: the types the shapes and `refused` allow, as one base commit, then
+ * production's shapes, then the branch's gate on what was loaded, which writes nothing.
+ */
+async function loadCopy(
+  input: ImportSnapshotInput,
+  storage: SnapshotLoadStorage,
+  snapshot: AsyncIterable<Uint8Array>,
+  refused: readonly SnapshotSkip[] = []
+): Promise<LoadedCopy> {
+  const records = decodeSnapshot(snapshot)[Symbol.asyncIterator]()
 
   // A failed import closes the stream it reads, so an export feeding it ends its read too.
   try {
     const manifest = await expectRecord(records, "manifest")
     const members = await expectRecord(records, "members")
 
-    const plan = new ImportPlan(manifest, input.ontology, input.projections)
+    const plan = new ImportPlan({
+      manifest,
+      ontology: input.ontology,
+      projections: input.projections,
+      migrations: input.migrations ?? [],
+      appliesMigrations: storage.ontology.migrations !== undefined,
+      refused,
+    })
     const users = await importMembers(storage, manifest.projectId, members)
     const commit = await baseCommit(storage, manifest, members, plan, input.ontology)
 
@@ -146,11 +330,47 @@ export async function importSnapshot(input: ImportSnapshotInput): Promise<Snapsh
       }
     )
 
-    return report(manifest, plan, commit.id, users)
+    await recordProductionShapes(storage, manifest.projectId, plan)
+    const check = await checkTypeShapes({
+      storage,
+      projectId: manifest.projectId,
+      ontology: input.ontology,
+      migrations: input.migrations ?? [],
+      mode: "check",
+      unseen: plan.unseenProperties(),
+      unseenValues: plan.projectedProperties(),
+      uniqueDuplicates: true,
+    })
+
+    return { manifest, plan, commit, users, check }
   } catch (error) {
     await records.return?.(undefined).catch(() => undefined)
     throw error
   }
+}
+
+/**
+ * The loaded types the gate found the copy's data doesn't fit, with its lines: a change no
+ * migration resolves, or two objects sharing a value of a property made unique. A property hidden
+ * from the person says nothing of production's values: the copy holds none, so the gate leaves its
+ * changes out (`unseen`), and the report lists them as not checked.
+ */
+function refusedTypes(copy: LoadedCopy): SnapshotSkip[] {
+  return copy.check.types.flatMap((type) => {
+    if (!copy.plan.type(type.objectTypeId)) return []
+
+    const findings = type.findings
+    if (findings.length === 0) return []
+
+    return [
+      {
+        objectTypeId: type.objectTypeId,
+        kind: "unfit" as const,
+        reason: "production's objects don't fit the branch's code, and no migration makes them fit",
+        findings: formatTypeShapeFindings(findings),
+      },
+    ]
+  })
 }
 
 /**
@@ -169,22 +389,42 @@ function assertComplete(end: SnapshotEnd, plan: ImportPlan, users: number): void
   }
 }
 
-function report(
-  manifest: SnapshotManifest,
-  plan: ImportPlan,
-  commitId: string,
-  users: number
-): SnapshotImportReport {
-  return {
-    projectId: manifest.projectId,
-    takenAt: manifest.takenAt,
-    takenBy: manifest.takenBy,
-    commitId,
-    members: manifest.members,
-    users,
-    types: plan.report(),
-    skipped: plan.skipped,
-  }
+/**
+ * What production's objects fit, recorded on the branch before its gate runs, with the migrations
+ * production settled: the gate then compares them with the branch's code as a deploy would. A
+ * type production never recorded, and a version 2 snapshot, have none: the gate reads the copy as
+ * a first deploy does.
+ */
+async function recordProductionShapes(
+  storage: SnapshotLoadStorage,
+  projectId: string,
+  plan: ImportPlan
+): Promise<void> {
+  const types = plan.recorded()
+  if (types.length === 0) return
+
+  const updatedAt = new Date().toISOString()
+  const settled = types.flatMap(({ objectTypeId, shape }) =>
+    shape.settledMigrationIds.map((migrationId) => ({ objectTypeId, migrationId }))
+  )
+
+  await storage.transaction(async (tx) => {
+    await tx.ontology.typeShapes.lock({ projectId })
+
+    // A branch has no release before it to start.
+    for (const { objectTypeId, shape } of types) {
+      await tx.ontology.typeShapes.write({
+        projectId,
+        objectTypeId,
+        shape: shape.fits,
+        previous: null,
+        updatedAt,
+      })
+    }
+    if (settled.length > 0) {
+      await tx.ontology.migrations?.settle({ projectId, migrations: settled, settledAt: updatedAt })
+    }
+  })
 }
 
 async function expectRecord<K extends SnapshotRecord["kind"]>(
@@ -266,10 +506,19 @@ function withheldProperties(
   return { withheld: { takenBy: creator?.[1] ?? manifest.takenBy.id, properties } }
 }
 
+type LoadingFit = Extract<TypeFit, { fits: true }>
+
 interface TypePlan {
   readonly manifest: SnapshotTypeManifest
   readonly objectType: ObjectType
-  readonly droppedPropertyIds: ReadonlySet<string>
+  readonly fit: LoadingFit
+  /**
+   * The objects holding each removal the copy leaves out, by its key: a property's are counted,
+   * a link's sources gathered, as the gate counts objects by primary id.
+   */
+  readonly heldProperties: Map<string, number>
+  readonly heldLinks: Map<string, Set<string>>
+  readonly droppedPropertyIds: Set<string>
   readonly droppedLinkIds: ReadonlySet<string>
   /** Hidden from the person, and required by the branch: no object holds them. */
   readonly requiredHiddenPropertyIds: readonly string[]
@@ -290,6 +539,11 @@ interface TypePlan {
   /** The source the type loads as, when it travelled as one and the branch can continue it. */
   readonly source?: SnapshotSourceWrite
   readonly notReprojectable?: string
+  /**
+   * The properties production's projection feeds, on a type loaded as created objects: their
+   * values are edits on the copy, where a deploy would read most as the projection's.
+   */
+  readonly projectedPropertyIds: ReadonlySet<string>
   /** The next root's place among the source's roots. */
   nextOrdinal: number
 }
@@ -298,26 +552,51 @@ interface TypePlan {
 class ImportPlan {
   readonly #types = new Map<string, TypePlan>()
   readonly #ontology: OntologyRegistry
-  readonly skipped: { objectTypeId: string; reason: string }[] = []
+  readonly #skipped: SnapshotSkip[] = []
+  /** Objects of each type the branch no longer defines: a deploy refuses to remove it if any. */
+  readonly #skippedHeld = new Map<
+    string,
+    { readonly change: Extract<ProbedChange, { kind: "type-removed" | "primary" }>; count: number }
+  >()
   /** What the snapshot held, skipped types included, to check against its end. */
   readonly read = { objects: 0, links: 0, points: 0, vectors: 0, sourceRoots: 0, edits: 0 }
   readonly #byProjection = new Map<string, TypePlan>()
 
-  constructor(
-    manifest: SnapshotManifest,
-    ontology: OntologyRegistry,
-    projections: ProjectionDefinitionCatalog | undefined
-  ) {
+  constructor(input: {
+    readonly manifest: SnapshotManifest
+    readonly ontology: OntologyRegistry
+    readonly projections: ProjectionDefinitionCatalog | undefined
+    readonly migrations: readonly MigrationDefinition[]
+    readonly appliesMigrations: boolean
+    /** The types the branch's gate refused on an earlier load of the same copy. */
+    readonly refused: readonly SnapshotSkip[]
+  }) {
+    const { manifest, ontology, projections, migrations, appliesMigrations } = input
     this.#ontology = ontology
 
     for (const objectTypeId of manifest.unreadableTypeIds) {
-      this.skipped.push({ objectTypeId, reason: "the person who took it cannot read this type" })
+      this.#skipped.push({
+        objectTypeId,
+        kind: "unreadable",
+        reason: "the person who took it cannot read this type",
+        findings: [],
+      })
     }
 
+    const refused = new Map(input.refused.map((skip) => [skip.objectTypeId, skip]))
     for (const type of manifest.types) {
-      const fit = checkTypeFits(type, ontology)
+      const skip = refused.get(type.objectTypeId)
+      if (skip) {
+        this.#skipped.push(skip)
+        continue
+      }
+
+      const fit = checkTypeFits({ manifest: type, ontology, migrations, appliesMigrations })
       if (!fit.fits) {
-        this.skipped.push({ objectTypeId: type.objectTypeId, reason: fit.reason })
+        const { kind, reason, findings } = fit
+        this.#skipped.push({ objectTypeId: type.objectTypeId, kind, reason, findings })
+        const change = skippedChange(fit.kind, type, ontology)
+        if (change) this.#skippedHeld.set(type.objectTypeId, { change, count: 0 })
         continue
       }
 
@@ -326,6 +605,19 @@ class ImportPlan {
       const typePlan: TypePlan = {
         manifest: type,
         objectType,
+        fit,
+        heldProperties: new Map(
+          fit.leftOut.flatMap((change) =>
+            change.kind === "property-removed" && !fit.withheld.includes(change.propertyId)
+              ? [[change.propertyId, 0] as const]
+              : []
+          )
+        ),
+        heldLinks: new Map(
+          fit.leftOut.flatMap((change) =>
+            "linkId" in change ? [[change.linkId, new Set<string>()] as const] : []
+          )
+        ),
         droppedPropertyIds: new Set(fit.droppedPropertyIds),
         droppedLinkIds: new Set(fit.droppedLinkIds),
         requiredHiddenPropertyIds: objectType.properties
@@ -339,11 +631,14 @@ class ImportPlan {
         // preparation backfills it, and refuses the duplicates as it would anywhere else.
         unique: ontology
           .listUniqueProperties(type.objectTypeId)
-          .filter((property) => type.uniquePropertyIds.includes(property.propertyId)),
+          .filter((property) => fit.uniquePropertyIds.includes(property.propertyId)),
         artifactRefs: ontology.listArtifactRefProperties(type.objectTypeId),
         counts: { objects: 0, links: 0, points: 0, vectors: 0, droppedLinks: 0 },
         skippedVectors: new Map(),
         ...travel,
+        projectedPropertyIds: travel.source
+          ? new Set()
+          : projectedPropertyIds(type, objectType, ontology, projections),
         nextOrdinal: 0,
       }
       this.#types.set(type.objectTypeId, typePlan)
@@ -384,6 +679,61 @@ class ImportPlan {
     )
   }
 
+  /** The shapes production recorded, which the branch records as its own before its gate runs. */
+  recorded(): readonly { readonly objectTypeId: string; readonly shape: SnapshotTypeShape }[] {
+    return [...this.#types.values()].flatMap((plan) =>
+      plan.fit.recorded
+        ? [{ objectTypeId: plan.manifest.objectTypeId, shape: plan.fit.recorded }]
+        : []
+    )
+  }
+
+  /**
+   * The properties whose values the copy doesn't hold, by type: hidden from the person, or keys
+   * production no longer declares, whose values don't travel.
+   */
+  unseenProperties(): ReadonlyMap<string, ReadonlySet<string>> {
+    return new Map(
+      [...this.#types.values()].map((plan) => [
+        plan.manifest.objectTypeId,
+        new Set([...plan.manifest.hiddenPropertyIds, ...plan.fit.withheld]),
+      ])
+    )
+  }
+
+  /**
+   * The properties whose values the copy holds as edits where production holds a projection's:
+   * a deploy reads only edits, so the copy can't tell what it would find.
+   */
+  projectedProperties(): ReadonlyMap<string, ReadonlySet<string>> {
+    return new Map(
+      [...this.#types.values()].map((plan) => [
+        plan.manifest.objectTypeId,
+        plan.projectedPropertyIds,
+      ])
+    )
+  }
+
+  /** Counts the objects of a type skipped from its shapes, for what a deploy would say. */
+  holdsSkippedType(objectTypeId: string, objects: number): void {
+    const held = this.#skippedHeld.get(objectTypeId)
+    if (held) held.count += objects
+  }
+
+  /**
+   * The types left out, with the line a deploy prints for a removed type, or one whose primary
+   * property changed, that holds objects.
+   */
+  skips(): readonly SnapshotSkip[] {
+    return this.#skipped.map((skip) => {
+      const held = this.#skippedHeld.get(skip.objectTypeId)
+      if (!held || held.count === 0) return skip
+
+      const line = finding(skip.objectTypeId, held.change, held.count)
+      return { ...skip, findings: formatTypeShapeFindings([line]) }
+    })
+  }
+
   /** Per type, the required properties hidden from the person, for types that have any. */
   requiredHiddenPropertyIds(): Record<string, readonly string[]> {
     const withheld: Record<string, readonly string[]> = {}
@@ -394,9 +744,13 @@ class ImportPlan {
     return withheld
   }
 
-  /** Whether the branch keeps a link: its definition still fits, and its target was imported. */
+  /**
+   * Whether the branch keeps a link: its definition still fits, or a pending step removes it, and
+   * its target was imported.
+   */
   keepsLink(plan: TypePlan, linkId: string, targetTypeId: string): boolean {
     if (plan.droppedLinkIds.has(linkId) || !this.#types.has(targetTypeId)) return false
+    if (plan.fit.movedLinks.has(linkId)) return true
 
     const link = plan.objectType.links.find((candidate) => candidate.id === linkId)
     return (
@@ -404,7 +758,14 @@ class ImportPlan {
     )
   }
 
-  report(): readonly ImportedSnapshotType[] {
+  report(
+    migration: OntologyMigrationRunRecord | null,
+    check: TypeShapeCheck,
+    values: UncheckedValues
+  ): readonly ImportedSnapshotType[] {
+    const run = new Map(migration?.plan.types.map((type) => [type.objectTypeId, type]))
+    const checked = new Map(check.types.map((type) => [type.objectTypeId, type]))
+
     return [...this.#types.values()].map((plan) => ({
       objectTypeId: plan.manifest.objectTypeId,
       objects: plan.counts.objects,
@@ -412,10 +773,19 @@ class ImportPlan {
       points: plan.counts.points,
       vectors: plan.counts.vectors,
       hiddenPropertyIds: plan.manifest.hiddenPropertyIds,
+      throughCondition: plan.manifest.throughCondition,
       requiredHiddenPropertyIds: plan.requiredHiddenPropertyIds,
       droppedPropertyIds: [...plan.droppedPropertyIds],
       droppedLinks: plan.counts.droppedLinks,
       skippedVectors: [...plan.skippedVectors].map(([profile, reason]) => ({ profile, reason })),
+      migrationIds: [
+        ...new Set(run.get(plan.manifest.objectTypeId)?.steps.map((step) => step.migrationId)),
+      ],
+      refusedByDeploy: refusedByDeploy(plan),
+      unchecked: [
+        ...unchecked(plan, checked.get(plan.manifest.objectTypeId)),
+        ...values.lines(plan.manifest.objectTypeId),
+      ],
       ...(plan.manifest.projection
         ? {
             projectionId: plan.manifest.projection.projectionId,
@@ -427,6 +797,118 @@ class ImportPlan {
         : {}),
     }))
   }
+}
+
+/**
+ * The removals the copy left out that production's objects hold: a deploy of the branch's code
+ * refuses each one, with the gate's own line, counted on the copy, or by production for a key its
+ * code no longer declares, whose values don't travel.
+ */
+function refusedByDeploy(plan: TypePlan): readonly string[] {
+  const objectTypeId = plan.manifest.objectTypeId
+  const held = (change: ProbedChange) =>
+    change.kind === "property-removed"
+      ? (plan.heldProperties.get(change.propertyId) ?? 0)
+      : "linkId" in change
+        ? (plan.heldLinks.get(change.linkId)?.size ?? 0)
+        : 0
+
+  // Production says a withheld key is held, never by how many objects.
+  const findings = [
+    ...plan.fit.refusedWithheld.map((change) =>
+      heldFinding(objectTypeId, change, plan.fit.remedy(change))
+    ),
+    ...plan.fit.leftOut.flatMap((change) => {
+      const count = held(change)
+      return count > 0 ? [finding(objectTypeId, change, count, plan.fit.remedy(change))] : []
+    }),
+  ]
+  return formatTypeShapeFindings(findings)
+}
+
+/**
+ * What a deploy would read that the copy can't: changes of properties hidden from the person, and
+ * of keys whose values didn't travel. Each says it was not checked.
+ */
+function unchecked(plan: TypePlan, check: TypeShapeTypeCheck | undefined): readonly string[] {
+  const objectTypeId = plan.manifest.objectTypeId
+
+  // A withheld key a deploy refuses reads as a refusal, not as unchecked.
+  const refused = (change: NarrowedChange) =>
+    plan.fit.refusedWithheld.some((left) => sameChange(left, change))
+  // A hidden property has no value on the copy; a projected one has its values only as edits.
+  const hidden = new Set([...plan.manifest.hiddenPropertyIds, ...plan.fit.withheld])
+  const of = (properties: ReadonlySet<string>, change: NarrowedChange) =>
+    "propertyId" in change &&
+    (properties.has(change.propertyId) || properties.has(plan.fit.storedKey(change.propertyId)))
+  const projected = (change: NarrowedChange) =>
+    of(plan.projectedPropertyIds, change) && !of(hidden, change)
+
+  // The unique dry run reads the values the copy holds: it finds no duplicate where it holds none.
+  const unique = (check?.changes ?? []).filter(
+    (change): change is NarrowedChange =>
+      change.kind === "property-unique" && narrows(change) && of(hidden, change)
+  )
+
+  const lines = [...plan.fit.unchecked, ...(check?.unseen ?? []), ...unique]
+    .filter((change) => !refused(change))
+    .map((change) =>
+      uncheckedLine(objectTypeId, change, projected(change) ? "projected" : "hidden")
+    )
+
+  return [...new Set(lines)]
+}
+
+/** Objects listed per type for a step that failed on a value the check didn't read. */
+const LISTED_UNCHECKED = 100
+
+/**
+ * The objects a fill or a convert failed on, for a property the check didn't read: each keeps its
+ * value on the copy, where a deploy would have read edits only and left the rest to the projection.
+ */
+class UncheckedValues {
+  readonly #byType = new Map<string, { readonly lines: string[]; failed: number }>()
+
+  add(failure: { readonly objectTypeId: string; readonly line: string }): void {
+    const type = this.#byType.get(failure.objectTypeId) ?? { lines: [], failed: 0 }
+    this.#byType.set(failure.objectTypeId, type)
+
+    type.failed += 1
+    if (type.lines.length < LISTED_UNCHECKED) {
+      type.lines.push(`${failure.line}: not checked, so it keeps its value.`)
+    }
+  }
+
+  lines(objectTypeId: string): readonly string[] {
+    const type = this.#byType.get(objectTypeId)
+    if (!type) return []
+
+    const more = type.failed - type.lines.length
+    return more > 0
+      ? [...type.lines, `… and ${more.toLocaleString("en-US")} more not checked.`]
+      : type.lines
+  }
+}
+
+function sameChange(left: NarrowedChange, right: NarrowedChange): boolean {
+  return (
+    left.kind === right.kind &&
+    ("propertyId" in left ? left.propertyId : undefined) ===
+      ("propertyId" in right ? right.propertyId : undefined)
+  )
+}
+
+/** The change a deploy refuses for a type skipped from its shapes, which its objects then hold. */
+function skippedChange(
+  kind: SnapshotSkipKind,
+  type: SnapshotTypeManifest,
+  ontology: OntologyRegistry
+): Extract<ProbedChange, { kind: "type-removed" | "primary" }> | null {
+  if (kind === "removed") return { kind: "type-removed", effect: "refused" }
+  if (kind !== "primary") return null
+
+  const to = ontology.getPrimaryPropertyId(type.objectTypeId)
+  return { kind: "primary", from: type.primaryPropertyId, to, effect: "refused" }
 }
 
 /** Load every record after the members, and return the snapshot's end. */
@@ -490,7 +972,10 @@ async function loadRecords(
 
 async function loadObjects(plan: ImportPlan, loader: SnapshotLoader, record: SnapshotObjects) {
   const type = plan.type(record.objectTypeId)
-  if (!type) return
+  if (!type) {
+    plan.holdsSkippedType(record.objectTypeId, record.ids.length)
+    return
+  }
 
   const objectTypeId = record.objectTypeId
   const valueTypes = plan.valueTypes
@@ -500,11 +985,18 @@ async function loadObjects(plan: ImportPlan, loader: SnapshotLoader, record: Sna
 
   fromColumns(record).forEach((properties, index) => {
     const primaryId = record.ids[index]!
-    for (const propertyId of type.droppedPropertyIds) delete properties[propertyId]
 
     const edited: Record<string, JsonValue> = {}
     for (const propertyId in properties) {
-      if (!type.telemetryPropertyIds.has(propertyId)) edited[propertyId] = properties[propertyId]!
+      if (!type.fit.keeps(propertyId)) {
+        const held = type.heldProperties.get(propertyId)
+        if (held !== undefined) type.heldProperties.set(propertyId, held + 1)
+
+        type.droppedPropertyIds.add(propertyId)
+        delete properties[propertyId]
+      } else if (!type.telemetryPropertyIds.has(propertyId)) {
+        edited[propertyId] = properties[propertyId]!
+      }
     }
 
     objects.push({
@@ -563,11 +1055,14 @@ async function loadLinks(plan: ImportPlan, loader: SnapshotLoader, record: Snaps
     properties,
   ] of record.rows) {
     if (!plan.keepsLink(type, linkId, targetTypeId)) {
+      type.heldLinks.get(linkId)?.add(sourceId)
       type.counts.droppedLinks += 1
       continue
     }
 
-    const cardinality = type.objectType.links.find((link) => link.id === linkId)?.cardinality
+    const cardinality =
+      type.objectType.links.find((link) => link.id === linkId)?.cardinality ??
+      type.fit.movedLinks.get(linkId)
     links.push({
       sourceTypeId: record.sourceTypeId,
       sourceId,
@@ -697,12 +1192,48 @@ async function loadEdits(plan: ImportPlan, loader: SnapshotLoader, record: Snaps
 }
 
 /**
+ * The properties a projection feeds on a type loaded as created objects: those production's feeds,
+ * as the snapshot names them, and those the branch's feed, a property one newly feeds included. A
+ * snapshot taken before it named them names none: the branch's projection of the same id says, or
+ * else every property but the primary may be the projection's.
+ */
+function projectedPropertyIds(
+  type: SnapshotTypeManifest,
+  objectType: ObjectType,
+  ontology: OntologyRegistry,
+  projections: ProjectionDefinitionCatalog | undefined
+): ReadonlySet<string> {
+  const projection = type.projection
+  if (!projection) return new Set()
+
+  const definitions = projections?.listObjects() ?? []
+  const fed = definitions.flatMap((definition) =>
+    computeProjectionOwnership(definition, ontology).objects.flatMap((owned) =>
+      owned.objectTypeId === type.objectTypeId ? owned.propertyIds : []
+    )
+  )
+  if (projection.propertyIds) return new Set([...projection.propertyIds, ...fed])
+
+  const continued = definitions.some(
+    (definition) =>
+      definition.id === projection.projectionId && definition.objectTypeId === type.objectTypeId
+  )
+  if (continued) return new Set(fed)
+
+  const propertyIds = [
+    ...Object.keys(type.shape?.fits.properties ?? {}),
+    ...objectType.properties.map((property) => property.id),
+  ]
+  return new Set(propertyIds.filter((propertyId) => propertyId !== type.primaryPropertyId))
+}
+
+/**
  * A type travels as its source when the branch can continue it: the branch still defines it
  * whole, and its projection of the same id still feeds it from the same dataset.
  */
 function sourceTravel(
   type: SnapshotTypeManifest,
-  fit: Extract<TypeFit, { fits: true }>,
+  fit: LoadingFit,
   projections: ProjectionDefinitionCatalog | undefined
 ): Pick<TypePlan, "source" | "notReprojectable"> {
   const projection = type.projection

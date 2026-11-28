@@ -301,11 +301,12 @@ function fakeSandboxes(
               yield new Uint8Array(lab.files.get(copy) as Uint8Array)
             })()
           )
-          const report = await importSnapshot({
+          const loading = importSnapshot({
             snapshot: delivered.snapshot,
             storage: (await storage.openBranchNamespace(schema.replace(/^branch_/, "")))!,
             ontology: ontology(),
           })
+          const report = await track(loading)
           const rest = await delivered.rest()
           lab.files.delete(copy)
           lab.files.delete(`${copy}.json`)

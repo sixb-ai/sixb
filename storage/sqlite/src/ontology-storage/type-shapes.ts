@@ -146,6 +146,40 @@ export class SqliteOntologyTypeShapeStorage implements OntologyTypeShapeStorage 
     })
   }
 
+  async listHeldPropertyKeys(input: {
+    readonly projectId: string
+    readonly objectTypeId: string
+  }): Promise<readonly string[]> {
+    return this.runRootOperation(() => {
+      const { projectId, objectTypeId: type } = input
+      const edits = "ontology_object_overrides AS edits"
+      const ofType = (alias: string) => `${alias}.project_id = ? AND ${alias}.object_type_id = ?`
+      const rows = this.db
+        .query(
+          `SELECT keys.key FROM objects AS o, json_each(o.properties) AS keys WHERE ${ofType("o")}
+           UNION
+           SELECT keys.key FROM ${edits}, json_each(edits.value, '$.properties') AS keys
+           WHERE ${ofType("edits")}
+           UNION
+           SELECT keys.key FROM ${edits}, json_each(edits.value, '$.set') AS keys
+           WHERE ${ofType("edits")}
+           UNION
+           SELECT keys.value FROM ${edits}, json_each(edits.value, '$.unset') AS keys
+           WHERE ${ofType("edits")}
+           UNION
+           SELECT keys.key FROM ${edits}, json_each(edits.edited_at) AS keys
+           WHERE ${ofType("edits")} AND json_type(edits.edited_at) = 'object'
+           UNION
+           SELECT property_id FROM timeseries AS t WHERE ${ofType("t")}
+           ORDER BY 1`
+        )
+        .all(...Array.from({ length: 6 }, () => [projectId, type]).flat()) as {
+        readonly key: string
+      }[]
+      return rows.map((row) => row.key)
+    })
+  }
+
   async listEdits(input: ListObjectEditsInput): Promise<{
     readonly edits: readonly StoredObjectEdit[]
     readonly nextPrimaryId?: string

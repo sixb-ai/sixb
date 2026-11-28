@@ -6,6 +6,7 @@ import {
   validateEffectiveObject,
   validateObjectAuthorityProperties,
 } from "../materializer/effective/validate"
+import { WithheldProperties } from "../materializer/effective/withheld"
 import { vectorConfiguration, vectorSources } from "../objects/vectors/profile"
 import { collectArtifactRefIds } from "../ontology/artifact-ref"
 import type { OntologyDefinitionCatalog } from "../ontology/registry"
@@ -45,9 +46,17 @@ export interface ValuePlanType {
    * gets no fill of one: its next run gives it the projection's value, which an edit would mask.
    */
   readonly projected: ReadonlySet<string>
+  /**
+   * The properties the check didn't read (`unseen`): a step that fails on one leaves the object's
+   * value as it was and reports it (`onUnchecked`) instead of refusing the object. Empty in
+   * production, whose check reads everything.
+   */
+  readonly unchecked?: ReadonlySet<string>
 }
 
-interface Failure {
+/** An object the value steps refuse, or a unique key two of them would share. */
+export interface ValuePlanFailure {
+  readonly objectTypeId: string
   readonly migrationId: string
   readonly line: string
   /** How many failed objects the line names: one, or each staged object of a collision. */
@@ -85,11 +94,19 @@ export async function planValueSteps(input: {
   readonly startedAt: string
   readonly ontology: OntologyDefinitionCatalog
   readonly types: readonly ValuePlanType[]
+  /** Each object a step fails on a property its type's check didn't read. */
+  readonly onUnchecked?: (failure: ValuePlanFailure) => void
 }): Promise<void> {
-  const failures: Failure[] = []
+  const failures: ValuePlanFailure[] = []
   let failed = 0
-  const fail = (failure: Failure) => {
-    failed += 1
+  // Every object that fails, by type: past the listed ones, a type's count is still its own.
+  const failedByType = new Map<string, number>()
+  const count = (objectTypeId: string, objects: number) => {
+    failed += objects
+    failedByType.set(objectTypeId, (failedByType.get(objectTypeId) ?? 0) + objects)
+  }
+  const fail = (failure: ValuePlanFailure) => {
+    count(failure.objectTypeId, 1)
     if (failures.length < LISTED_FAILURES) failures.push(failure)
   }
 
@@ -111,23 +128,29 @@ export async function planValueSteps(input: {
     })
     for (const collision of collisions) {
       const migrationId = valueMigrationOf(input.types, collision)
-      failed += collision.primaryIds.length
       const objects = collision.primaryIds.length
-      failures.push({ migrationId, line: collisionLine(collision), objects })
+      count(collision.objectTypeId, objects)
+      failures.push({
+        objectTypeId: collision.objectTypeId,
+        migrationId,
+        line: collisionLine(collision),
+        objects,
+      })
     }
   }
 
-  if (failed > 0) throw planFailure(failures, failed)
+  if (failed > 0) throw planFailure(failures, failed, failedByType)
 }
 
 function typePlanner(
   input: Parameters<typeof planValueSteps>[0],
   planned: ValuePlanType,
-  fail: (failure: Failure) => void,
+  fail: (failure: ValuePlanFailure) => void,
   staging: () => boolean
 ) {
   const { storage, values, projectId, ontology, startedAt } = input
   const { type, definitions } = planned
+  const unchecked = planned.unchecked ?? new Set<string>()
   const { objectTypeId } = type
   const objectType = ontology.resolveObjectType(objectTypeId)
   const primaryPropertyId = ontology.getPrimaryPropertyId(objectTypeId)
@@ -174,6 +197,10 @@ function typePlanner(
     everyObject: [...unique.values()].some((property) => !property.update),
   }
 
+  // What a branch's copy withheld: a required property its creator can't read has no value to
+  // check. Production holds no snapshot commit, and reads nothing.
+  const withheld = new WithheldProperties()
+
   const resolve = (state: MaterializationObjectState, moved: ObjectState) =>
     resolveEffectiveObject({
       ref: state.ref,
@@ -214,11 +241,19 @@ function typePlanner(
       const given = giveValue(state, current, definition)
       if (given === null) continue
       if ("reason" in given) {
-        fail({
+        const failure = {
+          objectTypeId,
           migrationId: step.migrationId,
           line: objectLine(objectTypeId, primaryId, given.reason),
-        })
-        return null
+        }
+        if (!unchecked.has(definition.propertyId)) {
+          fail(failure)
+          return null
+        }
+
+        // A value the check didn't read: the object keeps it, and the step goes on to the next.
+        input.onUnchecked?.(failure)
+        continue
       }
 
       if (
@@ -258,10 +293,16 @@ function typePlanner(
     const created = current.override?.kind === "create" && !current.source
     if (changed && created && after) {
       try {
-        validateEffectiveObject(ontology, state.ref, after)
+        // A property the check didn't read is checked by its own steps, value by value: what one
+        // of them couldn't convert keeps its old value, and a missing one stays missing.
+        const unrequired = [...(withheld.of(state.effective)?.propertyIds ?? []), ...unchecked]
+        const checked = Object.fromEntries(
+          Object.entries(after).filter(([propertyId]) => !unchecked.has(propertyId))
+        )
+        validateEffectiveObject(ontology, state.ref, checked, undefined, { unrequired })
       } catch (error) {
         const line = objectLine(objectTypeId, primaryId, messageOf(error))
-        fail({ migrationId: lastMigrationId, line })
+        fail({ objectTypeId, migrationId: lastMigrationId, line })
         return null
       }
     }
@@ -272,7 +313,7 @@ function typePlanner(
       if (after && Object.keys(effective).length > 0) vectors = vectorRequests(before, after)
     } catch (error) {
       const line = objectLine(objectTypeId, primaryId, messageOf(error))
-      fail({ migrationId: lastMigrationId, line })
+      fail({ objectTypeId, migrationId: lastMigrationId, line })
       return null
     }
 
@@ -435,7 +476,13 @@ function typePlanner(
             })
           )
         )
-        return { objects: states.flatMap((state) => state.objects), next: page.nextPrimaryId }
+        const objects = states.flatMap((state) => state.objects)
+        await withheld.load(
+          storage.ontology.commits,
+          projectId,
+          objects.map((object) => object.effective)
+        )
+        return { objects, next: page.nextPrimaryId }
       }
 
       // The next page is read while this one runs its functions, and one write of staged rows
@@ -555,21 +602,68 @@ function objectLine(objectTypeId: string, primaryId: string, reason: string): st
   return `${objectTypeId} '${primaryId}': ${reason.replace(/^\[Sixb\] /, "")}`
 }
 
-function planFailure(failures: readonly Failure[], failed: number): Error {
+function planFailure(
+  failures: readonly ValuePlanFailure[],
+  failed: number,
+  failedByType: ReadonlyMap<string, number>
+): ValuePlanError {
+  return new ValuePlanError(failures, failed, failedByType)
+}
+
+/**
+ * The value steps' plan refused objects: what a deploy prints, and per type the lines that name
+ * its objects, so a branch's copy can leave out only the types that fail.
+ */
+export class ValuePlanError extends Error {
+  readonly failures: readonly ValuePlanFailure[]
+  /** How many objects fail, by type: those `failures` lists, and those past them. */
+  readonly failedByType: ReadonlyMap<string, number>
+
+  constructor(
+    failures: readonly ValuePlanFailure[],
+    failed: number,
+    failedByType: ReadonlyMap<string, number>
+  ) {
+    super(
+      [
+        `[Sixb] ${failureLines(failures, failed).join("\n")}`,
+        "Nothing was written. Fix the functions or the data, then deploy again.",
+      ].join("\n")
+    )
+    this.name = "ValuePlanError"
+    this.failures = failures
+    this.failedByType = failedByType
+  }
+
+  /** The types whose objects fail, each with its lines: the migrations, then each object. */
+  byType(): ReadonlyMap<string, readonly string[]> {
+    const types = new Map<string, ValuePlanFailure[]>()
+    for (const failure of this.failures) {
+      types.set(failure.objectTypeId, [...(types.get(failure.objectTypeId) ?? []), failure])
+    }
+
+    return new Map(
+      [...types].map(([objectTypeId, of]) => [
+        objectTypeId,
+        failureLines(of, this.failedByType.get(objectTypeId) ?? 0),
+      ])
+    )
+  }
+}
+
+/** `Migration 'x' cannot apply: 2 objects fail.`, then a line per named object. */
+function failureLines(failures: readonly ValuePlanFailure[], failed: number): string[] {
   const ids = [...new Set(failures.map((failure) => failure.migrationId))].sort()
   const names = ids.map((id) => `'${id}'`).join(", ")
   const objects = failed === 1 ? "1 object fails" : `${failed.toLocaleString("en-US")} objects fail`
   const named = failures.reduce((sum, failure) => sum + (failure.objects ?? 1), 0)
   const more = failed - named
 
-  return new Error(
-    [
-      `[Sixb] ${ids.length === 1 ? "Migration" : "Migrations"} ${names} cannot apply: ${objects}.`,
-      ...failures.map((failure) => `  ${failure.line}`),
-      ...(more > 0 ? [`  … and ${more.toLocaleString("en-US")} more.`] : []),
-      "Nothing was written. Fix the functions or the data, then deploy again.",
-    ].join("\n")
-  )
+  return [
+    `${ids.length === 1 ? "Migration" : "Migrations"} ${names} cannot apply: ${objects}.`,
+    ...failures.map((failure) => `  ${failure.line}`),
+    ...(more > 0 ? [`  … and ${more.toLocaleString("en-US")} more.`] : []),
+  ]
 }
 
 function messageOf(error: unknown): string {

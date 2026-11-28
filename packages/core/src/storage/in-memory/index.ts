@@ -312,6 +312,10 @@ export class InMemoryStorage
 
   /** Each branch is an instance of its own, kept as long as this one. */
   private readonly branches = new Map<string, InMemoryStorage>()
+  /** The storage as the last snapshot load found it. */
+  private beforeLoad:
+    | { readonly commitId: string; readonly state: InMemoryStorageSnapshot }
+    | undefined
 
   /** One view of a copy of this storage, taken under its lock: later writes never reach it. */
   async readSnapshot<T>(
@@ -366,7 +370,12 @@ export class InMemoryStorage
     input: SnapshotLoadInput,
     run: (loader: SnapshotLoader) => Promise<T>
   ): Promise<T> {
-    return this.transaction(async () => {
+    let before: { readonly commitId: string; readonly state: InMemoryStorageSnapshot } | undefined
+    const result = await this.transaction(async () => {
+      // What `unloadSnapshot` puts back: the storage before the load, members included, taken
+      // under the load's own lock.
+      before = { commitId: input.commit.id, state: this.snapshot() }
+
       const existing = await this.objectStorage.list({ projectId: input.projectId, limit: 1 })
       if (existing.total > 0) throw snapshotTargetNotEmpty()
 
@@ -384,6 +393,31 @@ export class InMemoryStorage
         write: async (batch) =>
           this.ontologyStorage.snapshots.write(input.projectId, input.commit, batch),
       })
+    })
+
+    this.beforeLoad = before
+    return result
+  }
+
+  async unloadSnapshot(input: {
+    readonly projectId: string
+    readonly commitId: string
+  }): Promise<void> {
+    // The check and the restore under one lock: no write lands between them.
+    await this.withTransactionLock(async () => {
+      const before = this.beforeLoad
+      const { commits } = await this.ontologyStorage.commits.list({
+        projectId: input.projectId,
+        limit: 2,
+      })
+      if (before?.commitId !== input.commitId || commits.length !== 1) {
+        throw new Error(
+          `[Sixb] This storage holds no load of '${input.commitId}' alone: something was written since, so emptying it would take that too.`
+        )
+      }
+
+      this.restore(before.state)
+      this.beforeLoad = undefined
     })
   }
 

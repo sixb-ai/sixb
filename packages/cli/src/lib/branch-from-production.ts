@@ -447,19 +447,25 @@ async function loadCopy(input: {
   )
   // Read once: the copy's stream is spent after it.
   let rest: Awaited<ReturnType<typeof copy.rest>> | undefined
+  // The import reads the snapshot again from the spool when it loads without the types the
+  // branch's gate refused: the first read is the one counted.
+  let reads = 0
+  const snapshot = () =>
+    reads++ === 0
+      ? copy.snapshot
+      : readBranchCopy(Bun.file(input.spool).stream() as unknown as AsyncIterable<Uint8Array>)
+          .snapshot
 
   try {
+    // The import runs the branch's gate on the copy, with its migrations, as a deploy would.
     const report = await importSnapshot({
-      snapshot: copy.snapshot,
+      snapshot,
       storage: namespace,
       ontology: input.host.definitions.ontology as never,
       projections: input.host.definitions.projections,
+      migrations: input.host.definitions.migrations.list(),
     })
     rest = await copy.rest()
-    await migrateStorage(namespace, {
-      projectId: input.host.id,
-      ontology: input.host.definitions.ontology as never,
-    })
 
     // The branch's directory may hold its database too, as `SqliteStorage({ path: ".sixb" })` keeps
     // a namespace in `.sixb/branches/<name>/`: only the CLI's own files go.
@@ -480,7 +486,7 @@ async function loadCopy(input: {
       apiUrl: pending.apiUrl,
       profile: pending.profile,
       objects: report.types.reduce((total, type) => total + type.objects, 0),
-      skipped: report.skipped.map((skip) => ({ ...skip })),
+      skipped: report.skipped.map(({ objectTypeId, reason }) => ({ objectTypeId, reason })),
       ...(rest
         ? {
             credential: rest.lake.credential,

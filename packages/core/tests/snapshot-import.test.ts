@@ -43,9 +43,9 @@ import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 function importInto(storage: Storage, chunks: readonly Uint8Array[], ontology?: OntologyRegistry) {
   return importSnapshot({
-    snapshot: (async function* () {
+    snapshot: async function* () {
       yield* chunks
-    })(),
+    },
     storage,
     ontology: ontology ?? new OntologyRegistry({ sources: [Team, Ticket, Invoice] }),
   })
@@ -66,7 +66,12 @@ describe("what an import reports of what the person read", () => {
       hiddenPropertyIds: ["code", "notes"],
     })
     expect(report.skipped).toEqual([
-      { objectTypeId: "invoice", reason: "the person who took it cannot read this type" },
+      {
+        objectTypeId: "invoice",
+        kind: "unreadable",
+        reason: "the person who took it cannot read this type",
+        findings: [],
+      },
     ])
   })
 
@@ -288,9 +293,27 @@ describe("importing a snapshot into a branch", () => {
       new OntologyRegistry({ sources: [BranchTeam, BranchTicket] })
     )
 
+    // Production never recorded its shapes: the copy is checked as a first deploy would be.
     expect(report.skipped).toEqual([
-      { objectTypeId: "invoice", reason: "the branch no longer defines this type" },
-      { objectTypeId: "ticket", reason: "property 'status' changed its type or mode" },
+      {
+        objectTypeId: "invoice",
+        kind: "removed",
+        reason: "the branch no longer defines this type",
+        findings: [
+          "✗ invoice was removed, and 1 object holds it.",
+          "  Removing a type that holds objects isn't supported yet: declare it again.",
+        ],
+      },
+      {
+        objectTypeId: "ticket",
+        kind: "unfit",
+        reason: "production's objects don't fit the branch's code, and no migration makes them fit",
+        findings: [
+          "✗ ticket: 'status' changed from unknown to integer, and 3 objects hold edits it no longer accepts.",
+          "  Convert them in a migration:",
+          '    defineMigration("ticket-status", ticket).convertProperty("status", ({ value }) => …)',
+        ],
+      },
     ])
     expect(report.types).toEqual([
       expect.objectContaining({

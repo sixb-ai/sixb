@@ -171,3 +171,6 @@ Nothing of a batch in flight was written. Run `sixb db migrate` to resume it.
 
 `sixb dev` runs the pending migrations on local data at startup. A change no migration covers is a
 warning: the recorded shape stays as it was, so the migration runs once you add it.
+
+A branch from production runs them on its copy first, as the next deploy would
+([Test on production data](../cli/production-data.md#what-the-branch-holds)).

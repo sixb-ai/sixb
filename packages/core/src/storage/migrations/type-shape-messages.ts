@@ -83,6 +83,39 @@ export function duplicateFinding(
   }
 }
 
+/** A change data holds, when only that it is held is known: no count is given. */
+export function heldFinding(
+  objectTypeId: string,
+  change: ProbedChange,
+  remedy: readonly string[]
+): TypeShapeFinding {
+  const described = describe(objectTypeId, change)
+
+  return {
+    objectTypeId,
+    change,
+    count: null,
+    message: `${described.what}, and ${described.data("objects", false)}.`,
+    remedy: remedy.length > 0 ? remedy : described.remedy,
+  }
+}
+
+/**
+ * A change the check didn't read: the copy it ran on holds none of the property's values, or holds
+ * its projection's values as edits, which a deploy would leave to the projection.
+ */
+export function uncheckedLine(
+  objectTypeId: string,
+  change: NarrowedChange,
+  why: "hidden" | "projected" = "hidden"
+): string {
+  const reason =
+    why === "projected"
+      ? "the copy can't tell its projection's values from edits"
+      : "the copy holds none of its values"
+  return `${describe(objectTypeId, change).what}: not checked, ${reason}.`
+}
+
 /** The lines `sixb check`, a deploy and the agent print for findings: one `✗` per change. */
 export function formatTypeShapeFindings(findings: readonly TypeShapeFinding[]): string[] {
   return findings.flatMap((item) => [

@@ -95,6 +95,43 @@ export class InMemoryOntologyTypeShapeStorage implements OntologyTypeShapeStorag
     })
   }
 
+  async listHeldPropertyKeys(input: {
+    readonly projectId: string
+    readonly objectTypeId: string
+  }): Promise<readonly string[]> {
+    return this.runRootOperation(() => {
+      const { projectId, objectTypeId } = input
+      const keys = new Set<string>()
+      const hold = (values: Readonly<Record<string, unknown>> | readonly string[]) => {
+        for (const key of Array.isArray(values) ? values : Object.keys(values)) keys.add(key)
+      }
+
+      getInMemoryObjectMaterializerAdapter(this.objects).visitExactObjects(
+        projectId,
+        objectTypeId,
+        (row) => hold(row.properties)
+      )
+      for (const row of this.state.objectOverrides.values()) {
+        if (row.projectId !== projectId || row.ref.objectTypeId !== objectTypeId) continue
+
+        hold(row.editedAt ?? {})
+        if (row.value.kind === "create") hold(row.value.properties)
+        if (row.value.kind === "patch") {
+          hold(row.value.set)
+          hold(row.value.unset)
+        }
+      }
+      getInMemoryTimeseriesMaterializerAdapter(this.timeseries).visitSeries(
+        projectId,
+        (seriesTypeId, _objectId, propertyId) => {
+          if (seriesTypeId === objectTypeId) keys.add(propertyId)
+        }
+      )
+
+      return [...keys].sort(compare)
+    })
+  }
+
   async listEdits(input: ListObjectEditsInput): Promise<{
     readonly edits: readonly StoredObjectEdit[]
     readonly nextPrimaryId?: string

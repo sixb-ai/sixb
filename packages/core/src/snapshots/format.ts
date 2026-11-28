@@ -10,6 +10,7 @@ import type {
   ProjectionEntityRef,
   ProjectionSourceAssertion,
 } from "../materialization/model"
+import type { TypeShape } from "../ontology/type-shapes"
 import type { UserRef } from "../ontology/user-ref"
 import type { GroupMembershipSource, UserStatus } from "../storage/auth"
 
@@ -22,13 +23,20 @@ import type { GroupMembershipSource, UserStatus } from "../storage/auth"
  * Objects are columnar: one array per property across a page, which compresses to about half of
  * one JSON object per row and decodes faster.
  */
-export const SNAPSHOT_SIGNATURE = new Uint8Array([0x53, 0x49, 0x58, 0x42, 0x53, 0x4e, 0x50, 0x02])
+export const SNAPSHOT_SIGNATURE = new Uint8Array([0x53, 0x49, 0x58, 0x42, 0x53, 0x4e, 0x50, 0x03])
 
 /**
- * The format's version, in the signature's last byte and in the manifest. A reader refuses any
- * other. Version 2 adds a projection's source roots and the edits made over them.
+ * The format's version, in the signature's last byte and in the manifest. Version 2 adds a
+ * projection's source roots and the edits made over them; version 3 replaces each type's
+ * definition fingerprints with the shape production's objects fit.
  */
-export const SNAPSHOT_FORMAT = 2
+export const SNAPSHOT_FORMAT = 3
+
+/**
+ * The versions a reader takes. A version 2 snapshot carries no shapes: the branch checks the copy
+ * itself, as a first deploy does.
+ */
+const READABLE_FORMATS: readonly number[] = [2, SNAPSHOT_FORMAT]
 
 const FRAME_HEADER_BYTES = 5
 const MAX_FRAME_BYTES = 512 * 1024 * 1024
@@ -37,6 +45,24 @@ const CODEC_ZSTD = 1
 
 const compress = promisify(zstdCompress)
 const decompress = promisify(zstdDecompress)
+
+/** Why a type of the snapshot is left out of the branch, one word each. */
+export const SNAPSHOT_SKIP_KINDS = [
+  /** The person who took the copy cannot read it. */
+  "unreadable",
+  /** The branch no longer defines it. */
+  "removed",
+  /** The branch changed its primary property. */
+  "primary",
+  /** Production was applying a migration to it. */
+  "migrating",
+  /** Two of the branch's pending migrations change the same thing. */
+  "conflict",
+  /** Production's objects don't fit the branch's code, and no migration makes them fit. */
+  "unfit",
+] as const
+
+export type SnapshotSkipKind = (typeof SNAPSHOT_SKIP_KINDS)[number]
 
 export type SnapshotRecord =
   | SnapshotManifest
@@ -52,7 +78,7 @@ export type SnapshotRecord =
 /** What the snapshot holds, written first. */
 export interface SnapshotManifest {
   readonly kind: "manifest"
-  readonly format: typeof SNAPSHOT_FORMAT
+  readonly format: 2 | typeof SNAPSHOT_FORMAT
   readonly projectId: string
   /** S, the moment the consistent read began. */
   readonly takenAt: string
@@ -69,16 +95,13 @@ export interface SnapshotManifest {
   readonly lake?: { readonly catalogVersion: string }
 }
 
-/** One object type as production defines it, so the importer can tell what still fits. */
+/** One object type as production holds it, so the importer can tell what still fits. */
 export interface SnapshotTypeManifest {
   readonly objectTypeId: string
+  /** The property the objects' ids are values of. */
   readonly primaryPropertyId: string
-  /** Fingerprint of each property's definition, by property id. */
-  readonly properties: Readonly<Record<string, string>>
-  readonly requiredPropertyIds: readonly string[]
-  readonly uniquePropertyIds: readonly string[]
-  /** Fingerprint of each link's definition, by link id. */
-  readonly links: Readonly<Record<string, string>>
+  /** Absent from a version 2 snapshot. */
+  readonly shape?: SnapshotTypeShape
   /** Properties the person's clearance hides: their values are not in the snapshot. */
   readonly hiddenPropertyIds: readonly string[]
   readonly throughCondition: boolean
@@ -88,9 +111,34 @@ export interface SnapshotTypeManifest {
   readonly projection?: SnapshotProjection
 }
 
+/** What production's objects of a type fit, as its stored shapes say (`ontology/type-shapes.ts`). */
+export interface SnapshotTypeShape {
+  /** The shape production recorded, or its code's when it recorded none. */
+  readonly fits: TypeShape
+  /**
+   * `unrecorded`: production holds no shape for the type; its objects were read under its code's
+   * shape, which the branch takes. `migrating`: a migration run was being applied to it.
+   */
+  readonly state: "current" | "migrating" | "unrecorded"
+  /** The migrations production settled for the type: they never run again, there or here. */
+  readonly settledMigrationIds: readonly string[]
+  /**
+   * Keys production's objects hold that its code no longer declares. Only that they are held:
+   * their values don't travel, their markings gone with their definition, and no count is given,
+   * which could tell what a marking or a view condition hid. A deploy refuses each, or migrates it.
+   */
+  readonly withheld?: readonly string[]
+}
+
 export interface SnapshotProjection {
   readonly projectionId: string
   readonly datasetId: string
+  /**
+   * The properties production's projection feeds, from its definition: a type copied as created
+   * objects holds their values as edits, which a deploy would leave to the projection. Absent from
+   * a snapshot taken before it was added.
+   */
+  readonly propertyIds?: readonly string[]
   /**
    * Whether the person holds `dataset.view` on the projection's dataset. It is not "reads the
    * dataset in full": a column's markings may still hide it, which the lake slice decides.
@@ -377,9 +425,9 @@ function assertSignature(buffer: Uint8Array): void {
   }
 
   const version = buffer[SNAPSHOT_SIGNATURE.length - 1]
-  if (version !== SNAPSHOT_FORMAT) {
+  if (version === undefined || !READABLE_FORMATS.includes(version)) {
     throw new Error(
-      `[Sixb] This snapshot uses format ${version}; this version of Sixb reads format ${SNAPSHOT_FORMAT}. Take it again with the same Sixb version on both sides.`
+      `[Sixb] This snapshot uses format ${version}; this version of Sixb reads formats ${READABLE_FORMATS.join(" and ")}. Take it again with the same Sixb version on both sides.`
     )
   }
 }

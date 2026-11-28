@@ -25,9 +25,12 @@ import { readableOnly } from "../objects/clearance-redaction"
 import { declaredProperties } from "../objects/property-clearance"
 import { vectorConfiguration, vectorSources } from "../objects/vectors/profile"
 import { OntologyRegistry } from "../ontology"
+import { typeShape } from "../ontology/type-shapes"
 import type { ObjectType } from "../ontology/types"
 import type { UserRef } from "../ontology/user-ref"
 import type { ProjectionDefinitionCatalog } from "../projections"
+import { computeProjectionOwnership } from "../projections/ownership"
+import type { ObjectProjectionDefinition } from "../projections/types"
 import type { SixbHostView } from "../runtime/host"
 import { isBoundSixb } from "../runtime/sixb"
 import type { AppliedMarkings } from "../security/applied-markings"
@@ -45,7 +48,6 @@ import {
   type SnapshotReadView,
 } from "../storage/snapshots"
 import type { Storage } from "../storage/types"
-import { typeDefinitionManifest } from "./definitions"
 import {
   encodeSnapshotFrame,
   jsonOf,
@@ -61,6 +63,7 @@ import {
   type SnapshotRecord,
   type SnapshotSourceVersion,
   type SnapshotTypeManifest,
+  type SnapshotTypeShape,
   type SnapshotVectors,
   toColumns,
 } from "./format"
@@ -273,6 +276,7 @@ async function takeSnapshot(
     })
   )
   const scope = await readerSnapshotScope(readersIn(storage.objects))
+  const withheld = await withheldKeys(storage, source, scope)
   const user = scope.user
   if (!user) throw new Error("[Sixb] A snapshot is taken as a user: sign in as one.")
 
@@ -334,7 +338,15 @@ async function takeSnapshot(
             slicing.catch((error: unknown) => stop.abort(error))
           }
 
-          const manifest = snapshotManifest(source, { ...scope, user }, active, settings, sources)
+          const shapes = await recordedShapes(first.storage, source, scope, withheld)
+          const manifest = snapshotManifest(
+            source,
+            { ...scope, user },
+            active,
+            settings,
+            sources,
+            shapes
+          )
           await push({
             ...manifest,
             takenAt,
@@ -797,7 +809,8 @@ function snapshotManifest(
   scope: ReaderSnapshotScope & { readonly user: UserRef },
   active: readonly ActiveOntologySource[],
   settings: ExportSettings,
-  sources: ReadonlyMap<string, SourceTravel>
+  sources: ReadonlyMap<string, SourceTravel>,
+  shapes: ReadonlyMap<string, SnapshotTypeShape>
 ): Omit<SnapshotManifest, "takenAt"> {
   const projections = projectionsByType(source, active, scope.canViewDataset, sources)
 
@@ -814,7 +827,8 @@ function snapshotManifest(
     const projection = projections.get(objectType.id)
     types.push({
       objectTypeId: objectType.id,
-      ...typeDefinitionManifest(objectType, source.ontology),
+      primaryPropertyId: source.ontology.getPrimaryPropertyId(objectType.id),
+      shape: shapes.get(objectType.id)!,
       hiddenPropertyIds: access.hiddenPropertyIds,
       throughCondition: access.throughCondition,
       vectors: exportedVectorProfiles(objectType, access.hiddenPropertyIds, settings),
@@ -831,6 +845,87 @@ function snapshotManifest(
     types: types.sort((left, right) => compare(left.objectTypeId, right.objectTypeId)),
     unreadableTypeIds: unreadableTypeIds.sort(compare),
   }
+}
+
+/**
+ * What production's objects of each readable type fit, read at S in the snapshot's consistent read,
+ * with the objects they describe: the shape production recorded and the migrations it settled, or
+ * its code's shape when it recorded none; and the keys `withheldKeys` found.
+ */
+async function recordedShapes(
+  storage: Storage,
+  source: SnapshotSource,
+  scope: ReaderSnapshotScope,
+  withheld: ReadonlyMap<string, readonly string[]>
+): Promise<ReadonlyMap<string, SnapshotTypeShape>> {
+  const projectId = source.projectId
+  const settled = new Map<string, string[]>()
+  for (const row of (await storage.ontology.migrations?.listSettled({ projectId })) ?? []) {
+    settled.set(row.objectTypeId, [...(settled.get(row.objectTypeId) ?? []), row.migrationId])
+  }
+  const recorded = new Map(
+    (await storage.ontology.typeShapes.list({ projectId })).map((row) => [row.objectTypeId, row])
+  )
+
+  const shapes = new Map<string, SnapshotTypeShape>()
+  for (const objectType of source.ontology.listObjectTypes()) {
+    if (!scope.types.has(objectType.id)) continue
+
+    const row = recorded.get(objectType.id)
+    const keys = withheld.get(objectType.id) ?? []
+    shapes.set(objectType.id, {
+      fits: row?.shape ?? typeShape(objectType, source.ontology),
+      state: row?.state ?? "unrecorded",
+      settledMigrationIds: (settled.get(objectType.id) ?? []).sort(compare),
+      ...(keys.length > 0 ? { withheld: keys } : {}),
+    })
+  }
+  return shapes
+}
+
+/**
+ * The keys each readable type's objects hold that production's code no longer declares, found
+ * before the consistent read opens, so a long scan holds none of its views: a commit refuses an
+ * undeclared key, so none appears meanwhile. Only that a key is held: no value and no count, which
+ * could tell what a marking or a condition hid. A recorded shape names every such key the data
+ * may hold; a type never recorded is scanned for its keys, in one pass of the provider's own.
+ */
+async function withheldKeys(
+  storage: Storage,
+  source: SnapshotSource,
+  scope: ReaderSnapshotScope
+): Promise<ReadonlyMap<string, readonly string[]>> {
+  const projectId = source.projectId
+  const shapes = storage.ontology.typeShapes
+  const recorded = new Map(
+    (await shapes.list({ projectId })).map((row) => [row.objectTypeId, row.shape])
+  )
+
+  const withheld = new Map<string, readonly string[]>()
+  for (const objectType of source.ontology.listObjectTypes()) {
+    if (!scope.types.has(objectType.id)) continue
+
+    const declared = new Set(objectType.properties.map((property) => property.id))
+    const objectTypeId = objectType.id
+    const shape = recorded.get(objectTypeId)
+
+    const keys = shape
+      ? await heldAmong(Object.keys(shape.properties).filter((id) => !declared.has(id)))
+      : (await shapes.listHeldPropertyKeys({ projectId, objectTypeId })).filter(
+          (id) => !declared.has(id)
+        )
+    if (keys.length > 0) withheld.set(objectTypeId, keys)
+
+    async function heldAmong(candidates: readonly string[]): Promise<string[]> {
+      const held: string[] = []
+      for (const propertyId of candidates) {
+        const probe = { kind: "property", propertyId } as const
+        if (await shapes.holds({ projectId, objectTypeId, probe })) held.push(propertyId)
+      }
+      return held
+    }
+  }
+  return withheld
 }
 
 /**
@@ -858,6 +953,7 @@ function projectionsByType(
         {
           projectionId: definition.id,
           datasetId: definition.datasetId,
+          propertyIds: projectedPropertyIds(definition, source.ontology),
           datasetView: canViewDataset(definition.datasetId),
           ...(version
             ? {
@@ -872,6 +968,17 @@ function projectionsByType(
         },
       ]
     })
+  )
+}
+
+/** The properties a projection feeds on its type, as its definition says: no value is read. */
+function projectedPropertyIds(
+  definition: ObjectProjectionDefinition,
+  ontology: OntologyRegistry
+): readonly string[] {
+  const ownership = computeProjectionOwnership(definition, ontology)
+  return ownership.objects.flatMap((owned) =>
+    owned.objectTypeId === definition.objectTypeId ? owned.propertyIds : []
   )
 }
 

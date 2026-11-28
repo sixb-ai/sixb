@@ -156,6 +156,32 @@ export class PgOntologyTypeShapeStorage implements OntologyTypeShapeStorage {
     })
   }
 
+  async listHeldPropertyKeys(input: {
+    readonly projectId: string
+    readonly objectTypeId: string
+  }): Promise<readonly string[]> {
+    return this.runRootOperation(async (sql) => {
+      const { projectId, objectTypeId: type } = input
+      const ofType = sql`project_id = ${projectId} AND object_type_id = ${type}`
+      const rows = await sql<{ readonly key: string }[]>`
+        SELECT jsonb_object_keys(properties) AS key FROM objects WHERE ${ofType}
+        UNION
+        SELECT jsonb_object_keys(COALESCE(value -> 'properties', value -> 'set', '{}'::jsonb))
+        FROM ontology_object_overrides WHERE ${ofType}
+        UNION
+        SELECT jsonb_array_elements_text(COALESCE(value -> 'unset', '[]'::jsonb))
+        FROM ontology_object_overrides WHERE ${ofType}
+        UNION
+        SELECT jsonb_object_keys(edited_at) FROM ontology_object_overrides
+        WHERE ${ofType} AND jsonb_typeof(edited_at) = 'object'
+        UNION
+        SELECT property_id FROM timeseries_latest WHERE ${ofType}
+        ORDER BY 1
+      `
+      return rows.map((row) => row.key)
+    })
+  }
+
   async listEdits(input: ListObjectEditsInput): Promise<{
     readonly edits: readonly StoredObjectEdit[]
     readonly nextPrimaryId?: string

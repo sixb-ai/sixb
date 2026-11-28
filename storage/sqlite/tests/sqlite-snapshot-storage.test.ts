@@ -129,3 +129,19 @@ test("a page of slots an old migration left in conflict does not end the link ed
     await rm(directory, { recursive: true, force: true })
   }
 })
+
+// Reproduce: drop the namespace check of SqliteStorage.unloadSnapshot, and a root database loses
+// whatever it holds.
+test("a load is emptied in a branch namespace only", async () => {
+  const storage = new SqliteStorage()
+  try {
+    const refused = await storage
+      .unloadSnapshot({ projectId: "p", commitId: "snapshot_1" })
+      .catch((error: Error) => error)
+    expect(String(refused)).toContain(
+      "[SixbSqlite] A snapshot load is emptied in a branch namespace only"
+    )
+  } finally {
+    storage.close()
+  }
+})

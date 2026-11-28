@@ -15,7 +15,7 @@ import { insertSqliteRuntimeCommit } from "./ontology-storage/commits"
 import { encodeSqliteVector } from "./vector-encoding"
 
 /** Tables a snapshot fills: their secondary indexes are built once, after the load. */
-const LOADED_TABLES = [
+export const LOADED_TABLES = [
   "objects",
   "links",
   "ontology_object_overrides",

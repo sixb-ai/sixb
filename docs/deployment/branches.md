@@ -116,8 +116,8 @@ your machine only.
 | Nobody opens it for 14 days | Loses its copy; the next open takes a new one |
 | Its git branch is deleted | Is deleted. A merge alone deletes nothing |
 
-Each type is checked against the branch's own definitions as its copy loads: a type the branch
-changed incompatibly is left out, and the branch says which and why.
+A branch is the dry run of its [migrations](../ontology/migrations.md) on production's data: see
+[what its copy holds](../cli/production-data.md#what-the-branch-holds).
 
 A branch reaches production's database, production's API, the git host, the npm and yarn
 registries, DuckDB's extensions (`https://extensions.duckdb.org`) when the project's lake is

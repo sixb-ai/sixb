@@ -148,7 +148,7 @@ export class PgSnapshotLoad {
         await lane.tail.catch(() => undefined)
         await lane.connection.unsafe("ROLLBACK").catch(() => undefined)
       }
-      await emptyAgain(first, input, state)
+      await emptyAgain(first, { projectId: input.projectId, commitId: input.commit.id }, state)
       throw error
     } finally {
       // Nothing in flight once the caller releases the connections.
@@ -629,17 +629,48 @@ async function writeCommit(sql: SQLClient, input: SnapshotLoadInput): Promise<vo
  * Undo a failed load: what lanes committed, the commit, and the mark. The schema held nothing
  * before, so emptying its tables takes only the load's rows.
  */
-async function emptyAgain(
+async function emptyAgain(sql: ReservedSQL, input: LoadRef, state: BranchSchemaState) {
+  await runPgTransactionOn(sql, () => emptyLoadedRows(sql, input, state))
+}
+
+/**
+ * Undo a committed load, and only one: its commit must be the project's only one, so nothing
+ * written since is emptied with it.
+ */
+export async function unloadPgSnapshot(
   sql: ReservedSQL,
-  input: SnapshotLoadInput,
+  input: LoadRef,
   state: BranchSchemaState
 ): Promise<void> {
   await runPgTransactionOn(sql, async () => {
-    await sql.unsafe(`TRUNCATE ${LOADED_TABLES.join(", ")}`)
-    await sql`DELETE FROM object_unique_properties WHERE project_id = ${input.projectId}`
-    await sql`DELETE FROM ontology_commits WHERE project_id = ${input.projectId} AND id = ${input.commit.id}`
-    await markState(sql, state)
+    // No commit lands between the count and the emptying.
+    await sql`LOCK TABLE ontology_commits IN EXCLUSIVE MODE`
+    const [counted] = await sql<{ commits: number; loads: number }[]>`
+      SELECT count(*)::int AS commits, count(*) FILTER (WHERE id = ${input.commitId})::int AS loads
+        FROM ontology_commits
+       WHERE project_id = ${input.projectId}
+    `
+    if (counted?.loads !== 1 || counted.commits !== 1) {
+      throw new Error(
+        `[SixbPg] This branch holds no load of '${input.commitId}' alone: something was written since, so emptying it would take that too. Drop the branch and take a new copy.`
+      )
+    }
+
+    await emptyLoadedRows(sql, input, state)
   })
+}
+
+interface LoadRef {
+  readonly projectId: string
+  readonly commitId: string
+}
+
+/** The schema held nothing before the load, so emptying its tables takes only the load's rows. */
+async function emptyLoadedRows(sql: ReservedSQL, input: LoadRef, state: BranchSchemaState) {
+  await sql.unsafe(`TRUNCATE ${LOADED_TABLES.join(", ")}`)
+  await sql`DELETE FROM object_unique_properties WHERE project_id = ${input.projectId}`
+  await sql`DELETE FROM ontology_commits WHERE project_id = ${input.projectId} AND id = ${input.commitId}`
+  await markState(sql, state)
 }
 
 /** Drop every index of these tables that no constraint owns, returning how to build it. */

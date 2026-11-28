@@ -1,11 +1,20 @@
 import { expect, test } from "bun:test"
-import { col, defineDataset, defineObjectType, defineProjection, link, prop, SixbHost } from ".."
+import {
+  col,
+  defineDataset,
+  defineMigration,
+  defineObjectType,
+  defineProjection,
+  link,
+  prop,
+  SixbHost,
+} from ".."
 import { InMemoryBlobStorage } from "../blob-storage"
 import { InMemoryBroker } from "../broker"
 import { InMemoryLakeStorage } from "../lake-storage"
-import type { OntologyRegistry } from "../ontology"
+import { OntologyRegistry } from "../ontology"
+import { typeShape } from "../ontology/type-shapes"
 import { InMemoryQueues } from "../queues"
-import { typeDefinitionManifest } from "../snapshots/definitions"
 import { exportSnapshot, hostSnapshotSource } from "../snapshots/export"
 import {
   encodeSnapshotFrame,
@@ -32,6 +41,7 @@ import {
   seededHost,
   TIMEOUT_MS,
 } from "./snapshot-contract-fixture"
+import { runSnapshotShapesCases } from "./snapshot-shapes-contract"
 
 export interface SnapshotLoadContractProvider<TStorage extends Storage> {
   /** A migrated storage holding no project yet. */
@@ -361,6 +371,218 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
     TIMEOUT_MS
   )
 
+  // Red check: in SQLite's `unloadSnapshot`, empty `LOADED_TABLES` in their own order: the
+  // sources go before the roots and rows that hold them, and the import fails on a foreign key.
+  test(
+    `${name} empties a load that took a projection's source over, when the branch refuses its type`,
+    async () => {
+      await withStorage(async (storage) => {
+        const branchStorage = await storage.createBranchNamespace("devices-refused")
+        const production = devicesHost(branchStorage)
+
+        // d-2's edit holds a name the branch's integer refuses, and no migration converts it.
+        const report = await importSnapshot({
+          snapshot: () => devicesSnapshot(production),
+          storage: branchStorage,
+          ontology: new OntologyRegistry({ sources: [retypedDevice()] }),
+          projections: production.definitions.projections,
+        })
+        expect(report.skipped).toEqual([
+          expect.objectContaining({ objectTypeId: Device.id, kind: "unfit" }),
+        ])
+        expect(report.types).toEqual([])
+
+        const active = await branchStorage.ontology.sources.getActive({
+          projectId: PROJECT,
+          source: { projectionId: fromDevices.id },
+        })
+        expect(active).toBeNull()
+        expect((await branchStorage.objects.list({ projectId: PROJECT })).total).toBe(0)
+      })
+    },
+    TIMEOUT_MS
+  )
+
+  // Red check: in import.ts, drop `projections` from the `applyTypeShapes` call: the fill edits
+  // d-1, which its source stands for, and the edit masks the value the projection gives it.
+  test(
+    `${name} fills no property the branch's projection feeds, on an object an action created`,
+    async () => {
+      await withStorage(async (storage) => {
+        const branchStorage = await storage.createBranchNamespace("devices-serial")
+        const branch = serialHost(branchStorage)
+        const fill = defineMigration("device-serial", SerialDevice).fillProperty(
+          "serial",
+          () => "unknown"
+        )
+
+        const report = await importSnapshot({
+          snapshot: createdDevicesSnapshot(),
+          storage: branchStorage,
+          ontology: branch.definitions.ontology as OntologyRegistry,
+          projections: branch.definitions.projections,
+          migrations: [fill],
+        })
+        expect(report.types).toEqual([
+          expect.objectContaining({
+            objectTypeId: Device.id,
+            reprojectable: true,
+            migrationIds: ["device-serial"],
+          }),
+        ])
+
+        // d-1 waits for its projection's serial; d-2, which no source row stands for, is filled.
+        await branchStorage.readSnapshot({ views: 1, maxDurationMs: 60_000 }, async ([view]) => {
+          const edits = await view!.readObjectEdits({
+            projectId: PROJECT,
+            objectTypeId: Device.id,
+            limit: 10,
+          })
+          expect(edits.map(({ ref, value }) => [ref.primaryId, value])).toEqual([
+            ["d-1", { kind: "create", properties: { name: "A" } }],
+            ["d-2", { kind: "create", properties: { name: "B", serial: "unknown" } }],
+          ])
+        })
+      })
+    },
+    TIMEOUT_MS
+  )
+
+  // Red check: in import.ts, pass no `unseenValues` to the gate: the devices are refused, each
+  // one's name counted as an edit the code refuses.
+  test(
+    `${name} leaves the values of a type copied as created objects to its projection`,
+    async () => {
+      await withStorage(async (storage) => {
+        const ontology = new OntologyRegistry({ sources: [retypedDevice()] })
+        const unchecked = [
+          "SnapshotDevice: 'name' changed from string to integer: not checked, the copy can't tell its projection's values from edits.",
+        ]
+
+        // The snapshot names the properties, or else every property but the primary may be fed.
+        for (const [label, propertyIds] of [
+          ["named", ["name"]],
+          ["unnamed", undefined],
+        ] as const) {
+          const branchStorage = await storage.createBranchNamespace(`devices-${label}`)
+          const report = await importSnapshot({
+            snapshot: copiedDevicesSnapshot(propertyIds),
+            storage: branchStorage,
+            ontology,
+          })
+
+          expect(report.skipped).toEqual([])
+          expect(report.types).toEqual([
+            expect.objectContaining({
+              objectTypeId: Device.id,
+              objects: 3,
+              reprojectable: false,
+              migrationIds: [],
+              refusedByDeploy: [],
+              unchecked,
+            }),
+          ])
+          expect(await storedName(branchStorage, "d-1")).toBe("A")
+        }
+
+        // Its keys are still read: a removal nothing migrates is refused once, counted.
+        const removing = await storage.createBranchNamespace("devices-removed")
+        const removed = await importSnapshot({
+          snapshot: copiedDevicesSnapshot(["name"]),
+          storage: removing,
+          ontology: new OntologyRegistry({ sources: [unnamedDevice()] }),
+        })
+        expect(removed.types).toEqual([
+          expect.objectContaining({
+            refusedByDeploy: [
+              "✗ SnapshotDevice: 'name' was removed, and 3 objects hold it.",
+              "  Rename or remove it in a migration:",
+              '    defineMigration("snapshot-device-name", SnapshotDevice).renameProperty("name", "<new id>")',
+              '    defineMigration("snapshot-device-name", SnapshotDevice).removeProperty("name")',
+            ],
+            unchecked: [],
+          }),
+        ])
+      })
+    },
+    TIMEOUT_MS
+  )
+
+  // Red check: in type-shapes.ts, leave the `valuesUnseen` changes out of `runnable`: the convert
+  // never runs, and every device keeps a name its integer refuses. In plan-values.ts, refuse an
+  // object whatever property its step failed on: the devices are left out for d-2.
+  test(
+    `${name} converts the values of a type copied as created objects, refusing none`,
+    async () => {
+      await withStorage(async (storage) => {
+        const Retyped = retypedDevice()
+        const convert = defineMigration("device-name-length", Retyped).convertProperty(
+          "name",
+          ({ value }) => {
+            if (value === "B") throw new Error("no length for B")
+            return String(value).length
+          }
+        )
+
+        const branchStorage = await storage.createBranchNamespace("devices-converted")
+        const report = await importSnapshot({
+          snapshot: copiedDevicesSnapshot(["name"]),
+          storage: branchStorage,
+          ontology: new OntologyRegistry({ sources: [Retyped] }),
+          migrations: [convert],
+        })
+
+        expect(report.skipped).toEqual([])
+        expect(report.types).toEqual([
+          expect.objectContaining({
+            objectTypeId: Device.id,
+            migrationIds: ["device-name-length"],
+            refusedByDeploy: [],
+            unchecked: [
+              "SnapshotDevice: 'name' changed from string to integer: not checked, the copy can't tell its projection's values from edits.",
+              "SnapshotDevice 'd-2': convertProperty('name') failed: no length for B: not checked, so it keeps its value.",
+            ],
+          }),
+        ])
+        expect(await storedName(branchStorage, "d-1")).toBe(1)
+        expect(await storedName(branchStorage, "d-2")).toBe("B")
+      })
+    },
+    TIMEOUT_MS
+  )
+
+  // Red check: in import.ts, take only the snapshot's `propertyIds` in `projectedPropertyIds`:
+  // the serial the branch's projection newly feeds is counted missing on every device, and the
+  // type is refused where a deploy passes it.
+  test(
+    `${name} leaves a required property the branch's projection newly feeds to it`,
+    async () => {
+      await withStorage(async (storage) => {
+        const branchStorage = await storage.createBranchNamespace("devices-fed")
+        const branch = serialHost(branchStorage)
+
+        const report = await importSnapshot({
+          snapshot: copiedDevicesSnapshot(["name"]),
+          storage: branchStorage,
+          ontology: branch.definitions.ontology as OntologyRegistry,
+          projections: branch.definitions.projections,
+        })
+
+        expect(report.skipped).toEqual([])
+        expect(report.types).toEqual([
+          expect.objectContaining({
+            objectTypeId: Device.id,
+            objects: 3,
+            unchecked: [
+              "SnapshotDevice: 'serial' was added as required: not checked, the copy can't tell its projection's values from edits.",
+            ],
+          }),
+        ])
+      })
+    },
+    TIMEOUT_MS
+  )
+
   test(
     `${name} keeps branch namespaces apart`,
     async () => {
@@ -401,6 +623,8 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
     },
     TIMEOUT_MS
   )
+
+  runSnapshotShapesCases(name, withStorage)
 }
 
 const Device = defineObjectType({
@@ -455,13 +679,53 @@ function devicesHost(storage: Storage): SixbHost {
   })
 }
 
-/** A snapshot whose devices travel as their projection's source, with one edit over d-2. */
-async function* devicesSnapshot(host: SixbHost): AsyncGenerator<Uint8Array> {
+/** Devices whose name, which their projection feeds, a branch makes a number. */
+function retypedDevice() {
+  return defineObjectType({
+    id: Device.id,
+    name: "Device",
+    properties: [prop("id", "string", { primary: true, required: true }), prop("name", "integer")],
+    links: [
+      link.self("parent", { cardinality: "one" }),
+      link.self("related", { cardinality: "many" }),
+    ],
+  })
+}
+
+function unnamedDevice() {
+  return defineObjectType({
+    id: Device.id,
+    name: "Device",
+    properties: [prop("id", "string", { primary: true, required: true })],
+    links: [
+      link.self("parent", { cardinality: "one" }),
+      link.self("related", { cardinality: "many" }),
+    ],
+  })
+}
+
+async function storedName(storage: Storage, primaryId: string) {
+  const row = await storage.objects.getByPrimaryId({
+    projectId: PROJECT,
+    objectTypeId: Device.id,
+    primaryId,
+  })
+  return row?.properties.name
+}
+
+/**
+ * Devices a projection feeds, copied as created objects: the person's copy can't take the
+ * projection's source over. `propertyIds` is what production's projection feeds, absent from an
+ * earlier snapshot.
+ */
+async function* copiedDevicesSnapshot(
+  propertyIds: readonly string[] | undefined
+): AsyncGenerator<Uint8Array> {
   const at = Date.parse(DEVICE_EDIT.updatedAt)
   const records: SnapshotRecord[] = [
     {
       kind: "manifest",
-      format: 2,
+      format: 3,
       projectId: PROJECT,
       takenAt: DEVICE_EDIT.updatedAt,
       takenBy: { type: "user", id: "usr_alice" },
@@ -469,7 +733,180 @@ async function* devicesSnapshot(host: SixbHost): AsyncGenerator<Uint8Array> {
       types: [
         {
           objectTypeId: Device.id,
-          ...typeDefinitionManifest(Device, host.definitions.ontology),
+          primaryPropertyId: "id",
+          shape: {
+            fits: typeShape(Device, new OntologyRegistry({ sources: [Device] })),
+            state: "current",
+            settledMigrationIds: [],
+          },
+          hiddenPropertyIds: [],
+          throughCondition: false,
+          vectors: [],
+          projection: {
+            projectionId: fromDevices.id,
+            datasetId: devices.id,
+            ...(propertyIds ? { propertyIds } : {}),
+            datasetView: true,
+            notReprojectable: "the branch does not read production's datasets in place",
+          },
+        },
+      ],
+      unreadableTypeIds: [],
+    },
+    { kind: "members", users: [], memberships: [] },
+    {
+      kind: "objects",
+      objectTypeId: Device.id,
+      ids: ["d-1", "d-2", "d-3"],
+      createdAt: [at, at, at],
+      updatedAt: [at, at, at],
+      columns: [
+        { propertyId: "id", values: ["d-1", "d-2", "d-3"] },
+        { propertyId: "name", values: ["A", "B", "C"] },
+      ],
+    },
+    {
+      kind: "end",
+      counts: { objects: 3, links: 0, points: 0, vectors: 0, users: 0, sourceRoots: 0, edits: 0 },
+    },
+  ]
+
+  yield SNAPSHOT_SIGNATURE
+  for (const record of records) yield await encodeSnapshotFrame(record, { compress: false })
+}
+
+/** Devices as a branch changes them: a required serial, which its projection feeds. */
+const SerialDevice = defineObjectType({
+  id: Device.id,
+  name: "Device",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("name", "string"),
+    prop("serial", "string", { required: true }),
+  ],
+  links: [
+    link.self("parent", { cardinality: "one" }),
+    link.self("related", { cardinality: "many" }),
+  ],
+})
+const serialDevices = defineDataset("snapshot_devices", {
+  schema: [col("id", "string"), col("name", "string"), col("serial", "string")],
+})
+const serialFromDevices = defineProjection("snapshot_devices", SerialDevice)
+  .fromDataset(serialDevices)
+  .properties({ id: "id", name: "name", serial: "serial" })
+
+function serialHost(storage: Storage): SixbHost {
+  return new SixbHost({
+    id: PROJECT,
+    ontology: [SerialDevice],
+    datasets: [serialDevices],
+    projections: [serialFromDevices],
+    blobStorage: new InMemoryBlobStorage(),
+    broker: new InMemoryBroker(),
+    lakeStorage: new InMemoryLakeStorage(),
+    queues: new InMemoryQueues(),
+    storage,
+  })
+}
+
+/**
+ * Devices that travel as their source, both created by an action: d-1, which production's
+ * projection then asserted too, and d-2, which no source row stands for.
+ */
+async function* createdDevicesSnapshot(): AsyncGenerator<Uint8Array> {
+  const at = Date.parse(DEVICE_EDIT.updatedAt)
+  const created = (name: string) => ({ kind: "create", properties: { name } }) as const
+  const records: SnapshotRecord[] = [
+    {
+      kind: "manifest",
+      format: 3,
+      projectId: PROJECT,
+      takenAt: DEVICE_EDIT.updatedAt,
+      takenBy: { type: "user", id: "usr_alice" },
+      members: "self",
+      types: [
+        {
+          objectTypeId: Device.id,
+          primaryPropertyId: "id",
+          shape: {
+            fits: typeShape(Device, new OntologyRegistry({ sources: [Device] })),
+            state: "current",
+            settledMigrationIds: [],
+          },
+          hiddenPropertyIds: [],
+          throughCondition: false,
+          vectors: [],
+          projection: {
+            projectionId: fromDevices.id,
+            datasetId: devices.id,
+            datasetView: true,
+            source: {
+              datasetVersion: {
+                datasetId: devices.id,
+                versionId: "v1",
+                createdAt: DEVICE_EDIT.updatedAt,
+              },
+              projectionRevision: "revision",
+              ownershipHash: "ownership",
+              ontologyRevision: "ontology",
+            },
+          },
+        },
+      ],
+      unreadableTypeIds: [],
+      lake: { catalogVersion: "point" },
+    },
+    { kind: "members", users: [], memberships: [] },
+    {
+      kind: "objects",
+      objectTypeId: Device.id,
+      ids: ["d-1", "d-2"],
+      createdAt: [at, at],
+      updatedAt: [at, at],
+      columns: [{ propertyId: "name", values: ["A", "B"] }],
+    },
+    { kind: "sourceRoots", projectionId: fromDevices.id, roots: [DEVICE_ROOTS[0]!] },
+    {
+      kind: "edits",
+      objectTypeId: Device.id,
+      objects: [
+        ["d-1", created("A"), null, at],
+        ["d-2", created("B"), null, at],
+      ],
+      links: [],
+      slots: [],
+    },
+    {
+      kind: "end",
+      counts: { objects: 2, links: 0, points: 0, vectors: 0, users: 0, sourceRoots: 1, edits: 2 },
+    },
+  ]
+
+  yield SNAPSHOT_SIGNATURE
+  for (const record of records) yield await encodeSnapshotFrame(record, { compress: false })
+}
+
+/** A snapshot whose devices travel as their projection's source, with one edit over d-2. */
+async function* devicesSnapshot(host: SixbHost): AsyncGenerator<Uint8Array> {
+  const at = Date.parse(DEVICE_EDIT.updatedAt)
+  const records: SnapshotRecord[] = [
+    {
+      kind: "manifest",
+      format: 3,
+      projectId: PROJECT,
+      takenAt: DEVICE_EDIT.updatedAt,
+      takenBy: { type: "user", id: "usr_alice" },
+      members: "self",
+      types: [
+        {
+          objectTypeId: Device.id,
+          primaryPropertyId: "id",
+          shape: {
+            fits: typeShape(Device, host.definitions.ontology),
+            state: "current",
+            settledMigrationIds: [],
+          },
           hiddenPropertyIds: [],
           throughCondition: false,
           vectors: [],

@@ -57,10 +57,19 @@ is written in halves. Objects are columnar per page. The `end` record counts wha
 and the importer checks it, with nothing after it, before the provider commits: a cut, doubled or
 extended stream never imports.
 
-The manifest carries each type's definition fingerprints, the properties hidden from the person,
-the vector configurations, and the projection feeding the type with the version production
-applied, and `lake.catalogVersion`, the lake point the branch's slice was cut at. Version 2 adds
-a projection's source roots and the edits over its type; a reader refuses any other version.
+The manifest carries each type's primary property and shape, the properties hidden from the
+person, the vector configurations, and the projection feeding the type with the version
+production applied, and `lake.catalogVersion`, the lake point the branch's slice was cut at.
+Version 2 adds a projection's source roots and the edits over its type. Version 3 replaces the
+definition fingerprints with the shape production's objects fit (`ontology/type-shapes.ts`): the
+row production recorded, read at S with the migrations it settled, or its code's, `unrecorded`,
+when it recorded none. `withheld` names the keys production's objects hold that its code no
+longer declares, and only that: no value travels, their markings gone with their definition,
+and no count, which could tell what a marking or a condition hid. They are found before the
+consistent read opens, so no view waits on the scan; a commit refuses an undeclared key, so none
+appears meanwhile. A recorded shape names the candidates, each probed; a type never recorded is
+scanned for its keys alone (`listHeldPropertyKeys`, one SQL pass). A reader takes
+versions 2 and 3, and refuses any other.
 
 ## Lake slice
 
@@ -76,15 +85,25 @@ then deletes the slice through its caller (`dropLakeSlice`).
 ## Import
 
 - Members are written first, in a transaction of their own, and kept by a load taken again.
-- `checkTypeFits` compares each type with the branch's definition. A removed type, a changed
-  primary or property, or a newly required property skips the type; a removed property or link is
-  left out. Everything is reported per type.
+- **The branch decides as a deploy would, on the copy's data.**
+
+  | Step | What |
+  |---|---|
+  | Before the load | `checkTypeFits` (`definitions.ts`) runs the gate's `classifyTypeChanges` on production's shape and the branch's code and migrations. Only what can't be stored skips the type: a removed type, a changed primary, a type production was migrating, conflicting steps. A removal nothing migrates is left out of the objects; the keys and links a pending step moves load, so the step runs |
+  | The load | Counts the objects that held each left-out key, and those of a removed type or a changed primary: the gate's own finding, a deploy would refuse it (`refusedByDeploy`, a skip's `findings`). A withheld key is said to be held, with no count; through a view condition it is listed as not checked, since only hidden objects may hold it |
+  | After it | Production's shapes and settled migrations are recorded (not for an `unrecorded` type, nor a version 2 snapshot: the gate's baseline pass reads the copy, as a first deploy does). Then `checkTypeShapes` in `check` mode, with the unique dry run worded as findings (`uniqueDuplicates`, so `applyTypeShapes` doesn't run it again), and hidden and withheld properties `unseen`: the copy holds none of their values, so their changes are listed as not checked (`unchecked`). The properties a projection feeds on a type copied as created objects are `unseenValues` (see Projections) |
+  | A type it refuses | `unloadSnapshot` empties the load, as a failed one is emptied, only while its commit is the project's only one, and the copy loads again from `snapshot()` without it, skipped (`unfit`) with the gate's lines and counts. The second read must be the same copy (`takenAt`) and refuse nothing more. Only this path reads the copy twice |
+  | Then | `applyTypeShapes`, as a deploy after its checks: the run, unique values, the shapes. A fill or a convert whose plan refuses objects (`ValuePlanError`) wrote nothing: its types are refused with the plan's lines, and the copy loads again without them |
+
+  Hidden properties and objects a condition hides are listed per type: the migrations never saw
+  them. A version 2 snapshot has no shapes: every key loads, so a pending rename still finds the
+  old key, and a type its data doesn't fit is refused like any other.
 - A required property hidden from the person keeps its type: its objects and their links travel
   and read normally, and the report lists it (`requiredHiddenPropertyIds`). Any write to one of
   those objects, a new link included, fails while the property is unset, and says why; a delete
-  works. The base commit records the property and who took the copy
-  (`materializer/effective/withheld.ts`). Only objects nothing wrote since the import name that
-  commit, so production never reads it.
+  works. The branch's fills and converts check those objects without it. The base commit records
+  the property and who took the copy (`materializer/effective/withheld.ts`). Only objects nothing
+  wrote since the import name that commit, so production never reads it.
 - `loadSnapshot` writes one base commit, the kernel operation `ontology.loadSnapshot`, with no
   outbox row: nothing reacts. Its ontology revision is the branch's. It is all or nothing.
 - Each object is created by an edit (`create` override), each link by an edge or slot override, so
@@ -134,6 +153,21 @@ production's, it reads the dataset in full, as anywhere.
 
 Otherwise the type travels as created objects, and the manifest and the import report say why
 (`notReprojectable`): its projection cannot update them on the branch.
+
+Each object is then one `create` edit, which flattens the projection's values into edits. A deploy
+reads only edits for a value's fit and for a missing required value, and leaves the projection's
+values to the projection. So the properties production's projection feeds (`propertyIds`, from its
+definition; for an older snapshot, the branch's projection of the same id, or else every property
+but the primary), and those the branch's projections feed, are `unseenValues`: a change of their
+values or of whether they are required is listed as not checked, never refused. Their keys are
+still read: a removal or a rename is decided and runs as for any property.
+
+The branch's fills and converts still run on them, so the copy fits its code where they can: an
+object one of them fails on keeps its value, and is listed as not checked too (`onUncheckedValue`).
+A value the branch's schema refuses with no convert declared stays as it is: a write to its object
+fails on the branch until a convert exists, and a required one nothing fills stays missing. The
+limit: a real edit production holds over one of those values is flattened like the rest, so the
+branch can't check it either.
 
 ## Branch namespaces
 

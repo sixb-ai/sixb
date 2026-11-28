@@ -290,7 +290,13 @@ export function runDeclaredPropertiesContractSuite<TStorage extends Storage>(
             "d-projected",
             "v-1",
           ])
-          expectNoStaleValue(records)
+          // The manifest names the stale keys a deploy would refuse, with no count and no
+          // value (`withheld`): only that may name them.
+          const named = records.flatMap((record) =>
+            record.kind === "manifest" ? record.types.map((type) => type.shape?.withheld) : []
+          )
+          expect(named).toEqual([["gate"], ["combo", "gate"]])
+          expectNoStaleValue(records.map(withoutWithheldKeys))
         }
       })
     },
@@ -305,6 +311,20 @@ interface Readers {
   readonly guard: ReturnType<typeof createTestSixb>
   /** Views doors and vaults, cleared for the marking. */
   readonly keeper: ReturnType<typeof createTestSixb>
+}
+
+/** A snapshot record without the stale keys its manifest names on purpose. */
+function withoutWithheldKeys(record: SnapshotRecord): SnapshotRecord {
+  if (record.kind !== "manifest") return record
+
+  return {
+    ...record,
+    types: record.types.map(({ shape, ...type }) => {
+      if (!shape) return type
+      const { withheld: _withheld, ...kept } = shape
+      return { ...type, shape: kept }
+    }),
+  }
 }
 
 /** No value stored under `gate` or `combo` appears anywhere in what a reader received. */
