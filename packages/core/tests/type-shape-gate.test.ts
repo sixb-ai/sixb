@@ -19,6 +19,7 @@ import {
 } from "../src/materializer"
 import type { ObjectLink } from "../src/ontology/types"
 import { TypeShapeMismatchError } from "../src/storage/internal"
+import { prepareUniqueProperties } from "../src/storage/migrations/prepare-unique-properties"
 import { checkTypeShapes, recordTypeShapes } from "../src/storage/migrations/type-shapes"
 
 const PROJECT = "type-shape-gate"
@@ -961,5 +962,31 @@ describe("unique values and a deploy that fails", () => {
     expect(await holder(storage, "Alpha", "code", "Y")).toBe("A-1")
     expect(await holder(storage, "Alpha", "code", "X")).toBeNull()
     expect(await holder(storage, "Job", "note", "same")).toBe("J-1")
+  })
+
+  // Revert check: in `backfillProperty`, return early on current values whatever `rebuild` says:
+  // the redeploy then trusts the values the failed deploy built, and records `J-2`'s duplicate.
+  // Pass `rebuild` to the real preparation only, not to `checkUniqueProperties`' dry run: `Alpha`'s
+  // values are then rebuilt before `Job.note` fails.
+  test("rebuilds the values of a property it makes unique, even those a failed deploy built", async () => {
+    const storage = new InMemoryStorage()
+    await deploy(storage, before)
+    await commit(storage, before, [upsert("Job", "J-1", { note: "same" })])
+
+    // A deploy of `after` that fails once it built the values, before it records the shapes.
+    await prepareUniqueProperties({ storage, projectId: PROJECT, ontology: after })
+
+    // The old release starts again, and writes a value another job holds.
+    await commit(storage, before, [upsert("Job", "J-2", { note: "same" })])
+    const prepared = await storage.ontology.uniqueValues.listPrepared({ projectId: PROJECT })
+
+    // The dry run names both before anything is written.
+    const redeployed = await deploy(storage, after).catch((error: unknown) => error)
+    expect(String(redeployed)).toContain("Cannot make 'Job.note' unique")
+    expect(String(redeployed)).toContain("'J-1' and 'J-2' share a value")
+    expect(await storage.ontology.uniqueValues.listPrepared({ projectId: PROJECT })).toEqual(
+      prepared
+    )
+    expect((await storedJob(storage))?.shape.properties.note).not.toHaveProperty("unique")
   })
 })

@@ -16,9 +16,12 @@
 5. **Recording** the new shapes, last, so nothing that can fail runs after it.
 
 A deploy that fails therefore leaves no unique value prepared: the old release, started again,
-would write such a property without keeping its values, and the next deploy would trust them. A
-property made unique is a narrowing for the same reason: it pauses writes, so the old release
-can't write a value another object holds while the values are built.
+would write such a property without keeping its values, and the next deploy would trust them. One
+that fails after building them, before recording the shapes, still can: a property the deploy makes
+unique, from the recorded shape to the code's, is built again from the objects, its dry run
+included, whatever is prepared (`madeUnique`). A property made unique is a narrowing for the same
+reason: it pauses writes, so the old release can't write a value another object holds while the
+values are built.
 
 ## Stored type shapes
 

@@ -4,7 +4,11 @@ import {
   prepareObjectQueries,
 } from "../objects/query-preparation"
 import type { Storage } from "../types"
-import { checkUniqueProperties, prepareUniqueProperties } from "./prepare-unique-properties"
+import {
+  checkUniqueProperties,
+  madeUnique,
+  prepareUniqueProperties,
+} from "./prepare-unique-properties"
 import {
   checkTypeShapes,
   formatTypeShapeFindings,
@@ -107,10 +111,11 @@ export async function applyTypeShapes(
 ): Promise<void> {
   const unfit = shapes.types.filter((type) => type.findings.length > 0)
   const keepObjectTypeIds = new Set(unfit.map((type) => type.objectTypeId))
+  const rebuild = madeUnique(shapes.types)
 
   // Not part of the status: it only reads and writes rows, and says when it builds values.
-  await checkUniqueProperties({ ...options, storage, keepObjectTypeIds })
-  await prepareUniqueProperties({ ...options, storage, keepObjectTypeIds })
+  await checkUniqueProperties({ ...options, storage, keepObjectTypeIds, rebuild })
+  await prepareUniqueProperties({ ...options, storage, keepObjectTypeIds, rebuild })
 
   await recordTypeShapes(storage, shapes)
 }

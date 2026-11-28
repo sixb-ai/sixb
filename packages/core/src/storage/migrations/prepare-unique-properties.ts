@@ -1,5 +1,6 @@
 import { UniqueValueViolationError } from "../../materialization/errors"
 import type { OntologyDefinitionCatalog } from "../../ontology/registry"
+import type { TypeShapeChange } from "../../ontology/type-shapes"
 import {
   UNIQUE_VALUE_KEY_VERSION,
   type UniquePropertyDefinition,
@@ -37,8 +38,11 @@ export async function prepareUniqueProperties(input: {
   readonly ontology: OntologyDefinitionCatalog
   /** Types whose stored values stay as they are, such as those whose data the code doesn't fit. */
   readonly keepObjectTypeIds?: ReadonlySet<string>
+  /** Properties whose prepared values are rebuilt even when current: see {@link madeUnique}. */
+  readonly rebuild?: readonly UniquePropertyRef[]
 }): Promise<void> {
   const { storage, projectId } = input
+  const rebuild = new Set((input.rebuild ?? []).map(propertyKey))
   const kept = (property: { readonly objectTypeId: string }) =>
     input.keepObjectTypeIds?.has(property.objectTypeId) ?? false
   const declared = declaredUniqueProperties(input.ontology).filter((property) => !kept(property))
@@ -46,9 +50,14 @@ export async function prepareUniqueProperties(input: {
 
   for (const property of declared) {
     await withRetries(property, () =>
-      storage.transaction((tx) => backfillProperty(tx, projectId, property), {
-        isolation: "serializable",
-      })
+      storage.transaction(
+        (tx) =>
+          backfillProperty(tx, projectId, property, {
+            announce: true,
+            rebuild: rebuild.has(propertyKey(property)),
+          }),
+        { isolation: "serializable" }
+      )
     )
   }
 
@@ -82,8 +91,10 @@ export async function checkUniqueProperties(input: {
   readonly projectId: string
   readonly ontology: OntologyDefinitionCatalog
   readonly keepObjectTypeIds?: ReadonlySet<string>
+  readonly rebuild?: readonly UniquePropertyRef[]
 }): Promise<void> {
   const { storage, projectId } = input
+  const rebuild = new Set((input.rebuild ?? []).map(propertyKey))
   const declared = declaredUniqueProperties(input.ontology).filter(
     (property) => !(input.keepObjectTypeIds?.has(property.objectTypeId) ?? false)
   )
@@ -92,7 +103,10 @@ export async function checkUniqueProperties(input: {
     const checked = withRetries(property, () =>
       storage.transaction(
         async (tx) => {
-          await backfillProperty(tx, projectId, property, { announce: false })
+          await backfillProperty(tx, projectId, property, {
+            announce: false,
+            rebuild: rebuild.has(propertyKey(property)),
+          })
           throw new DryRunRollback()
         },
         { isolation: "serializable" }
@@ -102,6 +116,29 @@ export async function checkUniqueProperties(input: {
       if (!(error instanceof DryRunRollback)) throw error
     })
   }
+}
+
+interface UniquePropertyRef {
+  readonly objectTypeId: string
+  readonly propertyId: string
+}
+
+/**
+ * The properties a deploy makes unique, from the recorded shape to the code's: their prepared
+ * values are never trusted. A failed deploy may have built them, and the old release, started
+ * again, writes such a property without keeping them: it may have written a value another object
+ * holds since.
+ */
+export function madeUnique(
+  types: readonly { readonly objectTypeId: string; readonly changes: readonly TypeShapeChange[] }[]
+): UniquePropertyRef[] {
+  return types.flatMap(({ objectTypeId, changes }) =>
+    changes.flatMap((change) =>
+      change.kind === "property-unique" && change.unique
+        ? [{ objectTypeId, propertyId: change.propertyId }]
+        : []
+    )
+  )
 }
 
 function declaredUniqueProperties(ontology: OntologyDefinitionCatalog): DeclaredUniqueProperty[] {
@@ -130,12 +167,15 @@ async function withRetries(
   }
 }
 
-/** `announce`: say when values are built, which a dry run doesn't. */
+/**
+ * `announce`: say when values are built, which a dry run doesn't. `rebuild`: build them even when
+ * the prepared ones look current.
+ */
 async function backfillProperty(
   tx: Storage,
   projectId: string,
   property: DeclaredUniqueProperty,
-  options: { readonly announce: boolean } = { announce: true }
+  options: { readonly announce: boolean; readonly rebuild: boolean }
 ): Promise<void> {
   const { objectTypeId, propertyId } = property
   const values = tx.ontology.uniqueValues
@@ -144,7 +184,7 @@ async function backfillProperty(
   const current = (await values.listPrepared({ projectId })).find(
     (prepared) => propertyKey(prepared) === propertyKey(property)
   )
-  if (current && isCurrent(current, property)) return
+  if (current && isCurrent(current, property) && !options.rebuild) return
 
   await values.clear({ projectId, objectTypeId, propertyId })
 
