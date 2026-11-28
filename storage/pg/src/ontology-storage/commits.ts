@@ -7,11 +7,13 @@ import type {
   OntologyCommitRecord,
   OntologyCommitStorage,
 } from "@sixb/core/storage"
+import type { SQLClient } from "../pg-client"
 import {
   assertNonblank,
   assertNonnegativeInteger,
   assertTimestamp,
   commitRecord,
+  jsonParameter,
   originWhere,
   type PgOntologyCommitRow,
   type PgRootOperation,
@@ -121,4 +123,26 @@ export class PgOntologyCommitStorage implements OntologyCommitStorage {
       return { commits, total: count, hasMore: offset + commits.length < count }
     })
   }
+}
+
+/**
+ * Inserts a commit with a runtime origin that lists no change, as a snapshot's base commit and a
+ * migration batch's are: the rows it wrote say what it holds.
+ */
+export async function insertPgRuntimeCommit(
+  sql: SQLClient,
+  commit: OntologyCommitRecord
+): Promise<void> {
+  await sql`
+    INSERT INTO ontology_commits (
+      project_id, id, idempotency_key, request_hash, execution_id,
+      origin_kind, origin_run_id, origin_batch_ordinal, origin,
+      ontology_revision, intent, result, committed_at
+    ) VALUES (
+      ${commit.projectId}, ${commit.id}, ${commit.idempotencyKey}, ${commit.requestHash},
+      ${commit.executionId}, 'runtime', NULL, NULL, ${jsonParameter(sql, commit.origin)},
+      ${commit.ontologyRevision}, ${jsonParameter(sql, commit.intent)},
+      ${jsonParameter(sql, commit.result)}, ${commit.committedAt}
+    )
+  `
 }

@@ -110,20 +110,31 @@ describe("materializer write ownership", () => {
       )
     ).flat()
 
-    // A snapshot's load is the one other writer: it fills an empty branch namespace with one base
-    // commit, which no event announces, so there is no materialization to go through.
-    const snapshotLoads = ["storage/pg/src/snapshot-load.ts", "storage/sqlite/src/snapshot-load.ts"]
+    // A snapshot's load and a migration run are the other writers, as kernel operations whose
+    // commits no event announces: a load fills an empty branch namespace with one base commit, a run
+    // rewrites the keys a type no longer has, so there is no materialization to go through. Both
+    // insert their commits through `insert*RuntimeCommit` in `commits.ts`.
+    const kernelWriters = [
+      "storage/pg/src/snapshot-load.ts",
+      "storage/sqlite/src/snapshot-load.ts",
+      "storage/pg/src/ontology-storage/migrations.ts",
+      "storage/sqlite/src/ontology-storage/migrations.ts",
+    ]
+    const runtimeCommits = [
+      "storage/pg/src/ontology-storage/commits.ts",
+      "storage/sqlite/src/ontology-storage/commits.ts",
+    ]
     await expectSqlWritesOwnedBy(
       providerFiles,
       /INSERT\s+INTO\s+ontology_(?:commits|outbox)\b/i,
       ["materializations.ts", "materialization-writer.ts"],
-      snapshotLoads
+      runtimeCommits
     )
     await expectSqlWritesOwnedBy(
       providerFiles,
       materializerAuthorityWrite,
       ["materialization-writer.ts"],
-      snapshotLoads
+      kernelWriters
     )
     await expectSqlWritesOwnedBy(providerFiles, /SET\s+status\s*=\s*'active'/i, [
       "materializations.ts",

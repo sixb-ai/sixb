@@ -97,8 +97,12 @@ lanes beside them; each batch is one `applyBatch`, in one transaction, set-based
   `parallelism` is the pool size less one, at most `MAX_PARALLELISM` (6, from a 1/2/4/6/8
   sweep). SQLite has one writer: `parallelism` 1, one range per kind, lanes one after another.
   In memory, 2, so the suite runs several ranges.
-- **Derived rows** go in batches too: unique values in key order, then the properties'
-  preparation, then artifact refs walked in key order, each batch bounded like the others.
+- **Derived rows** go in batches too: unique values, then the properties' preparation, then
+  artifact refs walked in key order, each batch bounded like the others. pg walks unique values by
+  heap page (TID ranges up to the table's size at the first batch) when the properties hold at
+  least a quarter as many values as the table has pages, and one property at a time by key
+  otherwise. Values in `value_hash` order lie on random pages: a walk by key reads about one
+  random page per value, so a large property would read every page many times over.
 - **No touches.** Only replacement plans read commit touches, and `startRun` drops them all; writes
   are paused, roles refuse a `migrating` shape and `sixb dev` starts its workers after migrating, so
   no plan opens before `finishRun`.

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { Storage } from ".."
-import type { MigrationDefinition } from "../migrations"
+import { defineMigration, type MigrationDefinition } from "../migrations"
 import { applyOntologyMigrations, resumeOntologyMigration } from "../migrations/run"
 import type { OntologyRegistry } from "../ontology"
 import { migrateStorage } from "../storage/migrations"
@@ -15,6 +15,7 @@ import type { OntologyMigrationStorage } from "../storage/ontology"
 import { migrationRunTotals } from "../storage/ontology/migrations"
 import {
   ARTIFACT,
+  closeReleases,
   dumpStores,
   firstRelease,
   INSPECTION,
@@ -28,6 +29,7 @@ import {
   TIMEOUT_MS,
   v1,
   v2,
+  wideRelease,
 } from "./ontology-migration-contract-fixture"
 
 export interface OntologyMigrationContractProvider<TStorage extends Storage> {
@@ -56,9 +58,34 @@ export function runOntologyMigrationContractSuite<TStorage extends Storage>(
       await seedJobs(storage)
       await run(storage)
     } finally {
+      await closeReleases(storage)
       await provider.cleanup?.(storage)
     }
   }
+
+  // Removal proof: in a provider's `startRun` and `finishRun`, leave `previous` as it was: the
+  // release before the run may then start as a role on the data the run rewrote.
+  test(
+    `${name} leaves no previous shape to a type a run rewrote`,
+    async () => {
+      await withSeeded(async (storage) => {
+        for (const row of await storage.ontology.typeShapes.list({ projectId: PROJECT })) {
+          await storage.ontology.typeShapes.write({
+            ...row,
+            projectId: PROJECT,
+            previous: row.shape,
+          })
+        }
+
+        await migrate(storage, { batchRows: 1_000 })
+        const rows = await storage.ontology.typeShapes.list({ projectId: PROJECT })
+        for (const objectTypeId of [JOB, INSPECTION]) {
+          expect(rows.find((row) => row.objectTypeId === objectTypeId)?.previous).toBeNull()
+        }
+      })
+    },
+    TIMEOUT_MS
+  )
 
   test(
     `${name} removes a property from every store that holds it`,
@@ -102,7 +129,9 @@ export function runOntologyMigrationContractSuite<TStorage extends Storage>(
         expect(edit("j-1")?.value).toEqual({ kind: "create", properties: { note: "first" } })
         expect(Object.keys(edit("j-1")?.editedAt ?? {})).toEqual(["note"])
         expect(edit("p-1")?.value).toEqual({ kind: "patch", set: {}, unset: [] })
-        expect(edit("p-2")?.value).toEqual({ kind: "patch", set: {}, unset: [] })
+        // Removal proof: in SQLite, read `unset` through a bare `value` inside `json_each`, which is
+        // json_each's own column; `note` then goes with `gate`.
+        expect(edit("p-2")?.value).toEqual({ kind: "patch", set: {}, unset: ["note"] })
 
         const vectors = await storage.ontology.vectors?.list({
           projectId: PROJECT,
@@ -301,6 +330,55 @@ export function runOntologyMigrationContractSuite<TStorage extends Storage>(
 
   // Removal proof: in `planPendingSteps`, leave out every step of a settled migration; the key
   // the old release wrote back then needs a new migration id.
+  // Removal proof: in SQLite, give `json_remove` every path in one call (it takes 127 arguments
+  // at most), or `OR` one `json_type` per key (the expression tree is 1,000 deep at most); this
+  // run then fails past the point of no return, and every resume the same way.
+  test(
+    `${name} removes four hundred properties of one type in one migration`,
+    async () => {
+      const storage = await provider.createStorage()
+      try {
+        const names = Array.from({ length: 400 }, (_, index) => `old${index + 1}`)
+        const before = wideRelease(names)
+        const after = wideRelease([])
+        const options = { projectId: PROJECT, ontologyShapes: "deploy" as const }
+
+        await migrateStorage(storage, { ...options, ontology: before.ontology })
+        const values = Object.fromEntries(names.map((id) => [id, `value of ${id}`]))
+        await firstRelease(storage, before)
+          .objects(before.Job)
+          .upsert({ properties: { id: "w-1", ...values } })
+
+        let migration = defineMigration("wide-remove", after.Job)
+        for (const id of names) migration = migration.removeProperty(id)
+        await migrateStorage(storage, {
+          ...options,
+          ontology: after.ontology,
+          migrations: [migration],
+        })
+
+        const job = await storage.objects.getByPrimaryId({
+          projectId: PROJECT,
+          objectTypeId: after.Job.id,
+          primaryId: "w-1",
+        })
+        expect(job?.properties).toEqual({ id: "w-1" })
+        const edits = await storage.ontology.typeShapes.listEdits({
+          projectId: PROJECT,
+          objectTypeId: after.Job.id,
+          limit: 10,
+        })
+        expect(edits.edits.map((edit) => [edit.value, edit.editedAt])).toEqual([
+          [{ kind: "create", properties: {} }, {}],
+        ])
+      } finally {
+        await closeReleases(storage)
+        await provider.cleanup?.(storage)
+      }
+    },
+    TIMEOUT_MS
+  )
+
   test(
     `${name} removes a key again when an old release wrote it back`,
     async () => {

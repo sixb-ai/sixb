@@ -255,6 +255,7 @@ export class PostgresStorage
   /** Set on a branch namespace's storage: the only kind a snapshot loads into. */
   private branchName: string | undefined
   private readonly shutdownTimeoutSeconds: number
+  private readonly poolSize: number
   private readonly transactionScope = new AsyncLocalStorage<boolean>()
   private readonly sortIndexes = new PgSortIndexCatalog()
   private hosting: PgHostedBranches | undefined
@@ -273,6 +274,7 @@ export class PostgresStorage
       1,
       Math.round((options.shutdownTimeoutMillis ?? 5000) / 1000)
     )
+    this.poolSize = options.max ?? 10
 
     this.sql = createPgClient({
       ...(options.connectionString !== undefined
@@ -283,7 +285,7 @@ export class PostgresStorage
       ...(options.database !== undefined ? { database: options.database } : {}),
       ...(options.user !== undefined ? { user: options.user } : {}),
       ...(options.password !== undefined ? { password: options.password } : {}),
-      max: options.max ?? 10,
+      max: this.poolSize,
       schemaName: this.schemaName,
       ...(options.idleTimeoutMillis !== undefined
         ? { idleTimeoutMillis: options.idleTimeoutMillis }
@@ -311,6 +313,7 @@ export class PostgresStorage
       maxConcurrentAggregates: options.maxConcurrentAggregates,
       runOntologyOperation: (run) => runPgTransaction(this.sql, run),
       transactionContext: null,
+      poolSize: this.poolSize,
     })
     const scope = createStorageOperationScope(
       async (run) => {
@@ -770,6 +773,7 @@ export class PostgresStorage
         sortIndexes: this.sortIndexes,
         runOntologyOperation: async (run) => run(client),
         transactionContext,
+        poolSize: 1,
       }),
       ping: async () => {
         await client`SELECT 1`
@@ -786,6 +790,7 @@ function createPostgresStores(
   options: {
     readonly runOntologyOperation: <T>(run: (sql: SQLClient) => Promise<T>) => Promise<T>
     readonly transactionContext: PgOntologyTransactionContext | null
+    readonly poolSize: number
     readonly sortIndexes: PgSortIndexCatalog
     readonly maxConcurrentAggregates?: number
   }
@@ -800,6 +805,7 @@ function createPostgresStores(
       sql,
       runRootOperation: options.runOntologyOperation,
       transactionContext: options.transactionContext,
+      poolSize: options.poolSize,
     }),
     auth,
     executions,

@@ -238,6 +238,7 @@ const shippedMigrationIds = [
   "116-lake-slice-credentials",
   "117-ontology-type-shapes",
   "118-ontology-migrate-executions",
+  "119-ontology-migration-runs",
 ]
 
 afterEach(async () => {
@@ -2550,6 +2551,9 @@ describe("SQLite storage migrations", () => {
         "ontology_commit_touches",
         "ontology_commits",
         "ontology_link_overrides",
+        "ontology_migration_run_lanes",
+        "ontology_migration_runs",
+        "ontology_migrations_settled",
         "ontology_object_overrides",
         "ontology_outbox",
         "ontology_replacement_plan_identities",

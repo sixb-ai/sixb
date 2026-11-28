@@ -162,6 +162,7 @@ const SHIPPED_MIGRATIONS = [
   "121-hosted-branch-namespaces",
   "122-ontology-type-shapes",
   "123-ontology-migrate-executions",
+  "124-ontology-migration-runs",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -1467,6 +1468,9 @@ describe("Postgres storage migrations", () => {
         "ontology_commit_touches",
         "ontology_commits",
         "ontology_link_overrides",
+        "ontology_migration_run_lanes",
+        "ontology_migration_runs",
+        "ontology_migrations_settled",
         "ontology_object_overrides",
         "ontology_outbox",
         "ontology_replacement_plan_identities",

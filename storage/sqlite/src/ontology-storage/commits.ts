@@ -134,3 +134,29 @@ export class SqliteOntologyCommitStorage implements OntologyCommitStorage {
     return row ? commitRecord(row) : null
   }
 }
+
+/**
+ * Inserts a commit with a runtime origin that lists no change, as a snapshot's base commit and a
+ * migration batch's are: the rows it wrote say what it holds.
+ */
+export function insertSqliteRuntimeCommit(db: Database, commit: OntologyCommitRecord): void {
+  db.query(
+    `INSERT INTO ontology_commits (
+       project_id, id, idempotency_key, request_hash, execution_id,
+       origin_kind, origin_run_id, origin_batch_ordinal, origin,
+       ontology_revision, projection_revision, ownership_hash,
+       intent, result, committed_at
+     ) VALUES (?, ?, ?, ?, ?, 'runtime', NULL, NULL, ?, ?, NULL, NULL, ?, ?, ?)`
+  ).run(
+    commit.projectId,
+    commit.id,
+    commit.idempotencyKey,
+    commit.requestHash,
+    commit.executionId,
+    JSON.stringify(commit.origin),
+    commit.ontologyRevision,
+    JSON.stringify(commit.intent),
+    JSON.stringify(commit.result),
+    commit.committedAt
+  )
+}
