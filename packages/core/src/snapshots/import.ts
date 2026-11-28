@@ -194,6 +194,7 @@ export async function importSnapshot(input: ImportSnapshotInput): Promise<Snapsh
           projectId: copy.manifest.projectId,
           ontology: input.ontology,
           migrations: input.migrations ?? [],
+          ...(input.projections ? { projections: input.projections } : {}),
         },
         copy.check
       )
