@@ -791,6 +791,49 @@ export function runOntologyMigrationContractSuite<TStorage extends Storage>(
     TIMEOUT_MS
   )
 
+  // Removal proof: in a provider's derived lane, clear a rename's new id only when values move
+  // there; the stale preparation is trusted after the run, and nothing finds `j-1` by `A1`.
+  test(
+    `${name} builds a renamed property's values over a preparation no object backed`,
+    async () => {
+      await withSeeded(async (storage) => {
+        const prepared = await storage.ontology.uniqueValues.listPrepared({ projectId: PROJECT })
+        const gate = prepared.find(
+          (property) => property.objectTypeId === JOB && property.propertyId === "gate"
+        )!
+
+        // `gate` stops being unique, and a release that made `gateCode` unique while no object
+        // held it left its preparation, as one that recorded no shapes may have.
+        const plain = release({
+          gate: "gate",
+          contract: "contract",
+          links: true,
+          uniqueGate: false,
+        })
+        await deploy(storage, plain.ontology)
+        await storage.transaction(async (tx) => {
+          await tx.ontology.uniqueValues.lockPreparation({ projectId: PROJECT })
+          await tx.ontology.uniqueValues.markPrepared({
+            ...gate,
+            projectId: PROJECT,
+            propertyId: "gateCode",
+            preparedAt: "2026-04-01T00:00:00.000Z",
+          })
+        })
+
+        // A crash right past the point of no return: the deploy that resumes the run no longer
+        // knows a rename ran, so the run itself has to have cleared `gateCode`.
+        const crashing = deploy(failingAfter(storage, 0), renamed.ontology, [renameGate])
+        const crashed = await crashing.catch((error: unknown) => error)
+        expect(String(crashed)).toContain("the process was killed")
+
+        await deploy(storage, renamed.ontology, [renameGate])
+        await expectUniqueMoved(storage)
+      })
+    },
+    TIMEOUT_MS
+  )
+
   // Removal proof: in a provider's derived lane, drop the unique values of a moved rename instead
   // of moving them; nothing builds them again here.
   test(

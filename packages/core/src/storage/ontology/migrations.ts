@@ -17,7 +17,8 @@ export type OntologyMigrationStoreStep =
       /**
        * `move`: `from`'s unique values become `to`'s, as they were prepared the way `to`'s
        * compare. `drop`: they go, and if `to` is unique its values are built after the run, once
-       * a dry run under `from` found no duplicate.
+       * a dry run under `from` found no duplicate. Either way, what `to` held goes first, its
+       * preparation included.
        */
       readonly unique: "move" | "drop"
     }

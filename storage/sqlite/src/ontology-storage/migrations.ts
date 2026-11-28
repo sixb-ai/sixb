@@ -560,9 +560,11 @@ export class SqliteOntologyMigrationStorage implements OntologyMigrationStorage 
     }
 
     if (cursor.store === "uniqueValues") {
-      // What a moved property's new id may already hold goes first, before any value moves there.
-      const toIds = moves.map((move) => move.to)
-      if (cursor.after === undefined && moves.length > 0) {
+      // What a rename's new id may already hold goes first, before any value moves there, whether
+      // or not values do: a release that once made it unique may have left a preparation no object
+      // backs, which the preparation after the run would trust.
+      const toIds = compiled.renames.map((rename) => rename.to)
+      if (cursor.after === undefined && toIds.length > 0) {
         for (const table of ["object_unique_values", "object_unique_properties"]) {
           this.db
             .query(`DELETE FROM ${table} WHERE ${ofProperties(toIds)}`)

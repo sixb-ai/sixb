@@ -451,6 +451,12 @@ export class InMemoryOntologyMigrationStorage implements OntologyMigrationStorag
     let uniqueValues = 0
     let artifactRefs = 0
 
+    // What a rename's new id may already hold goes first, as pg and SQLite do: a release that once
+    // made it unique may have left a preparation no object backs, trusted after the run otherwise.
+    for (const { to } of compiled.renames) {
+      adapter.clearUniqueProperty(run.projectId, objectTypeId, to)
+    }
+
     for (const { from, to } of derivedMoves(compiled)) {
       const uniqueTo = compiled.uniqueMoves.some((move) => move.from === from) ? to : null
       uniqueValues += adapter.moveUniqueProperty(run.projectId, objectTypeId, from, uniqueTo)

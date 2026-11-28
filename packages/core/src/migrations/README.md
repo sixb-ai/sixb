@@ -127,9 +127,10 @@ A rename moves what already exists instead of rebuilding it:
   instant: when other edit commits share it and none names the new id, lineage names the instant.
 - **Unique values.** Nothing is prepared before the run. The plan says per rename whether
   `from`'s values move (`unique: "move"`: they were prepared with the key kind and version `to`
-  compares by) or go (`drop`). The derived lane deletes whatever `to` held, then moves
-  `property_id` in the same walk that deletes a removed key's (by page or by key, as under "Lanes
-  and batches"), and the preparation after the run finds them current. When they can't move and
+  compares by) or go (`drop`). Either way the derived lane first deletes whatever `to` held, its
+  preparation included: a release that once made `to` unique may have left one no object backs.
+  It then moves `property_id` in the same walk that deletes a removed key's (by page or by key, as
+  under "Lanes and batches"), and the preparation after the run finds them current. When they can't move and
   `to` is unique, the dry run before the run (`checkUniqueProperties`) builds `to`'s values from
   those under `from` and rolls back, so a duplicate fails before the point of no return; the
   preparation after the run builds them for real.

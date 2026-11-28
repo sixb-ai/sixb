@@ -758,13 +758,14 @@ async function applyUniqueValues(
   cursorAfter: readonly string[] | undefined,
   batchRows: number
 ): Promise<LaneOutcome> {
-  const moves = compiled.uniqueMoves
   let walk = cursorAfter
 
   if (walk === undefined) {
-    // What a moved property's new id may already hold goes first, before any value moves there.
-    if (moves.length > 0) {
-      const toIds = moves.map((move) => move.to)
+    // What a rename's new id may already hold goes first, before any value moves there, whether or
+    // not values do: a release that once made it unique may have left a preparation no object
+    // backs, which the preparation after the run would trust.
+    const toIds = compiled.renames.map((rename) => rename.to)
+    if (toIds.length > 0) {
       await sql`DELETE FROM object_unique_values WHERE ${ofType} AND property_id = ANY(${toIds})`
       await sql`
         DELETE FROM object_unique_properties WHERE ${ofType} AND property_id = ANY(${toIds})
