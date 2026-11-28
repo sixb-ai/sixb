@@ -91,8 +91,14 @@ export async function planValueSteps(input: {
 }): Promise<void> {
   const failures: ValuePlanFailure[] = []
   let failed = 0
+  // Every object that fails, by type: past the listed ones, a type's count is still its own.
+  const failedByType = new Map<string, number>()
+  const count = (objectTypeId: string, objects: number) => {
+    failed += objects
+    failedByType.set(objectTypeId, (failedByType.get(objectTypeId) ?? 0) + objects)
+  }
   const fail = (failure: ValuePlanFailure) => {
-    failed += 1
+    count(failure.objectTypeId, 1)
     if (failures.length < LISTED_FAILURES) failures.push(failure)
   }
 
@@ -114,8 +120,8 @@ export async function planValueSteps(input: {
     })
     for (const collision of collisions) {
       const migrationId = valueMigrationOf(input.types, collision)
-      failed += collision.primaryIds.length
       const objects = collision.primaryIds.length
+      count(collision.objectTypeId, objects)
       failures.push({
         objectTypeId: collision.objectTypeId,
         migrationId,
@@ -125,7 +131,7 @@ export async function planValueSteps(input: {
     }
   }
 
-  if (failed > 0) throw planFailure(failures, failed)
+  if (failed > 0) throw planFailure(failures, failed, failedByType)
 }
 
 function typePlanner(
@@ -575,8 +581,12 @@ function objectLine(objectTypeId: string, primaryId: string, reason: string): st
   return `${objectTypeId} '${primaryId}': ${reason.replace(/^\[Sixb\] /, "")}`
 }
 
-function planFailure(failures: readonly ValuePlanFailure[], failed: number): ValuePlanError {
-  return new ValuePlanError(failures, failed)
+function planFailure(
+  failures: readonly ValuePlanFailure[],
+  failed: number,
+  failedByType: ReadonlyMap<string, number>
+): ValuePlanError {
+  return new ValuePlanError(failures, failed, failedByType)
 }
 
 /**
@@ -585,8 +595,14 @@ function planFailure(failures: readonly ValuePlanFailure[], failed: number): Val
  */
 export class ValuePlanError extends Error {
   readonly failures: readonly ValuePlanFailure[]
+  /** How many objects fail, by type: those `failures` lists, and those past them. */
+  readonly failedByType: ReadonlyMap<string, number>
 
-  constructor(failures: readonly ValuePlanFailure[], failed: number) {
+  constructor(
+    failures: readonly ValuePlanFailure[],
+    failed: number,
+    failedByType: ReadonlyMap<string, number>
+  ) {
     super(
       [
         `[Sixb] ${failureLines(failures, failed).join("\n")}`,
@@ -595,6 +611,7 @@ export class ValuePlanError extends Error {
     )
     this.name = "ValuePlanError"
     this.failures = failures
+    this.failedByType = failedByType
   }
 
   /** The types whose objects fail, each with its lines: the migrations, then each object. */
@@ -604,10 +621,11 @@ export class ValuePlanError extends Error {
       types.set(failure.objectTypeId, [...(types.get(failure.objectTypeId) ?? []), failure])
     }
 
-    const failed = (of: readonly ValuePlanFailure[]) =>
-      of.reduce((sum, failure) => sum + (failure.objects ?? 1), 0)
     return new Map(
-      [...types].map(([objectTypeId, of]) => [objectTypeId, failureLines(of, failed(of))])
+      [...types].map(([objectTypeId, of]) => [
+        objectTypeId,
+        failureLines(of, this.failedByType.get(objectTypeId) ?? 0),
+      ])
     )
   }
 }

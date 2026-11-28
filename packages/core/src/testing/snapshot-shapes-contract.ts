@@ -654,6 +654,43 @@ export function runSnapshotShapesCases(
     TIMEOUT_MS
   )
 
+  // Red check: in plan-values.ts, count a type's failures from its listed ones in `byType`: the
+  // branch says 100 jobs fail, where 101 do.
+  test(
+    `${name} counts every object a fill refuses, past the ones it names`,
+    async () => {
+      await withStorage(async (storage) => {
+        const host = await production(storage)
+        const jobs = createTestSixb(host).objects(Job)
+        for (let index = 0; index < 100; index += 1) {
+          await jobs.upsert({ properties: { id: `j${String(index + 10).padStart(3, "0")}` } })
+        }
+        const Required = job(prop("gate", "string", { required: true }), hours(), note())
+        const fill = defineMigration("job-gate-fill", Required).fillProperty("gate", () => {
+          throw new Error("no gate for this job")
+        })
+
+        const { report } = await branchOf({
+          storage,
+          host,
+          as: "owners",
+          types: [Required, Crew],
+          migrations: [fill],
+        })
+
+        const [skip] = report.skipped
+        expect(skip).toMatchObject({ objectTypeId: Job.id, kind: "unfit" })
+        expect(skip!.findings[0]).toBe(
+          "✗ Migration 'job-gate-fill' cannot apply: 101 objects fail."
+        )
+        expect(skip!.findings.at(-1)).toBe("  … and 1 more.")
+
+        await host.closeBroker()
+      })
+    },
+    TIMEOUT_MS
+  )
+
   // Red check: in type-shapes.ts, match `unseen` on the code's id only: the jobs are refused
   // because the copy lacks `remark`, which production holds under `note`.
   test(
