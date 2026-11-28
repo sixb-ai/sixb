@@ -157,6 +157,12 @@ export async function checkTypeShapes(input: {
    */
   readonly unseen?: ReadonlyMap<string, ReadonlySet<string>>
   /**
+   * Properties, by type, whose stored values the check can't tell from a projection's: a branch's
+   * copy of a projected type holds them all as edits. A change of their values or of whether they
+   * are required needs no data, and no fill or convert runs on them; their keys still move.
+   */
+  readonly unseenValues?: ReadonlyMap<string, ReadonlySet<string>>
+  /**
    * Runs the unique preparation's dry run, as `applyTypeShapes` does before the point of no
    * return, and words a duplicate as its type's finding instead of failing: `sixb db migrate
    * --check` fails on it before the live release stops, and a branch refuses the type as the
@@ -196,6 +202,7 @@ export async function checkTypeShapes(input: {
       stored: storedById.get(objectTypeId) ?? null,
       settled: settled.get(objectTypeId) ?? new Set(),
       unseen: input.unseen?.get(objectTypeId) ?? new Set(),
+      unseenValues: input.unseenValues?.get(objectTypeId) ?? new Set(),
     })
     if (checked === "unrecorded") unrecorded.push(objectTypeId)
     else types.push(checked)
@@ -353,9 +360,10 @@ async function checkType(input: {
   readonly stored: StoredTypeShape | null
   readonly settled: ReadonlySet<string>
   readonly unseen: ReadonlySet<string>
+  readonly unseenValues: ReadonlySet<string>
 }): Promise<TypeShapeTypeCheck | "unrecorded"> {
   const { storage, projectId, ontology, mode, migrations, objectType, objectTypeId, stored } = input
-  const { settled, unseen } = input
+  const { settled, unseen, unseenValues } = input
   const code = objectType ? typeShape(objectType, ontology) : null
   const settles = code
     ? concerningMigrations({ objectTypeId, ontology, migrations }).filter((id) => !settled.has(id))
@@ -402,7 +410,15 @@ async function checkType(input: {
     run,
     unseen: unread,
   } = code
-    ? await migrationFindings({ ...probed, from, code, migrations, settled, unseen })
+    ? await migrationFindings({
+        ...probed,
+        from,
+        code,
+        migrations,
+        settled,
+        unseen,
+        unseenValues,
+      })
     : {
         findings: (await probeChanges({ ...probed, pending })).map(({ change, count }) =>
           finding(objectTypeId, change, count)
@@ -562,13 +578,14 @@ async function migrationFindings(
     readonly migrations: readonly MigrationDefinition[]
     readonly settled: ReadonlySet<string>
     readonly unseen: ReadonlySet<string>
+    readonly unseenValues: ReadonlySet<string>
   }
 ): Promise<{
   readonly findings: TypeShapeFinding[]
   readonly run: TypeShapeTypeCheck["run"]
   readonly unseen: readonly ProbedChange[]
 }> {
-  const { objectTypeId, ontology, from, code, migrations, settled, unseen } = input
+  const { objectTypeId, ontology, from, code, migrations, settled, unseen, unseenValues } = input
   const classes = classifyTypeChanges({
     objectTypeId,
     from,
@@ -577,6 +594,7 @@ async function migrationFindings(
     migrations,
     settled,
     unseen,
+    unseenValues,
     appliesMigrations: input.storage.ontology.migrations !== undefined,
   })
   if (classes.conflicts.length > 0) {
@@ -647,6 +665,8 @@ export function classifyTypeChanges(input: {
   readonly appliesMigrations: boolean
   /** Properties whose data isn't there to read: their changes are left out of every class. */
   readonly unseen?: ReadonlySet<string>
+  /** Properties whose values can't be read for what they are: only their value changes are. */
+  readonly unseenValues?: ReadonlySet<string>
 }): TypeChangeClasses {
   const { objectTypeId, from, code, ontology, migrations, settled } = input
   const coverage = coverChanges({
@@ -660,10 +680,13 @@ export function classifyTypeChanges(input: {
   })
 
   // A property is unseen by the key the data holds it under: a pending rename's `from`.
+  const holds = (properties: ReadonlySet<string> | undefined, propertyId: string) =>
+    properties !== undefined &&
+    (properties.has(propertyId) || properties.has(coverage.storedKey(propertyId)))
   const unseen = (change: ProbedChange) =>
-    input.unseen !== undefined &&
     "propertyId" in change &&
-    (input.unseen.has(change.propertyId) || input.unseen.has(coverage.storedKey(change.propertyId)))
+    (holds(input.unseen, change.propertyId) ||
+      (readsValues(change) && holds(input.unseenValues, change.propertyId)))
 
   const conflicts = coverage.conflicts.map(({ change, message }) => ({
     objectTypeId,
@@ -685,6 +708,19 @@ export function classifyTypeChanges(input: {
     blocked: input.appliesMigrations ? [] : seen,
     unseen: [...new Set([...missing, ...covered].filter(unseen))],
     coverage,
+  }
+}
+
+/** A change decided by the property's values: whether they fit, or whether objects lack one. */
+function readsValues(change: ProbedChange): boolean {
+  switch (change.kind) {
+    case "property-added":
+    case "property-required":
+    case "property-retyped":
+    case "property-not-nullable":
+      return true
+    default:
+      return false
   }
 }
 

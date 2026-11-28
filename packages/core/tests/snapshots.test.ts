@@ -106,7 +106,9 @@ describe("a snapshot holds what one person reads", () => {
   })
 
   // The version applied is absent here: no projection ran, and the snapshot cut no lake slice, so
-  // the type travels as created objects, which its projection cannot update on the branch.
+  // the type travels as created objects, which its projection cannot update on the branch. What it
+  // feeds comes from its definition, the primary property aside: reproduce by leaving
+  // `propertyIds` out of `projectionsByType`.
   test("a type a projection feeds says so, and whether the person reads its dataset", async () => {
     const { host, optionsFor } = await deploy()
     const manager = await readAll(
@@ -123,6 +125,7 @@ describe("a snapshot holds what one person reads", () => {
     expect(invoice?.projection).toEqual({
       projectionId: "snapshot_invoices",
       datasetId: "snapshot_books",
+      propertyIds: [],
       datasetView: true,
       notReprojectable: "the branch does not read production's datasets in place",
     })

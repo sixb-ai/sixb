@@ -134,6 +134,12 @@ export interface SnapshotProjection {
   readonly projectionId: string
   readonly datasetId: string
   /**
+   * The properties production's projection feeds, from its definition: a type copied as created
+   * objects holds their values as edits, which a deploy would leave to the projection. Absent from
+   * a snapshot taken before it was added.
+   */
+  readonly propertyIds?: readonly string[]
+  /**
    * Whether the person holds `dataset.view` on the projection's dataset. It is not "reads the
    * dataset in full": a column's markings may still hide it, which the lake slice decides.
    */

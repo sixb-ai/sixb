@@ -29,6 +29,8 @@ import { typeShape } from "../ontology/type-shapes"
 import type { ObjectType } from "../ontology/types"
 import type { UserRef } from "../ontology/user-ref"
 import type { ProjectionDefinitionCatalog } from "../projections"
+import { computeProjectionOwnership } from "../projections/ownership"
+import type { ObjectProjectionDefinition } from "../projections/types"
 import type { SixbHostView } from "../runtime/host"
 import { isBoundSixb } from "../runtime/sixb"
 import type { AppliedMarkings } from "../security/applied-markings"
@@ -951,6 +953,7 @@ function projectionsByType(
         {
           projectionId: definition.id,
           datasetId: definition.datasetId,
+          propertyIds: projectedPropertyIds(definition, source.ontology),
           datasetView: canViewDataset(definition.datasetId),
           ...(version
             ? {
@@ -965,6 +968,17 @@ function projectionsByType(
         },
       ]
     })
+  )
+}
+
+/** The properties a projection feeds on its type, as its definition says: no value is read. */
+function projectedPropertyIds(
+  definition: ObjectProjectionDefinition,
+  ontology: OntologyRegistry
+): readonly string[] {
+  const ownership = computeProjectionOwnership(definition, ontology)
+  return ownership.objects.flatMap((owned) =>
+    owned.objectTypeId === definition.objectTypeId ? owned.propertyIds : []
   )
 }
 

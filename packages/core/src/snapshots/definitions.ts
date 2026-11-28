@@ -48,6 +48,8 @@ export type TypeFit =
       remedy(change: ProbedChange): readonly string[]
       /** Whether the branch keeps a property's values: it declares it, or a pending step moves it. */
       keeps(propertyId: string): boolean
+      /** The key production's objects hold a property of the branch by, through pending renames. */
+      storedKey(propertyId: string): string
     }
   | {
       readonly fits: false
@@ -106,6 +108,7 @@ export function checkTypeFits(input: {
       unchecked: [],
       remedy: () => [],
       keeps: () => true,
+      storedKey: (propertyId) => propertyId,
     }
   }
 
@@ -177,6 +180,7 @@ export function checkTypeFits(input: {
     unchecked: changed.filter((change) => ofWithheld(change) && !refusedWithheld.includes(change)),
     remedy: (change) => classes.coverage.remedy(change),
     keeps,
+    storedKey: (propertyId) => classes.coverage.storedKey(propertyId),
   }
 }
 

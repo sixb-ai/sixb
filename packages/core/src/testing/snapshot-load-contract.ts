@@ -416,6 +416,73 @@ export function runSnapshotLoadContractSuite<TStorage extends Storage>(
     TIMEOUT_MS
   )
 
+  // Red check: in import.ts, pass no `unseenValues` to the gate: the devices are refused, each
+  // one's name counted as an edit the code refuses, and the convert rewrites them all.
+  test(
+    `${name} leaves the values of a type copied as created objects to its projection`,
+    async () => {
+      await withStorage(async (storage) => {
+        const Retyped = retypedDevice()
+        const ontology = new OntologyRegistry({ sources: [Retyped] })
+        const convert = defineMigration("device-name-length", Retyped).convertProperty(
+          "name",
+          ({ value }) => String(value).length
+        )
+        const unchecked = [
+          "SnapshotDevice: 'name' changed from string to integer: not checked, the copy can't tell its projection's values from edits.",
+        ]
+
+        // The snapshot names the properties, or else every property but the primary may be fed.
+        for (const [label, propertyIds, migrations] of [
+          ["named", ["name"], []],
+          ["unnamed", undefined, []],
+          ["converted", ["name"], [convert]],
+        ] as const) {
+          const branchStorage = await storage.createBranchNamespace(`devices-${label}`)
+          const report = await importSnapshot({
+            snapshot: copiedDevicesSnapshot(propertyIds),
+            storage: branchStorage,
+            ontology,
+            migrations,
+          })
+
+          expect(report.skipped).toEqual([])
+          expect(report.types).toEqual([
+            expect.objectContaining({
+              objectTypeId: Device.id,
+              objects: 3,
+              reprojectable: false,
+              migrationIds: [],
+              refusedByDeploy: [],
+              unchecked,
+            }),
+          ])
+          expect(await storedName(branchStorage, "d-1")).toBe("A")
+        }
+
+        // Its keys are still read: a removal nothing migrates is refused once, counted.
+        const removing = await storage.createBranchNamespace("devices-removed")
+        const removed = await importSnapshot({
+          snapshot: copiedDevicesSnapshot(["name"]),
+          storage: removing,
+          ontology: new OntologyRegistry({ sources: [unnamedDevice()] }),
+        })
+        expect(removed.types).toEqual([
+          expect.objectContaining({
+            refusedByDeploy: [
+              "✗ SnapshotDevice: 'name' was removed, and 3 objects hold it.",
+              "  Rename or remove it in a migration:",
+              '    defineMigration("snapshot-device-name", SnapshotDevice).renameProperty("name", "<new id>")',
+              '    defineMigration("snapshot-device-name", SnapshotDevice).removeProperty("name")',
+            ],
+            unchecked: [],
+          }),
+        ])
+      })
+    },
+    TIMEOUT_MS
+  )
+
   test(
     `${name} keeps branch namespaces apart`,
     async () => {
@@ -510,6 +577,102 @@ function devicesHost(storage: Storage): SixbHost {
     queues: new InMemoryQueues(),
     storage,
   })
+}
+
+/** Devices whose name, which their projection feeds, a branch makes a number. */
+function retypedDevice() {
+  return defineObjectType({
+    id: Device.id,
+    name: "Device",
+    properties: [prop("id", "string", { primary: true, required: true }), prop("name", "integer")],
+    links: [
+      link.self("parent", { cardinality: "one" }),
+      link.self("related", { cardinality: "many" }),
+    ],
+  })
+}
+
+function unnamedDevice() {
+  return defineObjectType({
+    id: Device.id,
+    name: "Device",
+    properties: [prop("id", "string", { primary: true, required: true })],
+    links: [
+      link.self("parent", { cardinality: "one" }),
+      link.self("related", { cardinality: "many" }),
+    ],
+  })
+}
+
+async function storedName(storage: Storage, primaryId: string) {
+  const row = await storage.objects.getByPrimaryId({
+    projectId: PROJECT,
+    objectTypeId: Device.id,
+    primaryId,
+  })
+  return row?.properties.name
+}
+
+/**
+ * Devices a projection feeds, copied as created objects: the person's copy can't take the
+ * projection's source over. `propertyIds` is what production's projection feeds, absent from an
+ * earlier snapshot.
+ */
+async function* copiedDevicesSnapshot(
+  propertyIds: readonly string[] | undefined
+): AsyncGenerator<Uint8Array> {
+  const at = Date.parse(DEVICE_EDIT.updatedAt)
+  const records: SnapshotRecord[] = [
+    {
+      kind: "manifest",
+      format: 3,
+      projectId: PROJECT,
+      takenAt: DEVICE_EDIT.updatedAt,
+      takenBy: { type: "user", id: "usr_alice" },
+      members: "self",
+      types: [
+        {
+          objectTypeId: Device.id,
+          primaryPropertyId: "id",
+          shape: {
+            fits: typeShape(Device, new OntologyRegistry({ sources: [Device] })),
+            state: "current",
+            settledMigrationIds: [],
+          },
+          hiddenPropertyIds: [],
+          throughCondition: false,
+          vectors: [],
+          projection: {
+            projectionId: fromDevices.id,
+            datasetId: devices.id,
+            ...(propertyIds ? { propertyIds } : {}),
+            datasetView: true,
+            notReprojectable: "the branch does not read production's datasets in place",
+          },
+        },
+      ],
+      unreadableTypeIds: [],
+    },
+    { kind: "members", users: [], memberships: [] },
+    {
+      kind: "objects",
+      objectTypeId: Device.id,
+      ids: ["d-1", "d-2", "d-3"],
+      createdAt: [at, at, at],
+      updatedAt: [at, at, at],
+      columns: [
+        { propertyId: "id", values: ["d-1", "d-2", "d-3"] },
+        { propertyId: "name", values: ["A", "B", "C"] },
+      ],
+    },
+    {
+      kind: "end",
+      counts: { objects: 3, links: 0, points: 0, vectors: 0, users: 0, sourceRoots: 0, edits: 0 },
+    },
+  ]
+
+  yield SNAPSHOT_SIGNATURE
+  for (const record of records) yield await encodeSnapshotFrame(record, { compress: false })
 }
 
 /** Devices as a branch changes them: a required serial, which its projection feeds. */

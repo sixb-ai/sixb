@@ -100,9 +100,20 @@ export function heldFinding(
   }
 }
 
-/** A change the check didn't read: the copy it ran on holds none of the property's values. */
-export function uncheckedLine(objectTypeId: string, change: ProbedChange): string {
-  return `${describe(objectTypeId, change).what}: not checked, the copy holds none of its values.`
+/**
+ * A change the check didn't read: the copy it ran on holds none of the property's values, or holds
+ * its projection's values as edits, which a deploy would leave to the projection.
+ */
+export function uncheckedLine(
+  objectTypeId: string,
+  change: NarrowedChange,
+  why: "hidden" | "projected" = "hidden"
+): string {
+  const reason =
+    why === "projected"
+      ? "the copy can't tell its projection's values from edits"
+      : "the copy holds none of its values"
+  return `${describe(objectTypeId, change).what}: not checked, ${reason}.`
 }
 
 /** The lines `sixb check`, a deploy and the agent print for findings: one `✗` per change. */

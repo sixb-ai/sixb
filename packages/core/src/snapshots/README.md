@@ -91,7 +91,7 @@ then deletes the slice through its caller (`dropLakeSlice`).
   |---|---|
   | Before the load | `checkTypeFits` (`definitions.ts`) runs the gate's `classifyTypeChanges` on production's shape and the branch's code and migrations. Only what can't be stored skips the type: a removed type, a changed primary, a type production was migrating, conflicting steps. A removal nothing migrates is left out of the objects; the keys and links a pending step moves load, so the step runs |
   | The load | Counts the objects that held each left-out key, and those of a removed type or a changed primary: the gate's own finding, a deploy would refuse it (`refusedByDeploy`, a skip's `findings`). A withheld key is said to be held, with no count; through a view condition it is listed as not checked, since only hidden objects may hold it |
-  | After it | Production's shapes and settled migrations are recorded (not for an `unrecorded` type, nor a version 2 snapshot: the gate's baseline pass reads the copy, as a first deploy does). Then `checkTypeShapes` in `check` mode, with the unique dry run worded as findings (`uniqueDuplicates`, so `applyTypeShapes` doesn't run it again), and hidden and withheld properties `unseen`: the copy holds none of their values, so their changes are listed as not checked (`unchecked`) |
+  | After it | Production's shapes and settled migrations are recorded (not for an `unrecorded` type, nor a version 2 snapshot: the gate's baseline pass reads the copy, as a first deploy does). Then `checkTypeShapes` in `check` mode, with the unique dry run worded as findings (`uniqueDuplicates`, so `applyTypeShapes` doesn't run it again), and hidden and withheld properties `unseen`: the copy holds none of their values, so their changes are listed as not checked (`unchecked`). The properties a projection feeds on a type copied as created objects are `unseenValues` (see Projections) |
   | A type it refuses | `unloadSnapshot` empties the load, as a failed one is emptied, only while its commit is the project's only one, and the copy loads again from `snapshot()` without it, skipped (`unfit`) with the gate's lines and counts. The second read must be the same copy (`takenAt`) and refuse nothing more. Only this path reads the copy twice |
   | Then | `applyTypeShapes`, as a deploy after its checks: the run, unique values, the shapes. A fill or a convert whose plan refuses objects (`ValuePlanError`) wrote nothing: its types are refused with the plan's lines, and the copy loads again without them |
 
@@ -153,6 +153,16 @@ production's, it reads the dataset in full, as anywhere.
 
 Otherwise the type travels as created objects, and the manifest and the import report say why
 (`notReprojectable`): its projection cannot update them on the branch.
+
+Each object is then one `create` edit, which flattens the projection's values into edits. A deploy
+reads only edits for a value's fit and for a missing required value, and leaves the projection's
+values to the projection, fills and converts included. So the properties production's projection
+feeds (`propertyIds`, from its definition; for an older snapshot, the branch's projection of the
+same id, or else every property but the primary) are `unseenValues`: a change of their values or
+of whether they are required is listed as not checked, and no fill or convert runs on them. Their
+keys are still read: a removal or a rename is decided and runs as for any property. The limit: a
+real edit production holds over one of those values is flattened like the rest, so the branch
+can't check it either.
 
 ## Branch namespaces
 

@@ -13,6 +13,7 @@ import type { ObjectType, Property } from "../ontology/types"
 import { UNIQUE_VALUE_KEY_VERSION, uniqueValueKey } from "../ontology/unique-values"
 import type { UserRef } from "../ontology/user-ref"
 import type { ProjectionDefinitionCatalog } from "../projections"
+import { computeProjectionOwnership } from "../projections/ownership"
 import { computeOntologyRevision } from "../projections/revision"
 import { applyTypeShapes } from "../storage/migrations/migrate-storage"
 import {
@@ -144,7 +145,8 @@ export interface ImportedSnapshotType {
   readonly refusedByDeploy: readonly string[]
   /**
    * What a deploy would read that the copy can't, one line each: changes of properties hidden
-   * from the person, or of keys production's code no longer declares, whose values don't travel.
+   * from the person, or of keys production's code no longer declares, whose values don't travel,
+   * and value changes of properties a projection feeds on a type copied as created objects.
    */
   readonly unchecked: readonly string[]
   /** Set for a type a projection feeds in production. */
@@ -326,6 +328,7 @@ async function loadCopy(
       migrations: input.migrations ?? [],
       mode: "check",
       unseen: plan.unseenProperties(),
+      unseenValues: plan.projectedProperties(),
       uniqueDuplicates: true,
     })
 
@@ -526,6 +529,11 @@ interface TypePlan {
   /** The source the type loads as, when it travelled as one and the branch can continue it. */
   readonly source?: SnapshotSourceWrite
   readonly notReprojectable?: string
+  /**
+   * The properties production's projection feeds, on a type loaded as created objects: their
+   * values are edits on the copy, where a deploy would read most as the projection's.
+   */
+  readonly projectedPropertyIds: ReadonlySet<string>
   /** The next root's place among the source's roots. */
   nextOrdinal: number
 }
@@ -618,6 +626,9 @@ class ImportPlan {
         counts: { objects: 0, links: 0, points: 0, vectors: 0, droppedLinks: 0 },
         skippedVectors: new Map(),
         ...travel,
+        projectedPropertyIds: travel.source
+          ? new Set()
+          : projectedPropertyIds(type, objectType, ontology, projections),
         nextOrdinal: 0,
       }
       this.#types.set(type.objectTypeId, typePlan)
@@ -676,6 +687,19 @@ class ImportPlan {
       [...this.#types.values()].map((plan) => [
         plan.manifest.objectTypeId,
         new Set([...plan.manifest.hiddenPropertyIds, ...plan.fit.withheld]),
+      ])
+    )
+  }
+
+  /**
+   * The properties whose values the copy holds as edits where production holds a projection's:
+   * a deploy reads only edits, so the copy can't tell what it would find.
+   */
+  projectedProperties(): ReadonlyMap<string, ReadonlySet<string>> {
+    return new Map(
+      [...this.#types.values()].map((plan) => [
+        plan.manifest.objectTypeId,
+        plan.projectedPropertyIds,
       ])
     )
   }
@@ -798,9 +822,19 @@ function unchecked(plan: TypePlan, unseen: readonly ProbedChange[]): readonly st
   // A withheld key a deploy refuses reads as a refusal, not as unchecked.
   const refused = (change: ProbedChange) =>
     plan.fit.refusedWithheld.some((left) => sameChange(left, change))
+  // A hidden property has no value on the copy; a projected one has its values only as edits.
+  const hidden = new Set([...plan.manifest.hiddenPropertyIds, ...plan.fit.withheld])
+  const of = (properties: ReadonlySet<string>, change: ProbedChange) =>
+    "propertyId" in change &&
+    (properties.has(change.propertyId) || properties.has(plan.fit.storedKey(change.propertyId)))
+  const projected = (change: ProbedChange) =>
+    of(plan.projectedPropertyIds, change) && !of(hidden, change)
+
   const lines = [...plan.fit.unchecked, ...unseen]
     .filter((change) => !refused(change))
-    .map((change) => uncheckedLine(objectTypeId, change))
+    .map((change) =>
+      uncheckedLine(objectTypeId, change, projected(change) ? "projected" : "hidden")
+    )
 
   return [...new Set(lines)]
 }
@@ -1104,6 +1138,36 @@ async function loadEdits(plan: ImportPlan, loader: SnapshotLoader, record: Snaps
         })),
     },
   })
+}
+
+/**
+ * The properties production's projection feeds on a type loaded as created objects, as the
+ * snapshot names them; one taken before it did names none, so the branch's projection of the same
+ * id says, or else every property but the primary may be the projection's.
+ */
+function projectedPropertyIds(
+  type: SnapshotTypeManifest,
+  objectType: ObjectType,
+  ontology: OntologyRegistry,
+  projections: ProjectionDefinitionCatalog | undefined
+): ReadonlySet<string> {
+  const projection = type.projection
+  if (!projection) return new Set()
+  if (projection.propertyIds) return new Set(projection.propertyIds)
+
+  const branch = projections
+    ?.listObjects()
+    .find((definition) => definition.id === projection.projectionId)
+  if (branch?.objectTypeId === type.objectTypeId) {
+    const ownership = computeProjectionOwnership(branch, ontology)
+    return new Set(ownership.objects.flatMap((owned) => owned.propertyIds))
+  }
+
+  const propertyIds = [
+    ...Object.keys(type.shape?.fits.properties ?? {}),
+    ...objectType.properties.map((property) => property.id),
+  ]
+  return new Set(propertyIds.filter((propertyId) => propertyId !== type.primaryPropertyId))
 }
 
 /**
