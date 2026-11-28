@@ -148,7 +148,7 @@ export const en = {
     migrating: "Production was updating it when the copy was taken. Refresh to copy it again.",
     conflict: "Two of this branch's migrations change the same thing in it.",
     unfit:
-      "Its definition changed on this branch, and no migration makes production's rows fit it yet.",
+      "Its definition changed on this branch, and production's rows don't fit it: see why below.",
     removedValues:
       "This branch removed some of its values, so they weren't copied. Production needs a migration to remove them too.",
     migrated: "This branch's migrations updated its rows on this copy.",
@@ -337,7 +337,7 @@ export const fr: Translation<BranchesMessages> = {
       "La production le mettait à jour pendant la copie. Actualisez la branche pour le copier à nouveau.",
     conflict: "Deux migrations de cette branche y changent la même chose.",
     unfit:
-      "Sa définition a changé sur cette branche, et aucune migration n’y fait encore correspondre les lignes de production.",
+      "Sa définition a changé sur cette branche, et les lignes de production n’y correspondent pas : voyez pourquoi ci-dessous.",
     removedValues:
       "Cette branche a retiré certaines de ses valeurs : elles n’ont pas été copiées. La production a besoin d’une migration pour les retirer aussi.",
     migrated: "Les migrations de cette branche ont mis à jour ses lignes sur cette copie.",

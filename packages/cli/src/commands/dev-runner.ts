@@ -342,9 +342,10 @@ function branchNotice(branch: BranchFromProduction, apiUrl: string): string[] {
 }
 
 /** What the copy left out, what it holds in part, and the migrations it ran on the rest. */
-function copyNotice(copy: BranchFromProduction["copy"]): string[] {
+export function copyNotice(copy: BranchFromProduction["copy"]): string[] {
   const named = (ids: readonly string[]) => ids.map((id) => `'${id}'`).join(", ")
   const indented = (lines: readonly string[]) => lines.map((line) => `  ${line}`)
+  const migrated = new Set(copy.migrated.map((type) => type.objectTypeId))
 
   return [
     // What a deploy would refuse says so as the deploy does, a line per change, counted.
@@ -365,7 +366,9 @@ function copyNotice(copy: BranchFromProduction["copy"]): string[] {
         ...(hiddenPropertyIds.length > 0 ? [`${named(hiddenPropertyIds)} hidden from you`] : []),
         ...(throughCondition ? ["some objects hidden from you"] : []),
       ]
-      return `Copied in part: ${objectTypeId}, ${hidden.join(" and ")}. Migrations ran on what you read.`
+      // Only a type the migrations ran on says what they ran on.
+      const ran = migrated.has(objectTypeId) ? " Migrations ran on what you read." : ""
+      return `Copied in part: ${objectTypeId}, ${hidden.join(" and ")}.${ran}`
     }),
     ...copy.migrated.map(
       ({ objectTypeId, migrationIds }) =>

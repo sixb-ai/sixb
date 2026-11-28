@@ -608,7 +608,7 @@ describe("Console › Branches", () => {
     expect(view.getByText("Ada Laurent can't read it in production.")).toBeDefined()
     expect(
       view.getByText(
-        "Its definition changed on this branch, and no migration makes production's rows fit it yet."
+        "Its definition changed on this branch, and production's rows don't fit it: see why below."
       )
     ).toBeDefined()
     expect(
