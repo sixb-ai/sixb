@@ -475,6 +475,38 @@ describe("a change pending migrations cover", () => {
     )
   })
 
+  // Removal proof: in `coverage.ts`, have `changeOf` search `changes` alone. The converts resolve
+  // only a change of the shape the rename leaves, so both calls throw a plain `Error` instead.
+  test("refuses two converts of a renamed property, in check mode too", async () => {
+    const storage = await deployed([], release([prop("h", "string")]))
+    const hours = release([prop("hours", "double")])
+    const migrations = [
+      defineMigration("a-rename", hours.Job).renameProperty("h", "hours"),
+      defineMigration("b-conv", hours.Job).convertProperty("hours", () => 0),
+      defineMigration("c-conv", hours.Job).convertProperty("hours", () => 1),
+    ]
+    const conflict =
+      "Job: migration 'b-conv' converts 'hours', and migration 'c-conv' converts 'hours': only one can run."
+
+    expect(await messageOf(deploy(storage, hours, migrations))).toBe(
+      [
+        "[Sixb] The stored objects don't fit this code:",
+        `  ✗ ${conflict}`,
+        "    Keep one. A migration every database has applied can be deleted.",
+      ].join("\n")
+    )
+
+    const checked = await migrateStorage(storage, {
+      projectId: PROJECT,
+      ontology: hours.ontology,
+      migrations,
+      ontologyShapes: "check",
+    })
+    const job = checked.shapes?.types.find((type) => type.objectTypeId === "Job")
+    expect(job?.findings.map((item) => item.message)).toEqual([conflict])
+    expect(job?.run).toEqual([])
+  })
+
   test("covers a subtype through a migration of its parent", async () => {
     const withSubtypes = release([prop("gate", "string"), prop("hours", "string")], [], true)
     const storage = await deployed([create("I-1", { gate: "B12" }, "Inspection")], withSubtypes)

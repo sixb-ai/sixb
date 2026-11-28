@@ -32,7 +32,7 @@ data holds into findings; a covered one runs, probed under its stored key, unles
 provider can't apply its steps (no `migrations`, or no `migrations.values` for a fill or a
 convert). A value step resolves changes of the shape the renames leave (`valueChanges`), not of
 the stored one: a convert of a renamed property's `to` has no change of its own in the stored
-shape.
+shape. Two such converts conflict on that change too, a finding in check mode as in a deploy.
 
 ## Step kinds
 

@@ -619,7 +619,7 @@ function classifyTypeChanges(input: {
     objectTypeId,
     stored: from,
     code,
-    changes: diffTypeShapes(from, code).filter(needsData),
+    decides: needsData,
     ontology,
     migrations,
     settled,

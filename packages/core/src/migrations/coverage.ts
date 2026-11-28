@@ -33,20 +33,21 @@ export interface MigrationCoverage<TChange extends TypeShapeChange> {
 }
 
 /**
- * Sorts `changes`, the ones from `stored` to `code` that aren't compatible, into those pending
- * migration steps cover and those still missing one. Reads no data: the gate probes both lists and
- * only the changes data holds count.
+ * Sorts the changes from `stored` to `code` that `decides` keeps, those the data decides, into
+ * those pending migration steps cover and those still missing one. Reads no data: the gate probes
+ * both lists and only the changes data holds count.
  */
 export function coverChanges<TChange extends TypeShapeChange>(input: {
   readonly objectTypeId: string
   readonly stored: TypeShape
   readonly code: TypeShape
-  readonly changes: readonly TChange[]
+  readonly decides: (change: TypeShapeChange) => change is TChange
   readonly ontology: OntologyDefinitionCatalog
   readonly migrations: readonly MigrationDefinition[]
   readonly settled?: ReadonlySet<string>
 }): MigrationCoverage<TChange> {
-  const { objectTypeId, stored, code, changes, ontology, migrations } = input
+  const { objectTypeId, stored, code, ontology, migrations } = input
+  const changes = diffTypeShapes(stored, code).filter(input.decides)
   const plan = planPendingSteps({
     objectTypeId,
     stored,
@@ -74,7 +75,8 @@ export function coverChanges<TChange extends TypeShapeChange>(input: {
         : []
     )
   )
-  const valueChanges = diffTypeShapes(keyed, code).filter(
+  const keyedChanges = diffTypeShapes(keyed, code)
+  const valueChanges = keyedChanges.filter(
     (change) =>
       change.effect !== "compatible" &&
       "propertyId" in change &&
@@ -82,9 +84,13 @@ export function coverChanges<TChange extends TypeShapeChange>(input: {
       !covered.some((held) => sameConcern(held, change))
   )
 
+  // A conflict is found on the shape the renames leave: two converts of a renamed property resolve
+  // a change of `keyed` only.
+  const conflicting = [...changes, ...keyedChanges.filter(input.decides)]
+
   return {
     conflicts: plan.conflicts.map((conflict) => ({
-      change: changeOf(changes, conflict.steps[1].step),
+      change: changeOf(conflicting, conflict.steps[1].step),
       message: conflict.message,
     })),
     missing,
@@ -122,7 +128,13 @@ function concernOf(change: TypeShapeChange): string {
   return kind
 }
 
-/** A change of a subject the step holds. A pending step always has one: it resolves a change. */
+/**
+ * A change of a subject the step holds. Never thrown for a project's migrations, whatever they
+ * are: a conflict is found among steps pending on the shape the renames leave (a value step that
+ * ran first touched only its own property), and a step is pending only while that shape differs
+ * from the code's at its subject in a way the data decides: a key to move or remove, a value to
+ * fill or convert. The error is a bug in a step kind's `pending`.
+ */
 function changeOf<TChange extends TypeShapeChange>(
   changes: readonly TChange[],
   step: OntologyMigrationStep
