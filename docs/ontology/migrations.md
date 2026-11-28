@@ -68,12 +68,12 @@ or one property changed twice.
 ## Running one
 
 `sixb check --migrate` (the deploy step) and `sixb db migrate` run the pending migrations before
-the new code serves. `removeProperty` runs in this release; a change another step covers, such as
-a rename, still stops the deploy while objects hold it:
+the new code serves. `removeProperty`, `renameProperty` and `removeLink` run in this release; a
+change a fill or a convert covers still stops the deploy while objects hold it:
 
 ```text
-✗ Job: 'gate' was removed, and 2,140 objects hold it.
-  Migration 'job-gate-code' is pending; this build can't apply it yet.
+✗ Job: 'hours' is now required, and 2,140 objects lack it: created without it or cleared by an edit.
+  Migration 'job-hours' is pending; this build can't apply it yet.
 ```
 
 A run goes in this order:
@@ -85,14 +85,32 @@ A run goes in this order:
    failure leaves storage as it was, and the old release starts again.
 3. **Apply.** From the first batch, the deploy only goes forward
    ([During a deploy](../deployment/object-type-changes.md#during-a-deploy)). Each batch rewrites
-   only the objects, edits, source rows, unique values, file references and vectors that hold a
-   removed key, in one transaction, and saves where the next one starts. On PostgreSQL, ranges of
-   a type's objects and its source rows run side by side.
+   only the objects, edits, source rows, links, unique values, file references and vectors that
+   hold a removed or renamed key, in one transaction, and saves where the next one starts. On
+   PostgreSQL, ranges of a type's objects and its source rows run side by side.
 4. **Record.** The type's new shape is recorded, and the migration doesn't run again on that
    database.
 
 A migration changes the shape, not the business: rewritten objects get a new version, but no
 `object.updated` event, rule or workflow fires.
+
+## What a rename moves
+
+Everything that holds the old key moves to the new one, without being rebuilt:
+
+| Store | After `renameProperty("gate", "gateCode")` |
+| --- | --- |
+| Values and edits | Under `gateCode`, losing edits and unsets included, each with its edit time |
+| Source rows | Under `gateCode`, and so are the properties a row names absent |
+| Unique values | Moved as they are; built after the run if `gate` wasn't unique the same way |
+| File references | Held by `gateCode` |
+| Vectors | Still found by search: the embedding stays, and was computed from text that named `gate` |
+| Query indexes | Those on `gate` are dropped before the run; those on `gateCode` are built after it |
+
+- `removeLink` deletes the links of that kind, their edits (edges and slots, cleared ones
+  included) and the links a projection asserted.
+- Lineage still names the edit that set a renamed value. When other edits share its instant, it
+  names that instant instead of the commit.
 
 ## When a run stops
 
@@ -111,7 +129,7 @@ Nothing of a batch in flight was written. Run `sixb db migrate` to resume it.
 
 ## What it doesn't rewrite
 
-- Events already in the outbox and workflow runs in flight keep the old keys.
+- Events already in the outbox, workflow runs in flight and event history keep the old keys.
 - Telemetry series: removing a telemetry property isn't supported yet.
 
 ## `sixb dev`

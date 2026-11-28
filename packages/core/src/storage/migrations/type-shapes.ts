@@ -2,6 +2,7 @@ import type { JsonValue } from "../../json"
 import { coverChanges, type MigrationCoverage } from "../../migrations/coverage"
 import { CONFLICT_REMEDY } from "../../migrations/messages"
 import { concerningMigrations, type PlannedStep } from "../../migrations/pending"
+import { runRenames } from "../../migrations/run"
 import { stepKindOf } from "../../migrations/steps"
 import type { MigrationDefinition } from "../../migrations/types"
 import type { OntologyDefinitionCatalog } from "../../ontology/registry"
@@ -184,7 +185,7 @@ export async function checkTypeShapes(input: {
     else types.push(checked)
   }
   if (input.uniqueDuplicates) {
-    types.splice(0, types.length, ...(await withUniqueDuplicates(input, types)))
+    types.splice(0, types.length, ...(await withUniqueDuplicates(input, migrations, types)))
   }
 
   return {
@@ -226,6 +227,7 @@ async function withUniqueDuplicates(
     readonly projectId: string
     readonly ontology: OntologyDefinitionCatalog
   },
+  migrations: readonly MigrationDefinition[],
   types: readonly TypeShapeTypeCheck[]
 ): Promise<TypeShapeTypeCheck[]> {
   const unfit = new Set(
@@ -237,6 +239,7 @@ async function withUniqueDuplicates(
     ontology: input.ontology,
     keepObjectTypeIds: unfit,
     rebuild: madeUnique(types),
+    renames: runRenames({ types }, migrations),
   })
 
   return types.map((type) => {
@@ -246,7 +249,13 @@ async function withUniqueDuplicates(
     const findings = found.map(({ propertyId, violation }) =>
       duplicateFinding(type.objectTypeId, propertyId, violation)
     )
-    return { ...type, findings: [...type.findings, ...findings], next: { kind: "keep" } }
+    return {
+      ...type,
+      findings: [...type.findings, ...findings],
+      next: { kind: "keep" },
+      run: [],
+      settles: [],
+    }
   })
 }
 

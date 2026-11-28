@@ -32,4 +32,6 @@ export const removeLink: StepKind<RemoveLink> = {
     if (change.kind !== "link-removed" || change.effect !== "narrowing") return null
     return { verb: "remove", call: `removeLink(${quoted(change.linkId)})` }
   },
+
+  storeStep: (step) => ({ kind: "removeLink", linkId: step.linkId }),
 }

@@ -97,6 +97,7 @@ export type {
   OntologyMigrationRunType,
   OntologyMigrationStorage,
   OntologyMigrationStoreStep,
+  OntologyMigrationVectorMove,
   SettledMigration,
   StartOntologyMigrationRunInput,
 } from "./migrations"

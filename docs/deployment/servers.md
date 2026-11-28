@@ -162,7 +162,7 @@ A release with storage migrations is the exception: the live release was built f
 
 A process that exits is restarted automatically, and the services start when the server boots, without anyone logging in.
 
-To return to an earlier release, deploy its commit with `--ref`. Storage migrations are not reversed, and neither are ontology migrations: the older commit is checked against the stored objects like any other, so one that requires a property a migration removed is refused ([Changing object types](object-type-changes.md)).
+To return to an earlier release, deploy its commit with `--ref`. Storage migrations are not reversed, and neither are ontology migrations: the older commit is checked against the stored objects like any other, so one from before a rename, or one that requires a property a migration removed, is refused ([Changing object types](object-type-changes.md)).
 
 ## Next steps
 

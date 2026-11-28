@@ -6,6 +6,7 @@ import {
   defineObjectType,
   defineProjection,
   type EmbeddingModel,
+  link,
   type ObjectTypeWithPropertyTokens,
   OntologyRegistry,
   prop,
@@ -32,10 +33,12 @@ import { createTestSixb } from "./execution"
 import { startTestProjectionRun } from "./projection-execution"
 import { createStoredArtifact } from "./stored-artifacts"
 
-// Jobs as a first release stores them, in every place a property can live, then the release that
-// removes `gate` and `contract`. Edit-created jobs hold values, a vector, an artifact and a unique
-// value; projected jobs hold source rows, a losing edit, an unset, absent values and a row a delete
-// hides; an inspection, a subtype, inherits it all.
+// Jobs as a first release stores them, in every place a property can live, then the releases that
+// remove `gate` and `contract`, or rename them and remove the links. Edit-created jobs hold values,
+// a vector, an artifact, a unique value and links; projected jobs hold source rows and source
+// links, a losing edit, an unset, a cleared lead, absent values and a row a delete hides; an
+// inspection, a subtype, inherits it all. Every release keeps a projected `depot`, whose source
+// links sit beside the removed `lead`'s.
 
 export const PROJECT = "ontology-migration-contract"
 export const ARTIFACT = "art_m1g2r3t4n5"
@@ -53,28 +56,65 @@ const embedding: EmbeddingModel = {
   },
 }
 
-/** The release that stores `gate` and `contract`, or the one that removed them. */
-export function release(withGate: boolean, options: { readonly uniqueNote?: boolean } = {}) {
+const Technician = defineObjectType({
+  id: "MigrationTechnician",
+  name: "Technician",
+  properties: [prop("id", "string", { primary: true, required: true })],
+})
+
+export interface ReleaseOptions {
+  /** The id `gate` has in the release, or `null` once removed. */
+  readonly gate: "gate" | "gateCode" | null
+  readonly contract: "contract" | "agreement" | null
+  /** Whether jobs have a `crew` and a `lead`; every release has a `depot`. */
+  readonly links: boolean
+  readonly uniqueGate?: boolean
+  readonly uniqueNote?: boolean
+}
+
+/** A release of jobs: the first stores `gate`, `contract` and links; later ones move them. */
+export function release(options: ReleaseOptions) {
+  const { gate, contract } = options
   const Job = defineObjectType({
     id: "MigrationJob",
     name: "Job",
     properties: [
       prop("id", "string", { primary: true, required: true }),
-      ...(withGate
+      ...(gate
         ? [
-            prop("gate", "string", { unique: true, nullable: true }),
-            prop("contract", ref.artifact(), { nullable: true }),
+            prop(gate, "string", {
+              ...(options.uniqueGate === false ? {} : { unique: true as const }),
+              nullable: true,
+              query: { searchable: true, filterable: true, sortable: true },
+            }),
           ]
         : []),
-      prop("note", "string", options.uniqueNote ? { unique: true } : {}),
+      ...(contract ? [prop(contract, ref.artifact(), { nullable: true })] : []),
+      prop("note", "string", {
+        ...(options.uniqueNote ? { unique: true as const } : {}),
+        query: { searchable: true, text: true },
+      }),
       prop("temperature", "double", { mode: "telemetry" }),
+    ],
+    links: [
+      link("depot", Technician, { cardinality: "one" }),
+      ...(options.links
+        ? [
+            link("crew", Technician, { cardinality: "many" }),
+            link("lead", Technician, { cardinality: "one" }),
+          ]
+        : []),
     ],
     search: {
       vectors: {
-        ...(withGate ? { gates: { source: ["gate"], model: embedding } } : {}),
+        ...(gate ? { gates: { source: [gate], model: embedding } } : {}),
         notes: { source: ["note"], model: embedding },
       },
     },
+    // A text count filtered on the key: its columns are named after the definition only.
+    ...(gate
+      ? { query: { indexes: [{ kind: "text", propertyId: "note", filters: [gate] }] } }
+      : {}),
   })
   const Inspection = defineObjectType({
     id: "MigrationInspection",
@@ -83,17 +123,26 @@ export function release(withGate: boolean, options: { readonly uniqueNote?: bool
     properties: [],
   })
 
-  const ontology = new OntologyRegistry({ sources: [Job, Inspection] })
+  const ontology = new OntologyRegistry({ sources: [Technician, Job, Inspection] })
   const jobs = defineDataset("migration_contract_jobs", {
     schema: [
       col("id", "string"),
-      ...(withGate ? [col("gate", "string", { nullable: true })] : []),
+      col("gate", "string", { nullable: true }),
+      col("lead_id", "string", { nullable: true }),
+      col("depot_id", "string", { nullable: true }),
       col("updated_at", "timestamp"),
     ],
   })
-  const projection = defineProjection("migration_contract_jobs", Job)
+  const mapped = defineProjection("migration_contract_jobs", Job)
     .fromDataset(jobs)
-    .properties(withGate ? { id: "id", gate: "gate" } : { id: "id" })
+    .properties(gate ? ({ id: "id", [gate]: "gate" } as { id: "id" }) : { id: "id" })
+  const depot = { link: Job.l.depot, sourceField: "depot_id" as const, target: Technician }
+  const projection = mapped
+    .withLinks(
+      options.links
+        ? { depot, lead: { link: Job.l.lead, sourceField: "lead_id", target: Technician } }
+        : { depot }
+    )
     .resolveConflicts({ strategy: "mostRecent", sourceTimestamp: "updated_at" })
   const projections = new ProjectionRegistry({
     projections: [projection],
@@ -104,13 +153,22 @@ export function release(withGate: boolean, options: { readonly uniqueNote?: bool
   return { Job, Inspection, ontology, projections, projection, jobs }
 }
 
-export const v1 = release(true)
-export const v2 = release(false)
+export const v1 = release({ gate: "gate", contract: "contract", links: true })
+export const v2 = release({ gate: null, contract: null, links: true })
+/** The release that renames `gate` and `contract`, and no longer links jobs to technicians. */
+export const renamed = release({ gate: "gateCode", contract: "agreement", links: false })
 
 /** Removes both properties `v2` dropped. */
 export const removeGate = defineMigration("job-gate", v2.Job)
   .removeProperty("gate")
   .removeProperty("contract")
+
+/** Renames both properties, and removes both links, as `renamed` needs. */
+export const renameGate = defineMigration("job-gate-code", renamed.Job)
+  .renameProperty("gate", "gateCode")
+  .renameProperty("contract", "agreement")
+  .removeLink("crew")
+  .removeLink("lead")
 
 /**
  * Jobs with one optional string property per name and no projection: a migration that removes or
@@ -131,11 +189,16 @@ export function wideRelease(names: readonly string[]) {
     extends: Job,
     properties: [],
   })
-  return { Job, Inspection, ontology: new OntologyRegistry({ sources: [Job, Inspection] }) }
+  return {
+    Job,
+    Inspection,
+    ontology: new OntologyRegistry({ sources: [Technician, Job, Inspection] }),
+  }
 }
 
 export const JOB = v1.Job.id
 export const INSPECTION = v1.Inspection.id
+export const TECHNICIAN = Technician.id
 
 /** Jobs that hold `gate` in every store, and `j-note`, which holds neither removed property. */
 export async function seedJobs(storage: Storage): Promise<void> {
@@ -169,28 +232,48 @@ export async function seedJobs(storage: Storage): Promise<void> {
   }
   await sixb.objects(v1.Inspection).upsert({ properties: { id: "i-1", gate: "I1" } })
 
+  // Links an action wrote: a crew edge and a lead slot.
+  for (const id of ["t-1", "t-2"]) await sixb.objects(Technician).upsert({ properties: { id } })
+  await sixb.objects(v1.Job).byId("j-1").link(v1.Job.l.crew, technicianRef("t-1"))
+  await sixb.objects(v1.Job).byId("j-1").link(v1.Job.l.lead, technicianRef("t-2"))
+
   // Projected jobs: `p-1`'s edit loses to a newer source row, `p-2`'s edit clears it, `p-3`'s row
-  // names it absent, and `p-4`'s row is hidden by a delete.
+  // names it absent, and `p-4`'s row is hidden by a delete. `p-1`'s projected lead is cleared.
   await publish(
     storage,
     1,
-    [entry("p-1", "P1"), entry("p-2", "P2"), entry("p-3"), entry("p-4", "P4")],
+    [
+      entry("p-1", "P1", "t-1"),
+      entry("p-2", "P2"),
+      entry("p-3", undefined, "t-2"),
+      entry("p-4", "P4"),
+    ],
     at(1)
   )
   await edits(storage, at(2)).commit([
     patch("p-1", { gate: "E1" }),
     patch("p-2", {}, ["gate", "note"]),
     { id: "delete-p-4", kind: "object.delete", ref: jobRef("p-4") },
+    {
+      id: "clear-p-1",
+      kind: "link.delete",
+      ref: { source: jobRef("p-1"), linkId: "lead", target: technicianRef("t-1") },
+    },
   ])
   await publish(
     storage,
     2,
-    [entry("p-1", "P1b"), entry("p-2", "P2"), entry("p-3"), entry("p-4", "P4")],
+    [
+      entry("p-1", "P1b", "t-1"),
+      entry("p-2", "P2"),
+      entry("p-3", undefined, "t-2"),
+      entry("p-4", "P4"),
+    ],
     at(3)
   )
 }
 
-/** The first release's trusted client: what its actions write. */
+/** A release's trusted client, the first one's by default: what its actions write. */
 export function firstRelease(
   storage: Storage,
   code: {
@@ -200,7 +283,7 @@ export function firstRelease(
 ) {
   const host = new SixbHost({
     id: PROJECT,
-    ontology: [code.Job, code.Inspection],
+    ontology: [Technician, code.Job, code.Inspection],
     models: { embedding: [embedding] },
     blobStorage: new InMemoryBlobStorage(),
     broker: new InMemoryBroker(),
@@ -335,6 +418,10 @@ export function jobRef(primaryId: string, objectTypeId: string = JOB) {
   return { objectTypeId, primaryId }
 }
 
+export function technicianRef(primaryId: string) {
+  return { objectTypeId: Technician.id, primaryId }
+}
+
 function at(seconds: number): string {
   return new Date(Date.parse(AT) + seconds * 1_000).toISOString()
 }
@@ -391,8 +478,8 @@ function patch(
   }
 }
 
-/** One dataset row: the job's projected `gate`, or `gate` named absent. */
-function entry(primaryId: string, gate?: string): ProjectionSourceEntry {
+/** One dataset row: the job's projected `gate`, or `gate` named absent, its lead and its depot. */
+function entry(primaryId: string, gate?: string, lead?: string): ProjectionSourceEntry {
   const ref = jobRef(primaryId)
   return {
     root: { kind: "object", ref },
@@ -403,6 +490,18 @@ function entry(primaryId: string, gate?: string): ProjectionSourceEntry {
         properties: gate === undefined ? { id: primaryId } : { id: primaryId, gate },
         ...(gate === undefined ? { absentSourcePropertyIds: ["gate"] } : {}),
       },
+      {
+        kind: "link" as const,
+        ref: { source: ref, linkId: "depot", target: technicianRef("t-1") },
+      },
+      ...(lead
+        ? [
+            {
+              kind: "link" as const,
+              ref: { source: ref, linkId: "lead", target: technicianRef(lead) },
+            },
+          ]
+        : []),
     ],
   }
 }

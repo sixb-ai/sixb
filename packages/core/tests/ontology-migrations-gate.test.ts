@@ -26,8 +26,8 @@ import { prepareUniqueProperties } from "../src/storage/migrations/prepare-uniqu
 import type { OntologyMigrationStorage } from "../src/storage/ontology/migrations"
 
 // The deploy's gate with the project's migrations: a change their pending steps cover isn't
-// missing one, one they don't says what to write, a covered removal runs, and a covered change of a
-// kind this build can't apply yet still stops on data. The pending algorithm alone is in
+// missing one, one they don't says what to write, a covered removal or rename runs, and a covered
+// change of a kind this build can't apply yet still stops on data. The pending algorithm alone is in
 // `ontology-migrations-pending`, what a run writes in the shared migration suite.
 
 const PROJECT = "migrations-gate"
@@ -353,13 +353,15 @@ describe("a change pending migrations cover", () => {
       [link("crew", Technician)]
     )
     const migration = defineMigration("job-gate", v2.Job).renameProperty("gate", "gateCode")
-    expect(await messageOf(deploy(storage, v2, [migration]))).toBe(
-      [
-        "[Sixb] The stored objects don't fit this code:",
-        "  ✗ Job: 'gate' was removed, and 1 object holds it.",
-        "    Migration 'job-gate' is pending; this build can't apply it yet.",
-      ].join("\n")
-    )
+    await deploy(storage, v2, [migration])
+
+    expect((await storedJob(storage))?.shape.properties).toHaveProperty("gateCode")
+    const job = await storage.objects.getByPrimaryId({
+      projectId: PROJECT,
+      objectTypeId: "Job",
+      primaryId: "J-1",
+    })
+    expect(job?.properties).toEqual({ ref: "J-1", gateCode: "B12" })
   })
 
   // Guard proof: in `coverage.ts`, compare the changes' kinds as they are. The new property's
@@ -379,8 +381,6 @@ describe("a change pending migrations cover", () => {
         "  ✗ Job: 'gateCode' is now required, and 1 object lacks it: created without it or cleared by an edit.",
         "    Fill it in a migration:",
         '      defineMigration("job-gate-code", Job).fillProperty("gateCode", ({ object }) => …)',
-        "  ✗ Job: 'gate' was removed, and 1 object holds it.",
-        "    Migration 'job-gate' is pending; this build can't apply it yet.",
       ].join("\n")
     )
   })
@@ -494,6 +494,28 @@ describe("a migration run", () => {
     })
     expect(await messageOf(started)).toContain(
       "Job: 'memo' was removed since its shape was recorded."
+    )
+  })
+
+  // Revert check: as above: the release before a rename then starts, keeps `gateCode` recorded,
+  // records its own `gate` next to it, and fails every edit of an object the run renamed.
+  test("leaves the release before a rename refused, as a role", async () => {
+    const storage = await deployed([create("J-1", { gate: "B12" })])
+    const v2 = release(
+      [prop("gateCode", "string"), prop("hours", "string")],
+      [link("crew", Technician)]
+    )
+    await deploy(storage, v2, [
+      defineMigration("job-gate-code", v2.Job).renameProperty("gate", "gateCode"),
+    ])
+
+    const started = migrateStorage(storage, {
+      projectId: PROJECT,
+      ontology: v1.ontology,
+      ontologyShapes: "role",
+    })
+    expect(await messageOf(started)).toContain(
+      "Job: 'gateCode' was removed since its shape was recorded."
     )
   })
 

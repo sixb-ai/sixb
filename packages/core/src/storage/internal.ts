@@ -76,11 +76,13 @@ export {
 } from "./migrations/type-shapes"
 export {
   addMigrationCounts,
+  type CompiledMigrationSteps,
   compileMigrationSteps,
   migrationBatchConflict,
   migrationLanes,
   migrationRunAlreadyOpen,
   migrationRunType,
+  movedVectorFingerprint,
   rootKeyEnd,
   rootKeyPrefix,
 } from "./ontology/migrations"

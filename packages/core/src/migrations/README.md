@@ -86,9 +86,9 @@ lanes beside them; each batch is one `applyBatch`, in one transaction, set-based
 
 | Lane | Batch | Stores |
 | --- | --- | --- |
-| `objects`, one per range of a type | up to `batchRows` objects and edits by primary id, ending at the lower of the two last keys | `objects` (`version + 1`, `last_commit_id`), edits (`create.properties`, `patch.set`, `unset`, edit times), vectors whose source held a key |
+| `objects`, one per range of a type | up to `batchRows` objects and edits by primary id, ending at the lower of the two last keys | `objects` (`version + 1`, `last_commit_id`), edits (`create.properties`, `patch.set`, `unset`, edit times), vectors whose source held a key, links and link edits by source id |
 | `sources`, one per root-key range of a type | up to `batchRows` source roots of one version, by root key, every version in turn | source row values and `absentSourcePropertyIds` |
-| `derived`, per type | up to `batchRows` rows | unique values and their preparation, then artifact refs |
+| `derived`, per type | up to `batchRows` rows | unique values and their preparation, then artifact refs, then source rows of removed links (with their versions' `assertion_count`) |
 
 - **Ranges.** pg splits a type's objects into up to `parallelism` primary-id ranges, and its
   source roots into as many root-key ranges, from a `TABLESAMPLE` of the partition (or of
@@ -102,11 +102,17 @@ lanes beside them; each batch is one `applyBatch`, in one transaction, set-based
   heap page (TID ranges up to the table's size at the first batch) when the properties hold at
   least a quarter as many values as the table has pages, and one property at a time by key
   otherwise. Values in `value_hash` order lie on random pages: a walk by key reads about one
-  random page per value, so a large property would read every page many times over.
+  random page per value, so a large property would read every page many times over. Source rows
+  of removed links go by source id after the cursor, every row of the last id a batch reaches with
+  it: the link-source index also holds the links the type keeps, which a batch starting from the
+  type's first entry would walk again each time.
 - **No touches.** Only replacement plans read commit touches, and `startRun` drops them all; writes
   are paused, roles refuse a `migrating` shape and `sixb dev` starts its workers after migrating, so
   no plan opens before `finishRun`.
-- One statement per store: `compileMigrationSteps` folds a type's steps into the keys they remove.
+- One statement per store: `compileMigrationSteps` folds a type's steps into the keys rows are
+  rewritten for (removed ids and renamed `from`s), the renames, and the removed links. The
+  removed and `to` ids are disjoint (a `from` is undeclared, a `to` declared), so dropping every
+  key then adding each `to` the row held is one expression (`moveKeys`, and in SQL `moved`).
 - The batch commit (runtime origin, the run's start as its time, no change listed, as a
   snapshot's base commit) is named by (run, lane, batch) and written only when an object or an edit
   changed. No outbox row.
@@ -115,6 +121,40 @@ lanes beside them; each batch is one `applyBatch`, in one transaction, set-based
   crash rolls back the batches in flight and nothing else.
 - Telemetry is never rewritten: a telemetry removal isn't pending (`steps/remove-property.ts`).
 - `updated_at` stays: the migration changes the shape, not the business.
+
+## Renames
+
+A rename moves what already exists instead of rebuilding it:
+
+- **Edit times** move with their values, so lineage still finds the edit. It finds it by its
+  instant: when other edit commits share it and none names the new id, lineage names the instant.
+- **Unique values.** Nothing is prepared before the run. The plan says per rename whether
+  `from`'s values move (`unique: "move"`: they were prepared with the key kind and version `to`
+  compares by) or go (`drop`). Either way the derived lane first deletes whatever `to` held, its
+  preparation included: a release that once made `to` unique may have left one no object backs.
+  It then moves `property_id` in the same walk that deletes a removed key's (by page or by key, as
+  under "Lanes and batches"), and the preparation after the run finds them current. When they can't move and
+  `to` is unique, the dry run before the run (`checkUniqueProperties`) builds `to`'s values from
+  those under `from` and rolls back, so a duplicate fails before the point of no return; the
+  preparation after the run builds them for real.
+- **Vectors.** `source_fingerprint` hashes key names, so the objects lane recomputes it in JS for
+  the batch's vectors of a moved profile (`OntologyMigrationRunType.vectors`: the code's profiles
+  whose source names a `to`, with their configuration under the old keys), from the values the
+  object holds before the batch. A vector that doesn't match them, or of another configuration,
+  is deleted like a removed key's. The embedding is kept: it was computed from text that named the
+  old key. Indexing queued for those profiles moves the same way (`request.configuration` and
+  `sourceFingerprint`), so `prepare` doesn't discard it; it goes only when its object no longer
+  holds the values it was asked for.
+- **Query structures** (PostgreSQL). Only sort and text count indexes carry their definition, so
+  `startRun` matches what `pg_get_indexdef`, `pg_get_statisticsobjdef` and `pg_get_expr` print
+  (`properties -> '<key>'::text` or `->>`) on the type's partition and on the generated columns of
+  `objects`, and drops it before any batch, so the rewrite doesn't maintain it. A text column
+  filtered on the key is found by its count index's comment. The preparation record goes with
+  them, and `applyTypeShapes` prepares queries again after the run. Adding or dropping a generated
+  column changes `objects`' row type, which aborts a transaction that runs a statement cached
+  with `*`: the reads unique preparation and lineage run in transactions name their columns.
+  Tagging every query structure, as visibility indexes are (`visibility-indexes.ts`), would make
+  the match exact.
 
 ## Settled migrations
 

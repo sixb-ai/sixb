@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import type { Storage } from ".."
 import { defineMigration, type MigrationDefinition } from "../migrations"
 import { applyOntologyMigrations, resumeOntologyMigration } from "../migrations/run"
+import { vectorConfiguration, vectorSources } from "../objects/vectors/profile"
 import type { OntologyRegistry } from "../ontology"
 import { migrateStorage } from "../storage/migrations"
 import { applyTypeShapes } from "../storage/migrations/migrate-storage"
@@ -25,8 +26,12 @@ import {
   PROJECT,
   release,
   removeGate,
+  renamed,
+  renameGate,
   seedJobs,
+  TECHNICIAN,
   TIMEOUT_MS,
+  technicianRef,
   v1,
   v2,
   wideRelease,
@@ -35,6 +40,21 @@ import {
 export interface OntologyMigrationContractProvider<TStorage extends Storage> {
   readonly createStorage: () => TStorage | Promise<TStorage>
   readonly cleanup?: (storage: TStorage) => void | Promise<void>
+  /** Stores the marker an old storage migration left on a slot, for a provider that has one. */
+  readonly writeLegacyLinkConflict?: (
+    storage: TStorage,
+    slot: {
+      readonly projectId: string
+      readonly sourceTypeId: string
+      readonly sourcePrimaryId: string
+      readonly linkId: string
+    }
+  ) => Promise<void>
+  /**
+   * What the provider prints of every index, statistic and generated column a type's queries are
+   * built on, for a provider that builds them. A text column starts with its name.
+   */
+  readonly readQueryStructures?: (storage: TStorage, objectTypeId: string) => Promise<string[]>
 }
 
 /**
@@ -163,6 +183,7 @@ export function runOntologyMigrationContractSuite<TStorage extends Storage>(
         expect(shapes.map((row) => [row.objectTypeId, row.state])).toEqual([
           [INSPECTION, "current"],
           [JOB, "current"],
+          [TECHNICIAN, "current"],
         ])
         expect(shapes.find((row) => row.objectTypeId === JOB)?.shape.properties).not.toHaveProperty(
           "gate"
@@ -242,7 +263,7 @@ export function runOntologyMigrationContractSuite<TStorage extends Storage>(
         // Past the point of no return: a role refuses to start, `--check` says it applies, nothing
         // records a shape over the run's, and no second run starts.
         const shapes = await storage.ontology.typeShapes.list({ projectId: PROJECT })
-        expect(shapes.map((row) => row.state)).toEqual(["migrating", "migrating"])
+        expect(shapes.map((row) => row.state)).toEqual(["migrating", "migrating", "current"])
         const refused = await check(storage, "role").catch((error: unknown) => error)
         expect(refused).toBeInstanceOf(OntologyMigrationApplyingError)
         expect((await check(storage, "check")).applying).toEqual([INSPECTION, JOB])
@@ -313,7 +334,7 @@ export function runOntologyMigrationContractSuite<TStorage extends Storage>(
         }
         const before = await dumpStores(storage)
 
-        const unique = release(false, { uniqueNote: true })
+        const unique = release({ gate: null, contract: null, links: true, uniqueNote: true })
         const failed = await migrateStorage(storage, {
           projectId: PROJECT,
           ontology: unique.ontology,
@@ -475,6 +496,470 @@ export function runOntologyMigrationContractSuite<TStorage extends Storage>(
     },
     TIMEOUT_MS
   )
+
+  // Removal proofs: in a provider, drop the rename from `unset` or from the edit times, the vector
+  // move, the link delete or the source link delete, and this case fails; in SQLite, read `unset`
+  // through a bare `value` inside `json_each`, which is json_each's own column.
+  test(
+    `${name} renames a property in every store that holds it, and removes links`,
+    async () => {
+      await withSeeded(async (storage) => {
+        if (provider.writeLegacyLinkConflict) {
+          await provider.writeLegacyLinkConflict(storage, {
+            projectId: PROJECT,
+            sourceTypeId: JOB,
+            sourcePrimaryId: "j-3",
+            linkId: "lead",
+          })
+        }
+        const before = await versions(storage)
+        const state = await readJobs(storage)
+        const queued = await queuedIndexing(storage, "j-2")
+        expect(queued?.configuration).toBe(vectorConfiguration(v1.Job.search!.vectors!.gates!))
+        const jobsSource = { projectId: PROJECT, source: { projectionId: v1.projection.id } }
+        const assertions = (await storage.ontology.sources.getActive(jobsSource))?.assertionCount
+
+        await deploy(storage, renamed.ontology, [renameGate])
+
+        for (const objectTypeId of [JOB, INSPECTION]) {
+          for (const probe of [
+            { kind: "property", propertyId: "gate" },
+            { kind: "property", propertyId: "contract" },
+            { kind: "link", linkId: "crew" },
+            { kind: "link", linkId: "lead" },
+          ] as const) {
+            expect(
+              await storage.ontology.typeShapes.holds({ projectId: PROJECT, objectTypeId, probe })
+            ).toBe(false)
+          }
+        }
+        await expectVersionsBumpedOnce(storage, before)
+        // The active version's two projected leads went, and its count with them.
+        expect((await storage.ontology.sources.getActive(jobsSource))?.assertionCount).toBe(
+          assertions! - 2
+        )
+
+        // Values, edits and their times, source rows and absent ids, under the new ids.
+        const after = await readJobs(storage)
+        expect(after.get("j-1")?.effective?.properties).toEqual({
+          id: "j-1",
+          gateCode: "A1",
+          note: "first",
+          agreement: { type: "artifact", id: ARTIFACT },
+          temperature: 21.5,
+        })
+        const { gate, contract, ...kept } = state.get("j-1")?.override?.editedAt ?? {}
+        expect(gate).toBeDefined()
+        expect(after.get("j-1")?.override?.editedAt).toEqual({
+          ...kept,
+          gateCode: gate,
+          agreement: contract,
+        })
+        expect(after.get("p-1")?.override?.value).toEqual({
+          kind: "patch",
+          set: { gateCode: "E1" },
+          unset: [],
+        })
+        expect(after.get("p-1")?.override?.editedAt).toEqual({
+          gateCode: state.get("p-1")?.override?.editedAt?.gate ?? "missing",
+        })
+        expect(after.get("p-1")?.effective?.properties.gateCode).toBe("P1b")
+        expect(after.get("p-1")?.source?.assertion).toMatchObject({
+          properties: { gateCode: "P1b" },
+        })
+        expect(after.get("p-2")?.override?.value).toEqual({
+          kind: "patch",
+          set: {},
+          unset: ["gateCode", "note"],
+        })
+        expect(after.get("p-3")?.source?.assertion).toMatchObject({
+          absentSourcePropertyIds: ["gateCode"],
+        })
+        expect(after.get("i-1")?.effective?.properties.gateCode).toBe("I1")
+
+        // The edit that set the value still explains it, by its commit or, when other edit
+        // commits share its instant and none names `gateCode`, by that instant: never the run.
+        const renamedLineage = await firstRelease(storage, renamed)
+          .objects(renamed.Job)
+          .lineage("j-1")
+        const source = renamedLineage?.properties.gateCode?.source ?? "none"
+        expect(renamedLineage?.sources[source]).toMatchObject({
+          kind: "edit",
+          committedAt: state.get("j-1")?.override?.editedAt?.gate,
+        })
+
+        // File refs and vectors moved: the old embedding is found under the new profile.
+        const holders = await storage.objects.listArtifactHolders?.({
+          projectId: PROJECT,
+          artifactId: ARTIFACT,
+          limit: 10,
+        })
+        expect(holders?.holders.map((holder) => holder.propertyId)).toEqual(["agreement"])
+        const vectors = await storage.ontology.vectors?.list({
+          projectId: PROJECT,
+          ref: jobRef("j-1"),
+        })
+        const profile = renamed.Job.search!.vectors!.gates!
+        expect(vectors?.find((vector) => vector.profile === "gates")).toMatchObject({
+          source: ["gateCode"],
+          configuration: vectorConfiguration(profile),
+          sourceFingerprint: vectorSources(["gateCode"], { gateCode: "A1" }).sourceFingerprint,
+        })
+        const found = await firstRelease(storage, renamed)
+          .objects(renamed.Job)
+          .query()
+          .vector("gates", "A1", { k: 1 })
+          .list()
+          .catch((error: unknown) => error)
+        // SQLite searches only with its vector extension, which a test run may not load.
+        if (!String(found).includes("requires extension support")) {
+          expect((found as { objects: { primaryId: string }[] }).objects).toMatchObject([
+            { primaryId: "j-1" },
+          ])
+        }
+
+        // Indexing asked for before the run follows the profile, or `prepare` would drop it.
+        expect(await queuedIndexing(storage, "j-2")).toMatchObject({
+          id: queued?.id,
+          configuration: vectorConfiguration(profile),
+          sourceFingerprint: vectorSources(["gateCode"], { gateCode: "G-j-2" }).sourceFingerprint,
+        })
+
+        // Unique values moved: another job can't take a held value, and a released one is free.
+        const prepared = await storage.ontology.uniqueValues.listPrepared({ projectId: PROJECT })
+        expect(prepared.map((property) => property.propertyId).sort()).toEqual([
+          "gateCode",
+          "gateCode",
+        ])
+        await expectUniqueMoved(storage)
+
+        expect(await storage.ontology.migrations?.listSettled({ projectId: PROJECT })).toEqual([
+          { objectTypeId: INSPECTION, migrationId: "job-gate-code" },
+          { objectTypeId: JOB, migrationId: "job-gate-code" },
+        ])
+      })
+    },
+    TIMEOUT_MS
+  )
+
+  // Removal proof: in PostgreSQL, leave `dropMigratedQueryStructures` out of `startRun`; the
+  // indexes, statistics and text columns on `gate` stay, each maintained by every later write.
+  test(
+    `${name} drops the query structures on a renamed key and prepares the new key's`,
+    async () => {
+      const read = provider.readQueryStructures
+      if (!read) return
+
+      await withSeeded(async (storage) => {
+        const reads = (key: string) => (definition: string) =>
+          definition.includes(`'${key}'::text`) &&
+          (!definition.includes("object_type_id = '") || definition.includes(`'${JOB}'::text`))
+        const textColumns = (definitions: readonly string[]) =>
+          definitions.filter((definition) => definition.startsWith("sixb_qtext_")).length
+
+        const before = await read(storage, JOB)
+        expect(before.filter(reads("gate")).length).toBeGreaterThan(3)
+
+        await deploy(storage, renamed.ontology, [renameGate])
+
+        const after = await read(storage, JOB)
+        expect(after.filter(reads("gate"))).toEqual([])
+        expect(after.filter(reads("gateCode")).length).toBe(before.filter(reads("gate")).length)
+        // A text column filtered on the key holds no key in its expression: its index named it.
+        expect(textColumns(after)).toBe(textColumns(before))
+      })
+    },
+    TIMEOUT_MS
+  )
+
+  // Removal proofs, in SQLite: nest each rename around the previous expression (`CASE … THEN
+  // expr ELSE json_set(expr, …)`), and the parser overflows at a dozen; or `OR` one condition per
+  // rename for the `to` that gives way, and the expression tree is too deep. Either fails past the
+  // point of no return, and every resume the same way.
+  test(
+    `${name} renames five hundred properties of one type in one migration`,
+    async () => {
+      const storage = await provider.createStorage()
+      try {
+        const from = Array.from({ length: 500 }, (_, index) => `old${index + 1}`)
+        const to = from.map((id) => id.replace("old", "new"))
+        const before = wideRelease(from)
+        const after = wideRelease(to)
+        const values = Object.fromEntries(from.map((id) => [id, `value of ${id}`]))
+
+        await deploy(storage, before.ontology)
+        const jobs = firstRelease(storage, before).objects(before.Job)
+        await jobs.upsert({ properties: { id: "w-1", ...values } })
+        await jobs.upsert({ properties: { id: "w-2", old1: "only one" } })
+
+        let migration = defineMigration("wide-rename", after.Job)
+        for (const [index, id] of from.entries())
+          migration = migration.renameProperty(id, to[index]!)
+        await deploy(storage, after.ontology, [migration])
+
+        const read = (primaryId: string) =>
+          storage.objects.getByPrimaryId({
+            projectId: PROJECT,
+            objectTypeId: after.Job.id,
+            primaryId,
+          })
+        expect((await read("w-1"))?.properties).toEqual({
+          id: "w-1",
+          ...Object.fromEntries(to.map((id, index) => [id, `value of ${from[index]}`])),
+        })
+        expect((await read("w-2"))?.properties).toEqual({ id: "w-2", new1: "only one" })
+
+        const edits = await storage.ontology.typeShapes.listEdits({
+          projectId: PROJECT,
+          objectTypeId: after.Job.id,
+          limit: 10,
+        })
+        const created = edits.edits.find((edit) => edit.primaryId === "w-1")!
+        expect(
+          created.value.kind === "create" && Object.keys(created.value.properties).sort()
+        ).toEqual([...to].sort())
+        expect(Object.keys(created.editedAt).sort()).toEqual([...to].sort())
+      } finally {
+        await closeReleases(storage)
+        await provider.cleanup?.(storage)
+      }
+    },
+    TIMEOUT_MS
+  )
+
+  test(
+    `${name} renames one property and removes another in one migration`,
+    async () => {
+      await withSeeded(async (storage) => {
+        const code = release({ gate: "gateCode", contract: null, links: true })
+        const migration = defineMigration("job-gate-code", code.Job)
+          .renameProperty("gate", "gateCode")
+          .removeProperty("contract")
+
+        await deploy(storage, code.ontology, [migration])
+
+        expect((await object(storage, "j-1"))?.properties).toEqual({
+          id: "j-1",
+          gateCode: "A1",
+          note: "first",
+          temperature: 21.5,
+        })
+        const holders = await storage.objects.listArtifactHolders?.({
+          projectId: PROJECT,
+          artifactId: ARTIFACT,
+          limit: 10,
+        })
+        expect(holders?.holders ?? []).toEqual([])
+      })
+    },
+    TIMEOUT_MS
+  )
+
+  // Removal proofs: leave the dry run out of `applyTypeShapes`, and the duplicate fails after the
+  // point of no return, with every job already renamed; leave out the preparation after the run,
+  // and `gateCode` has no values; in PostgreSQL, read `listByPrimaryIdPage` with `*`, and the dry
+  // run fails on its cached plan once query preparation added a column to `objects`.
+  test(
+    `${name} builds a newly unique renamed property after the run, refusing duplicates before it`,
+    async () => {
+      await withSeeded(async (storage) => {
+        // A release where `gate` isn't unique: its values go, and two jobs may share one.
+        const plain = release({
+          gate: "gate",
+          contract: "contract",
+          links: true,
+          uniqueGate: false,
+        })
+        await deploy(storage, plain.ontology)
+        await firstRelease(storage, plain)
+          .objects(plain.Job)
+          .upsert({ properties: { id: "j-2", gate: "A1" } })
+        const before = await dumpStores(storage)
+
+        const failed = await deploy(storage, renamed.ontology, [renameGate]).catch(
+          (error: unknown) => error
+        )
+        expect(String(failed)).toContain("Cannot make 'MigrationJob.gateCode' unique")
+        expect(await dumpStores(storage)).toEqual(before)
+
+        await firstRelease(storage, plain)
+          .objects(plain.Job)
+          .upsert({ properties: { id: "j-2", gate: "A2" } })
+        await deploy(storage, renamed.ontology, [renameGate])
+        await expectUniqueMoved(storage)
+      })
+    },
+    TIMEOUT_MS
+  )
+
+  // Removal proof: in a provider's derived lane, clear a rename's new id only when values move
+  // there; the stale preparation is trusted after the run, and nothing finds `j-1` by `A1`.
+  test(
+    `${name} builds a renamed property's values over a preparation no object backed`,
+    async () => {
+      await withSeeded(async (storage) => {
+        const prepared = await storage.ontology.uniqueValues.listPrepared({ projectId: PROJECT })
+        const gate = prepared.find(
+          (property) => property.objectTypeId === JOB && property.propertyId === "gate"
+        )!
+
+        // `gate` stops being unique, and a release that made `gateCode` unique while no object
+        // held it left its preparation, as one that recorded no shapes may have.
+        const plain = release({
+          gate: "gate",
+          contract: "contract",
+          links: true,
+          uniqueGate: false,
+        })
+        await deploy(storage, plain.ontology)
+        await storage.transaction(async (tx) => {
+          await tx.ontology.uniqueValues.lockPreparation({ projectId: PROJECT })
+          await tx.ontology.uniqueValues.markPrepared({
+            ...gate,
+            projectId: PROJECT,
+            propertyId: "gateCode",
+            preparedAt: "2026-04-01T00:00:00.000Z",
+          })
+        })
+
+        // A crash right past the point of no return: the deploy that resumes the run no longer
+        // knows a rename ran, so the run itself has to have cleared `gateCode`.
+        const crashing = deploy(failingAfter(storage, 0), renamed.ontology, [renameGate])
+        const crashed = await crashing.catch((error: unknown) => error)
+        expect(String(crashed)).toContain("the process was killed")
+
+        await deploy(storage, renamed.ontology, [renameGate])
+        await expectUniqueMoved(storage)
+      })
+    },
+    TIMEOUT_MS
+  )
+
+  // Removal proof: in a provider's derived lane, drop the unique values of a moved rename instead
+  // of moving them; nothing builds them again here.
+  test(
+    `${name} resumes a rename a crash stopped, and moves each key once`,
+    async () => {
+      await withSeeded(async (storage) => {
+        const before = await versions(storage)
+        const options = { batchRows: 2, migrations: [renameGate], ontology: renamed.ontology }
+        const crashed = await migrate(failingAfter(storage, 3), options).catch(
+          (error: unknown) => error
+        )
+        expect(String(crashed)).toContain("Run `sixb db migrate` to resume it.")
+
+        const resumed = await resumeOntologyMigration({ storage, projectId: PROJECT, batchRows: 2 })
+        expect(resumed?.status).toBe("applied")
+        await expectVersionsBumpedOnce(storage, before)
+
+        const jobs = await readJobs(storage)
+        expect(jobs.get("j-1")?.effective?.properties.gateCode).toBe("A1")
+        expect(jobs.get("p-2")?.override?.value).toEqual({
+          kind: "patch",
+          set: {},
+          unset: ["gateCode", "note"],
+        })
+        await expectUniqueMoved(storage)
+      })
+    },
+    TIMEOUT_MS
+  )
+
+  // Removal proof: in a provider's source-link batch, delete only the first `batchRows` rows and
+  // move the cursor past their last source; `p-1`'s second lead, in another version, then stays.
+  test(
+    `${name} removes a link's source rows one source at a time, and keeps another link's`,
+    async () => {
+      await withSeeded(async (storage) => {
+        const jobsSource = { projectId: PROJECT, source: { projectionId: v1.projection.id } }
+        const assertions = (await storage.ontology.sources.getActive(jobsSource))?.assertionCount
+        const depots = ["p-1", "p-2", "p-3", "p-4"].map((id) => ({
+          source: jobRef(id),
+          linkId: "depot",
+          target: technicianRef("t-1"),
+        }))
+
+        // One row a batch: `p-1` and `p-3` each hold a lead in both versions, beside their depot.
+        const run = await migrate(storage, {
+          batchRows: 1,
+          migrations: [renameGate],
+          ontology: renamed.ontology,
+        })
+
+        const derived = run?.lanes.find(
+          (lane) => lane.lane.kind === "derived" && lane.lane.objectTypeId === JOB
+        )
+        expect(derived?.counts.sources).toBe(4)
+        expect((await storage.ontology.sources.getActive(jobsSource))?.assertionCount).toBe(
+          assertions! - 2
+        )
+
+        const state = await storage.ontology.materializations.readState({
+          projectId: PROJECT,
+          objects: [],
+          links: depots,
+          linkScopes: [],
+        })
+        const projected = state.links.map((link) => link.source?.assertion.ref.source.primaryId)
+        expect(projected.sort()).toEqual(depots.map((depot) => depot.source.primaryId))
+      })
+    },
+    TIMEOUT_MS
+  )
+}
+
+/** A whole deploy step, as `sixb db migrate` runs it: unique and query preparation included. */
+function deploy(
+  storage: Storage,
+  ontology: OntologyRegistry,
+  migrations: readonly MigrationDefinition[] = []
+) {
+  return migrateStorage(storage, {
+    projectId: PROJECT,
+    ontology,
+    migrations,
+    ontologyShapes: "deploy",
+  })
+}
+
+/** The queued indexing of a job's `gates` profile, as the dispatcher reads it. */
+async function queuedIndexing(storage: Storage, primaryId: string) {
+  const due = await storage.ontology.vectorIndexing?.listDue({
+    projectId: PROJECT,
+    now: "2100-01-01T00:00:00.000Z",
+    limit: 100,
+  })
+  return due?.find((work) => work.ref.primaryId === primaryId && work.profile === "gates")
+}
+
+/** The stored state of the jobs the cases read, by primary id. */
+async function readJobs(storage: Storage) {
+  const refs = [...["j-1", "p-1", "p-2", "p-3"].map((id) => jobRef(id)), jobRef("i-1", INSPECTION)]
+  const state = await storage.ontology.materializations.readState({
+    projectId: PROJECT,
+    objects: refs,
+    links: [],
+    linkScopes: [],
+  })
+  return new Map(state.objects.map((row) => [row.ref.primaryId, row]))
+}
+
+/**
+ * `gateCode`'s values are found under it: a lookup by value finds `j-1`, another job can't take
+ * its value, and once `j-1` changes it, it is free.
+ */
+async function expectUniqueMoved(storage: Storage): Promise<void> {
+  const jobs = firstRelease(storage, renamed).objects(renamed.Job)
+  const held = { projectId: PROJECT, objectTypeId: JOB, propertyId: "gateCode", valueKey: "A1" }
+  expect((await storage.objects.getByUniqueValue(held))?.primaryId).toBe("j-1")
+
+  const taken = await jobs
+    .upsert({ properties: { id: "j-new", gateCode: "A1" } })
+    .catch((error: unknown) => error)
+  expect(String(taken)).toContain("already has this 'gateCode'")
+
+  await jobs.upsert({ properties: { id: "j-1", gateCode: "A9" } })
+  await jobs.upsert({ properties: { id: "j-new", gateCode: "A1" } })
 }
 
 /** The deploy's ontology step, with a batch size of the test's. */
@@ -483,16 +968,18 @@ async function migrate(
   options: {
     readonly batchRows?: number
     readonly migrations?: readonly MigrationDefinition[]
+    readonly ontology?: OntologyRegistry
   } = {}
 ) {
   const migrations = options.migrations ?? [removeGate]
-  const shapes = await check(storage, "deploy", v2.ontology, migrations)
+  const ontology = options.ontology ?? v2.ontology
+  const shapes = await check(storage, "deploy", ontology, migrations)
   if (shapes.blocked) throw new TypeShapeMismatchError(shapes)
 
   const run = await applyOntologyMigrations({
     storage,
     projectId: PROJECT,
-    ontology: v2.ontology,
+    ontology,
     migrations,
     check: shapes,
     ...(options.batchRows ? { batchRows: options.batchRows } : {}),

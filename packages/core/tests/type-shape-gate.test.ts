@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import {
+  defineMigration,
   defineObjectType,
   InMemoryStorage,
   link,
@@ -1018,5 +1019,42 @@ describe("unique values and a deploy that fails", () => {
       prepared
     )
     expect((await storedJob(storage))?.shape.properties.note).not.toHaveProperty("unique")
+  })
+
+  // Revert check: in `uniqueValuesMove`, drop the `fromUnique` test: the run then moves the values
+  // the failed deploy built for `note`, the dry run skips `memo`, and `J-2`'s duplicate is kept.
+  test("rebuilds a renamed property's values when the recorded shape didn't keep them unique", async () => {
+    const storage = new InMemoryStorage()
+    await deploy(storage, before)
+    await commit(storage, before, [upsert("Job", "J-1", { note: "same" })])
+
+    // A deploy of `after` that fails once it built `note`'s values, before it records the shapes;
+    // then the old release writes a value another job holds.
+    await prepareUniqueProperties({ storage, projectId: PROJECT, ontology: after })
+    await commit(storage, before, [upsert("Job", "J-2", { note: "same" })])
+    const recorded = await storedJob(storage)
+
+    const Job = defineObjectType({
+      id: "Job",
+      name: "Job",
+      properties: [
+        prop("ref", "string", { primary: true, required: true }),
+        prop("memo", "string", { unique: true }),
+      ],
+    })
+    const renamed = new OntologyRegistry({
+      sources: [...before.listObjectTypes().filter((type) => type.id !== "Job"), Job],
+    })
+    const migration = defineMigration("job-memo", Job).renameProperty("note", "memo")
+
+    const redeployed = await migrateStorage(storage, {
+      projectId: PROJECT,
+      ontology: renamed,
+      migrations: [migration],
+      ontologyShapes: "deploy",
+    }).catch((error: unknown) => error)
+    expect(String(redeployed)).toContain("Cannot make 'Job.memo' unique")
+    expect(String(redeployed)).toContain("'J-1' and 'J-2' share a value")
+    expect(await storedJob(storage)).toEqual(recorded)
   })
 })

@@ -3,9 +3,16 @@ import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execu
 import { createKernelScope } from "../execution/scopes"
 import { sha256Canonical } from "../materialization/identity"
 import { createRuntimeIdempotencyKey } from "../materializer/shared/identity"
+import { vectorConfiguration } from "../objects/vectors/profile"
 import type { OntologyDefinitionCatalog } from "../ontology/registry"
 import { sameShape } from "../ontology/type-shapes"
+import type { ObjectVectorSearchProfile } from "../ontology/types"
+import { uniquePropertiesOf } from "../ontology/unique-values"
 import { computeOntologyRevision } from "../projections/revision"
+import {
+  type PendingUniqueRename,
+  uniqueValuesMove,
+} from "../storage/migrations/prepare-unique-properties"
 import type { TypeShapeCheck } from "../storage/migrations/type-shapes"
 import type { OntologyCommitRecord } from "../storage/ontology/commits"
 import {
@@ -14,7 +21,9 @@ import {
   type OntologyMigrationRunPlan,
   type OntologyMigrationRunRecord,
   type OntologyMigrationStorage,
+  type OntologyMigrationVectorMove,
 } from "../storage/ontology/migrations"
+import type { PreparedUniqueProperty } from "../storage/ontology/unique-values"
 import type { Storage } from "../storage/types"
 import { stepKindOf } from "./steps"
 import type { MigrationDefinition } from "./types"
@@ -43,7 +52,8 @@ export async function applyOntologyMigrations(input: {
   readonly onStarted?: (runId: string) => Promise<void> | void
 }): Promise<OntologyMigrationRunRecord | null> {
   const { storage, projectId, check } = input
-  const plan = runPlan(input)
+  const prepared = await storage.ontology.uniqueValues.listPrepared({ projectId })
+  const plan = runPlan({ ...input, prepared })
   if (!plan) return null
 
   const migrations = migrationStorage(storage)
@@ -174,18 +184,57 @@ async function finish(
   return finished
 }
 
+/** The renames `check` runs, per type: their unique values are the run's to move or drop. */
+export function runRenames(
+  check: Pick<TypeShapeCheck, "types">,
+  migrations: readonly MigrationDefinition[]
+): PendingUniqueRename[] {
+  const byId = new Map(migrations.map((migration) => [migration.id, migration]))
+
+  return check.types.flatMap((type) =>
+    type.run.flatMap(({ migrationId, index }) => {
+      const step = byId.get(migrationId)?.steps[index]
+      if (step?.kind !== "renameProperty") return []
+
+      const fromShape = type.stored?.shape ?? type.baseline
+      const fromUnique = fromShape?.properties[step.from]?.unique === true
+      return [{ objectTypeId: type.objectTypeId, from: step.from, to: step.to, fromUnique }]
+    })
+  )
+}
+
 /** What the run applies: the types `check` found steps to run for, and nothing else it found. */
 function runPlan(input: {
   readonly ontology: OntologyDefinitionCatalog
   readonly migrations: readonly MigrationDefinition[]
   readonly check: TypeShapeCheck
+  readonly prepared: readonly PreparedUniqueProperty[]
 }): OntologyMigrationRunPlan | null {
+  const { ontology, check, prepared } = input
   const byId = new Map(input.migrations.map((migration) => [migration.id, migration]))
-  const types = input.check.types.flatMap((type) => {
+  const renames = runRenames(check, input.migrations)
+  const valueTypes = ontology.getValueTypesById()
+
+  const types = check.types.flatMap((type) => {
     if (type.run.length === 0 || type.findings.length > 0 || type.next.kind !== "write") return []
 
     const fromShape = type.stored?.shape ?? type.baseline
     if (!fromShape) return []
+
+    const { objectTypeId } = type
+    const objectType = ontology.getObjectTypeById(objectTypeId)!
+    const unique = new Map(
+      uniquePropertiesOf(objectType, valueTypes).map((property) => [
+        property.propertyId,
+        property.kind,
+      ])
+    )
+    const uniqueMoves = new Set(
+      renames
+        .filter((rename) => rename.objectTypeId === objectTypeId)
+        .filter((rename) => uniqueValuesMove(prepared, rename, unique.get(rename.to)))
+        .map((rename) => rename.from)
+    )
 
     const steps = type.run.map(({ migrationId, index }) => {
       const step = byId.get(migrationId)?.steps[index]
@@ -195,19 +244,58 @@ function runPlan(input: {
           `[Sixb] This build can't apply step ${index} of migration '${migrationId}'.`
         )
       }
-      return { ...storeStep(step), migrationId }
+      return { ...storeStep(step, { uniqueMoves }), migrationId }
     })
-    return [{ objectTypeId: type.objectTypeId, fromShape, toShape: type.next.shape, steps }]
+
+    const vectors = vectorMoves(
+      objectType.search?.vectors ?? {},
+      renames.filter((rename) => rename.objectTypeId === objectTypeId)
+    )
+    return [
+      {
+        objectTypeId,
+        fromShape,
+        toShape: type.next.shape,
+        steps,
+        ...(vectors.length > 0 ? { vectors } : {}),
+      },
+    ]
   })
   if (types.length === 0) return null
 
   const ids = [...new Set(types.flatMap((type) => type.steps.map((step) => step.migrationId)))]
 
   return {
-    ontologyRevision: computeOntologyRevision(input.ontology),
+    ontologyRevision: computeOntologyRevision(ontology),
     migrations: ids.sort().map((id) => ({ id, hash: migrationHash(byId.get(id)!) })),
     types,
   }
+}
+
+/**
+ * The code's vector profiles whose source names a renamed property. Their stored vectors were
+ * built with the same profile under the old keys, so they keep their embedding; one built with
+ * another model or source has another configuration, and goes like a removed key's.
+ */
+function vectorMoves(
+  profiles: Readonly<Record<string, ObjectVectorSearchProfile>>,
+  renames: readonly PendingUniqueRename[]
+): OntologyMigrationVectorMove[] {
+  return Object.entries(profiles).flatMap(([profile, definition]) => {
+    const toSource = [...definition.source]
+    const fromSource = toSource.map((id) => renames.find((rename) => rename.to === id)?.from ?? id)
+    if (fromSource.every((id, index) => id === toSource[index])) return []
+
+    return [
+      {
+        profile,
+        fromConfiguration: vectorConfiguration({ ...definition, source: fromSource }),
+        toConfiguration: vectorConfiguration(definition),
+        fromSource,
+        toSource,
+      },
+    ]
+  })
 }
 
 /**

@@ -1,25 +1,84 @@
 import { expect, test } from "bun:test"
+import type { OntologyMigrationStoreStep } from "@sixb/core/storage"
 import { runOntologyMigrationContractSuite } from "@sixb/core/testing"
+import type { PostgresStorage } from "../src"
+import { objectPartitionName } from "../src/objects/partitions"
 import { createPgClient } from "../src/pg-client"
 import { createTestStorage, disposeTestStorage, type TestStorage } from "./helpers"
 
+const connections = new WeakMap<PostgresStorage, TestStorage>()
+
+async function withClient<T>(
+  storage: PostgresStorage,
+  run: (sql: ReturnType<typeof createPgClient>) => Promise<T>
+): Promise<T> {
+  const { connectionString, schemaName } = connections.get(storage)!
+  const sql = createPgClient({ connectionString, schemaName, max: 1 })
+  try {
+    return await run(sql)
+  } finally {
+    await sql.end()
+  }
+}
+
 runOntologyMigrationContractSuite("PostgreSQL storage", {
-  createStorage: async () => (await createTestStorage()).storage,
+  createStorage: async () => {
+    const created = await createTestStorage()
+    connections.set(created.storage, created)
+
+    // The suite searches the vectors a rename moved.
+    await withClient(
+      created.storage,
+      (sql) => sql`CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public`
+    )
+    return created.storage
+  },
   cleanup: (storage) => disposeTestStorage(storage),
+  writeLegacyLinkConflict: async (storage, slot) => {
+    await withClient(
+      storage,
+      (sql) => sql`
+        INSERT INTO ontology_link_overrides (project_id, identity_kind, identity_key,
+          source_type_id, source_primary_id, link_id, target_type_id, target_primary_id, value,
+          last_commit_id, updated_at)
+        VALUES (${slot.projectId}, 'slot',
+          ${sql.json([slot.sourceTypeId, slot.sourcePrimaryId, slot.linkId])},
+          ${slot.sourceTypeId}, ${slot.sourcePrimaryId}, ${slot.linkId}, ${slot.sourceTypeId}, 'x',
+          ${sql.json({ kind: "legacy-conflict" })}, 'c', '2026-01-01T00:00:00.000Z')
+      `
+    )
+  },
+  readQueryStructures: (storage, objectTypeId) =>
+    withClient(storage, async (sql) => {
+      const partition = objectPartitionName(objectTypeId)
+      const rows = await sql<{ readonly definition: string }[]>`
+        SELECT pg_get_indexdef(indexrelid) AS definition FROM pg_index
+        WHERE indrelid = to_regclass(${partition})
+        UNION ALL
+        SELECT pg_get_statisticsobjdef(oid) FROM pg_statistic_ext
+        WHERE stxrelid = to_regclass(${partition})
+        UNION ALL
+        SELECT a.attname || ' ' || pg_get_expr(d.adbin, d.adrelid) FROM pg_attribute AS a
+        JOIN pg_attrdef AS d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+        WHERE a.attrelid = to_regclass('objects') AND a.attname LIKE 'sixb_q%'
+      `
+      return rows.map((row) => row.definition)
+    }),
 })
 
 const PROJECT = "unique-walk"
 const RUN = "migration_walk"
 
 /**
- * Removes `Job.gate`, whose unique values sit in a table another type's values fill, and returns
- * how the derived lane walked them, batch by batch: `pages` or `values`.
+ * Removes `Job.gate` (or applies `step` to it), whose unique values sit in a table another type's
+ * values fill, and returns how the derived lane walked them, batch by batch: `pages` or `values`.
  */
 async function removeUniqueValues(
   created: TestStorage,
   values: { readonly gate: number; readonly padding: number; readonly batchRows: number },
   /** Run between the first batch and the next. */
-  between?: (sql: ReturnType<typeof createPgClient>) => Promise<void>
+  between?: (sql: ReturnType<typeof createPgClient>) => Promise<void>,
+  step: OntologyMigrationStoreStep = { kind: "removeProperty", propertyId: "gate" }
 ): Promise<{ readonly walks: readonly string[]; readonly left: Record<string, number> }> {
   const { storage, connectionString, schemaName } = created
   const sql = createPgClient({ connectionString, schemaName, max: 1 })
@@ -69,7 +128,7 @@ async function removeUniqueValues(
               objectTypeId: "Job",
               fromShape: shape,
               toShape: shape,
-              steps: [{ kind: "removeProperty", propertyId: "gate", migrationId: "job-gate" }],
+              steps: [{ ...step, migrationId: "job-gate" }],
             },
           ],
         },
@@ -166,6 +225,51 @@ test("PostgreSQL storage finishes by key what a table rewrite moved below the pa
     expect(walks).toContain("pages")
     expect(walks).toContain("values")
     expect(left).toEqual({})
+  } finally {
+    await disposeTestStorage(created.storage)
+  }
+}, 30_000)
+
+// Removal proof: in `uniqueValuesByProperty`, delete a moved property's values instead of
+// moving them; `gateCode` then holds none.
+test("PostgreSQL storage moves a renamed property's unique values by key in a large table", async () => {
+  const created = await createTestStorage()
+  try {
+    const rename = { kind: "renameProperty", from: "gate", to: "gateCode", unique: "move" } as const
+    const { walks, left } = await removeUniqueValues(
+      created,
+      { gate: 5, padding: 40_000, batchRows: 2 },
+      undefined,
+      rename
+    )
+
+    expect(new Set(walks)).toEqual(new Set(["values"]))
+    expect(left).toEqual({ "Job.gateCode": 5, "Pad.code": 40_000 })
+    const prepared = await created.storage.ontology.uniqueValues.listPrepared({
+      projectId: PROJECT,
+    })
+    expect(prepared.map((property) => property.propertyId)).toEqual(["gateCode"])
+  } finally {
+    await disposeTestStorage(created.storage)
+  }
+}, 30_000)
+
+// Removal proof: in `uniqueValuesByPages`, finish at the last page without `leftAfterPages`;
+// `gateCode` is then prepared without the values the rewrite moved below the cursor.
+test("PostgreSQL storage moves by key what a table rewrite moved below the page walk", async () => {
+  const created = await createTestStorage()
+  try {
+    const rename = { kind: "renameProperty", from: "gate", to: "gateCode", unique: "move" } as const
+    const { left } = await removeUniqueValues(
+      created,
+      { gate: 5_000, padding: 0, batchRows: 1_000 },
+      async (sql) => {
+        await sql`VACUUM FULL object_unique_values`
+      },
+      rename
+    )
+
+    expect(left).toEqual({ "Job.gateCode": 5_000 })
   } finally {
     await disposeTestStorage(created.storage)
   }
