@@ -55,6 +55,8 @@ bun sixb lake check --entry .sixb/dist/sixb.config.js
 
 Run these with the production provider settings. `check` verifies project configuration and provider health; `lake check` validates dataset definitions against the lake catalog. `db migrate` also refuses object type changes the stored objects don't fit: see [Changing object types](object-type-changes.md).
 
+Run `bun sixb db migrate --check` first. On exit `3`, stop the old version before `db migrate`: it would write what the new shapes refuse ([exit codes](object-type-changes.md#during-a-deploy)). [`sixb deploy`](servers.md) does this for you.
+
 Deploy `.sixb/dist`, installed dependencies, and any files your application reads at runtime. Start services from the project root. Production commands use `.sixb/dist/sixb.config.js` when present; use `--entry` for a different build location.
 
 ## Start services
