@@ -11,18 +11,19 @@ longer fit stops the deploy before anything is written, and says what holds it b
 ## What a deploy checks
 
 Storage keeps, for each object type, the shape its stored objects fit: each property's schema,
-`required`, `nullable`, mode, `unique` and primary, and each link's targets and cardinality.
-`sixb db migrate` and `sixb check --migrate` compare it with your code's.
+`required`, `nullable`, mode, `unique` and primary, and each link's cardinality and the types it
+accepts, subtypes included. `sixb db migrate` and `sixb check --migrate` compare it with your
+code's.
 
 | Change | Stops the deploy when |
 |---|---|
-| New optional property, new type, new link, added link target, name or description | Never |
+| New optional property, new type, new link, link widened (a target added, a supertype, `link.any`), name or description | Never |
 | Property removed | An object, an edit or a projection's row still holds it |
 | New required property, or optional made required | An object created by an action lacks it, or an edit cleared it |
 | Schema narrowed (other type, enum value removed, `nullable` removed) | An edit holds a value the new schema refuses |
 | Link removed | A link or a link edit of that kind exists |
 | `unique` added, or its values compared another way (schema changed) | Two objects share a value: they are named before anything is written |
-| Mode changed (static ↔ telemetry), telemetry property removed or narrowed, link retargeted or cardinality changed, primary property changed, type removed | Any data holds it: these aren't supported yet |
+| Mode changed (static ↔ telemetry), telemetry property removed or narrowed, link retargeted (a type it accepted no longer is, such as a subtype that left the hierarchy; a removed type's own row decides for it) or cardinality changed, primary property changed, type removed | Any data holds it: these aren't supported yet |
 
 Widening needs nothing: new enum values, `integer` to `double`, `nullable` added, `required`
 dropped. Values a projection writes aren't checked: the projection rebuilds them under the new
