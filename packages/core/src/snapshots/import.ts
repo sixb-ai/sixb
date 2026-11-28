@@ -20,10 +20,16 @@ import {
   finding,
   formatTypeShapeFindings,
   heldFinding,
+  type NarrowedChange,
+  narrows,
   type ProbedChange,
   uncheckedLine,
 } from "../storage/migrations/type-shape-messages"
-import { checkTypeShapes, type TypeShapeCheck } from "../storage/migrations/type-shapes"
+import {
+  checkTypeShapes,
+  type TypeShapeCheck,
+  type TypeShapeTypeCheck,
+} from "../storage/migrations/type-shapes"
 import {
   type OntologyCommitRecord,
   SNAPSHOT_COMMIT_ID_PREFIX,
@@ -753,7 +759,7 @@ class ImportPlan {
     check: TypeShapeCheck
   ): readonly ImportedSnapshotType[] {
     const run = new Map(migration?.plan.types.map((type) => [type.objectTypeId, type]))
-    const unseen = new Map(check.types.map((type) => [type.objectTypeId, type.unseen ?? []]))
+    const checked = new Map(check.types.map((type) => [type.objectTypeId, type]))
 
     return [...this.#types.values()].map((plan) => ({
       objectTypeId: plan.manifest.objectTypeId,
@@ -771,7 +777,7 @@ class ImportPlan {
         ...new Set(run.get(plan.manifest.objectTypeId)?.steps.map((step) => step.migrationId)),
       ],
       refusedByDeploy: refusedByDeploy(plan),
-      unchecked: unchecked(plan, unseen.get(plan.manifest.objectTypeId) ?? []),
+      unchecked: unchecked(plan, checked.get(plan.manifest.objectTypeId)),
       ...(plan.manifest.projection
         ? {
             projectionId: plan.manifest.projection.projectionId,
@@ -816,21 +822,27 @@ function refusedByDeploy(plan: TypePlan): readonly string[] {
  * What a deploy would read that the copy can't: changes of properties hidden from the person, and
  * of keys whose values didn't travel. Each says it was not checked.
  */
-function unchecked(plan: TypePlan, unseen: readonly ProbedChange[]): readonly string[] {
+function unchecked(plan: TypePlan, check: TypeShapeTypeCheck | undefined): readonly string[] {
   const objectTypeId = plan.manifest.objectTypeId
 
   // A withheld key a deploy refuses reads as a refusal, not as unchecked.
-  const refused = (change: ProbedChange) =>
+  const refused = (change: NarrowedChange) =>
     plan.fit.refusedWithheld.some((left) => sameChange(left, change))
   // A hidden property has no value on the copy; a projected one has its values only as edits.
   const hidden = new Set([...plan.manifest.hiddenPropertyIds, ...plan.fit.withheld])
-  const of = (properties: ReadonlySet<string>, change: ProbedChange) =>
+  const of = (properties: ReadonlySet<string>, change: NarrowedChange) =>
     "propertyId" in change &&
     (properties.has(change.propertyId) || properties.has(plan.fit.storedKey(change.propertyId)))
-  const projected = (change: ProbedChange) =>
+  const projected = (change: NarrowedChange) =>
     of(plan.projectedPropertyIds, change) && !of(hidden, change)
 
-  const lines = [...plan.fit.unchecked, ...unseen]
+  // The unique dry run reads the values the copy holds: it finds no duplicate where it holds none.
+  const unique = (check?.changes ?? []).filter(
+    (change): change is NarrowedChange =>
+      change.kind === "property-unique" && narrows(change) && of(hidden, change)
+  )
+
+  const lines = [...plan.fit.unchecked, ...(check?.unseen ?? []), ...unique]
     .filter((change) => !refused(change))
     .map((change) =>
       uncheckedLine(objectTypeId, change, projected(change) ? "projected" : "hidden")
@@ -839,7 +851,7 @@ function unchecked(plan: TypePlan, unseen: readonly ProbedChange[]): readonly st
   return [...new Set(lines)]
 }
 
-function sameChange(left: ProbedChange, right: ProbedChange): boolean {
+function sameChange(left: NarrowedChange, right: NarrowedChange): boolean {
   return (
     left.kind === right.kind &&
     ("propertyId" in left ? left.propertyId : undefined) ===

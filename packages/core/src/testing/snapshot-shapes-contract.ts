@@ -735,6 +735,42 @@ export function runSnapshotShapesCases(
     TIMEOUT_MS
   )
 
+  // Red check: in import.ts, leave out the `property-unique` changes `unchecked` adds: the copy
+  // says nothing of `note`, whose values a deploy's dry run reads and the copy holds none of.
+  test(
+    `${name} says a hidden property made unique wasn't checked`,
+    async () => {
+      await withStorage(async (storage) => {
+        const host = await production(storage)
+        const Unique = job(
+          prop("gate", "string"),
+          hours(),
+          prop("note", "string", { markings: [internal], unique: true })
+        )
+
+        const { report } = await branchOf({
+          storage,
+          host,
+          as: "clerks",
+          types: [Unique, Crew],
+        })
+
+        expect(report.skipped).toEqual([])
+        expect(report.types).toContainEqual(
+          expect.objectContaining({
+            objectTypeId: Job.id,
+            unchecked: [
+              "SnapshotJob: 'note' is now unique: not checked, the copy holds none of its values.",
+            ],
+          })
+        )
+
+        await host.closeBroker()
+      })
+    },
+    TIMEOUT_MS
+  )
+
   // Red check: in import.ts, drop `uniqueDuplicates` from the gate's check: the import throws
   // out of the unique preparation, and the branch holds nothing.
   test(
