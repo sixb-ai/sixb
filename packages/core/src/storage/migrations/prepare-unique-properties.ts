@@ -86,18 +86,39 @@ class DryRunRollback extends Error {}
  * while the old release can still start again, and prepares for real once nothing else can fail:
  * a preparation left behind by a failed deploy would be trusted, stale, by the next one.
  */
-export async function checkUniqueProperties(input: {
+export async function checkUniqueProperties(input: UniqueDryRunInput): Promise<void> {
+  const [duplicate] = await findUniqueDuplicates(input)
+  if (duplicate) throw preparationError(duplicate, duplicate.violation)
+}
+
+export interface UniqueDryRunInput {
   readonly storage: Storage
   readonly projectId: string
   readonly ontology: OntologyDefinitionCatalog
   readonly keepObjectTypeIds?: ReadonlySet<string>
   readonly rebuild?: readonly UniquePropertyRef[]
-}): Promise<void> {
+}
+
+/** Two objects sharing a value of a property the code makes unique. */
+export interface UniqueDuplicate {
+  readonly objectTypeId: string
+  readonly propertyId: string
+  readonly violation: UniqueValueViolationError
+}
+
+/**
+ * The dry run of {@link checkUniqueProperties}, each property's first duplicate collected instead
+ * of thrown: the gate words them as findings when asked (`checkTypeShapes`' `uniqueDuplicates`).
+ */
+export async function findUniqueDuplicates(
+  input: UniqueDryRunInput
+): Promise<readonly UniqueDuplicate[]> {
   const { storage, projectId } = input
   const rebuild = new Set((input.rebuild ?? []).map(propertyKey))
   const declared = declaredUniqueProperties(input.ontology).filter(
     (property) => !(input.keepObjectTypeIds?.has(property.objectTypeId) ?? false)
   )
+  const duplicates: UniqueDuplicate[] = []
 
   for (const property of declared) {
     const checked = withRetries(property, () =>
@@ -113,9 +134,15 @@ export async function checkUniqueProperties(input: {
       )
     )
     await checked.catch((error: unknown) => {
-      if (!(error instanceof DryRunRollback)) throw error
+      if (error instanceof DryRunRollback) return
+
+      const violation = error instanceof Error ? error.cause : undefined
+      if (!(violation instanceof UniqueValueViolationError)) throw error
+      duplicates.push({ ...property, violation })
     })
   }
+
+  return duplicates
 }
 
 interface UniquePropertyRef {

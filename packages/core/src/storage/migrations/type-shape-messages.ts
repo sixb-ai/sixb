@@ -61,6 +61,26 @@ export function unprobedFinding(objectTypeId: string, change: NarrowedChange): T
   }
 }
 
+/**
+ * Two objects sharing a value of a property the code makes unique, as the unique dry run found
+ * them, with what the deploy says to do.
+ */
+export function duplicateFinding(
+  objectTypeId: string,
+  propertyId: string,
+  objects: { readonly holderPrimaryId: string; readonly claimantPrimaryId: string }
+): TypeShapeFinding {
+  return {
+    objectTypeId,
+    change: { kind: "property-unique", propertyId, unique: true, effect: "narrowing" },
+    count: 2,
+    message:
+      `${objectTypeId}: '${propertyId}' is now unique, and objects ` +
+      `'${objects.holderPrimaryId}' and '${objects.claimantPrimaryId}' share a value.`,
+    remedy: ["Fix the data, then start again."],
+  }
+}
+
 /** The lines `sixb check`, a deploy and the agent print for findings: one `✗` per change. */
 export function formatTypeShapeFindings(findings: readonly TypeShapeFinding[]): string[] {
   return findings.flatMap((item) => [

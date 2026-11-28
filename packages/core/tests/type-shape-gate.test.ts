@@ -227,6 +227,34 @@ describe("a deploy", () => {
     expect((await storedJob(storage))?.shape.properties.gate).toMatchObject({ unique: true })
   })
 
+  // Revert check: in `checkTypeShapes`, drop the `uniqueDuplicates` step: the check finds nothing,
+  // and `sixb db migrate --check` stops the live release for a change the data can't take.
+  test("words two objects sharing a value of a property made unique as a finding, when asked", async () => {
+    const storage = new InMemoryStorage()
+    await deploy(storage, withGate)
+    await commit(storage, withGate, [
+      create("J-1", { gate: "B12" }),
+      create("J-2", { gate: "B12" }),
+    ])
+    const unique = jobOntology(
+      [prop("gate", "string", { unique: true }), prop("hours", "string")],
+      [link("crew", Technician)]
+    )
+
+    const check = await checkTypeShapes({
+      storage,
+      projectId: PROJECT,
+      ontology: unique,
+      mode: "check",
+      uniqueDuplicates: true,
+    })
+    expect(check.blocked).toBe(true)
+    expect(check.types.find((type) => type.objectTypeId === "Job")?.findings[0]?.message).toBe(
+      "Job: 'gate' is now unique, and objects 'J-1' and 'J-2' share a value."
+    )
+    expect(await storage.ontology.uniqueValues.listPrepared({ projectId: PROJECT })).toEqual([])
+  })
+
   test("refuses a removed property objects hold, counts them, and records nothing", async () => {
     const storage = new InMemoryStorage()
     await deploy(storage, withGate)

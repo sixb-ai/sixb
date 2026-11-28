@@ -43,7 +43,7 @@ shape, which the old code may not fit.
 |---|---|---|
 | `0` | Nothing to change, or only widenings | Keeps the live release serving |
 | `3` | A storage migration, a narrowing no stored object is left out of, or a first shape | Stops the live release, then migrates |
-| `1` | Stored objects don't fit the code | Fails before stopping anything |
+| `1` | Stored objects don't fit the code, two of them sharing a value it makes unique included | Fails before stopping anything |
 
 `sixb check --migrate` builds unique values and records the new shapes last, once every other check
 passed, so a deploy that fails restarts the old release on data it still fits. A property made

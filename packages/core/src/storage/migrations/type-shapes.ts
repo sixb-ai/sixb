@@ -19,7 +19,9 @@ import type {
   TypeShapeProbeInput,
 } from "../ontology/type-shapes"
 import type { Storage } from "../types"
+import { findUniqueDuplicates, madeUnique } from "./prepare-unique-properties"
 import {
+  duplicateFinding,
   finding,
   mismatchMessage,
   type NarrowedChange,
@@ -102,6 +104,12 @@ export async function checkTypeShapes(input: {
   readonly projectId: string
   readonly ontology: OntologyDefinitionCatalog
   readonly mode: TypeShapeMode
+  /**
+   * Runs the unique preparation's dry run, as `applyTypeShapes` does before anything is written,
+   * and words a duplicate as its type's finding: `sixb db migrate --check` fails on it before the
+   * live release stops, as on any other data that doesn't fit.
+   */
+  readonly uniqueDuplicates?: boolean
 }): Promise<TypeShapeCheck> {
   const { storage, projectId, ontology, mode } = input
   const stored = await storage.ontology.typeShapes.list({ projectId })
@@ -127,6 +135,9 @@ export async function checkTypeShapes(input: {
     if (checked === "unrecorded") unrecorded.push(objectTypeId)
     else types.push(checked)
   }
+  if (input.uniqueDuplicates) {
+    types.splice(0, types.length, ...(await withUniqueDuplicates(input, types)))
+  }
 
   return {
     projectId,
@@ -136,6 +147,40 @@ export async function checkTypeShapes(input: {
     narrows: types.some((type) => type.pausesWrites),
     unrecorded,
   }
+}
+
+/**
+ * The types with what the unique dry run finds: two objects sharing a value of a property the code
+ * makes unique. A type that finds one records nothing, as a type with any other finding.
+ */
+async function withUniqueDuplicates(
+  input: {
+    readonly storage: Storage
+    readonly projectId: string
+    readonly ontology: OntologyDefinitionCatalog
+  },
+  types: readonly TypeShapeTypeCheck[]
+): Promise<TypeShapeTypeCheck[]> {
+  const unfit = new Set(
+    types.filter((type) => type.findings.length > 0).map((type) => type.objectTypeId)
+  )
+  const duplicates = await findUniqueDuplicates({
+    storage: input.storage,
+    projectId: input.projectId,
+    ontology: input.ontology,
+    keepObjectTypeIds: unfit,
+    rebuild: madeUnique(types),
+  })
+
+  return types.map((type) => {
+    const found = duplicates.filter((duplicate) => duplicate.objectTypeId === type.objectTypeId)
+    if (found.length === 0) return type
+
+    const findings = found.map(({ propertyId, violation }) =>
+      duplicateFinding(type.objectTypeId, propertyId, violation)
+    )
+    return { ...type, findings: [...type.findings, ...findings], next: { kind: "keep" } }
+  })
 }
 
 /**

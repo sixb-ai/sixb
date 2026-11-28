@@ -40,6 +40,9 @@ export async function runDbMigrate(options: DbMigrateOptions = {}) {
                 projectId: sixb.id,
                 ontology: sixb.definitions.ontology,
                 mode: "check",
+                // Read while the live release serves: only a property the code makes unique is
+                // built, in a transaction that rolls back.
+                uniqueDuplicates: true,
               })
             )
       const findings = shapes?.types.flatMap((type) => type.findings) ?? []

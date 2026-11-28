@@ -73,7 +73,10 @@ shape already is the code's.
 
 `check` returns `narrows`, any type's `pausesWrites`: `sixb db migrate --check` exits 3 on it so the
 live release stops before the shape is recorded, since the old code would write what the new shape
-refuses. A role started with `--no-migrate` checks and records in `role` mode too.
+refuses. It asks for `uniqueDuplicates` first, so two objects sharing a value of a property the
+code makes unique exit 1 instead: the unique dry run, while the live release serves, builds only
+the values no preparation holds yet. A role started with `--no-migrate` checks and records in
+`role` mode too.
 
 Shapes alone can't tell newer code from older, so `roleCheck` goes by `previous`:
 

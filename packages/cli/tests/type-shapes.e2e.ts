@@ -182,6 +182,22 @@ describe("sixb db migrate --check", () => {
     CLI_TIMEOUT_MS * 3
   )
 
+  // Revert check: in `runDbMigrate`, drop `uniqueDuplicates`: this exits 3, and the deploy stops
+  // the live release for a property its data can't make unique.
+  test(
+    "fails, not with 3, for a property made unique that two objects share a value of",
+    async () => {
+      const schema = await deployedSchema("duplicate")
+      await createJob(schema, { gate: "B12" })
+      await createJob(schema, { ref: "J-13", gate: "B12" })
+
+      const check = await sixb(schema, "uniqueGate", ["db", "migrate", "--check"])
+      expect(check.exitCode).toBe(1)
+      expect(check.stdout).toContain("Job: 'gate' is now unique, and objects")
+    },
+    CLI_TIMEOUT_MS * 3
+  )
+
   // Removal proof: in `runDbMigrate`, drop the exit on findings; this exits 3, and the deploy
   // stops the live release for a change it can't make.
   test(
