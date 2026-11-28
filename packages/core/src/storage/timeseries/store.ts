@@ -23,6 +23,13 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
       listLatestForObject: (projectId, objectTypeId, objectId) =>
         this.listLatestForObject(projectId, objectTypeId, objectId),
       applyExactPoint: (projectId, point) => this.applyExactPoint(projectId, point),
+      visitSeries: (projectId, visit) => {
+        for (const series of this.pointsByKey.values()) {
+          const [point] = series.values()
+          if (point?.projectId === projectId)
+            visit(point.objectTypeId, point.objectId, point.propertyId)
+        }
+      },
     })
   }
 
@@ -185,6 +192,11 @@ interface InMemoryTimeseriesMaterializerAdapter {
   getExactPoint(projectId: string, series: TelemetrySeriesRef, at: string): TimeseriesPoint | null
   listLatestForObject(projectId: string, objectTypeId: string, objectId: string): TimeseriesPoint[]
   applyExactPoint(projectId: string, point: StoredTelemetryPoint): void
+  /** Each series of the project that holds a point, once. */
+  visitSeries(
+    projectId: string,
+    visit: (objectTypeId: string, objectId: string, propertyId: string) => void
+  ): void
 }
 
 const materializerAdapters = new WeakMap<

@@ -160,6 +160,7 @@ const SHIPPED_MIGRATIONS = [
   "119-lake-slice-credentials",
   "120-hosted-branches",
   "121-hosted-branch-namespaces",
+  "122-ontology-type-shapes",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -1473,6 +1474,7 @@ describe("Postgres storage migrations", () => {
         "ontology_source_roots",
         "ontology_source_rows",
         "ontology_sources",
+        "ontology_type_shapes",
       ])
       // A commit references its execution; who asked and what wrote live only there.
       const commitColumns = await readTableColumns(sql, "ontology_commits")

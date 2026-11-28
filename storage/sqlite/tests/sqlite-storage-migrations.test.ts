@@ -236,6 +236,7 @@ const shippedMigrationIds = [
   "114-lake-slices",
   "115-skipped-action-effects",
   "116-lake-slice-credentials",
+  "117-ontology-type-shapes",
 ]
 
 afterEach(async () => {
@@ -2556,6 +2557,7 @@ describe("SQLite storage migrations", () => {
         "ontology_source_roots",
         "ontology_source_rows",
         "ontology_sources",
+        "ontology_type_shapes",
       ])
       // A commit references its execution; who asked and what wrote live only there.
       expect(readMemoryTableColumns(db, "ontology_commits")).toContain("execution_id")

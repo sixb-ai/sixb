@@ -97,6 +97,7 @@ interface InMemoryObjectMaterializerAdapter {
     targetId: string
   }): void
   visitExactLinks(projectId: string, visit: (row: ObjectLinkRow) => void): void
+  visitExactObjects(projectId: string, objectTypeId: string, visit: (row: ObjectRow) => void): void
   visitExactScopeLinks(
     projectId: string,
     sourceTypeId: string,
@@ -161,6 +162,11 @@ export class InMemoryObjectStorage implements ObjectStorage {
           for (const row of bucket.values()) {
             if (row.projectId === projectId) visit(structuredClone(row))
           }
+        }
+      },
+      visitExactObjects: (projectId, objectTypeId, visit) => {
+        for (const row of this.rows.get(objectRowKey(projectId, objectTypeId))?.values() ?? []) {
+          visit(structuredClone(row))
         }
       },
       visitExactScopeLinks: (projectId, sourceTypeId, sourceId, linkId, visit) => {

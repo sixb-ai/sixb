@@ -7,6 +7,7 @@ import { SqliteOntologyOutboxStorage } from "./outbox"
 import { SqliteOntologyReplacementPlanStorage } from "./replacement-plans"
 import type { SqliteRootOperation } from "./shared"
 import { SqliteOntologySourceStorage } from "./sources"
+import { SqliteOntologyTypeShapeStorage } from "./type-shapes"
 import { SqliteOntologyUniqueValueStorage } from "./unique-values"
 import { SqliteVectorIndexingStorage } from "./vector-indexing"
 import { SqliteOntologyVectorStorage } from "./vectors"
@@ -20,6 +21,7 @@ export class SqliteOntologyStorage implements OntologyStorage {
   readonly vectors: SqliteOntologyVectorStorage
   readonly outbox: SqliteOntologyOutboxStorage
   readonly uniqueValues: SqliteOntologyUniqueValueStorage
+  readonly typeShapes: SqliteOntologyTypeShapeStorage
 
   constructor(input: {
     readonly db: Database
@@ -49,6 +51,7 @@ export class SqliteOntologyStorage implements OntologyStorage {
     )
     this.outbox = new SqliteOntologyOutboxStorage(input.db, input.runRootOperation)
     this.uniqueValues = new SqliteOntologyUniqueValueStorage(input.db, input.runRootOperation)
+    this.typeShapes = new SqliteOntologyTypeShapeStorage(input.db, input.runRootOperation)
   }
 
   deactivateSessions(): void {

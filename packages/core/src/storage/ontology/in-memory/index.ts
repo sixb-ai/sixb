@@ -23,6 +23,7 @@ import {
   type InMemoryOntologyStorageTestingAdapter,
   registerInMemoryOntologyStorageTestingAdapter,
 } from "./testing"
+import { InMemoryOntologyTypeShapeStorage } from "./type-shapes"
 import { InMemoryOntologyUniqueValueStorage } from "./unique-values"
 
 export type InMemoryOntologyStorageSnapshot = InMemoryOntologyState
@@ -48,6 +49,7 @@ export class InMemoryOntologyStorage implements OntologyStorage {
   readonly replacementPlans: InMemoryOntologyReplacementPlanStorage
   readonly outbox: InMemoryOntologyOutboxStorage
   readonly uniqueValues: InMemoryOntologyUniqueValueStorage
+  readonly typeShapes: InMemoryOntologyTypeShapeStorage
   /** @internal What the in-memory storage loads and reads a snapshot through. */
   readonly snapshots: InMemorySnapshots
   private testHooks: InMemoryOntologyStorageTestHooks = {}
@@ -87,6 +89,12 @@ export class InMemoryOntologyStorage implements OntologyStorage {
       options.readExecution
     )
     this.uniqueValues = new InMemoryOntologyUniqueValueStorage(objects, options.runRootOperation)
+    this.typeShapes = new InMemoryOntologyTypeShapeStorage(
+      this.state,
+      objects,
+      timeseries,
+      options.runRootOperation
+    )
     this.snapshots = new InMemorySnapshots(this.state, objects, timeseries)
     const hooks: InMemoryOntologyStorageTestHooks = {
       beforeRead: (boundary) => this.testHooks.beforeRead?.(boundary),

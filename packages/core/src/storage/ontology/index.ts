@@ -3,6 +3,7 @@ import type { OntologyMaterializationStorage } from "./materializations"
 import type { OntologyOutboxStorage } from "./outbox"
 import type { OntologyReplacementPlanStorage } from "./replacement-plans"
 import type { OntologySourceStorage } from "./sources"
+import type { OntologyTypeShapeStorage } from "./type-shapes"
 import type { OntologyUniqueValueStorage } from "./unique-values"
 import type { OntologyVectorIndexingStorage } from "./vector-indexing"
 import type { OntologyVectorStorage } from "./vectors"
@@ -140,6 +141,14 @@ export type {
   StoredSourceObjectAssertion,
 } from "./sources"
 export type {
+  ListObjectEditsInput,
+  OntologyTypeShapeStorage,
+  StoredObjectEdit,
+  StoredTypeShape,
+  TypeShapeProbe,
+  TypeShapeProbeInput,
+} from "./type-shapes"
+export type {
   OntologyUniqueValueStorage,
   PreparedUniqueProperty,
   UniqueValueEntry,
@@ -156,6 +165,7 @@ export interface OntologyStorage {
   readonly replacementPlans: OntologyReplacementPlanStorage
   readonly outbox: OntologyOutboxStorage
   readonly uniqueValues: OntologyUniqueValueStorage
+  readonly typeShapes: OntologyTypeShapeStorage
 }
 
 export type {

@@ -8,6 +8,7 @@ import type {
 } from "../../ontology"
 import { normalizeDecimalValue } from "../../ontology"
 import { formatUnknownObjectTypeMessage } from "../../ontology/errors"
+import { linkTargetObjectTypeIds } from "../../ontology/link-targets"
 import {
   isContainsSchema,
   isExactSchema,
@@ -36,7 +37,6 @@ import type {
   ObjectQueryVector,
   QueryScalarKind,
 } from "./ir"
-import { linkTargetObjectTypeIds } from "./link-endpoints"
 import { normalizeObjectQuery } from "./normalize"
 import { MAX_RERANK_CANDIDATES } from "./reranking-limits"
 
