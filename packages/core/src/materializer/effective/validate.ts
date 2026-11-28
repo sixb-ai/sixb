@@ -107,7 +107,11 @@ export function validateEffectiveObject(
   ref: OntologyObjectRef,
   properties: Readonly<Record<string, JsonValue>>,
   /** What a branch's copy left out of the object, which a missing value is then explained by. */
-  withheld?: WithheldFromObject
+  withheld?: WithheldFromObject,
+  options?: {
+    /** Required properties a missing value is accepted for: a copy holds none of their values. */
+    readonly unrequired?: readonly string[]
+  }
 ): void {
   materializationValidation(() => {
     const objectType = ontology.resolveObjectType(ref.objectTypeId)
@@ -116,7 +120,8 @@ export function validateEffectiveObject(
       if (
         property.mode !== "telemetry" &&
         property.required &&
-        properties[property.id] === undefined
+        properties[property.id] === undefined &&
+        !options?.unrequired?.includes(property.id)
       ) {
         if (withheld?.propertyIds.includes(property.id)) {
           throw withheldPropertyError(objectType.id, property.id, withheld.takenBy)

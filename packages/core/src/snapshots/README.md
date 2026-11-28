@@ -101,9 +101,9 @@ then deletes the slice through its caller (`dropLakeSlice`).
 - A required property hidden from the person keeps its type: its objects and their links travel
   and read normally, and the report lists it (`requiredHiddenPropertyIds`). Any write to one of
   those objects, a new link included, fails while the property is unset, and says why; a delete
-  works. The base commit records the property and who took the copy
-  (`materializer/effective/withheld.ts`). Only objects nothing wrote since the import name that
-  commit, so production never reads it.
+  works. The branch's fills and converts check those objects without it. The base commit records
+  the property and who took the copy (`materializer/effective/withheld.ts`). Only objects nothing
+  wrote since the import name that commit, so production never reads it.
 - `loadSnapshot` writes one base commit, the kernel operation `ontology.loadSnapshot`, with no
   outbox row: nothing reacts. Its ontology revision is the branch's. It is all or nothing.
 - Each object is created by an edit (`create` override), each link by an edge or slot override, so

@@ -693,6 +693,48 @@ export function runSnapshotShapesCases(
     TIMEOUT_MS
   )
 
+  // Red check: in plan-values.ts, pass no `unrequired` to `validateEffectiveObject`: every job
+  // fails the convert for the `note` the copy holds none of, and the type is left out.
+  test(
+    `${name} converts the objects of a type whose required property is hidden from the person`,
+    async () => {
+      await withStorage(async (storage) => {
+        const host = await production(storage)
+        const Converted = job(
+          prop("gate", "integer"),
+          hours(),
+          prop("note", "string", { markings: [internal], required: true })
+        )
+        const convert = defineMigration("job-gate-length", Converted).convertProperty(
+          "gate",
+          ({ value }) => String(value).length
+        )
+
+        const { branch, report } = await branchOf({
+          storage,
+          host,
+          as: "clerks",
+          types: [Converted, Crew],
+          migrations: [convert],
+        })
+
+        expect(report.skipped).toEqual([])
+        expect(report.types).toContainEqual(
+          expect.objectContaining({
+            objectTypeId: Job.id,
+            objects: 3,
+            requiredHiddenPropertyIds: ["note"],
+            migrationIds: ["job-gate-length"],
+          })
+        )
+        expect(await stored(branch, Job.id, "j1")).toEqual({ id: "j1", gate: 3, hours: "3" })
+
+        await host.closeBroker()
+      })
+    },
+    TIMEOUT_MS
+  )
+
   // Red check: in import.ts, drop `uniqueDuplicates` from the gate's check: the import throws
   // out of the unique preparation, and the branch holds nothing.
   test(

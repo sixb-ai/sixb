@@ -6,6 +6,7 @@ import {
   validateEffectiveObject,
   validateObjectAuthorityProperties,
 } from "../materializer/effective/validate"
+import { WithheldProperties } from "../materializer/effective/withheld"
 import { vectorConfiguration, vectorSources } from "../objects/vectors/profile"
 import { collectArtifactRefIds } from "../ontology/artifact-ref"
 import type { OntologyDefinitionCatalog } from "../ontology/registry"
@@ -181,6 +182,10 @@ function typePlanner(
     everyObject: [...unique.values()].some((property) => !property.update),
   }
 
+  // What a branch's copy withheld: a required property its creator can't read has no value to
+  // check. Production holds no snapshot commit, and reads nothing.
+  const withheld = new WithheldProperties()
+
   const resolve = (state: MaterializationObjectState, moved: ObjectState) =>
     resolveEffectiveObject({
       ref: state.ref,
@@ -266,7 +271,8 @@ function typePlanner(
     const created = current.override?.kind === "create" && !current.source
     if (changed && created && after) {
       try {
-        validateEffectiveObject(ontology, state.ref, after)
+        const unrequired = withheld.of(state.effective)?.propertyIds ?? []
+        validateEffectiveObject(ontology, state.ref, after, undefined, { unrequired })
       } catch (error) {
         const line = objectLine(objectTypeId, primaryId, messageOf(error))
         fail({ objectTypeId, migrationId: lastMigrationId, line })
@@ -443,7 +449,13 @@ function typePlanner(
             })
           )
         )
-        return { objects: states.flatMap((state) => state.objects), next: page.nextPrimaryId }
+        const objects = states.flatMap((state) => state.objects)
+        await withheld.load(
+          storage.ontology.commits,
+          projectId,
+          objects.map((object) => object.effective)
+        )
+        return { objects, next: page.nextPrimaryId }
       }
 
       // The next page is read while this one runs its functions, and one write of staged rows
