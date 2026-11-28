@@ -5,6 +5,7 @@ import {
   integerEnum,
   link,
   OntologyRegistry,
+  type OntologySource,
   type Property,
   prop,
   stringEnum,
@@ -16,6 +17,7 @@ import {
   type TypeShape,
   type TypeShapeChange,
   typeShape,
+  withoutRemovedTargets,
 } from "../src/ontology/type-shapes"
 import type { ObjectLink, ValueType } from "../src/ontology/types"
 
@@ -357,6 +359,79 @@ describe("diffTypeShapes", () => {
 
     expect(changes(one, both)).toEqual(["link-targets(crew):compatible"])
     expect(changes(both, one)).toEqual(["link-targets(crew):refused"])
+  })
+
+  describe("a link's targets are the types it accepts, subtypes included", () => {
+    // Revert check: build `linkShape`'s targets from the declared ids alone
+    // (`[link.targetObjectTypeId].flat().sort()`) and drop the `"*"` test in `diffLink`: each of
+    // these fails.
+    const Space = defineObjectType({
+      id: "ShapeSpace",
+      name: "Space",
+      properties: [prop("id", "string", { primary: true, required: true })],
+      links: [],
+    })
+    const Room = defineObjectType({ ...Space, id: "ShapeRoom", name: "Room", extends: Space.id })
+    const Office = defineObjectType({
+      ...Space,
+      id: "ShapeOffice",
+      name: "Office",
+      extends: Space.id,
+    })
+
+    function visitShape(at: ObjectLink, spaces: readonly OntologySource[]): TypeShape {
+      const Visit = defineObjectType({
+        id: "ShapeVisit",
+        name: "Visit",
+        properties: [prop("ref", "string", { primary: true, required: true })],
+        links: [at],
+      })
+      const ontology = new OntologyRegistry({ sources: [Visit, ...spaces] })
+      return typeShape(ontology.resolveObjectType(Visit.id), ontology)
+    }
+
+    test("widening a link to a supertype is compatible", () => {
+      const room = visitShape(link("at", Room), [Space, Room])
+      const space = visitShape(link("at", Space), [Space, Room])
+
+      expect(space.links.at!.targets).toEqual([Room.id, Space.id])
+      expect(changes(room, space)).toEqual(["link-targets(at):compatible"])
+    })
+
+    test("widening a link to link.any is compatible, and narrowing it back is refused", () => {
+      const room = visitShape(link("at", Room), [Space, Room])
+      const any = visitShape(link.any("at"), [Space, Room])
+
+      expect(any.links.at!.targets).toEqual(["*"])
+      expect(changes(room, any)).toEqual(["link-targets(at):compatible"])
+      expect(changes(any, room)).toEqual(["link-targets(at):refused"])
+    })
+
+    test("a new subtype of a target is compatible", () => {
+      const before = visitShape(link("at", Space), [Space, Room])
+      const after = visitShape(link("at", Space), [Space, Room, Office])
+
+      expect(changes(before, after)).toEqual(["link-targets(at):compatible"])
+    })
+
+    // Revert check: return `stored` unchanged from `withoutRemovedTargets`: the link is refused
+    // for a type no object can be any more.
+    test("a removed subtype doesn't retarget the link: its own removal probes its objects", () => {
+      const before = visitShape(link("at", Space), [Space, Room, Office])
+      const ontology = new OntologyRegistry({ sources: [Space, Room] })
+      const after = visitShape(link("at", Space), [Space, Room])
+
+      expect(changes(before, after)).toEqual(["link-targets(at):refused"])
+      expect(changes(withoutRemovedTargets(before, ontology), after)).toEqual([])
+    })
+
+    test("a subtype that leaves the hierarchy retargets the link and is refused", () => {
+      const before = visitShape(link("at", Space), [Space, Room])
+      const LoneRoom = defineObjectType({ ...Space, id: Room.id, name: "Room" })
+      const after = visitShape(link("at", Space), [Space, LoneRoom])
+
+      expect(changes(before, after)).toEqual(["link-targets(at):refused"])
+    })
   })
 
   test("a cardinality change is refused, both ways", () => {

@@ -1,6 +1,6 @@
 import { compareStrings } from "../../json"
 import type { QueryScalarKind } from "../../objects/query/ir"
-import { linkTargetObjectTypeIds } from "../../objects/query/link-endpoints"
+import { linkTargetObjectTypeIds } from "../../ontology/link-targets"
 import {
   queryScalarKindForSchema,
   resolvePropertyQueryCapabilities,

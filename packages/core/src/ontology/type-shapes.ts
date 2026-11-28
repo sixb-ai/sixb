@@ -1,4 +1,5 @@
 import { stableJsonStringify } from "../json"
+import { linkTargetObjectTypeIds } from "./link-targets"
 import { primitiveTraits } from "./primitives"
 import type { OntologyDefinitionCatalog } from "./registry"
 import type { ObjectLink, ObjectType, PrimitiveSchema, Property, Schema, ValueType } from "./types"
@@ -36,6 +37,7 @@ export interface PropertyShape extends FieldShape {
 
 /** A link's targets and cardinality. Its properties are not part of the shape in V1. */
 export interface LinkShape {
+  /** Every type the link accepts, subtypes included, or `["*"]` for a link to any type. */
   readonly targets: readonly string[]
   readonly cardinality: "one" | "many"
   /** Links the stored data holds that no definition declared: their targets are unknown. */
@@ -101,7 +103,7 @@ export function typeShape(objectType: ObjectType, ontology: OntologyDefinitionCa
 
   const links: Record<string, LinkShape> = {}
   for (const link of sortById(objectType.links)) {
-    links[link.id] = linkShape(link)
+    links[link.id] = linkShape(link, ontology)
   }
 
   return { properties, links }
@@ -110,6 +112,25 @@ export function typeShape(objectType: ObjectType, ontology: OntologyDefinitionCa
 /** The primary property of a shape, or `undefined` for a shape recorded without one. */
 export function shapePrimaryId(shape: TypeShape): string | undefined {
   return Object.keys(shape.properties).find((id) => shape.properties[id]!.primary)
+}
+
+/**
+ * `stored` without the link targets the code no longer defines as object types. Each is a type
+ * removed, whose own `type-removed` change probes its objects: links to it don't retarget the link.
+ */
+export function withoutRemovedTargets(
+  stored: TypeShape,
+  ontology: Pick<OntologyDefinitionCatalog, "getObjectTypeById">
+): TypeShape {
+  const links: Record<string, LinkShape> = {}
+  for (const [linkId, link] of Object.entries(stored.links)) {
+    const targets = link.targets.filter(
+      (target) => target === "*" || ontology.getObjectTypeById(target) !== null
+    )
+    links[linkId] = targets.length === link.targets.length ? link : { ...link, targets }
+  }
+
+  return { ...stored, links }
 }
 
 /**
@@ -301,8 +322,11 @@ function diffLink(
   }
 
   if (!sameShape(stored.targets, code.targets)) {
-    // A link keeps every target it had: adding one is a widening, any other change retargets it.
-    const widens = stored.targets.every((target) => code.targets.includes(target))
+    // A link that still accepts every type it accepted widens: a target added, a supertype or a
+    // new subtype, `link.any`. A type it no longer accepts, such as a subtype that left the
+    // hierarchy, retargets it.
+    const widens =
+      code.targets.includes("*") || stored.targets.every((target) => code.targets.includes(target))
     const effect = widens ? "compatible" : "refused"
     changes.push({ kind: "link-targets", linkId, from: stored.targets, to: code.targets, effect })
   }
@@ -325,10 +349,10 @@ function propertyShape(
   }
 }
 
-function linkShape(link: ObjectLink): LinkShape {
+function linkShape(link: ObjectLink, ontology: OntologyDefinitionCatalog): LinkShape {
   return {
     cardinality: link.cardinality ?? "many",
-    targets: [link.targetObjectTypeId].flat().sort(),
+    targets: linkTargetObjectTypeIds(link.targetObjectTypeId, ontology) ?? ["*"],
   }
 }
 
